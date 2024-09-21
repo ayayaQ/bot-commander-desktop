@@ -5,8 +5,8 @@ export type BCFDCommand = {
     commandDescription: string;
     deleteAfter: boolean;
     deleteIf: boolean;
-    commandIfStrings: boolean;
-    commandNum: number;
+    deleteIfStrings: string;
+    deleteNum: number;
     deleteX: boolean;
     ignoreErrorMessage: boolean;
     isBan: boolean;
@@ -14,11 +14,13 @@ export type BCFDCommand = {
     isNSFW: boolean;
     isReact: boolean;
     isRequiredRole: boolean;
+    requiredRole: string;
     isRoleAssigner: boolean;
     isSpecificChannel: boolean;
     isSpecificMessage: boolean;
     isVoiceMute: boolean;
-    phrase: string;
+    isAdmin: boolean;
+    phrase: boolean;
     privateMessage: string;
     reaction: string;
     roleToAssign: string;
