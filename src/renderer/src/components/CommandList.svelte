@@ -3,6 +3,7 @@
   import type { BCFDCommand } from '../../../main/types'
   import CommandEditor from './CommandEditor.svelte'
   import CommandListItem from './CommandListItem.svelte'
+  import { fade } from 'svelte/transition'
 
   let commands: BCFDCommand[] = []
   let isEditing = false
@@ -71,7 +72,10 @@
     {:else}
       <ul class="space-y-2">
         {#each commands as command}
+        <div transition:fade={{ duration: 100 }}>
           <CommandListItem {command} {editCommand} {deleteCommand} />
+        </div>
+
         {/each}
       </ul>
     {/if}
