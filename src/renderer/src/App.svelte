@@ -2,8 +2,19 @@
   import CommandList from "./components/CommandList.svelte"
   import Help from "./components/Help.svelte"
   import Login from "./components/Login.svelte"
+  import Settings from "./components/Settings.svelte"
+  import Webhooks from "./components/Webhooks.svelte"
+  import { onMount } from "svelte"
+  import { loadSettings, settingsStore } from "./stores/settings"
 
-  let selectedMenu: 'commands' | 'help' | 'settings' = 'commands'
+  let selectedMenu: 'commands' | 'help' | 'settings' | 'webhooks' = 'commands'
+
+  onMount(async () => {
+    await loadSettings();
+
+    // apply theme from the settings
+    document.documentElement.setAttribute('data-theme', $settingsStore.theme);
+  });
 </script>
 
 
@@ -18,13 +29,18 @@
     {:else if selectedMenu === 'help'}
       <Help />
     {:else if selectedMenu === 'settings'}
-      <h1>Settings</h1>
+      <Settings />
+    {:else if selectedMenu === 'webhooks'}
+      <Webhooks />
     {/if}
     </div>
     <div class="sticky bottom-0">
       <div class="btm-nav static bg-base-200">
         <button class={selectedMenu === 'commands' ? 'active bg-base-200' : ''} on:click={() => selectedMenu = 'commands'}>
           <span class="material-symbols-outlined">home</span>
+        </button>
+        <button class={selectedMenu === 'webhooks' ? 'active bg-base-200' : ''} on:click={() => selectedMenu = 'webhooks'}>
+          <span class="material-symbols-outlined">webhook</span>
         </button>
         <button class={selectedMenu === 'help' ? 'active bg-base-200' : ''} on:click={() => selectedMenu = 'help'}>
           <span class="material-symbols-outlined">help</span>
