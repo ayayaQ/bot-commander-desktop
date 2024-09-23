@@ -1,6 +1,15 @@
 # bots-creator
 
-An Electron application with Svelte and TypeScript
+An Electron application with Svelte and [TypeScript](https://www.typescriptlang.org/)
+
+## Library References
+
+- [discord.js](https://discord.js.org/) (Discord API)
+- [Svelte](https://svelte.dev/) (Front-end Components)
+- [electron-vite](https://electron-vite.org/)
+- [electron](https://www.electronjs.org/)
+- [TailWind](https://tailwindcss.com/) (CSS)
+- [DaisyUI](https://daisyui.com/) (TailWind Component Library)
 
 ## Recommended IDE Setup
 
