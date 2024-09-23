@@ -49,3 +49,13 @@ export type TYPE_MEMBER_JOIN = 2;
 export type TYPE_MEMBER_LEAVE = 3;
 export type TYPE_MEMBER_BAN = 4;
 export type TYPE_MEMBER_ADD = 5;
+
+export type BCFDSlashCommand = {
+    commandName: string;
+    commandDescription: string;
+    commandReply: string;
+}
+
+export type AppSettings = {
+    theme: string;
+}

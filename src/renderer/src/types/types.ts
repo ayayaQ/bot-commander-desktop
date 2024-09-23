@@ -49,3 +49,7 @@ export type TYPE_MEMBER_JOIN = 2;
 export type TYPE_MEMBER_LEAVE = 3;
 export type TYPE_MEMBER_BAN = 4;
 export type TYPE_MEMBER_ADD = 5;
+
+export type AppSettings = {
+    theme: string;
+}
