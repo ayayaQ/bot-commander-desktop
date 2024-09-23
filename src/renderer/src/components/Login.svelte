@@ -27,7 +27,7 @@
   })
 </script>
 
-<div class="flex flex-col items-center justify-center min-h-screen bg-base-200">
+<div class="flex flex-col items-center justify-center min-h-screen bg-base-200 px-4">
   <div class="card w-96 bg-base-100 shadow-xl">
     <div class="card-body items-center text-center">
       {#if avatar}

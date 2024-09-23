@@ -28,8 +28,8 @@
       </div>
       <div class="space-x-2">
         <button class="btn btn-square btn-ghost" on:click={() => editCommand(command)}><span class="material-symbols-outlined">edit</span></button>
-        <button class="btn btn-square btn-info" on:click={exportCommand}><span class="material-symbols-outlined">download</span></button>
-        <button class="btn btn-square btn-error" on:click={() => dialog.showModal()}><span class="material-symbols-outlined">delete</span></button>
+        <button class="btn btn-square btn-ghost" on:click={exportCommand}><span class="material-symbols-outlined">download</span></button>
+        <button class="btn btn-square btn-ghost" on:click={() => dialog.showModal()}><span class="material-symbols-outlined">delete</span></button>
 
         <Dialog bind:dialog on:close={() => console.log('closed')}>
           <p>Are you sure you want to delete the command "{command.command}"?</p>
@@ -38,7 +38,7 @@
               <button class="btn btn-sm btn-error" on:click={() => deleteCommand(command)}
                 >Delete</button
               >
-              <button class="btn btn-sm btn-secondary">Cancel</button>
+              <button class="btn btn-sm btn-ghost">Cancel</button>
             </form>
           </div>
         </Dialog>
