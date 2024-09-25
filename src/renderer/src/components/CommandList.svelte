@@ -8,6 +8,7 @@
   let commands: BCFDCommand[] = []
   let isEditing = false
   let editingCommand: BCFDCommand | null = null
+  let searchQuery = ''
 
   onMount(async () => {
     await loadCommands()
@@ -51,6 +52,10 @@
     commands = commands.filter((cmd) => cmd.command !== command.command)
     await saveCommands()
   }
+
+  $: filteredCommands = commands.filter((cmd) =>
+    cmd.command.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    cmd.commandDescription.toLowerCase().includes(searchQuery.toLowerCase()))
 </script>
 
 <div class="p-4">
@@ -67,11 +72,17 @@
       <h2 class="text-2xl font-bold">Command List</h2>
       <button class="btn btn-primary" on:click={addCommand}><span class="material-symbols-outlined">add</span>Add Command</button>
     </div>
-    {#if commands.length === 0}
+    <div class="mb-4">
+      <label class="input input-bordered flex items-center gap-2">
+        <input type="text" class="grow" placeholder="Search" bind:value={searchQuery} />
+        <span class="material-symbols-outlined">search</span>
+      </label>
+    </div>
+    {#if filteredCommands.length === 0}
       <p class="text-gray-500">No commands found.</p>
     {:else}
       <ul class="space-y-2">
-        {#each commands as command}
+        {#each filteredCommands as command}
         <div transition:fade={{ duration: 100 }}>
           <CommandListItem {command} {editCommand} {deleteCommand} />
         </div>
