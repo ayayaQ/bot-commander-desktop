@@ -53,3 +53,12 @@ export type TYPE_MEMBER_ADD = 5;
 export type AppSettings = {
     theme: string;
 }
+
+export type BotStatus = {
+    status: string;
+    activity: string;
+    activityDetails: string;
+    streamUrl: string;
+}
+
+
