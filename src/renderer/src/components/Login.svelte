@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { connectionStore } from '../stores/connection'
+  import Status from './Status.svelte'
 
   $: username = $connectionStore.username
   $: avatar = $connectionStore.avatar
@@ -27,7 +28,7 @@
   })
 </script>
 
-<div class="flex flex-col items-center justify-center min-h-screen bg-base-200 px-4">
+<div class="flex flex-col items-center justify-center min-h-screen bg-base-200 p-4">
   <div class="card w-96 bg-base-100 shadow-xl">
     <div class="card-body items-center text-center">
       {#if avatar}
@@ -62,11 +63,18 @@
         />
       {/if}
       {#if !$connectionStore.connected}
-        <button class="btn btn-primary w-full" on:click={handleLogin}>Login</button>
+        <button class="btn btn-primary w-full" on:click={handleLogin}><span class="material-symbols-outlined">login</span>Login</button>
       {:else}
-        <button class="btn btn-primary w-full" on:click={handleLogout}>Logout</button>
-        <button class="btn btn-primary w-full" on:click={generateInvite}>Invite to Server</button>
+        <button class="btn btn-primary w-full" on:click={handleLogout}><span class="material-symbols-outlined">logout</span>Logout</button>
+        <button class="btn btn-primary w-full" on:click={generateInvite}><span class="material-symbols-outlined">mail</span>Invite to Server</button>
       {/if}
+      <div class="collapse bg-base-200">
+        <input type="checkbox" />
+        <div class="collapse-title text-xl font-medium"><div class="flex items-center justify-center gap-2"><span class="material-symbols-outlined">settings</span><span>Bot Status</span></div></div>
+        <div class="collapse-content">
+          <Status />
+        </div>
+      </div>
     </div>
   </div>
 </div>

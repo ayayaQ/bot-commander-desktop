@@ -19,10 +19,10 @@
 
 
 <div class="flex flex-row items-center justify-center h-screen">
-  <div class='basis-1/3'>
+  <div class='basis-1/3 h-full overflow-y-auto shrink-0 grow'>
     <Login />
   </div>
-  <div class='basis-2/3 h-full overflow-y-auto flex flex-col'>
+  <div class='basis-2/3 h-full overflow-y-auto flex flex-col shrink grow'>
     <div class="flex-grow">
     {#if selectedMenu === 'commands'}
       <CommandList />
