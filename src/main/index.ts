@@ -13,12 +13,13 @@ import {
   Interaction,
   Message,
   OmitPartialGroupDMChannel,
+  PresenceStatusData,
   TextChannel,
   User,
   WebhookClient
 } from 'discord.js'
 import fs from 'fs/promises'
-import { AppSettings, BCFDCommand, BCFDSlashCommand } from './types'
+import { AppSettings, BCFDCommand, BCFDSlashCommand, BotStatus } from './types'
 import { OAuth2Scopes, PermissionsBitField } from 'discord.js'
 import { stringInfoAddEval } from './virtual'
 
@@ -30,6 +31,12 @@ let commands: { bcfdCommands: BCFDCommand[]; bcfdSlashCommands: BCFDSlashCommand
 }
 let context: vm.Context
 let settings: AppSettings = { theme: 'light' } // Default settings
+let botStatus: BotStatus = {
+  status: 'online',
+  activity: 'Playing',
+  activityDetails: 'with BCFD',
+  streamUrl: ''
+} // Default bot status
 
 async function loadCommands(): Promise<void> {
   const commandsPath = join(app.getPath('userData'), 'commands.json')
@@ -76,6 +83,30 @@ async function saveSettings(): Promise<void> {
     await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2))
   } catch (error) {
     console.error('Error saving settings:', error)
+  }
+}
+
+async function loadBotStatus(): Promise<void> {
+  const botStatusPath = join(app.getPath('userData'), 'botStatus.json')
+  try {
+    const data = await fs.readFile(botStatusPath, 'utf-8')
+    botStatus = JSON.parse(data)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      // File doesn't exist, create it with default bot status
+      await fs.writeFile(botStatusPath, JSON.stringify(botStatus, null, 2))
+    } else {
+      console.error('Error loading bot status:', error)
+    }
+  }
+}
+
+async function saveBotStatus(): Promise<void> {
+  const botStatusPath = join(app.getPath('userData'), 'botStatus.json')
+  try {
+    await fs.writeFile(botStatusPath, JSON.stringify(botStatus, null, 2))
+  } catch (error) {
+    console.error('Error saving bot status:', error)
   }
 }
 
@@ -155,6 +186,7 @@ app.whenReady().then(async () => {
   )
 
   await loadSettings()
+  await loadBotStatus()
 
   ipcMain.handle('get-settings', () => {
     return settings
@@ -163,6 +195,17 @@ app.whenReady().then(async () => {
   ipcMain.handle('save-settings', async (_, newSettings: AppSettings) => {
     settings = newSettings
     await saveSettings()
+    return true
+  })
+
+  ipcMain.handle('get-bot-status', () => {
+    return botStatus
+  })
+
+  ipcMain.handle('save-bot-status', async (_, newBotStatus: BotStatus) => {
+    botStatus = newBotStatus
+    await saveBotStatus()
+    applyBotStatus(botStatus);
     return true
   })
 
@@ -254,10 +297,8 @@ function Connect(event: Electron.IpcMainEvent, token: string) {
 
     context = vm.createContext()
 
-    client.user.setPresence({
-      status: 'invisible',
-      activities: [{ name: 'invisible', type: ActivityType.Listening }]
-    })
+    // Use our bot status to set the presence of the bot
+    applyBotStatus(botStatus);
 
     connection = true
 
@@ -278,6 +319,55 @@ function Connect(event: Electron.IpcMainEvent, token: string) {
   client.login(token).catch((err) => {
     event.reply('fail', { error: err })
   })
+}
+
+function convertBotStatusActivityType(activityType: string): ActivityType {
+  switch (activityType) {
+    case 'Playing':
+      return ActivityType.Playing
+    case 'Streaming':
+      return ActivityType.Streaming
+    case 'Listening':
+      return ActivityType.Listening
+    case 'Watching':
+      return ActivityType.Watching
+    case 'Competing':
+      return ActivityType.Competing
+    default:
+      return ActivityType.Playing
+  }
+}
+
+function convertBotStatusStatus(status: string): PresenceStatusData {
+  switch (status) {
+    case 'Invisible':
+      return 'invisible'
+    case 'Online':
+      return 'online'
+    case 'Idle':
+      return 'idle'
+    case 'Do Not Disturb':
+      return 'dnd'
+    default:
+      return 'online'
+  }
+}
+
+function applyBotStatus(botStatus: BotStatus) {
+  if (client) {
+    client.user?.setPresence({
+      status: convertBotStatusStatus(botStatus.status),
+      activities:
+        botStatus.activity != 'None'
+          ? [
+              {
+                name: botStatus.activityDetails,
+                type: convertBotStatusActivityType(botStatus.activity)
+              }
+            ]
+          : undefined
+    })
+  }
 }
 
 function Disconnect(event: Electron.IpcMainEvent) {
@@ -698,7 +788,10 @@ function stringInfoAddGeneral(message: string) {
       '$minutes',
       (new Date().getMinutes() < 10 ? '0' : '') + new Date().getMinutes().toString()
     )
-    .replaceAll('$hours', (new Date().getHours() < 10 ? '0' : '') + new Date().getHours().toString())
+    .replaceAll(
+      '$hours',
+      (new Date().getHours() < 10 ? '0' : '') + new Date().getHours().toString()
+    )
     .replaceAll(
       '$seconds',
       (new Date().getSeconds() < 10 ? '0' : '') + new Date().getSeconds().toString()
