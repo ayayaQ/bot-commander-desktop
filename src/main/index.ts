@@ -5,23 +5,39 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import {
   ActivityType,
+  ChannelType,
   Client,
+  DMChannel,
   EmbedBuilder,
   Guild,
+  GuildBan,
   GuildMember,
   IntentsBitField,
   Interaction,
   Message,
+  MessageReaction,
+  NewsChannel,
   OmitPartialGroupDMChannel,
+  PartialDMChannel,
+  PartialGuildMember,
+  PartialMessageReaction,
+  Partials,
+  PartialUser,
   PresenceStatusData,
+  PrivateThreadChannel,
+  PublicThreadChannel,
+  StageChannel,
   TextChannel,
   User,
+  VoiceChannel,
   WebhookClient
 } from 'discord.js'
 import fs from 'fs/promises'
 import { AppSettings, BCFDCommand, BCFDSlashCommand, BotStatus } from './types'
 import { OAuth2Scopes, PermissionsBitField } from 'discord.js'
 import { stringInfoAddEval } from './virtual'
+import { Stats } from './stats'
+import { initializeBotState, loadBotState, saveBotState, getBotStateContext } from './virtual'
 
 let client: Client | null = null
 let connection: boolean = false
@@ -32,11 +48,19 @@ let commands: { bcfdCommands: BCFDCommand[]; bcfdSlashCommands: BCFDSlashCommand
 let context: vm.Context
 let settings: AppSettings = { theme: 'light' } // Default settings
 let botStatus: BotStatus = {
-  status: 'online',
+  status: 'Online',
   activity: 'Playing',
   activityDetails: 'with BCFD',
   streamUrl: ''
 } // Default bot status
+let stats: Stats
+const statsFilePath = join(app.getPath('userData'), 'stats.json')
+
+async function saveStats() {
+  if (stats) {
+    await stats.saveToFile(statsFilePath)
+  }
+}
 
 async function loadCommands(): Promise<void> {
   const commandsPath = join(app.getPath('userData'), 'commands.json')
@@ -117,10 +141,14 @@ function createWindow(): void {
     height: 670,
     show: false,
     autoHideMenuBar: true,
+    frame: false, // Remove the default frame
+    titleBarStyle: 'hidden', // Hide the title bar
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      contextIsolation: false, // Required for ipcRenderer in renderer process
+      nodeIntegration: true // Required for ipcRenderer in renderer process
     }
   })
 
@@ -156,6 +184,43 @@ app.whenReady().then(async () => {
     optimizer.watchWindowShortcuts(window)
   })
 
+  await loadCommands()
+  await loadSettings()
+  await loadBotStatus()
+
+  stats = new Stats()
+  await stats.loadFromFile(statsFilePath)
+
+  await initializeBotState() // Initialize bot state
+
+  addIPCHandlers()
+
+  createWindow()
+
+  app.on('before-quit', async (event) => {
+    event.preventDefault() // Prevent the app from quitting immediately
+    await saveStats() // Save stats before quitting
+    await saveBotState() // Save bot state before quitting
+    app.exit(0) // Now quit the app
+  })
+
+  app.on('activate', function () {
+    // On macOS it's common to re-create a window in the app when the
+    // dock icon is clicked and there are no other windows open.
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+})
+
+// Quit when all windows are closed, except on macOS. There, it's common
+// for applications and their menu bar to stay active until the user quits
+// explicitly with Cmd + Q.
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit()
+  }
+})
+
+function addIPCHandlers() {
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))
 
@@ -166,8 +231,6 @@ app.whenReady().then(async () => {
   ipcMain.on('disconnect', (event) => {
     Disconnect(event)
   })
-
-  await loadCommands()
 
   ipcMain.handle('get-commands', () => {
     return commands
@@ -184,9 +247,6 @@ app.whenReady().then(async () => {
       return true
     }
   )
-
-  await loadSettings()
-  await loadBotStatus()
 
   ipcMain.handle('get-settings', () => {
     return settings
@@ -205,7 +265,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('save-bot-status', async (_, newBotStatus: BotStatus) => {
     botStatus = newBotStatus
     await saveBotStatus()
-    applyBotStatus(botStatus);
+    applyBotStatus(botStatus)
     return true
   })
 
@@ -231,8 +291,37 @@ app.whenReady().then(async () => {
     return cookies[0]?.value ?? ''
   })
 
+  ipcMain.handle('getBotState', () => {
+    const context = getBotStateContext()
+    return vm.runInContext('JSON.parse(JSON.stringify(botState))', context)
+  })
+
+  ipcMain.handle('updateBotState', (event, key: string, value: any) => {
+    try {
+      const context = getBotStateContext();
+      vm.runInContext(`botState['${key}'] = ${JSON.stringify(value)}`, context);
+      saveBotState(); // Save the updated state
+      return true;
+    } catch (error) {
+      console.error('Error updating bot state:', error);
+      return false;
+    }
+  });
+
+  ipcMain.handle('runCodeInContext', (event, code: string) => {
+    try {
+      const context = getBotStateContext();
+      const result = vm.runInContext(code, context);
+      saveBotState(); // Save the state in case it was modified
+      return JSON.stringify(result, null, 2);
+    } catch (error) {
+      console.error('Error running code in context:', error);
+      throw error;
+    }
+  });
+
   // send a webhook using discord.js
-  ipcMain.on('send-webhook', async (event, webhook) => {
+  ipcMain.on('send-webhook', async (_event, webhook) => {
     const webhookClient = new WebhookClient({ url: webhook.webhookUrl })
     await webhookClient.send({
       username: webhook.name ?? undefined,
@@ -240,25 +329,31 @@ app.whenReady().then(async () => {
       content: webhook.message ?? undefined
     })
     webhookClient.destroy()
+    stats.incrementWebhooksSent()
   })
 
-  createWindow()
-
-  app.on('activate', function () {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  ipcMain.handle('get-stats', () => {
+    return stats.getStats()
   })
-})
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
-})
+  // Add these new IPC handlers for window controls if not already present
+  ipcMain.on('minimize-window', () => {
+    BrowserWindow.getFocusedWindow()?.minimize()
+  })
+
+  ipcMain.on('maximize-window', () => {
+    const win = BrowserWindow.getFocusedWindow()
+    if (win?.isMaximized()) {
+      win.unmaximize()
+    } else {
+      win?.maximize()
+    }
+  })
+
+  ipcMain.on('close-window', () => {
+    BrowserWindow.getFocusedWindow()?.close()
+  })
+}
 
 // In this file you can include the rest of your app"s specific main process
 // code. You can also put them in separate files and require them here.
@@ -286,19 +381,26 @@ function Connect(event: Electron.IpcMainEvent, token: string) {
       IntentsBitField.Flags.Guilds,
       IntentsBitField.Flags.GuildMembers,
       IntentsBitField.Flags.GuildMessages,
-      IntentsBitField.Flags.MessageContent
-    ]
+      IntentsBitField.Flags.MessageContent,
+      IntentsBitField.Flags.DirectMessages
+    ],
+    partials: [Partials.Channel, Partials.Message]
   })
 
-  client.once('ready', () => {
+  client.once('ready', async () => {
     if (client == null) return
 
     if (client.user == null) return
 
-    context = vm.createContext()
+    await loadBotState() // Load bot state when client is ready
+    context = getBotStateContext() // Use the bot state context
 
     // Use our bot status to set the presence of the bot
-    applyBotStatus(botStatus);
+    applyBotStatus(botStatus)
+
+    stats.updateUserCount(client.users.cache.size)
+    stats.updateServerCount(client.guilds.cache.size)
+    stats.updateCommandCount(commands.bcfdCommands.length)
 
     connection = true
 
@@ -309,7 +411,31 @@ function Connect(event: Electron.IpcMainEvent, token: string) {
   })
 
   client.on('messageCreate', (message) => {
+    stats.incrementMessagesReceived()
     onMessageCreate(message)
+  })
+
+  // when a user joins a guild
+  client.on('guildMemberAdd', (member) => {
+    stats.incrementJoinEventsReceived()
+    onGuildMemberAdd(member)
+  })
+
+  // when a user leaves a guild
+  client.on('guildMemberRemove', (member) => {
+    stats.incrementLeaveEventsReceived()
+    onGuildMemberRemove(member)
+  })
+
+  // when a user is banned from a guild
+  client.on('guildBanAdd', (ban) => {
+    stats.incrementBanEventsReceived()
+    onGuildBanAdd(ban)
+  })
+
+  // when a reaction is added to a message
+  client.on('messageReactionAdd', (reaction, user) => {
+    onMessageReactionAdd(reaction, user)
   })
 
   client.on('interactionCreate', (interaction) => {
@@ -372,6 +498,7 @@ function applyBotStatus(botStatus: BotStatus) {
 
 function Disconnect(event: Electron.IpcMainEvent) {
   if (client) {
+    saveBotState() // Save bot state before disconnecting
     client.destroy()
     client = null
     connection = false
@@ -390,8 +517,404 @@ async function onInteractionCreate(interaction: Interaction) {
   interaction.reply(command.commandReply)
 }
 
+async function requiredRole(
+  command: BCFDCommand,
+  message: OmitPartialGroupDMChannel<Message<boolean>>
+): Promise<boolean> {
+  if (command.isRequiredRole) {
+    // Check if the user has the required role
+    if (!message.member?.roles.cache.has(command.requiredRole)) {
+      // User does not have the required role, skip the command
+      if (!command.ignoreErrorMessage) {
+        message.reply('```' + `${command.command} requires role: ${command.requiredRole}` + '```')
+      }
+      return false
+    }
+  }
+  return true
+}
+
+async function deleteIf(
+  command: BCFDCommand,
+  message: OmitPartialGroupDMChannel<Message<boolean>>
+): Promise<boolean> {
+  if (command.deleteIf) {
+    let deleteStrings = command.deleteIfStrings.split('|')
+    for (const deleteString of deleteStrings) {
+      if (message.content.includes(deleteString)) {
+        message.delete()
+        break
+      }
+    }
+  }
+
+  return true
+}
+
+async function deleteX(
+  command: BCFDCommand,
+  message: OmitPartialGroupDMChannel<Message<boolean>>
+): Promise<boolean> {
+  if (command.deleteX) {
+    // check if user has permission to manage messages
+    if (
+      !message.member?.permissions.has(PermissionsBitField.Flags.ManageMessages) ||
+      !(message.channel instanceof TextChannel)
+    ) {
+      return false
+    }
+
+    let deleteAmount = command.deleteNum
+
+    let messages = await message.channel.messages.fetch({ limit: deleteAmount })
+    message.channel.bulkDelete(messages)
+  }
+
+  return true
+}
+
+async function channelMessage(
+  command: BCFDCommand,
+  channel:
+    | TextChannel
+    | DMChannel
+    | PartialDMChannel
+    | NewsChannel
+    | StageChannel
+    | VoiceChannel
+    | PublicThreadChannel<boolean>
+    | PrivateThreadChannel
+    | VoiceChannel,
+  stringInfoMethod: () => string
+): Promise<boolean> {
+  if (command.actionArr[0]) {
+    // reply to message
+    channel.send(stringInfoMethod())
+  }
+
+  return true
+}
+
+async function privateMessage(
+  command: BCFDCommand,
+  user: User,
+  stringInfoMethod: () => string
+): Promise<boolean> {
+  if (command.actionArr[1]) {
+    // sends a private message to the user
+    user.send(stringInfoMethod())
+  }
+
+  return true
+}
+
+async function kick(
+  command: BCFDCommand,
+  message: OmitPartialGroupDMChannel<Message<boolean>>,
+  firstItem: string,
+  messageWordCount: number
+): Promise<boolean> {
+  if (command.isKick && command.command == firstItem && messageWordCount == 2) {
+    // check if user has permission to kick
+    if (!message.member?.permissions.has(PermissionsBitField.Flags.KickMembers)) {
+      return false
+    }
+
+    let mentioned = message.mentions?.users?.first()
+
+    if (mentioned) {
+      // kick the user
+      message.guild?.members.kick(mentioned)
+    }
+  }
+
+  return true
+}
+
+async function ban(
+  command: BCFDCommand,
+  message: OmitPartialGroupDMChannel<Message<boolean>>,
+  firstItem: string,
+  messageWordCount: number
+): Promise<boolean> {
+  if (command.isBan && command.command == firstItem && messageWordCount == 2) {
+    // check if user has permission to ban
+    if (!message.member?.permissions.has(PermissionsBitField.Flags.BanMembers)) {
+      return false
+    }
+
+    let mentioned = message.mentions?.users?.first()
+
+    if (mentioned) {
+      // ban the user
+      message.guild?.members.ban(mentioned)
+    }
+  }
+
+  return true
+}
+
+async function voiceMute(
+  command: BCFDCommand,
+  message: OmitPartialGroupDMChannel<Message<boolean>>,
+  firstItem: string,
+  messageWordCount: number
+): Promise<boolean> {
+  if (command.isVoiceMute && command.command == firstItem && messageWordCount == 2) {
+    // check if user has permission to mute
+    if (!message.member?.permissions.has(PermissionsBitField.Flags.MuteMembers)) {
+      return false
+    }
+
+    let mentioned = message.mentions?.users?.first()
+
+    if (mentioned) {
+      let userID = mentioned.id
+      let guild = message.guild
+
+      if (!guild) {
+        return false
+      }
+
+      let member = await guild.members.fetch(userID)
+
+      // mute the user
+      member.voice.setMute(true, 'Muted by bot command')
+    }
+  }
+
+  return true
+}
+
+async function roleAssigner(
+  command: BCFDCommand,
+  member: GuildMember,
+  stringInfoMethod: (field: string) => string
+): Promise<boolean> {
+  if (command.isRoleAssigner) {
+    let role = stringInfoMethod(command.roleToAssign)
+
+    // add the role to the member if they dont have it, and if they have it remove it
+    if (!member.roles.cache.has(role)) {
+      member.roles.add(role)
+    } else {
+      member.roles.remove(role)
+    }
+  }
+
+  return true
+}
+
+async function sendChannelEmbed(
+  command: BCFDCommand,
+  channel:
+    | TextChannel
+    | DMChannel
+    | PartialDMChannel
+    | NewsChannel
+    | StageChannel
+    | VoiceChannel
+    | PublicThreadChannel<boolean>
+    | PrivateThreadChannel
+    | VoiceChannel,
+  stringInfoMethod: (field: string) => string
+): Promise<boolean> {
+  if (command.sendChannelEmbed) {
+    // builds an embed with our embed template
+    let embed = new EmbedBuilder()
+
+    if (command.channelEmbed.title != '') {
+      embed.setTitle(stringInfoMethod(command.channelEmbed.title))
+    }
+
+    if (command.channelEmbed.description != '') {
+      embed.setDescription(stringInfoMethod(command.channelEmbed.description))
+    }
+
+    if (command.channelEmbed.hexColor != '') {
+      // convert our hex color string to 'color'
+      let color = parseInt(stringInfoMethod(command.channelEmbed.hexColor), 16)
+      embed.setColor(color)
+    }
+
+    if (command.channelEmbed.imageURL != '') {
+      embed.setImage(stringInfoMethod(command.channelEmbed.imageURL))
+    }
+
+    if (command.channelEmbed.thumbnailURL != '') {
+      embed.setThumbnail(stringInfoMethod(command.channelEmbed.thumbnailURL))
+    }
+
+    if (command.channelEmbed.footer != '') {
+      embed.setFooter({ text: stringInfoMethod(command.channelEmbed.footer) })
+    }
+
+    // send the embed
+    channel.send({ embeds: [embed] })
+  }
+
+  return true
+}
+
+async function sendPrivateEmbed(
+  command: BCFDCommand,
+  user: User,
+  stringInfoMethod: (field: string) => string
+): Promise<boolean> {
+  if (command.sendPrivateEmbed) {
+    // builds an embed with our embed template
+    let embed = new EmbedBuilder()
+
+    if (command.privateEmbed.title != '') {
+      embed.setTitle(stringInfoMethod(command.privateEmbed.title))
+    }
+
+    if (command.privateEmbed.description != '') {
+      embed.setDescription(stringInfoMethod(command.privateEmbed.description))
+    }
+
+    if (command.privateEmbed.hexColor != '') {
+      // convert our hex color string to 'color'
+      let color = parseInt(stringInfoMethod(command.privateEmbed.hexColor), 16)
+      embed.setColor(color)
+    }
+
+    if (command.privateEmbed.imageURL != '') {
+      embed.setImage(stringInfoMethod(command.privateEmbed.imageURL))
+    }
+
+    if (command.privateEmbed.thumbnailURL != '') {
+      embed.setThumbnail(stringInfoMethod(command.privateEmbed.thumbnailURL))
+    }
+
+    if (command.privateEmbed.footer != '') {
+      embed.setFooter({ text: stringInfoMethod(command.privateEmbed.footer) })
+    }
+
+    // send the embed
+    user.send({ embeds: [embed] })
+  }
+
+  return true
+}
+
+async function react(
+  command: BCFDCommand,
+  message: OmitPartialGroupDMChannel<Message<boolean>>
+): Promise<boolean> {
+  if (command.isReact) {
+    // add a reaction to the message
+
+    // convert our command reaction to a reaction emote from the guild
+    let reaction = message.guild?.emojis.cache.get(
+      stringInfoAdd(command.reaction, message, command)
+    )
+
+    if (reaction) {
+      message.react(reaction)
+    }
+  }
+
+  return true
+}
+
+async function onGuildMemberAdd(member: GuildMember) {
+  if (member.user.bot) return
+
+  let filteredCommands = commands.bcfdCommands.filter((c) => c.type == 2)
+
+  for (const command of filteredCommands) {
+    if (command.isRoleAssigner) {
+      roleAssigner(command, member, (field) => field) //stringInfoAdd(field, member, command))
+    }
+
+    // get the first channel of the guild
+    let channel = member.guild.channels.cache.first() as TextChannel | undefined
+
+    if (channel) {
+      sendChannelEmbed(command, channel, (field) => field) //stringInfoAdd(field, channel, command))
+      channelMessage(
+        command,
+        channel,
+        () => command.channelMessage //stringInfoAdd(command.channelMessage, channel, command)
+      )
+    }
+
+    sendPrivateEmbed(command, member.user, (field) => field) //stringInfoAdd(field, member.user, command))
+    privateMessage(
+      command,
+      member.user,
+      () => command.privateMessage //stringInfoAdd(command.privateMessage, member.user, command)
+    )
+  }
+}
+
+async function onGuildMemberRemove(member: GuildMember | PartialGuildMember) {
+  if (member.user.bot) return
+
+  let filteredCommands = commands.bcfdCommands.filter((c) => c.type == 3)
+
+  for (const command of filteredCommands) {
+    // get the first channel of the guild
+    let channel = member.guild.channels.cache.first() as TextChannel | undefined
+
+    if (channel) {
+      sendChannelEmbed(command, channel, (field) => field) //stringInfoAdd(field, channel, command))
+      channelMessage(
+        command,
+        channel,
+        () => command.channelMessage //stringInfoAdd(command.channelMessage, channel, command)
+      )
+    }
+
+    sendPrivateEmbed(command, member.user, (field) => field) //stringInfoAdd(field, member.user, command))
+    privateMessage(
+      command,
+      member.user,
+      () => command.privateMessage //stringInfoAdd(command.privateMessage, member.user, command)
+    )
+  }
+}
+
+async function onGuildBanAdd(ban: GuildBan) {
+  if (ban.user.bot) return
+
+  let filteredCommands = commands.bcfdCommands.filter((c) => c.type == 4)
+
+  for (const command of filteredCommands) {
+    // get the first channel of the guild
+    let channel = ban.guild.channels.cache.first() as TextChannel | undefined
+
+    if (channel) {
+      sendChannelEmbed(command, channel, (field) => field) //stringInfoAdd(field, channel, command))
+      channelMessage(
+        command,
+        channel,
+        () => command.channelMessage //stringInfoAdd(command.channelMessage, channel, command)
+      )
+    }
+
+    sendPrivateEmbed(command, ban.user, (field) => field) //stringInfoAdd(field, member.user, command))
+    privateMessage(
+      command,
+      ban.user,
+      () => command.privateMessage //stringInfoAdd(command.privateMessage, member.user, command)
+    )
+  }
+}
+
+async function onMessageReactionAdd(
+  reaction: MessageReaction | PartialMessageReaction,
+  user: User | PartialUser
+) {
+  throw new Error('Function not implemented.')
+}
+
 async function onMessageCreate(message: OmitPartialGroupDMChannel<Message<boolean>>) {
   if (message.author.bot) return
+  if (message.channel.type === ChannelType.DM) {
+    stats.incrementPrivateMessagesReceived()
+  }
 
   let firstItem = message.content.split(' ')[0]
   let messageWordCount = message.content.split(' ').length
@@ -405,15 +928,8 @@ async function onMessageCreate(message: OmitPartialGroupDMChannel<Message<boolea
   )
 
   for (const command of filteredCommands) {
-    if (command.isRequiredRole) {
-      // Check if the user has the required role
-      if (!message.member?.roles.cache.has(command.roleToAssign)) {
-        // User does not have the required role, skip the command
-        if (!command.ignoreErrorMessage) {
-          message.reply('```' + `${command.command} requires role: ${command.roleToAssign}` + '```')
-        }
-        continue
-      }
+    if (!(await requiredRole(command, message))) {
+      continue
     }
 
     if (command.isAdmin) {
@@ -428,188 +944,49 @@ async function onMessageCreate(message: OmitPartialGroupDMChannel<Message<boolea
       }
     }
 
-    if (command.deleteIf) {
-      let deleteStrings = command.deleteIfStrings.split('|')
-      for (const deleteString of deleteStrings) {
-        if (message.content.includes(deleteString)) {
-          message.delete()
-          break
-        }
-      }
+    deleteIf(command, message)
+
+    if (!(await deleteX(command, message))) {
+      continue
     }
 
-    if (command.deleteX) {
-      // check if user has permission to manage messages
-      if (
-        !message.member?.permissions.has(PermissionsBitField.Flags.ManageMessages) ||
-        !(message.channel instanceof TextChannel)
-      ) {
-        continue
-      }
+    channelMessage(command, message.channel, () =>
+      stringInfoAdd(command.channelMessage, message, command)
+    )
 
-      let deleteAmount = command.deleteNum
-      // get the previous x messages
-      let messages = await message.channel.messages.fetch({ limit: deleteAmount })
-      // delete the messages
-      message.channel.bulkDelete(messages)
+    privateMessage(command, message.author, () =>
+      stringInfoAdd(command.privateMessage, message, command)
+    )
+
+    if (!(await kick(command, message, firstItem, messageWordCount))) {
+      continue
     }
 
-    if (command.actionArr[0]) {
-      // reply to message
-      message.channel.send(stringInfoAdd(command.channelMessage, message, command))
+    if (!(await ban(command, message, firstItem, messageWordCount))) {
+      continue
     }
 
-    if (command.actionArr[1]) {
-      // sends a private message to the user
-      message.author.send(stringInfoAdd(command.privateMessage, message, command))
+    if (!(await voiceMute(command, message, firstItem, messageWordCount))) {
+      continue
     }
 
-    if (command.isKick && command.command == firstItem && messageWordCount == 2) {
-      // check if user has permission to kick
-      if (!message.member?.permissions.has(PermissionsBitField.Flags.KickMembers)) {
-        continue
-      }
-
-      let mentioned = message.mentions?.users?.first()
-
-      if (mentioned) {
-        // kick the user
-        message.guild?.members.kick(mentioned)
-      }
+    if (message.member) {
+      roleAssigner(command, message.member, (field) => stringInfoAdd(field, message, command))
     }
 
-    if (command.isBan && command.command == firstItem && messageWordCount == 2) {
-      // check if user has permission to ban
-      if (!message.member?.permissions.has(PermissionsBitField.Flags.BanMembers)) {
-        continue
-      }
+    sendChannelEmbed(command, message.channel, (field) => stringInfoAdd(field, message, command))
 
-      let mentioned = message.mentions?.users?.first()
+    sendPrivateEmbed(command, message.author, (field) => stringInfoAdd(field, message, command))
 
-      if (mentioned) {
-        // ban the user
-        message.guild?.members.ban(mentioned)
-      }
-    }
-
-    if (command.isVoiceMute && command.command == firstItem && messageWordCount == 2) {
-      // check if user has permission to mute
-      if (!message.member?.permissions.has(PermissionsBitField.Flags.MuteMembers)) {
-        continue
-      }
-
-      let mentioned = message.mentions?.users?.first()
-
-      if (mentioned) {
-        let userID = mentioned.id
-        let guild = message.guild
-
-        if (!guild) {
-          continue
-        }
-
-        let member = await guild.members.fetch(userID)
-
-        // mute the user
-        member.voice.setMute(true, 'Muted by bot command')
-      }
-    }
-
-    if (command.isRoleAssigner) {
-      let role = stringInfoAdd(command.roleToAssign, message, command)
-
-      // add the role to the member if they dont have it, and if they have it remove it
-      if (!message.member?.roles.cache.has(role)) {
-        message.member?.roles.add(role)
-      } else {
-        message.member?.roles.remove(role)
-      }
-    }
-
-    if (command.sendChannelEmbed) {
-      // builds an embed with our embed template
-      let embed = new EmbedBuilder()
-
-      if (command.channelEmbed.title != '') {
-        embed.setTitle(stringInfoAdd(command.channelEmbed.title, message, command))
-      }
-
-      if (command.channelEmbed.description != '') {
-        embed.setDescription(stringInfoAdd(command.channelEmbed.description, message, command))
-      }
-
-      if (command.channelEmbed.hexColor != '') {
-        // convert our hex color string to 'color'
-        let color = parseInt(stringInfoAdd(command.channelEmbed.hexColor, message, command), 16)
-        embed.setColor(color)
-      }
-
-      if (command.channelEmbed.imageURL != '') {
-        embed.setImage(stringInfoAdd(command.channelEmbed.imageURL, message, command))
-      }
-
-      if (command.channelEmbed.thumbnailURL != '') {
-        embed.setThumbnail(stringInfoAdd(command.channelEmbed.thumbnailURL, message, command))
-      }
-
-      if (command.channelEmbed.footer != '') {
-        embed.setFooter({ text: stringInfoAdd(command.channelEmbed.footer, message, command) })
-      }
-
-      // send the embed
-      message.channel.send({ embeds: [embed] })
-    }
-
-    if (command.sendPrivateEmbed) {
-      // builds an embed with our embed template
-      let embed = new EmbedBuilder()
-
-      if (command.privateEmbed.title != '') {
-        embed.setTitle(stringInfoAdd(command.privateEmbed.title, message, command))
-      }
-
-      if (command.privateEmbed.description != '') {
-        embed.setDescription(stringInfoAdd(command.privateEmbed.description, message, command))
-      }
-
-      if (command.privateEmbed.hexColor != '') {
-        // convert our hex color string to 'color'
-        let color = parseInt(stringInfoAdd(command.privateEmbed.hexColor, message, command), 16)
-        embed.setColor(color)
-      }
-
-      if (command.privateEmbed.imageURL != '') {
-        embed.setImage(stringInfoAdd(command.privateEmbed.imageURL, message, command))
-      }
-
-      if (command.privateEmbed.thumbnailURL != '') {
-        embed.setThumbnail(stringInfoAdd(command.privateEmbed.thumbnailURL, message, command))
-      }
-
-      if (command.privateEmbed.footer != '') {
-        embed.setFooter({ text: stringInfoAdd(command.privateEmbed.footer, message, command) })
-      }
-
-      // send the embed
-      message.author.send({ embeds: [embed] })
-    }
-
-    if (command.isReact) {
-      // add a reaction to the message
-
-      // convert our command reaction to a reaction emote from the guild
-      let reaction = message.guild?.emojis.cache.get(
-        stringInfoAdd(command.reaction, message, command)
-      )
-
-      if (reaction) {
-        message.react(reaction)
-      }
-    }
+    react(command, message)
 
     if (command.deleteAfter) {
       // delete the message
       message.delete()
+    }
+
+    if (command.actionArr[0] || command.actionArr[1]) {
+      stats.incrementMessagesSent()
     }
   }
 }
@@ -853,3 +1230,16 @@ function stringInfoAddMessageContent(message: string, baseMessage: Message, comm
 
   return message
 }
+
+// Add this function to save stats periodically
+function saveStatsPeriodicaly() {
+  setInterval(
+    async () => {
+      await saveStats()
+    },
+    5 * 60 * 1000
+  ) // Save every 5 minutes
+}
+
+// Call this function after initializing the stats object
+saveStatsPeriodicaly()
