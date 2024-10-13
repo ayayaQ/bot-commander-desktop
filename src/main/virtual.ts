@@ -1,4 +1,9 @@
 import vm from 'vm';
+import fs from 'fs/promises';
+import { app } from 'electron';
+import { join } from 'path';
+
+let botStateContext: vm.Context;
 
 export function get(variableName: string, context: vm.Context) {
     return vm.runInContext(`${variableName}`, context);
@@ -56,3 +61,37 @@ export function stringInfoAddEval(code: string, context: vm.Context) {
       return code;
 }
 
+export async function initializeBotState() {
+    botStateContext = vm.createContext({ botState: {} });
+    await loadBotState();
+}
+
+export async function loadBotState() {
+    const botStatePath = join(app.getPath('userData'), 'botState.json');
+    try {
+        const data = await fs.readFile(botStatePath, 'utf-8');
+        const loadedState = JSON.parse(data);
+        vm.runInContext('botState = ' + JSON.stringify(loadedState), botStateContext);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+            // File doesn't exist, use default empty object
+            vm.runInContext('botState = {}', botStateContext);
+        } else {
+            console.error('Error loading bot state:', error);
+        }
+    }
+}
+
+export async function saveBotState() {
+    const botStatePath = join(app.getPath('userData'), 'botState.json');
+    try {
+        const state = vm.runInContext('JSON.stringify(botState)', botStateContext);
+        await fs.writeFile(botStatePath, state);
+    } catch (error) {
+        console.error('Error saving bot state:', error);
+    }
+}
+
+export function getBotStateContext() {
+    return botStateContext;
+}
