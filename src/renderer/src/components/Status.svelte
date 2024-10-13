@@ -30,8 +30,12 @@
     saveBotStatus({ status, activity, activityDetails, streamUrl })
   }
 
-  onMount(() => {
-    loadBotStatus()
+  onMount(async () => {
+    
+    status = $botStatusStore.status
+    activity = $botStatusStore.activity
+    activityDetails = $botStatusStore.activityDetails
+    streamUrl = $botStatusStore.streamUrl
   })
 </script>
 

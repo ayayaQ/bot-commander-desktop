@@ -58,7 +58,7 @@
     cmd.commandDescription.toLowerCase().includes(searchQuery.toLowerCase()))
 </script>
 
-<div class="p-4">
+<div class="">
   {#if isEditing}
     <CommandEditor
       mode={editingCommand ? 'edit' : 'add'}
@@ -68,6 +68,7 @@
     />
     <button class="btn btn-secondary mt-4" on:click={() => (isEditing = false)}>Cancel</button>
   {:else}
+  <div class="sticky top-0 z-20 bg-base-100 p-4 pb-1">
     <div class="flex justify-between items-center mb-4">
       <h2 class="text-2xl font-bold">Command List</h2>
       <button class="btn btn-primary" on:click={addCommand}><span class="material-symbols-outlined">add</span>Add Command</button>
@@ -78,6 +79,8 @@
         <span class="material-symbols-outlined">search</span>
       </label>
     </div>
+  </div>
+  <div class="p-4">
     {#if filteredCommands.length === 0}
       <p class="text-gray-500">No commands found.</p>
     {:else}
@@ -90,5 +93,6 @@
         {/each}
       </ul>
     {/if}
+  </div>
   {/if}
 </div>

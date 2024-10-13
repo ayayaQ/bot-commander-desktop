@@ -5,6 +5,12 @@
   export let mode: 'edit' | 'add' = 'add'
   export let command: BCFDCommand | null = null
 
+  //const TYPE_MESSAGE_RECEIVED = 0
+  //const TYPE_PM_RECEIVED = 1
+  const TYPE_MEMBER_JOIN = 2
+  const TYPE_MEMBER_LEAVE = 3
+  const TYPE_MEMBER_BAN = 4
+
   const dispatch = createEventDispatcher()
 
   let editedCommand: BCFDCommand = command
@@ -59,6 +65,26 @@
       }
 
   function handleSubmit() {
+    if (editedCommand.type === TYPE_MEMBER_JOIN || editedCommand.type === TYPE_MEMBER_LEAVE || editedCommand.type === TYPE_MEMBER_BAN) {
+      // reset the fields that are not needed for these types
+      editedCommand.isRequiredRole = false
+      editedCommand.requiredRole = ''
+      editedCommand.isAdmin = false
+      editedCommand.phrase = false
+      editedCommand.isNSFW = false
+      editedCommand.deleteAfter = false
+      editedCommand.deleteX = false
+      editedCommand.deleteNum = 0
+      editedCommand.deleteIf = false
+      editedCommand.deleteIfStrings = ''
+      editedCommand.isReact = false
+      editedCommand.reaction = ''
+      editedCommand.isKick = false
+      editedCommand.isBan = false
+      editedCommand.isVoiceMute = false
+      editedCommand.command = ''
+    }
+
     dispatch(mode === 'edit' ? 'update' : 'add', editedCommand)
   }
 </script>
@@ -76,23 +102,24 @@
         <option value={2}>Member Join</option>
         <option value={3}>Member Leave</option>
         <option value={4}>Member Ban</option>
-        <option value={5}>Member Add</option>
       </select>
     </div>
 
-    <div class="form-control">
-      <label class="label" for="command">
-        <span class="label-text">Command</span>
-      </label>
-      <input
-        type="text"
-        id="command"
-        bind:value={editedCommand.command}
-        class="input input-bordered"
-        placeholder="!command"
-        required
-      />
-    </div>
+    {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN}
+      <div class="form-control">
+        <label class="label" for="command">
+          <span class="label-text">Command</span>
+        </label>
+        <input
+          type="text"
+          id="command"
+          bind:value={editedCommand.command}
+          class="input input-bordered"
+          placeholder="!command"
+          required
+        />
+      </div>
+    {/if}
 
     <div class="form-control">
       <label class="label" for="commandDescription">
@@ -110,42 +137,44 @@
 
     <h3 class="text-xl font-bold mb-2">Action</h3>
 
-    <div class="form-control">
-      <label class="label" for="phrase">
-        <span class="label-text">Phrase (can appear anywhere in the message)</span>
-      </label>
-      <input type="checkbox" bind:checked={editedCommand.phrase} class="checkbox" />
-    </div>
-
-    <div class="form-control">
-      <label class="label" for="requiresRole">
-        <span class="label-text">Requires Role</span>
-      </label>
-      <input type="checkbox" bind:checked={editedCommand.isRequiredRole} class="checkbox" />
-    </div>
-
-    {#if editedCommand.isRequiredRole}
+    {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN}
       <div class="form-control">
-        <label class="label" for="requiredRole">
-          <span class="label-text">Required Role</span>
+        <label class="label" for="phrase">
+          <span class="label-text">Phrase (can appear anywhere in the message)</span>
         </label>
-        <input
-          type="text"
-          id="requiredRole"
-          bind:value={editedCommand.requiredRole}
-          class="input input-bordered"
-          placeholder="Role ID"
-          required
-        />
+        <input type="checkbox" bind:checked={editedCommand.phrase} class="checkbox" />
+      </div>
+
+      <div class="form-control">
+        <label class="label" for="requiresRole">
+          <span class="label-text">Requires Role</span>
+        </label>
+        <input type="checkbox" bind:checked={editedCommand.isRequiredRole} class="checkbox" />
+      </div>
+
+      {#if editedCommand.isRequiredRole}
+        <div class="form-control">
+          <label class="label" for="requiredRole">
+            <span class="label-text">Required Role</span>
+          </label>
+          <input
+            type="text"
+            id="requiredRole"
+            bind:value={editedCommand.requiredRole}
+            class="input input-bordered"
+            placeholder="Role ID"
+            required
+          />
+        </div>
+      {/if}
+
+      <div class="form-control">
+        <label class="label" for="isAdmin ">
+          <span class="label-text">Requires Admin</span>
+        </label>
+        <input type="checkbox" bind:checked={editedCommand.isAdmin} class="checkbox" />
       </div>
     {/if}
-
-    <div class="form-control">
-      <label class="label" for="isAdmin ">
-        <span class="label-text">Requires Admin</span>
-      </label>
-      <input type="checkbox" bind:checked={editedCommand.isAdmin} class="checkbox" />
-    </div>
 
     <div class="form-control">
       <label class="label" for="sendMessage">
@@ -393,25 +422,27 @@
       </div>
     {/if}
 
-    <div class="form-control">
-      <label class="label" for="isReact">
-        <span class="label-text">React To Message</span>
-      </label>
-      <input type="checkbox" bind:checked={editedCommand.isReact} class="checkbox" />
-    </div>
-
-    {#if editedCommand.isReact}
+    {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN}
       <div class="form-control">
-        <label class="label" for="reactToMessage  ">
+        <label class="label" for="isReact">
           <span class="label-text">React To Message</span>
         </label>
-        <input
-          type="text"
-          id="reactToMessage"
-          bind:value={editedCommand.reaction}
-          class="input input-bordered"
-        />
+        <input type="checkbox" bind:checked={editedCommand.isReact} class="checkbox" />
       </div>
+
+      {#if editedCommand.isReact}
+        <div class="form-control">
+          <label class="label" for="reactToMessage  ">
+            <span class="label-text">React To Message</span>
+          </label>
+          <input
+            type="text"
+            id="reactToMessage"
+            bind:value={editedCommand.reaction}
+            class="input input-bordered"
+          />
+        </div>
+      {/if}
     {/if}
 
     <div class="form-control">
@@ -421,85 +452,89 @@
       <input type="checkbox" bind:checked={editedCommand.ignoreErrorMessage} class="checkbox" />
     </div>
 
-    <div class="form-control">
-      <label class="label" for="deleteIf">
-        <span class="label-text">Delete If Contains</span>
-      </label>
-      <input type="checkbox" bind:checked={editedCommand.deleteIf} class="checkbox" />
-    </div>
-
-    {#if editedCommand.deleteIf}
+    {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN}
       <div class="form-control">
-        <label class="label" for="deleteIfStrings">
+        <label class="label" for="deleteIf">
           <span class="label-text">Delete If Contains</span>
         </label>
-        <input
-          type="text"
-          id="deleteIfStrings"
-          bind:value={editedCommand.deleteIfStrings}
-          class="input input-bordered"
-        />
+        <input type="checkbox" bind:checked={editedCommand.deleteIf} class="checkbox" />
       </div>
-    {/if}
 
-    <div class="form-control">
-      <label class="label" for="deleteAfter">
-        <span class="label-text">Delete After</span>
-      </label>
-      <input type="checkbox" bind:checked={editedCommand.deleteAfter} class="checkbox" />
-    </div>
+      {#if editedCommand.deleteIf}
+        <div class="form-control">
+          <label class="label" for="deleteIfStrings">
+            <span class="label-text">Delete If Contains</span>
+          </label>
+          <input
+            type="text"
+            id="deleteIfStrings"
+            bind:value={editedCommand.deleteIfStrings}
+            class="input input-bordered"
+          />
+        </div>
+      {/if}
 
-    <div class="form-control">
-      <label class="label" for="deleteX">
-        <span class="label-text">Delete X Times</span>
-      </label>
-      <input type="checkbox" bind:checked={editedCommand.deleteX} class="checkbox" />
-    </div>
-
-    {#if editedCommand.deleteX}
       <div class="form-control">
-        <label class="label" for="deleteNum">
+        <label class="label" for="deleteAfter">
+          <span class="label-text">Delete After</span>
+        </label>
+        <input type="checkbox" bind:checked={editedCommand.deleteAfter} class="checkbox" />
+      </div>
+
+      <div class="form-control">
+        <label class="label" for="deleteX">
           <span class="label-text">Delete X Times</span>
         </label>
-        <input
-          type="number"
-          bind:value={editedCommand.deleteNum}
-          class="input input-bordered"
-          min="1"
-          max="99"
-        />
+        <input type="checkbox" bind:checked={editedCommand.deleteX} class="checkbox" />
+      </div>
+
+      {#if editedCommand.deleteX}
+        <div class="form-control">
+          <label class="label" for="deleteNum">
+            <span class="label-text">Delete X Times</span>
+          </label>
+          <input
+            type="number"
+            bind:value={editedCommand.deleteNum}
+            class="input input-bordered"
+            min="1"
+            max="99"
+          />
+        </div>
+      {/if}
+
+      <div class="form-control">
+        <label class="label" for="isNSFW">
+          <span class="label-text">Is NSFW</span>
+        </label>
+        <input type="checkbox" bind:checked={editedCommand.isNSFW} class="checkbox" />
       </div>
     {/if}
-
-    <div class="form-control">
-      <label class="label" for="isNSFW">
-        <span class="label-text">Is NSFW</span>
-      </label>
-      <input type="checkbox" bind:checked={editedCommand.isNSFW} class="checkbox" />
-    </div>
 
     <h3 class="text-xl font-bold mb-2">Moderation</h3>
 
-    <div class="form-control">
-      <label class="label" for="isKick">
-        <span class="label-text">Kick</span>
-      </label>
-      <input type="checkbox" bind:checked={editedCommand.isKick} class="checkbox" />
-    </div>
+    {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN}
+      <div class="form-control">
+        <label class="label" for="isKick">
+          <span class="label-text">Kick</span>
+        </label>
+        <input type="checkbox" bind:checked={editedCommand.isKick} class="checkbox" />
+      </div>
 
-    <div class="form-control">
-      <label class="label" for="isBan">
-        <span class="label-text">Ban</span>
-      </label>
-      <input type="checkbox" bind:checked={editedCommand.isBan} class="checkbox" />
-    </div>
+      <div class="form-control">
+        <label class="label" for="isBan">
+          <span class="label-text">Ban</span>
+        </label>
+        <input type="checkbox" bind:checked={editedCommand.isBan} class="checkbox" />
+      </div>
 
-    <div class="form-control">
-      <label class="label" for="isVoiceMute">
-        <span class="label-text">Voice Mute</span>
-      </label>
-      <input type="checkbox" bind:checked={editedCommand.isVoiceMute} class="checkbox" />
-    </div>
+      <div class="form-control">
+        <label class="label" for="isVoiceMute">
+          <span class="label-text">Voice Mute</span>
+        </label>
+        <input type="checkbox" bind:checked={editedCommand.isVoiceMute} class="checkbox" />
+      </div>
+    {/if}
 
     <div class="form-control">
       <label class="label" for="isRoleAssigner">

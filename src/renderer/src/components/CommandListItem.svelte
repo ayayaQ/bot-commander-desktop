@@ -14,15 +14,44 @@
       .then(() => alert('Command exported to clipboard!'))
       .catch(err => console.error('Failed to copy command: ', err))
   }
+
+  const TYPE_MESSAGE_RECEIVED = 0
+  const TYPE_PM_RECEIVED = 1
+  const TYPE_MEMBER_JOIN = 2
+  const TYPE_MEMBER_LEAVE = 3
+  const TYPE_MEMBER_BAN = 4
+
+  function displayNameForCommand(command: BCFDCommand) {
+    switch (command.type) {
+      case TYPE_MESSAGE_RECEIVED: return command.command
+      case TYPE_PM_RECEIVED: return command.command
+      case TYPE_MEMBER_JOIN: return 'Member Join'
+      case TYPE_MEMBER_LEAVE: return 'Member Leave'
+      case TYPE_MEMBER_BAN: return 'Member Ban'
+      default: return command.command
+    }
+  }
+
+  function displayIconForCommand(command: BCFDCommand) {
+    // icons should be unique from material symbols
+    switch (command.type) {
+      case TYPE_MESSAGE_RECEIVED: return 'message'
+      case TYPE_PM_RECEIVED: return 'chat'
+      case TYPE_MEMBER_JOIN: return 'person_add'
+      case TYPE_MEMBER_LEAVE: return 'exit_to_app'
+      case TYPE_MEMBER_BAN: return 'person_remove'
+      default: return 'message'
+    }
+  }
 </script>
 
 <li class="card bg-base-200 shadow-xl">
   <div class="card-body">
     <div class="flex justify-between items-start">
       <div class="flex items-center justify-center gap-2">
-        <div class="flex items-center justify-center"><span class="material-symbols-outlined" style="font-size: 3rem;">message</span></div>
+        <div class="flex items-center justify-center"><span class="material-symbols-outlined" style="font-size: 3rem;">{displayIconForCommand(command)}</span></div>
         <div>
-        <h3 class="card-title">{command.command}</h3>
+        <h3 class="card-title">{displayNameForCommand(command)}</h3>
         <p>{command.commandDescription}</p>
     </div>
       </div>

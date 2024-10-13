@@ -2,6 +2,8 @@
   import { onMount } from 'svelte'
   import { connectionStore } from '../stores/connection'
   import Status from './Status.svelte'
+  import { botStatusStore } from '../stores/status'
+  import type { BotStatus } from '../types/types'
 
   $: username = $connectionStore.username
   $: avatar = $connectionStore.avatar
@@ -22,43 +24,55 @@
     window.open(invite, '_blank')
   }
 
+  function getActivityPreposition(status: BotStatus) {
+    if (status.activity === 'Listening') {
+      return ' to'
+    } else if (status.activity === 'Competing') {
+      return ' in'
+    }
+
+    return ''
+  }
+
   onMount(async () => {
     token = await connectionStore.ipc.getToken()
     console.log(token)
   })
 </script>
 
-<div class="flex flex-col items-center justify-center min-h-screen bg-base-200 p-4">
+<div class="flex flex-col items-center justify-center min-h-[calc(100vh-40px)] bg-base-200 p-4">
   <div class="card w-96 bg-base-100 shadow-xl">
     <div class="card-body items-center text-center">
       {#if avatar}
-        <div class="avatar placeholder mb-4">
-          <div class="rounded-full">
+        <div class="avatar placeholder">
+          <div class={`rounded-full ${$botStatusStore.status === 'Online' ? 'outline outline-2 outline-green-500' : $botStatusStore.status === 'Do Not Disturb' ? 'outline outline-2 outline-red-500' : $botStatusStore.status === 'Invisible' ? 'outline outline-2 outline-gray-500' : 'outline outline-2 outline-yellow-500'}`}>
             <img src={avatar} alt="Avatar" />
           </div>
         </div>
       {:else}
-        <div class="avatar placeholder">
+        <div class="avatar placeholder mb-14">
           <div class="bg-neutral text-neutral-content w-24 rounded-full">
             <span class="text-3xl select-none">Bot</span>
           </div>
         </div>
       {/if}
 
-      <h2 class="card-title mb-4">{username}</h2>
+      
       {#if !$connectionStore.connected}
         <input
           type="password"
           placeholder="Token"
-          class="input input-bordered w-full max-w-xs mb-4"
+          class="input input-bordered w-full max-w-xs"
           bind:value={token}
         />
       {:else}
+      <h2 class="card-title">{username}</h2>
+      <div class="text-sm"><span>{$botStatusStore.activity}{getActivityPreposition($botStatusStore)}</span><span class='font-medium'>&nbsp;{$botStatusStore.activityDetails}</span></div>
         <input
           type="password"
           placeholder="Token"
           disabled
-          class="input input-bordered w-full max-w-xs mb-4"
+          class="input input-bordered w-full max-w-xs"
           value={$connectionStore.token}
         />
       {/if}

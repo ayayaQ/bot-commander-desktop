@@ -52,4 +52,8 @@
       <option value="winter">Winter</option>
     </select>
   </div>
+  <div class="divider"></div>
+  <h2 class="text-2xl font-bold mb-4">About</h2>
+  <p>Version: 1.0.0</p>
+  <p>Author: <a href="https://github.com/ayayaQ" class="link link-primary">ayayaQ</a></p>
 </div>
