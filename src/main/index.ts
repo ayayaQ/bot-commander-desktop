@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, session } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, session, Tray, Menu } from 'electron'
 import { join } from 'path'
 import vm from 'node:vm'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -39,6 +39,15 @@ import { stringInfoAddEval } from './virtual'
 import { Stats } from './stats'
 import { initializeBotState, loadBotState, saveBotState, getBotStateContext } from './virtual'
 
+// Extend the Electron.App interface to include our custom property
+declare global {
+  namespace Electron {
+    interface App {
+      isQuitting: boolean;
+    }
+  }
+}
+
 let client: Client | null = null
 let connection: boolean = false
 let commands: { bcfdCommands: BCFDCommand[]; bcfdSlashCommands: BCFDSlashCommand[] } = {
@@ -55,6 +64,12 @@ let botStatus: BotStatus = {
 } // Default bot status
 let stats: Stats
 const statsFilePath = join(app.getPath('userData'), 'stats.json')
+
+let mainWindow: BrowserWindow | null = null
+let tray: Tray | null = null
+
+// Initialize the custom property
+app.isQuitting = false
 
 async function saveStats() {
   if (stats) {
@@ -136,9 +151,11 @@ async function saveBotStatus(): Promise<void> {
 
 function createWindow(): void {
   // Create the browser window.
-  const mainWindow = new BrowserWindow({
-    width: 900,
+  mainWindow = new BrowserWindow({
+    width: 1230,
     height: 670,
+    minWidth: 1230,
+    minHeight: 495,
     show: false,
     autoHideMenuBar: true,
     frame: false, // Remove the default frame
@@ -153,7 +170,7 @@ function createWindow(): void {
   })
 
   mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
+    mainWindow?.show()
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -168,6 +185,32 @@ function createWindow(): void {
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
+
+  // Prevent the window from closing when the close button is clicked
+  mainWindow.on('close', (event) => {
+    if (!app.isQuitting) {
+      event.preventDefault()
+      mainWindow?.hide()
+    }
+    return false
+  })
+}
+
+function createTray() {
+  tray = new Tray(icon)
+  const contextMenu = Menu.buildFromTemplate([
+    { label: 'Open', click: () => mainWindow?.show() },
+    { label: 'Quit', click: () => {
+      app.isQuitting = true
+      app.quit()
+    }}
+  ])
+  tray.setToolTip('BCFD')
+  tray.setContextMenu(contextMenu)
+
+  tray.on('double-click', () => {
+    mainWindow?.show()
+  })
 }
 
 // This method will be called when Electron has finished
@@ -196,6 +239,7 @@ app.whenReady().then(async () => {
   addIPCHandlers()
 
   createWindow()
+  createTray()
 
   app.on('before-quit', async (event) => {
     event.preventDefault() // Prevent the app from quitting immediately
@@ -211,13 +255,16 @@ app.whenReady().then(async () => {
   })
 })
 
-// Quit when all windows are closed, except on macOS. There, it's common
-// for applications and their menu bar to stay active until the user quits
-// explicitly with Cmd + Q.
+// Modify the existing 'window-all-closed' event handler
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+  if (process.platform !== 'darwin' && app.isQuitting) {
     app.quit()
   }
+})
+
+// Add a 'before-quit' event handler
+app.on('before-quit', () => {
+  app.isQuitting = true
 })
 
 function addIPCHandlers() {
