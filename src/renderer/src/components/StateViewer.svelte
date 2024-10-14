@@ -101,6 +101,7 @@
                     on:blur={saveEdit}
                     on:keydown={(e) => e.key === 'Enter' && saveEdit()}
                     class="input input-bordered input-sm w-full"
+                    autofocus
                   />
                 {:else}
                   <span on:dblclick={() => startEditing(key, value)}>

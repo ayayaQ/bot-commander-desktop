@@ -66,7 +66,7 @@
       on:add={handleAdd}
       on:update={handleUpdate}
     />
-    <button class="btn btn-secondary mt-4" on:click={() => (isEditing = false)}>Cancel</button>
+    <button class="btn btn-secondary m-4" on:click={() => (isEditing = false)}>Cancel</button>
   {:else}
   <div class="sticky top-0 z-20 bg-base-100 p-4 pb-1">
     <div class="flex justify-between items-center mb-4">
