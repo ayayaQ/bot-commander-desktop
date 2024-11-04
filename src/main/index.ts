@@ -9,6 +9,7 @@ import {
   Client,
   DMChannel,
   EmbedBuilder,
+  Events,
   Guild,
   GuildBan,
   GuildMember,
@@ -457,35 +458,35 @@ function Connect(event: Electron.IpcMainEvent, token: string) {
     })
   })
 
-  client.on('messageCreate', (message) => {
+  client.on(Events.MessageCreate, (message) => {
     stats.incrementMessagesReceived()
     onMessageCreate(message)
   })
 
   // when a user joins a guild
-  client.on('guildMemberAdd', (member) => {
+  client.on(Events.GuildMemberAdd, (member) => {
     stats.incrementJoinEventsReceived()
     onGuildMemberAdd(member)
   })
 
   // when a user leaves a guild
-  client.on('guildMemberRemove', (member) => {
+  client.on(Events.GuildMemberRemove, (member) => {
     stats.incrementLeaveEventsReceived()
     onGuildMemberRemove(member)
   })
 
   // when a user is banned from a guild
-  client.on('guildBanAdd', (ban) => {
+  client.on(Events.GuildBanAdd, (ban) => {
     stats.incrementBanEventsReceived()
     onGuildBanAdd(ban)
   })
 
   // when a reaction is added to a message
-  client.on('messageReactionAdd', (reaction, user) => {
+  client.on(Events.MessageReactionAdd, (reaction, user) => {
     onMessageReactionAdd(reaction, user)
   })
 
-  client.on('interactionCreate', (interaction) => {
+  client.on(Events.InteractionCreate, (interaction) => {
     onInteractionCreate(interaction)
   })
 
