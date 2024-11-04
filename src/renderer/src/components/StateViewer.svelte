@@ -126,10 +126,13 @@
         spellcheck="false"
       ></textarea>
     </div>
-    <button class="btn btn-primary mb-2" on:click={runCode}>Run Code</button>
-    <div class="bg-base-300 p-2 rounded">
+    <div class='flex justify-start gap-2'>
+
+    <button class="btn btn-primary mb-2 grow-0 " on:click={runCode}><span class="material-symbols-outlined">play_arrow</span>Run</button>
+    <div class="bg-base-300 p-2 rounded grow">
       <h4 class="font-bold">Output:</h4>
-      <pre class="whitespace-pre-wrap">{codeOutput}</pre>
+      <pre class="whitespace-pre-wrap break-words">{codeOutput}</pre>
+    </div>
     </div>
   </div>
 </div>

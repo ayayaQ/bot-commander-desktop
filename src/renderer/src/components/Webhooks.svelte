@@ -77,7 +77,7 @@
         ></textarea>
       </div>
 
-      <button type="submit" class="btn btn-primary w-full">Send Webhook</button>
+      <button type="submit" class="btn btn-primary w-full"><span class="material-symbols-outlined">send</span>Send</button>
     </form>
   </div>
 </div>
