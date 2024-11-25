@@ -56,7 +56,7 @@ let commands: { bcfdCommands: BCFDCommand[]; bcfdSlashCommands: BCFDSlashCommand
   bcfdSlashCommands: []
 }
 let context: vm.Context
-let settings: AppSettings = { theme: 'light' } // Default settings
+let settings: AppSettings = { theme: 'light', showToken: false } // Default settings
 let botStatus: BotStatus = {
   status: 'Online',
   activity: 'Playing',
@@ -430,9 +430,10 @@ function Connect(event: Electron.IpcMainEvent, token: string) {
       IntentsBitField.Flags.GuildMembers,
       IntentsBitField.Flags.GuildMessages,
       IntentsBitField.Flags.MessageContent,
-      IntentsBitField.Flags.DirectMessages
+      IntentsBitField.Flags.DirectMessages,
+      IntentsBitField.Flags.GuildMessageReactions
     ],
-    partials: [Partials.Channel, Partials.Message]
+    partials: [Partials.Channel, Partials.Message, Partials.Reaction]
   })
 
   client.once('ready', async () => {
@@ -955,7 +956,131 @@ async function onMessageReactionAdd(
   reaction: MessageReaction | PartialMessageReaction,
   user: User | PartialUser
 ) {
-  throw new Error('Function not implemented.')
+  if (user.bot) return
+  
+  // Fetch the complete reaction and user if they're partial
+  if (reaction.partial) {
+    try {
+      reaction = await reaction.fetch()
+    } catch (error) {
+      console.error('Error fetching reaction:', error)
+      return
+    }
+  }
+  if (user.partial) {
+    try {
+      user = await user.fetch()
+    } catch (error) {
+      console.error('Error fetching user:', error)
+      return
+    }
+  }
+
+  // Get the message
+  const message = reaction.message
+  let fetchedMessage: OmitPartialGroupDMChannel<Message<boolean>>;
+  if (message.partial) {
+    try {
+      fetchedMessage = await message.fetch()
+    } catch (error) {
+      console.error('Error fetching message:', error)
+      return
+    }
+  }
+
+  // Get the guild member
+  const member = message.guild?.members.cache.get(user.id)
+  if (!member) return
+
+  // Filter commands for reaction type (type 5)
+  const filteredCommands = commands.bcfdCommands.filter(c => 
+    c.type === 5 && (
+      // Check if reaction matches command
+      c.command === reaction.emoji.id ||
+      // Check if reaction matches command name
+      c.command === reaction.emoji.name ||
+      // Or if it's a phrase match
+      (c.phrase && reaction.emoji.name?.toLowerCase().includes(c.command.toLowerCase())) ||
+      // Or if it matches specific message
+      (c.specificMessage && message.id === c.specificMessage)
+    )
+  )
+
+  for (const command of filteredCommands) {
+    // Check required role
+    if (command.isRequiredRole) {
+      if (!member.roles.cache.has(command.requiredRole)) {
+        if (!command.ignoreErrorMessage) {
+          user.send(`This reaction requires role: ${command.requiredRole}`)
+        }
+        continue
+      }
+    }
+
+    // Check admin requirement
+    if (command.isAdmin) {
+      if (!member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+        continue
+      }
+    }
+
+    // Check NSFW requirement
+    if (command.isNSFW) {
+      if (message.channel instanceof TextChannel && !message.channel.nsfw) {
+        continue
+      }
+    }
+
+    // Handle channel message
+    if (command.actionArr[0]) {
+      channelMessage(
+        command,
+        message.channel as TextChannel,
+        () => stringInfoAddReaction(command.channelMessage, reaction, command)
+      )
+    }
+
+    // Handle private message
+    if (command.actionArr[1]) {
+      privateMessage(
+        command,
+        user,
+        () => stringInfoAddReaction(command.privateMessage, reaction, command)
+      )
+    }
+
+    // Handle channel embed
+    if (command.sendChannelEmbed) {
+      sendChannelEmbed(
+        command,
+        message.channel as TextChannel,
+        (field) => stringInfoAddReaction(field, reaction, command)
+      )
+    }
+
+    // Handle private embed
+    if (command.sendPrivateEmbed) {
+      sendPrivateEmbed(
+        command,
+        user,
+        (field) => stringInfoAddReaction(field, reaction, command)
+      )
+    }
+
+    // Handle role assignment
+    if (command.isRoleAssigner) {
+      roleAssigner(
+        command,
+        member,
+        (field) => stringInfoAddReaction(field, reaction, command)
+      )
+    }
+
+    // Increment stats if messages were sent
+    if (command.actionArr[0] || command.actionArr[1]) {
+      stats.incrementMessagesSent()
+    }
+  }
 }
 
 async function onMessageCreate(message: OmitPartialGroupDMChannel<Message<boolean>>) {
@@ -1065,6 +1190,26 @@ function stringInfoAdd(
 
   return message
 }
+
+// string info add for reaction add event
+function stringInfoAddReaction(message: string, reaction: MessageReaction | PartialMessageReaction, command: BCFDCommand): string {
+
+  message = stringInfoAddClient(message, reaction.client)
+  message = stringInfoAddGuild(message, reaction.message.guild)
+  if (reaction.message.channel instanceof TextChannel) {
+    message = stringInfoAddChannel(message, reaction.message.channel)
+  }
+
+  message = stringInfoAddGeneral(message)
+
+  message = stringInfoAddMessageContent(message, reaction.message as Message<boolean>, command)
+
+  message = stringInfoAddEval(message, context)
+
+
+  return message
+}
+
 
 function stringInfoAddUser(message: string, user: User): string {
   message = message
