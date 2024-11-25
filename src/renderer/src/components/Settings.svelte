@@ -3,14 +3,21 @@
   import { saveSettings, settingsStore } from '../stores/settings'
 
   let selectedTheme: string
+  let showToken: boolean
+
   function changeTheme(event) {
     let theme = event.target.value
     document.documentElement.setAttribute('data-theme', theme)
-    saveSettings({ theme })
+    saveSettings({ ...$settingsStore, theme: theme })
+  }
+
+  function toggleShowToken() {
+    saveSettings({ ...$settingsStore, showToken: showToken })
   }
 
   onMount(() => {
     selectedTheme = $settingsStore.theme
+    showToken = $settingsStore.showToken
   })
 </script>
 
@@ -52,6 +59,19 @@
       <option value="winter">Winter</option>
     </select>
   </div>
+
+  <div class="form-control">
+    <label class="label cursor-pointer">
+      <span class="label-text">Show Token</span>
+      <input 
+        type="checkbox" 
+        class="toggle" 
+        bind:checked={showToken}
+        on:change={toggleShowToken}
+      />
+    </label>
+  </div>
+
   <div class="divider"></div>
   <h2 class="text-2xl font-bold mb-4">About</h2>
   <p>Version: 1.0.0</p>
