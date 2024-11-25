@@ -1,11 +1,11 @@
 import { ActivityType, ChannelType, Client, DMChannel, EmbedBuilder, Events, GuildBan, GuildMember, IntentsBitField, Interaction, Message, MessageReaction, NewsChannel, OmitPartialGroupDMChannel, PartialDMChannel, PartialGuildMember, PartialMessageReaction, Partials, PartialUser, PermissionsBitField, PresenceStatusData, PrivateThreadChannel, PublicThreadChannel, StageChannel, TextChannel, User, VoiceChannel } from "discord.js";
 import { BCFDCommand, BCFDSlashCommand, BotStatus } from "../types/types";
-import { getBotStateContext, loadBotState, saveBotState } from "../virtual";
+import { getBotStateContext, loadBotState, saveBotState } from "../utils/virtual";
 import vm from 'node:vm'
 import { session } from "electron";
 import { getBotStatus } from "./statusService";
 import { stringInfoAdd, stringInfoAddReaction } from "./stringInfo";
-import { getStatsInstance, Stats } from "../stats";
+import { getStatsInstance, Stats } from "../utils/stats";
 
 let client: Client | null = null
 let connection: boolean = false

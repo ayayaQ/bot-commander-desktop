@@ -1,13 +1,13 @@
 import { BrowserWindow, ipcMain, session } from 'electron'
 import { OAuth2Scopes, PermissionsBitField, WebhookClient } from 'discord.js'
-import { getBotStateContext, saveBotState } from '../virtual'
+import { getBotStateContext, saveBotState } from '../utils/virtual'
 import vm from 'node:vm'
 import { applyBotStatus, Connect, Disconnect, getClient, getCommands, setCommands } from '../services/botService'
 import { AppSettings, BCFDCommand, BCFDSlashCommand, BotStatus } from '../types/types'
 import { saveBotStatus, saveCommands, saveSettings } from '../services/fileService'
 import { getSettings, setSettings } from '../services/settingsService'
 import { getBotStatus, setBotStatus } from '../services/statusService'
-import { getStatsInstance } from '../stats'
+import { getStatsInstance } from '../utils/stats'
 
 export function addIPCHandlers() {
   

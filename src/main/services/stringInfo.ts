@@ -1,7 +1,7 @@
 import { Client, Guild, GuildMember, Message, MessageReaction, OAuth2Scopes, OmitPartialGroupDMChannel, PartialMessageReaction, PermissionsBitField, TextChannel, User } from "discord.js"
 import { BCFDCommand } from "../types/types"
 import { getCommands, getContext } from "./botService"
-import { stringInfoAddEval } from "../virtual"
+import { stringInfoAddEval } from "../utils/virtual"
 
 export function stringInfoAdd(
     message: string,
