@@ -11,7 +11,11 @@
   function exportCommand() {
     const jsonCommand = JSON.stringify(command, null, 2)
     navigator.clipboard.writeText(jsonCommand)
-      .then(() => alert('Command exported to clipboard!'))
+      .then(() => {
+        const toast = document.getElementById('toast') as HTMLDivElement
+        toast.classList.remove('hidden')
+        setTimeout(() => toast.classList.add('hidden'), 3000)
+      })
       .catch(err => console.error('Failed to copy command: ', err))
   }
 
@@ -20,6 +24,7 @@
   const TYPE_MEMBER_JOIN = 2
   const TYPE_MEMBER_LEAVE = 3
   const TYPE_MEMBER_BAN = 4
+  const TYPE_REACTION = 5
 
   function displayNameForCommand(command: BCFDCommand) {
     switch (command.type) {
@@ -40,6 +45,7 @@
       case TYPE_MEMBER_JOIN: return 'person_add'
       case TYPE_MEMBER_LEAVE: return 'exit_to_app'
       case TYPE_MEMBER_BAN: return 'person_remove'
+      case TYPE_REACTION: return 'thumb_up'
       default: return 'message'
     }
   }
@@ -75,3 +81,9 @@
     </div>
   </div>
 </li>
+
+<div id="toast" class="toast toast-bottom toast-end hidden z-50 mb-14">
+  <div class="alert alert-success select-none">
+    <span>Command exported to clipboard!</span>
+  </div>
+</div>
