@@ -4,6 +4,7 @@
   import Status from './Status.svelte'
   import { botStatusStore } from '../stores/status'
   import type { BotStatus } from '../types/types'
+  import { settingsStore } from '../stores/settings'
 
   $: username = $connectionStore.username
   $: avatar = $connectionStore.avatar
@@ -36,7 +37,6 @@
 
   onMount(async () => {
     token = await connectionStore.ipc.getToken()
-    console.log(token)
   })
 </script>
 
@@ -59,17 +59,26 @@
 
       
       {#if !$connectionStore.connected}
-        <input
-          type="password"
+        {#if $settingsStore.showToken}
+          <input
+            type="text"
+            placeholder="Token"
+            class="input input-bordered w-full max-w-xs"
+            bind:value={token}
+          />
+        {:else}
+          <input
+            type="password"
           placeholder="Token"
-          class="input input-bordered w-full max-w-xs"
-          bind:value={token}
-        />
+            class="input input-bordered w-full max-w-xs"
+            bind:value={token}
+          />
+        {/if}
       {:else}
-      <h2 class="card-title">{username}</h2>
+        <h2 class="card-title">{username}</h2>
       <div class="text-sm"><span>{$botStatusStore.activity}{getActivityPreposition($botStatusStore)}</span><span class='font-medium'>&nbsp;{$botStatusStore.activityDetails}</span></div>
         <input
-          type="password"
+          type={$settingsStore.showToken ? "text" : "password"}
           placeholder="Token"
           disabled
           class="input input-bordered w-full max-w-xs"
