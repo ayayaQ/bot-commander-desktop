@@ -10,6 +10,7 @@
   const TYPE_MEMBER_JOIN = 2
   const TYPE_MEMBER_LEAVE = 3
   const TYPE_MEMBER_BAN = 4
+  const TYPE_REACTION = 5
 
   const dispatch = createEventDispatcher()
 
@@ -107,10 +108,11 @@
           <option value={2}>Member Join</option>
           <option value={3}>Member Leave</option>
           <option value={4}>Member Ban</option>
+          <option value={5}>Reaction</option>
         </select>
       </div>
 
-      {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN}
+      {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN && editedCommand.type !== TYPE_REACTION}
         <div class="form-control">
           <label class="label" for="command">
             <span class="label-text">Command</span>
@@ -140,9 +142,48 @@
         />
       </div>
 
+      {#if editedCommand.type === TYPE_REACTION}
+        <div class="form-control">
+          <label class="label" for="reaction">
+            <span class="label-text">Reaction (Emoji ID or name)</span>
+          </label>
+          <input
+            type="text"
+            id="reaction"
+            bind:value={editedCommand.command}
+            class="input input-bordered"
+            placeholder="👍 or emoji ID"
+            required
+          />
+        </div>
+
+        <div class="form-control">
+          <label class="label" for="isSpecificMessage">
+            <span class="label-text">Specific Message Only</span>
+          </label>
+          <input type="checkbox" bind:checked={editedCommand.isSpecificMessage} class="checkbox" />
+        </div>
+
+        {#if editedCommand.isSpecificMessage}
+          <div class="form-control">
+            <label class="label" for="specificMessage">
+              <span class="label-text">Message ID</span>
+            </label>
+            <input
+              type="text"
+              id="specificMessage"
+              bind:value={editedCommand.specificMessage}
+              class="input input-bordered"
+              placeholder="Message ID to watch for reactions"
+              required
+            />
+          </div>
+        {/if}
+      {/if}
+
       <h3 class="text-xl font-bold mb-2">Action</h3>
 
-      {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN}
+      {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN && editedCommand.type === TYPE_REACTION}
         <div class="form-control">
           <label class="label" for="phrase">
             <span class="label-text">Phrase (can appear anywhere in the message)</span>
@@ -427,7 +468,7 @@
         </div>
       {/if}
 
-      {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN}
+      {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN && editedCommand.type !== TYPE_REACTION}
         <div class="form-control">
           <label class="label" for="isReact">
             <span class="label-text">React To Message</span>
@@ -457,7 +498,7 @@
         <input type="checkbox" bind:checked={editedCommand.ignoreErrorMessage} class="checkbox" />
       </div>
 
-      {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN}
+      {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN && editedCommand.type !== TYPE_REACTION}
         <div class="form-control">
           <label class="label" for="deleteIf">
             <span class="label-text">Delete If Contains</span>
@@ -516,9 +557,20 @@
         </div>
       {/if}
 
+      {#if editedCommand.type === TYPE_REACTION}
+      <div class="form-control">
+        <label class="label" for="isNSFW">
+          <span class="label-text">Is NSFW</span>
+        </label>
+          <input type="checkbox" bind:checked={editedCommand.isNSFW} class="checkbox" />
+        </div>
+
+
+      {/if}
+
       <h3 class="text-xl font-bold mb-2">Moderation</h3>
 
-      {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN}
+      {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN && editedCommand.type !== TYPE_REACTION}
         <div class="form-control">
           <label class="label" for="isKick">
             <span class="label-text">Kick</span>
