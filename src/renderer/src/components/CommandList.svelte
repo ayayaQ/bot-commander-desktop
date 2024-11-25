@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import type { BCFDCommand } from '../../../main/types'
+  import type { BCFDCommand } from '../types/types';
   import CommandEditor from './CommandEditor.svelte'
   import CommandListItem from './CommandListItem.svelte'
   import { fade } from 'svelte/transition'
