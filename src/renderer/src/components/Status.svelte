@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
-  import { botStatusStore, loadBotStatus, saveBotStatus } from '../stores/status'
+  import { onDestroy, onMount } from 'svelte'
+  import { botStatusStore, saveBotStatus } from '../stores/status'
 
   let status = $botStatusStore.status
   let activity = $botStatusStore.activity
@@ -30,12 +30,19 @@
     saveBotStatus({ status, activity, activityDetails, streamUrl })
   }
 
+  let unsubscribe: () => void;
+
   onMount(async () => {
-    
-    status = $botStatusStore.status
-    activity = $botStatusStore.activity
-    activityDetails = $botStatusStore.activityDetails
-    streamUrl = $botStatusStore.streamUrl
+    unsubscribe = botStatusStore.subscribe((storeStatus) => {
+      status = storeStatus.status
+      activity = storeStatus.activity
+      activityDetails = storeStatus.activityDetails
+      streamUrl = storeStatus.streamUrl
+    })
+  })
+
+  onDestroy(() => {
+    unsubscribe()
   })
 </script>
 
