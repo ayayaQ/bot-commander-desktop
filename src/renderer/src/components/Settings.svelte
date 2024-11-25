@@ -24,6 +24,7 @@
 <div class="p-4">
   <h2 class="text-2xl font-bold mb-4">Settings</h2>
   <div class="form-control">
+    <!-- svelte-ignore a11y-label-has-associated-control -->
     <label class="label">
       <span class="label-text">Theme</span>
     </label>

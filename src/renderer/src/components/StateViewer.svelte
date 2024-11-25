@@ -102,6 +102,7 @@
               <td class="font-mono">{key}</td>
               <td class="font-mono">
                 {#if editingKey === key}
+                  <!-- svelte-ignore a11y-autofocus -->
                   <input
                     bind:value={editValue}
                     on:blur={saveEdit}
@@ -110,7 +111,7 @@
                     autofocus
                   />
                 {:else}
-                  <span on:dblclick={() => startEditing(key, value)}>
+                  <span role="button" tabindex="0" on:dblclick={() => startEditing(key, value)}>
                     {JSON.stringify(value)}
                   </span>
                 {/if}

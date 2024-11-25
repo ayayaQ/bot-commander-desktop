@@ -1,5 +1,14 @@
 import fs from 'fs/promises'
 
+let instance: Stats | null = null
+
+export function getStatsInstance(): Stats {
+  if (!instance) {
+    instance = new Stats()
+  }
+  return instance
+}
+
 export class Stats {
   private userCount: number = 0
   private messagesSent: number = 0
