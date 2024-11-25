@@ -77,6 +77,12 @@
   onDestroy(() => {
     clearInterval(interval)
   })
+
+  function autoResize(e: Event) {
+    const textarea = e.target as HTMLTextAreaElement
+    textarea.style.height = 'auto'
+    textarea.style.height = textarea.scrollHeight + 'px'
+  }
 </script>
 
 <div class="p-4">
@@ -122,8 +128,9 @@
       <textarea
         bind:value={codeToRun}
         placeholder="Enter JavaScript code here..."
-        class="textarea textarea-bordered w-full h-40"
+        class="textarea textarea-bordered w-full min-h-[2.5rem] resize-none overflow-hidden"
         spellcheck="false"
+        on:input={autoResize}
       ></textarea>
     </div>
     <div class='flex justify-start gap-2'>
