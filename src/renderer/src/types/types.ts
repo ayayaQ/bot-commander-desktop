@@ -52,6 +52,7 @@ export type TYPE_MEMBER_ADD = 5;
 
 export type AppSettings = {
     theme: string;
+    showToken: boolean;
 }
 
 export type BotStatus = {

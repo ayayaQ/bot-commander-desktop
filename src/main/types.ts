@@ -58,6 +58,7 @@ export type BCFDSlashCommand = {
 
 export type AppSettings = {
     theme: string;
+    showToken: boolean;
 }
 
 export type BotStatus = {
