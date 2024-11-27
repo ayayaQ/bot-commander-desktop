@@ -1,14 +1,23 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { saveSettings, settingsStore } from '../stores/settings'
+  import { currentLanguage, t } from '../stores/localisation'
 
   let selectedTheme: string
   let showToken: boolean
-
+  let selectedLanguage: string
   function changeTheme(event) {
     let theme = event.target.value
     document.documentElement.setAttribute('data-theme', theme)
     saveSettings({ ...$settingsStore, theme: theme })
+  }
+
+  function changeLanguage(event) {
+    let language = event.target.value
+    saveSettings({ ...$settingsStore, language: language })
+
+    // update localisation
+    currentLanguage.set(language)
   }
 
   function toggleShowToken() {
@@ -18,15 +27,16 @@
   onMount(() => {
     selectedTheme = $settingsStore.theme
     showToken = $settingsStore.showToken
+    selectedLanguage = $settingsStore.language
   })
 </script>
 
 <div class="p-4">
-  <h2 class="text-2xl font-bold mb-4">Settings</h2>
+  <h2 class="text-2xl font-bold mb-4">{$t('settings')}</h2>
   <div class="form-control">
     <!-- svelte-ignore a11y-label-has-associated-control -->
     <label class="label">
-      <span class="label-text">Theme</span>
+      <span class="label-text">{$t('theme')}</span>
     </label>
     <select class="select select-bordered" value={selectedTheme} on:change={changeTheme}>
       <option value="light">Light</option>
@@ -63,7 +73,7 @@
 
   <div class="form-control">
     <label class="label cursor-pointer">
-      <span class="label-text">Show Token</span>
+      <span class="label-text">{$t('show-token')}</span>
       <input 
         type="checkbox" 
         class="toggle" 
@@ -73,8 +83,18 @@
     </label>
   </div>
 
+  <div class="form-control">
+    <label class="label">
+      <span class="label-text">{$t('language')}</span>
+    </label>
+    <select class="select select-bordered" value={selectedLanguage} on:change={changeLanguage}>
+      <option value="en">English</option>
+      <option value="es">Español</option>
+    </select>
+  </div>
+
   <div class="divider"></div>
-  <h2 class="text-2xl font-bold mb-4">About</h2>
+  <h2 class="text-2xl font-bold mb-4">{$t('about')}</h2>
   <p>Version: 1.0.0</p>
   <p>Author: <a href="https://github.com/ayayaQ" class="link link-primary">ayayaQ</a></p>
   <p>Discord: <a href="https://discord.com/invite/mZp54sZ" class="link link-primary">Bot Commander for Discord Official Server</a></p>
