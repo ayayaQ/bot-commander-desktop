@@ -1,10 +1,11 @@
 import { app, shell, BrowserWindow, Tray, Menu } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import icon from '../../resources/icon.png?asset'
+import iconPng from '../../resources/icon.png?asset'
+import iconIco from '../../resources/icon.ico?asset'
 import { getStatsInstance, Stats } from './utils/stats'
 import { initializeBotState, saveBotState } from './utils/virtual'
-import { addIPCHandlers } from './handlers/ipcHandlers'
+import { addIPCHandlers, addWindowIPCHandlers } from './handlers/ipcHandlers'
 import { loadBotStatus, loadCommands, loadSettings } from './services/fileService'
 
 // Extend the Electron.App interface to include our custom property
@@ -34,6 +35,9 @@ async function saveStats() {
 }
 
 function createWindow(): void {
+
+  const windowIcon = process.platform === 'win32' ? iconIco : process.platform === 'darwin' ? iconPng : undefined;
+
   // Create the browser window.
   mainWindow = new BrowserWindow({
     width: 1230,
@@ -44,7 +48,7 @@ function createWindow(): void {
     autoHideMenuBar: true,
     frame: false, // Remove the default frame
     titleBarStyle: 'hidden', // Hide the title bar
-    ...(process.platform === 'linux' ? { icon } : {}),
+    ...(windowIcon ? { icon: windowIcon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -52,6 +56,8 @@ function createWindow(): void {
       nodeIntegration: true // Required for ipcRenderer in renderer process
     }
   })
+
+  addWindowIPCHandlers(mainWindow)
 
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()
@@ -81,7 +87,7 @@ function createWindow(): void {
 }
 
 function createTray() {
-  tray = new Tray(icon)
+  tray = new Tray(iconPng)
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Open', click: () => mainWindow?.show() },
     { label: 'Quit', click: () => {

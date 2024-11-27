@@ -9,6 +9,41 @@ import { getSettings, setSettings } from '../services/settingsService'
 import { getBotStatus, setBotStatus } from '../services/statusService'
 import { getStatsInstance } from '../utils/stats'
 
+export function addWindowIPCHandlers(mainWindow: BrowserWindow) {
+  ipcMain.on('minimize-window', () => {
+    mainWindow?.minimize()
+  })
+
+  ipcMain.on('maximize-window', () => {
+    if (mainWindow?.isMaximized()) {
+      mainWindow.unmaximize()
+    } else {
+      mainWindow?.maximize()
+    }
+  })
+
+  ipcMain.on('close-window', () => {
+    mainWindow?.close()
+  })
+
+  ipcMain.handle('is-window-maximized', () => {
+    return mainWindow?.isMaximized() ?? false
+  })
+
+  // Window state tracking
+  mainWindow.on('maximize', () => {
+    mainWindow.webContents.send('window-state-changed', true)
+  })
+  
+  mainWindow.on('unmaximize', () => {
+    mainWindow.webContents.send('window-state-changed', false)
+  })
+  
+  mainWindow.on('restore', () => {
+    mainWindow.webContents.send('window-state-changed', mainWindow.isMaximized())
+  })
+}
+
 export function addIPCHandlers() {
   
     ipcMain.on('connect', (event, token) => {
@@ -123,22 +158,5 @@ export function addIPCHandlers() {
   
     ipcMain.handle('get-stats', () => {
       return getStatsInstance().getStats()
-    })
-  
-    ipcMain.on('minimize-window', () => {
-      BrowserWindow.getFocusedWindow()?.minimize()
-    })
-  
-    ipcMain.on('maximize-window', () => {
-      const win = BrowserWindow.getFocusedWindow()
-      if (win?.isMaximized()) {
-        win.unmaximize()
-      } else {
-        win?.maximize()
-      }
-    })
-  
-    ipcMain.on('close-window', () => {
-      BrowserWindow.getFocusedWindow()?.close()
     })
   }
