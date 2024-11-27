@@ -84,18 +84,27 @@
   </div>
 
   <div class="form-control">
+    <!-- svelte-ignore a11y-label-has-associated-control -->
     <label class="label">
       <span class="label-text">{$t('language')}</span>
+      <!-- tooltip that notes that the language may be machine translated -->
+      <span class="tooltip tooltip-primary tooltip-left" data-tip="{$t('language-tooltip')}">
+        <span class="material-symbols-outlined">info</span>
+      </span>
     </label>
     <select class="select select-bordered" value={selectedLanguage} on:change={changeLanguage}>
       <option value="en">English</option>
       <option value="es">Español</option>
+      <option value="ja">日本語</option>
+      <option value="zh">简体中文</option>
+      <option value="ko">한국어</option>
+      <option value="ru">Русский</option>
     </select>
   </div>
 
   <div class="divider"></div>
   <h2 class="text-2xl font-bold mb-4">{$t('about')}</h2>
-  <p>Version: 1.0.0</p>
+  <p>Version: {$t('version-value')}</p>
   <p>Author: <a href="https://github.com/ayayaQ" class="link link-primary">ayayaQ</a></p>
   <p>Discord: <a href="https://discord.com/invite/mZp54sZ" class="link link-primary">Bot Commander for Discord Official Server</a></p>
 </div>

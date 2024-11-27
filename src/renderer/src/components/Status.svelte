@@ -8,8 +8,21 @@
   let activityDetails = $botStatusStore.activityDetails
   let streamUrl = $botStatusStore.streamUrl
 
-  const statusOptions = ['Online', 'Idle', 'Do Not Disturb', 'Invisible']
-  const activityOptions = ['Playing', 'Streaming', 'Listening', 'Watching', 'None', 'Competing']
+  const statusOptions = [
+    { value: 'Online', label: 'status-online' },
+    { value: 'Idle', label: 'status-idle' },
+    { value: 'Do Not Disturb', label: 'status-dnd' },
+    { value: 'Invisible', label: 'status-invisible' }
+  ]
+
+  const activityOptions = [
+    { value: 'Playing', label: 'activity-playing' },
+    { value: 'Streaming', label: 'activity-streaming' },
+    { value: 'Listening', label: 'activity-listening' },
+    { value: 'Watching', label: 'activity-watching' },
+    { value: 'None', label: 'activity-none' },
+    { value: 'Competing', label: 'activity-competing' }
+  ]
 
   function handleActivityChange() {
     if (activity === 'None') {
@@ -53,7 +66,7 @@
   </label>
   <select id="status" class="select select-bordered" bind:value={status}>
     {#each statusOptions as option}
-      <option value={option}>{option}</option>
+      <option value={option.value}>{$t(option.label)}</option>
     {/each}
   </select>
 </div>
@@ -68,7 +81,7 @@
     on:change={handleActivityChange}
   >
     {#each activityOptions as option}
-      <option value={option}>{option}</option>
+      <option value={option.value}>{$t(option.label)}</option>
     {/each}
   </select>
 </div>
