@@ -13,6 +13,7 @@ asarUnpack:
   - resources/**
 win:
   executableName: "Bot Commander for Discord"
+  icon: resources/icon.ico
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
@@ -33,8 +34,9 @@ linux:
     - AppImage
     - snap
     - deb
-  maintainer: electronjs.org
+  maintainer: ayayaQ
   category: Utility
+  icon: resources/icon.png
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
