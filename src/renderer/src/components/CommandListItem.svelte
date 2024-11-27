@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../stores/localisation'
   import type { BCFDCommand } from '../types/types'
   import Dialog from './Dialog.svelte'
 
@@ -67,13 +68,13 @@
         <button class="btn btn-square btn-ghost" on:click={() => dialog.showModal()}><span class="material-symbols-outlined">delete</span></button>
 
         <Dialog bind:dialog on:close={() => console.log('closed')}>
-          <p>Are you sure you want to delete the command "{command.command}"?</p>
+          <p>{$t('are-you-sure-you-want-to-delete-the-command')} {$t('open-quote')}{command.command}{$t('close-quote')}</p>
           <div class="modal-action">
             <form method="dialog">
               <button class="btn btn-sm btn-error" on:click={() => deleteCommand(command)}
-                >Delete</button
+                >{$t('delete')}</button
               >
-              <button class="btn btn-sm btn-ghost">Cancel</button>
+              <button class="btn btn-sm btn-ghost">{$t('cancel')}</button>
             </form>
           </div>
         </Dialog>
@@ -84,6 +85,6 @@
 
 <div id="toast" class="toast toast-bottom toast-end hidden z-50 mb-14">
   <div class="alert alert-success select-none">
-    <span>Command exported to clipboard!</span>
+    <span>{$t('command-exported-to-clipboard')}</span>
   </div>
 </div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../stores/localisation'
   import type { BCFDCommand } from '../types/types'
   import { createEventDispatcher } from 'svelte'
 
@@ -96,26 +97,26 @@
 
 <div class="p-4">
   <div class="p-4 bg-base-200 rounded-lg">
-    <h2 class="text-2xl font-bold mb-4">{mode === 'edit' ? 'Edit' : 'Add'} Command</h2>
+    <h2 class="text-2xl font-bold mb-4">{$t(mode === 'edit' ? 'edit-command' : 'add-command')}</h2>
     <form on:submit|preventDefault={handleSubmit} class="space-y-4">
       <div class="form-control">
         <label class="label" for="type">
-          <span class="label-text">Choose Command Type</span>
+          <span class="label-text">{$t('choose-command-type')}</span>
         </label>
         <select id="type" bind:value={editedCommand.type} class="select select-bordered" required>
-          <option value={0}>Message Received</option>
-          <option value={1}>Private Message Received</option>
-          <option value={2}>Member Join</option>
-          <option value={3}>Member Leave</option>
-          <option value={4}>Member Ban</option>
-          <option value={5}>Reaction</option>
+          <option value={0}>{$t('message-received')}</option>
+          <option value={1}>{$t('private-message-received')}</option>
+          <option value={2}>{$t('member-join')}</option>
+          <option value={3}>{$t('member-leave')}</option>
+          <option value={4}>{$t('member-ban')}</option>
+          <option value={5}>{$t('reaction')}</option>
         </select>
       </div>
 
       {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN && editedCommand.type !== TYPE_REACTION}
         <div class="form-control">
           <label class="label" for="command">
-            <span class="label-text">Command</span>
+            <span class="label-text">{$t('command')}</span>
           </label>
           <input
             type="text"
@@ -130,7 +131,7 @@
 
       <div class="form-control">
         <label class="label" for="commandDescription">
-          <span class="label-text">Description</span>
+          <span class="label-text">{$t('description')}</span>
         </label>
         <input
           type="text"
@@ -145,21 +146,21 @@
       {#if editedCommand.type === TYPE_REACTION}
         <div class="form-control">
           <label class="label" for="reaction">
-            <span class="label-text">Reaction (Emoji ID or name)</span>
+            <span class="label-text">{$t('reaction')}</span>
           </label>
           <input
             type="text"
             id="reaction"
             bind:value={editedCommand.command}
             class="input input-bordered"
-            placeholder="👍 or emoji ID"
+            placeholder={$t('reaction-placeholder')}
             required
           />
         </div>
 
         <div class="form-control">
           <label class="label" for="isSpecificMessage">
-            <span class="label-text">Specific Message Only</span>
+            <span class="label-text">{$t('specific-message-only')}</span>
           </label>
           <input type="checkbox" bind:checked={editedCommand.isSpecificMessage} class="checkbox" />
         </div>
@@ -167,7 +168,7 @@
         {#if editedCommand.isSpecificMessage}
           <div class="form-control">
             <label class="label" for="specificMessage">
-              <span class="label-text">Message ID</span>
+              <span class="label-text">{$t('message-id')}</span>
             </label>
             <input
               type="text"
@@ -181,19 +182,19 @@
         {/if}
       {/if}
 
-      <h3 class="text-xl font-bold mb-2">Action</h3>
+      <h3 class="text-xl font-bold mb-2">{$t('action')}</h3>
 
       {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN && editedCommand.type === TYPE_REACTION}
         <div class="form-control">
           <label class="label" for="phrase">
-            <span class="label-text">Phrase (can appear anywhere in the message)</span>
+            <span class="label-text">{$t('phrase')}</span>
           </label>
           <input type="checkbox" bind:checked={editedCommand.phrase} class="checkbox" />
         </div>
 
         <div class="form-control">
           <label class="label" for="requiresRole">
-            <span class="label-text">Requires Role</span>
+            <span class="label-text">{$t('requires-role')}</span>
           </label>
           <input type="checkbox" bind:checked={editedCommand.isRequiredRole} class="checkbox" />
         </div>
@@ -201,14 +202,14 @@
         {#if editedCommand.isRequiredRole}
           <div class="form-control">
             <label class="label" for="requiredRole">
-              <span class="label-text">Required Role</span>
+              <span class="label-text">{$t('required-role')}</span>
             </label>
             <input
               type="text"
               id="requiredRole"
               bind:value={editedCommand.requiredRole}
               class="input input-bordered"
-              placeholder="Role ID"
+              placeholder="{$t('role-id')}"
               required
             />
           </div>
@@ -216,7 +217,7 @@
 
         <div class="form-control">
           <label class="label" for="isAdmin ">
-            <span class="label-text">Requires Admin</span>
+            <span class="label-text">{$t('requires-admin')}</span>
           </label>
           <input type="checkbox" bind:checked={editedCommand.isAdmin} class="checkbox" />
         </div>
@@ -224,7 +225,7 @@
 
       <div class="form-control">
         <label class="label" for="sendMessage">
-          <span class="label-text">Send Message</span>
+          <span class="label-text">{$t('send-message')}</span>
         </label>
         <input
           type="checkbox"
@@ -237,7 +238,7 @@
       {#if editedCommand.actionArr[0]}
         <div class="form-control">
           <label class="label" for="channelMessage">
-            <span class="label-text">Channel Message</span>
+            <span class="label-text">{$t('channel-message')}</span>
           </label>
           <textarea
             id="channelMessage"
@@ -250,7 +251,7 @@
 
       <div class="form-control">
         <label class="label" for="sendChannelEmbed">
-          <span class="label-text">Send Channel Embed</span>
+          <span class="label-text">{$t('send-channel-embed')}</span>
         </label>
         <input
           type="checkbox"
@@ -263,7 +264,7 @@
       {#if editedCommand.sendChannelEmbed}
         <div class="form-control">
           <label class="label" for="channelEmbedTitle">
-            <span class="label-text">Channel Embed Title</span>
+            <span class="label-text">{$t('channel-embed-title')}</span>
           </label>
 
           <textarea
@@ -276,7 +277,7 @@
 
         <div class="form-control">
           <label class="label" for="channelEmbedDescription">
-            <span class="label-text">Channel Embed Description</span>
+            <span class="label-text">{$t('channel-embed-description')}</span>
           </label>
           <textarea
             id="channelEmbedDescription"
@@ -288,7 +289,7 @@
 
         <div class="form-control">
           <label class="label" for="channelEmbedFooter">
-            <span class="label-text">Channel Embed Footer</span>
+            <span class="label-text">{$t('channel-embed-footer')}</span>
           </label>
           <textarea
             id="channelEmbedFooter"
@@ -300,7 +301,7 @@
 
         <div class="form-control">
           <label class="label" for="channelEmbedImage">
-            <span class="label-text">Channel Embed Image</span>
+            <span class="label-text">{$t('channel-embed-image')}</span>
           </label>
           <input
             type="text"
@@ -312,7 +313,7 @@
 
         <div class="form-control">
           <label class="label" for="channelEmbedThumbnail">
-            <span class="label-text">Channel Embed Thumbnail</span>
+            <span class="label-text">{$t('channel-embed-thumbnail')}</span>
           </label>
           <input
             type="text"
@@ -324,7 +325,7 @@
 
         <div class="form-control">
           <label class="label" for="channelEmbedColor">
-            <span class="label-text">Channel Embed Color</span>
+            <span class="label-text">{$t('channel-embed-color')}</span>
           </label>
           <input
             type="text"
@@ -337,7 +338,7 @@
 
       <div class="form-control">
         <label class="label" for="isSpecificChannel">
-          <span class="label-text">Is Specific Channel</span>
+          <span class="label-text">{$t('is-specific-channel')}</span>
         </label>
         <input type="checkbox" bind:checked={editedCommand.isSpecificChannel} class="checkbox" />
       </div>
@@ -345,7 +346,7 @@
       {#if editedCommand.isSpecificChannel}
         <div class="form-control">
           <label class="label" for="specificChannel">
-            <span class="label-text">Specific Channel</span>
+            <span class="label-text">{$t('specific-channel')}</span>
           </label>
           <input
             type="text"
@@ -358,7 +359,7 @@
 
       <div class="form-control">
         <label class="label" for="sendMessage">
-          <span class="label-text">Send Private Message</span>
+          <span class="label-text">{$t('send-private-message')}</span>
         </label>
         <input
           type="checkbox"
@@ -371,7 +372,7 @@
       {#if editedCommand.actionArr[1]}
         <div class="form-control">
           <label class="label" for="privateMessage">
-            <span class="label-text">Private Message</span>
+            <span class="label-text">{$t('private-message')}</span>
           </label>
           <textarea
             id="privateMessage"
@@ -384,7 +385,7 @@
 
       <div class="form-control">
         <label class="label" for="sendPrivateEmbed">
-          <span class="label-text">Send Private Embed</span>
+          <span class="label-text">{$t('send-private-embed')}</span>
         </label>
         <input
           type="checkbox"
@@ -397,7 +398,7 @@
       {#if editedCommand.sendPrivateEmbed}
         <div class="form-control">
           <label class="label" for="privateEmbedTitle">
-            <span class="label-text">Private Embed Title</span>
+            <span class="label-text">{$t('private-embed-title')}</span>
           </label>
           <textarea
             id="privateEmbedTitle"
@@ -409,7 +410,7 @@
 
         <div class="form-control">
           <label class="label" for="privateEmbedDescription">
-            <span class="label-text">Private Embed Description</span>
+            <span class="label-text">{$t('private-embed-description')}</span>
           </label>
           <textarea
             id="privateEmbedDescription"
@@ -421,7 +422,7 @@
 
         <div class="form-control">
           <label class="label" for="privateEmbedFooter">
-            <span class="label-text">Private Embed Footer</span>
+            <span class="label-text">{$t('private-embed-footer')}</span>
           </label>
           <textarea
             id="privateEmbedFooter"
@@ -433,7 +434,7 @@
 
         <div class="form-control">
           <label class="label" for="privateEmbedImage">
-            <span class="label-text">Private Embed Image</span>
+            <span class="label-text">{$t('private-embed-image')}</span>
           </label>
           <input
             type="text"
@@ -445,7 +446,7 @@
 
         <div class="form-control">
           <label class="label" for="privateEmbedThumbnail">
-            <span class="label-text">Private Embed Thumbnail</span>
+            <span class="label-text">{$t('private-embed-thumbnail')}</span>
           </label>
           <input
             type="text"
@@ -457,7 +458,7 @@
 
         <div class="form-control">
           <label class="label" for="privateEmbedColor">
-            <span class="label-text">Private Embed Color</span>
+            <span class="label-text">{$t('private-embed-color')}</span>
           </label>
           <input
             type="text"
@@ -471,7 +472,7 @@
       {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN && editedCommand.type !== TYPE_REACTION}
         <div class="form-control">
           <label class="label" for="isReact">
-            <span class="label-text">React To Message</span>
+            <span class="label-text">{$t('react-to-message')}</span>
           </label>
           <input type="checkbox" bind:checked={editedCommand.isReact} class="checkbox" />
         </div>
@@ -479,7 +480,7 @@
         {#if editedCommand.isReact}
           <div class="form-control">
             <label class="label" for="reactToMessage  ">
-              <span class="label-text">React To Message</span>
+              <span class="label-text">{$t('react-to-message')}</span>
             </label>
             <input
               type="text"
@@ -493,7 +494,7 @@
 
       <div class="form-control">
         <label class="label" for="ignoreErrorMessage">
-          <span class="label-text">Ignore Error Message</span>
+          <span class="label-text">{$t('ignore-error-message')}</span>
         </label>
         <input type="checkbox" bind:checked={editedCommand.ignoreErrorMessage} class="checkbox" />
       </div>
@@ -501,7 +502,7 @@
       {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN && editedCommand.type !== TYPE_REACTION}
         <div class="form-control">
           <label class="label" for="deleteIf">
-            <span class="label-text">Delete If Contains</span>
+            <span class="label-text">{$t('delete-if-contains')}</span>
           </label>
           <input type="checkbox" bind:checked={editedCommand.deleteIf} class="checkbox" />
         </div>
@@ -509,7 +510,7 @@
         {#if editedCommand.deleteIf}
           <div class="form-control">
             <label class="label" for="deleteIfStrings">
-              <span class="label-text">Delete If Contains</span>
+              <span class="label-text">{$t('delete-if-contains')}</span>
             </label>
             <input
               type="text"
@@ -522,14 +523,14 @@
 
         <div class="form-control">
           <label class="label" for="deleteAfter">
-            <span class="label-text">Delete After</span>
+            <span class="label-text">{$t('delete-after')}</span>
           </label>
           <input type="checkbox" bind:checked={editedCommand.deleteAfter} class="checkbox" />
         </div>
 
         <div class="form-control">
           <label class="label" for="deleteX">
-            <span class="label-text">Delete X Times</span>
+            <span class="label-text">{$t('delete-x-times')}</span>
           </label>
           <input type="checkbox" bind:checked={editedCommand.deleteX} class="checkbox" />
         </div>
@@ -537,7 +538,7 @@
         {#if editedCommand.deleteX}
           <div class="form-control">
             <label class="label" for="deleteNum">
-              <span class="label-text">Delete X Times</span>
+              <span class="label-text">{$t('delete-x-times')}</span>
             </label>
             <input
               type="number"
@@ -551,7 +552,7 @@
 
         <div class="form-control">
           <label class="label" for="isNSFW">
-            <span class="label-text">Is NSFW</span>
+            <span class="label-text">{$t('is-nsfw')}</span>
           </label>
           <input type="checkbox" bind:checked={editedCommand.isNSFW} class="checkbox" />
         </div>
@@ -560,7 +561,7 @@
       {#if editedCommand.type === TYPE_REACTION}
       <div class="form-control">
         <label class="label" for="isNSFW">
-          <span class="label-text">Is NSFW</span>
+          <span class="label-text">{$t('is-nsfw')}</span>
         </label>
           <input type="checkbox" bind:checked={editedCommand.isNSFW} class="checkbox" />
         </div>
@@ -568,26 +569,26 @@
 
       {/if}
 
-      <h3 class="text-xl font-bold mb-2">Moderation</h3>
+      <h3 class="text-xl font-bold mb-2">{$t('moderation')}</h3>
 
       {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN && editedCommand.type !== TYPE_REACTION}
         <div class="form-control">
           <label class="label" for="isKick">
-            <span class="label-text">Kick</span>
+            <span class="label-text">{$t('kick')}</span>
           </label>
           <input type="checkbox" bind:checked={editedCommand.isKick} class="checkbox" />
         </div>
 
         <div class="form-control">
           <label class="label" for="isBan">
-            <span class="label-text">Ban</span>
+            <span class="label-text">{$t('ban')}</span>
           </label>
           <input type="checkbox" bind:checked={editedCommand.isBan} class="checkbox" />
         </div>
 
         <div class="form-control">
           <label class="label" for="isVoiceMute">
-            <span class="label-text">Voice Mute</span>
+            <span class="label-text">{$t('voice-mute')}</span>
           </label>
           <input type="checkbox" bind:checked={editedCommand.isVoiceMute} class="checkbox" />
         </div>
@@ -595,7 +596,7 @@
 
       <div class="form-control">
         <label class="label" for="isRoleAssigner">
-          <span class="label-text">Role Assign</span>
+          <span class="label-text">{$t('role-assigner')}</span>
         </label>
         <input type="checkbox" bind:checked={editedCommand.isRoleAssigner} class="checkbox" />
       </div>
@@ -603,7 +604,7 @@
       {#if editedCommand.isRoleAssigner}
         <div class="form-control">
           <label class="label" for="roleToAssign">
-            <span class="label-text">Role To Assign</span>
+            <span class="label-text">{$t('role-to-assign')}</span>
           </label>
           <input
             type="text"
@@ -615,7 +616,7 @@
       {/if}
 
       <button type="submit" class="btn btn-primary"
-        ><span class="material-symbols-outlined">add</span>{mode === 'edit' ? 'Update' : 'Add'} Command</button
+        ><span class="material-symbols-outlined">add</span>{$t(mode === 'edit' ? 'update-command' : 'add-command')}</button
       >
     </form>
   </div>

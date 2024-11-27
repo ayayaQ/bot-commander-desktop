@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../stores/localisation'
   import { sendWebhook } from '../stores/webhooks';
 
   let webhookUrl = ''
@@ -21,12 +22,12 @@
 
 <div class="p-4">
   <div class="p-4 bg-base-200 rounded-lg shadow-lg">
-    <h2 class="text-2xl font-bold mb-4">Send Discord Webhook</h2>
+    <h2 class="text-2xl font-bold mb-4">{$t('send-webhook')}</h2>
 
     <form on:submit|preventDefault={send} class="space-y-4">
       <div class="form-control">
         <label for="webhookUrl" class="label">
-          <span class="label-text">Webhook URL</span>
+          <span class="label-text">{$t('webhook-url')}</span>
         </label>
         <input
           type="text"
@@ -40,20 +41,20 @@
 
       <div class="form-control">
         <label for="name" class="label">
-          <span class="label-text">Name</span>
+          <span class="label-text">{$t('name')}</span>
         </label>
         <input
           type="text"
           id="name"
           bind:value={name}
           class="input input-bordered w-full"
-          placeholder="Webhook Name"
+          placeholder={$t('bot')}
         />
       </div>
 
       <div class="form-control">
         <label for="avatarUrl" class="label">
-          <span class="label-text">Avatar URL</span>
+          <span class="label-text">{$t('avatar')}</span>
         </label>
         <input
           type="url"
@@ -66,18 +67,18 @@
 
       <div class="form-control">
         <label for="message" class="label">
-          <span class="label-text">Message</span>
+          <span class="label-text">{$t('message')}</span>
         </label>
         <textarea
           id="message"
           bind:value={message}
           class="textarea textarea-bordered h-24 w-full"
-          placeholder="Enter your message here"
+          placeholder={$t('message-placeholder')}
           required
         ></textarea>
       </div>
 
-      <button type="submit" class="btn btn-primary w-full"><span class="material-symbols-outlined">send</span>Send</button>
+      <button type="submit" class="btn btn-primary w-full"><span class="material-symbols-outlined">send</span>{$t('send')}</button>
     </form>
   </div>
 </div>

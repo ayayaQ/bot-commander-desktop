@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { t } from '../stores/localisation'
 
   let stats = {
     userCount: 0,
@@ -48,7 +49,7 @@
 </script>
 
 <div class="p-4">
-  <h2 class="text-2xl font-bold mb-4">Stats</h2>
+  <h2 class="text-2xl font-bold mb-4">{$t('stats')}</h2>
 
   <div class="flex flex-row gap-4 flex-wrap">
     <div class="stats shadow">
@@ -56,7 +57,7 @@
         <div class="stat-figure text-primary">
           <span class="material-symbols-outlined" style="font-size: 48px;">people</span>
         </div>
-        <div class="stat-title">Users</div>
+        <div class="stat-title">{$t('users')}</div>
         <div class="stat-value">{stats.userCount}</div>
       </div>
     </div>
@@ -65,7 +66,7 @@
         <div class="stat-figure text-primary">
           <span class="material-symbols-outlined" style="font-size: 48px;">chat</span>
         </div>
-        <div class="stat-title">Messages Sent</div>
+        <div class="stat-title">{$t('messages-sent')}</div>
         <div class="stat-value">{stats.messagesSent}</div>
       </div>
     </div>
@@ -74,7 +75,7 @@
         <div class="stat-figure text-primary">
           <span class="material-symbols-outlined" style="font-size: 48px;">chat_bubble</span>
         </div>
-        <div class="stat-title">Messages Received</div>
+        <div class="stat-title">{$t('messages-received')}</div>
         <div class="stat-value">{stats.messagesReceived}</div>
       </div>
     </div>
@@ -83,7 +84,7 @@
         <div class="stat-figure text-primary">
           <span class="material-symbols-outlined" style="font-size: 48px;">person_add</span>
         </div>
-        <div class="stat-title">On Join</div>
+        <div class="stat-title">{$t('on-join')}</div>
         <div class="stat-value">{stats.joinEventsReceived}</div>
       </div>
     </div>
@@ -92,7 +93,7 @@
         <div class="stat-figure text-primary">
           <span class="material-symbols-outlined" style="font-size: 48px;">exit_to_app</span>
         </div>
-        <div class="stat-title">On Leave</div>
+        <div class="stat-title">{$t('on-leave')}</div>
         <div class="stat-value">{stats.leaveEventsReceived}</div>
       </div>
     </div>
@@ -101,7 +102,7 @@
         <div class="stat-figure text-primary">
           <span class="material-symbols-outlined" style="font-size: 48px;">block</span>
         </div>
-        <div class="stat-title">On Ban</div>
+        <div class="stat-title">{$t('on-ban')}</div>
         <div class="stat-value">{stats.banEventsReceived}</div>
       </div>
     </div>
@@ -110,7 +111,7 @@
         <div class="stat-figure text-primary">
           <span class="material-symbols-outlined" style="font-size: 48px;">chat_bubble_outline</span>
         </div>
-        <div class="stat-title">Private Messages Received</div>
+        <div class="stat-title">{$t('private-messages-received')}</div>
         <div class="stat-value">{stats.privateMessagesReceived}</div>
       </div>
     </div>
@@ -119,7 +120,7 @@
         <div class="stat-figure text-primary">
           <span class="material-symbols-outlined" style="font-size: 48px;">dns</span>
         </div>
-        <div class="stat-title">Servers</div>
+        <div class="stat-title">{$t('servers')}</div>
         <div class="stat-value">{stats.serverCount}</div>
       </div>
     </div>
@@ -128,7 +129,7 @@
         <div class="stat-figure text-primary">
           <span class="material-symbols-outlined" style="font-size: 48px;">auto_fix_high</span>
         </div>
-        <div class="stat-title">Commands</div>
+        <div class="stat-title">{$t('commands')}</div>
         <div class="stat-value">{stats.commandCount}</div>
       </div>
     </div>
@@ -137,7 +138,7 @@
         <div class="stat-figure text-primary">
           <span class="material-symbols-outlined" style="font-size: 48px;">timer</span>
         </div>
-        <div class="stat-title">Time Spent in App</div>
+        <div class="stat-title">{$t('time-spent-in-app')}</div>
         <div class="stat-value">{formatTime(displayTimeSpentInApp)}</div>
       </div>
     </div>
@@ -146,7 +147,7 @@
         <div class="stat-figure text-primary">
           <span class="material-symbols-outlined" style="font-size: 48px;">webhook</span>
         </div>
-        <div class="stat-title">Webhooks Sent</div>
+        <div class="stat-title">{$t('webhooks-sent')}</div>
         <div class="stat-value">{stats.webhooksSent}</div>
       </div>
     </div>

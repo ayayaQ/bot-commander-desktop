@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte'
   import { botStatusStore, saveBotStatus } from '../stores/status'
+  import { t } from '../stores/localisation'
 
   let status = $botStatusStore.status
   let activity = $botStatusStore.activity
@@ -48,7 +49,7 @@
 
 <div class="form-control w-full max-w-xs">
   <label for="status" class="label">
-    <span class="label-text">Status:</span>
+    <span class="label-text">{$t('status')}:</span>
   </label>
   <select id="status" class="select select-bordered" bind:value={status}>
     {#each statusOptions as option}
@@ -58,7 +59,7 @@
 </div>
 <div class="form-control w-full max-w-xs">
   <label for="activity" class="label">
-    <span class="label-text">Activity:</span>
+    <span class="label-text">{$t('activity')}:</span>
   </label>
   <select
     id="activity"
@@ -74,20 +75,20 @@
 {#if activity !== 'None'}
   <div class="form-control w-full max-w-xs">
     <label for="activityDetails" class="label">
-      <span class="label-text">{activity} Details:</span>
+      <span class="label-text">{$t('status-details')}:</span>
     </label>
     <input
       type="text"
       id="activityDetails"
       class="input input-bordered"
       bind:value={activityDetails}
-      placeholder="Enter activity details"
+      placeholder={$t('status-details-placeholder')}
     />
   </div>
   {#if activity === 'Streaming'}
     <div class="form-control w-full max-w-xs">
       <label for="streamUrl" class="label">
-        <span class="label-text">Twitch.tv URL:</span>
+        <span class="label-text">{$t('twitch-url')}:</span>
       </label>
       <input
         type="url"
@@ -100,5 +101,5 @@
   {/if}
 {/if}
 <div class="card-actions justify-end mt-4">
-  <button class="btn btn-primary" on:click={handleSubmit}>Update Status</button>
+  <button class="btn btn-primary" on:click={handleSubmit}>{$t('update-status')}</button>
 </div>
