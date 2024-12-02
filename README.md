@@ -1,6 +1,13 @@
-# bots-creator
+# bot-commander-desktop
 
-An Electron application with Svelte and [TypeScript](https://www.typescriptlang.org/)
+An Electron application with Svelte and [TypeScript](https://www.typescriptlang.org/). Allows the user to host a bot for Discord.
+
+### Download
+Want to try a ready-to-use build? See the [releases](https://github.com/ayayaQ/bot-commander-desktop/releases).
+
+### Visual Example
+![image](https://github.com/user-attachments/assets/18913217-d701-4300-83ef-610176e63421)
+
 
 ## Library References
 
