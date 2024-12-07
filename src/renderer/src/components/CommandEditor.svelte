@@ -183,8 +183,8 @@
       {/if}
 
       <h3 class="text-xl font-bold mb-2">{$t('action')}</h3>
-
-      {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN && editedCommand.type === TYPE_REACTION}
+      
+      {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN && editedCommand.type !== TYPE_REACTION}
         <div class="form-control">
           <label class="label" for="phrase">
             <span class="label-text">{$t('phrase')}</span>
