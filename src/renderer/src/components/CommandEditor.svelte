@@ -95,9 +95,23 @@
   }
 </script>
 
+<div class="p-4 sticky top-0 z-10 bg-base-300 items-center justify-between flex gap-2">
+  <div class=" font-bold text-4xl">{$t(mode === 'edit' ? 'edit-command' : 'add-command')}</div>
+  <div class="flex justify-end gap-2">
+    <button type="submit" class="btn btn-primary"
+      ><span class="material-symbols-outlined">save</span>{$t(
+        mode === 'edit' ? 'update-command' : 'add-command'
+      )}</button
+    >
+    <!-- cancel button-->
+    <button type="button" class="btn btn-secondary" on:click={() => dispatch('cancel')}
+      ><span class="material-symbols-outlined">close</span></button
+    >
+  </div>
+</div>
+
 <div class="p-4">
   <div class="p-4 bg-base-200 rounded-lg">
-    <h2 class="text-2xl font-bold mb-4">{$t(mode === 'edit' ? 'edit-command' : 'add-command')}</h2>
     <form on:submit|preventDefault={handleSubmit} class="space-y-4">
       <div class="form-control">
         <label class="label" for="type">
@@ -139,7 +153,6 @@
           bind:value={editedCommand.commandDescription}
           class="input input-bordered"
           placeholder="This is a command that does something"
-          required
         />
       </div>
 
@@ -183,7 +196,7 @@
       {/if}
 
       <h3 class="text-xl font-bold mb-2">{$t('action')}</h3>
-      
+
       {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN && editedCommand.type !== TYPE_REACTION}
         <div class="form-control">
           <label class="label" for="phrase">
@@ -209,7 +222,7 @@
               id="requiredRole"
               bind:value={editedCommand.requiredRole}
               class="input input-bordered"
-              placeholder="{$t('role-id')}"
+              placeholder={$t('role-id')}
               required
             />
           </div>
@@ -559,14 +572,12 @@
       {/if}
 
       {#if editedCommand.type === TYPE_REACTION}
-      <div class="form-control">
-        <label class="label" for="isNSFW">
-          <span class="label-text">{$t('is-nsfw')}</span>
-        </label>
+        <div class="form-control">
+          <label class="label" for="isNSFW">
+            <span class="label-text">{$t('is-nsfw')}</span>
+          </label>
           <input type="checkbox" bind:checked={editedCommand.isNSFW} class="checkbox" />
         </div>
-
-
       {/if}
 
       <h3 class="text-xl font-bold mb-2">{$t('moderation')}</h3>
@@ -614,10 +625,6 @@
           />
         </div>
       {/if}
-
-      <button type="submit" class="btn btn-primary"
-        ><span class="material-symbols-outlined">add</span>{$t(mode === 'edit' ? 'update-command' : 'add-command')}</button
-      >
     </form>
   </div>
 </div>
