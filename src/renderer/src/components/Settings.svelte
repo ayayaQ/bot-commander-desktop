@@ -7,6 +7,9 @@
   let selectedTheme: string
   let showToken: boolean
   let selectedLanguage: string
+  let openaiApiKey: string
+  let openaiModel: 'gpt-4o' | 'gpt-4o-mini'
+
   function changeTheme(event) {
     let theme = event.target.value
     document.documentElement.setAttribute('data-theme', theme)
@@ -25,10 +28,22 @@
     saveSettings({ ...$settingsStore, showToken: showToken })
   }
 
+  function updateOpenAIKey(event) {
+    openaiApiKey = event.target.value
+    saveSettings({ ...$settingsStore, openaiApiKey })
+  }
+
+  function updateOpenAIModel(event) {
+    openaiModel = event.target.value
+    saveSettings({ ...$settingsStore, openaiModel })
+  }
+
   onMount(() => {
     selectedTheme = $settingsStore.theme
     showToken = $settingsStore.showToken
     selectedLanguage = $settingsStore.language
+    openaiApiKey = $settingsStore.openaiApiKey
+    openaiModel = $settingsStore.openaiModel
   })
 </script>
 
@@ -37,6 +52,7 @@
 </HeaderBar>
 
 <div class="p-4">
+  <h2 class="text-2xl font-bold mb-4">General</h2>
   <div class="form-control">
     <!-- svelte-ignore a11y-label-has-associated-control -->
     <label class="label">
@@ -98,6 +114,32 @@
       <option value="zh">简体中文</option>
       <option value="ko">한국어</option>
       <option value="ru">Русский</option>
+    </select>
+  </div>
+
+  <div class="divider"></div>
+  <h2 class="text-2xl font-bold mb-4">OpenAI</h2>
+
+  <div class="form-control">
+    <label class="label">
+      <span class="label-text">OpenAI API Key</span>
+    </label>
+    <input
+      type={showToken ? 'text' : 'password'}
+      class="input input-bordered"
+      value={openaiApiKey}
+      on:input={updateOpenAIKey}
+      placeholder="Enter your OpenAI API key"
+    />
+  </div>
+
+  <div class="form-control">
+    <label class="label">
+      <span class="label-text">OpenAI Model</span>
+    </label>
+    <select class="select select-bordered" value={openaiModel} on:change={updateOpenAIModel}>
+      <option value="gpt-4o">GPT-4o</option>
+      <option value="gpt-4o-mini">GPT-4o Mini</option>
     </select>
   </div>
 

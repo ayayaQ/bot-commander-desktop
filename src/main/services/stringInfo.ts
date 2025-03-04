@@ -14,6 +14,7 @@ import { BCFDCommand } from '../types/types'
 import { getCommands, getContext } from './botService'
 import { stringInfoAddEval } from '../utils/virtual'
 import OpenAI from 'openai'
+import { getSettings } from './settingsService'
 
 export type StringInfoContext = {
   message: string
@@ -261,16 +262,26 @@ export async function stringInfoAddGeneral(message: string) {
 }
 
 async function fetchChatResponse(prompt: string): Promise<string> {
+  const settings = getSettings()
+
+  if (!settings.openaiApiKey) {
+    return 'Error: OpenAI API key not set in settings'
+  }
+
   const openai = new OpenAI({
-    apiKey: '<OPENAI_API_KEY>'
+    apiKey: settings.openaiApiKey
   })
 
   const completion = await openai.chat.completions.create({
     messages: [
-      { role: 'system', content: 'You are a helpful assistant.' },
+      {
+        role: 'system',
+        content:
+          'You are a helpful assistant. Who provides concise answers without filler. Never do the answer go beyond 1500 characters in length.'
+      },
       { role: 'user', content: prompt }
     ],
-    model: 'deepseek-chat'
+    model: settings.openaiModel
   })
 
   return completion.choices[0].message.content ?? 'Failed to fetch chat response'

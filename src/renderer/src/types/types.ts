@@ -121,6 +121,8 @@ export type AppSettings = {
   theme: string
   showToken: boolean
   language: string
+  openaiApiKey: string
+  openaiModel: 'gpt-4o' | 'gpt-4o-mini'
 }
 
 export type BotStatus = {
