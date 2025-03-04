@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from '../stores/localisation'
-  import { sendWebhook } from '../stores/webhooks';
+  import { sendWebhook } from '../stores/webhooks'
+  import HeaderBar from './HeaderBar.svelte'
 
   let webhookUrl = ''
   let name = ''
@@ -16,14 +17,16 @@
     }
 
     // use ipc renderer to send webhook to main process
-    sendWebhook(webhookUrl, name, avatarUrl, message);
+    sendWebhook(webhookUrl, name, avatarUrl, message)
   }
 </script>
 
+<HeaderBar>
+  <h2 class="text-2xl font-bold">{$t('send-webhook')}</h2>
+</HeaderBar>
+
 <div class="p-4">
   <div class="p-4 bg-base-200 rounded-lg shadow-lg">
-    <h2 class="text-2xl font-bold mb-4">{$t('send-webhook')}</h2>
-
     <form on:submit|preventDefault={send} class="space-y-4">
       <div class="form-control">
         <label for="webhookUrl" class="label">
@@ -78,7 +81,9 @@
         ></textarea>
       </div>
 
-      <button type="submit" class="btn btn-primary w-full"><span class="material-symbols-outlined">send</span>{$t('send')}</button>
+      <button type="submit" class="btn btn-primary w-full"
+        ><span class="material-symbols-outlined">send</span>{$t('send')}</button
+      >
     </form>
   </div>
 </div>

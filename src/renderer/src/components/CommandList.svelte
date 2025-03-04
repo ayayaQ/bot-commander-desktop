@@ -3,6 +3,7 @@
   import type { BCFDCommand } from '../types/types'
   import CommandEditor from './CommandEditor.svelte'
   import CommandListItem from './CommandListItem.svelte'
+  import HeaderBar from './HeaderBar.svelte'
   import { fade } from 'svelte/transition'
   import { t } from '../stores/localisation'
 
@@ -71,20 +72,22 @@
       on:cancel={() => (isEditing = false)}
     />
   {:else}
-    <div class="sticky top-0 z-20 bg-base-100 p-4 pb-1">
-      <div class="flex justify-between items-center mb-4">
-        <h2 class="text-2xl font-bold">{$t('commands')}</h2>
-        <button class="btn btn-primary" on:click={addCommand}
-          ><span class="material-symbols-outlined">add</span>{$t('add-command')}</button
-        >
+    <HeaderBar>
+      <div class=" basis-full">
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-2xl font-bold">{$t('commands')}</h2>
+          <button class="btn btn-primary" on:click={addCommand}
+            ><span class="material-symbols-outlined">add</span>{$t('add-command')}</button
+          >
+        </div>
+        <div class="">
+          <label class="input input-bordered flex items-center gap-2">
+            <input type="text" class="grow" placeholder="Search" bind:value={searchQuery} />
+            <span class="material-symbols-outlined">search</span>
+          </label>
+        </div>
       </div>
-      <div class="mb-4">
-        <label class="input input-bordered flex items-center gap-2">
-          <input type="text" class="grow" placeholder="Search" bind:value={searchQuery} />
-          <span class="material-symbols-outlined">search</span>
-        </label>
-      </div>
-    </div>
+    </HeaderBar>
     <div class="p-4">
       {#if filteredCommands.length === 0}
         <p class="text-gray-500">{$t('no-commands-found')}</p>

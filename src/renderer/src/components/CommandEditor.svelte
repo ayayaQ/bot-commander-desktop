@@ -1,7 +1,9 @@
 <script lang="ts">
   import { t } from '../stores/localisation'
-  import type { BCFDCommand } from '../types/types'
-  import { createEventDispatcher } from 'svelte'
+  import { validateBCFDCommand, type BCFDCommand } from '../types/types'
+  import { createEventDispatcher, onMount } from 'svelte'
+  import HeaderBar from './HeaderBar.svelte'
+  import Dialog from './Dialog.svelte'
 
   export let mode: 'edit' | 'add' = 'add'
   export let command: BCFDCommand | null = null
@@ -14,57 +16,142 @@
   const TYPE_REACTION = 5
 
   const dispatch = createEventDispatcher()
+  let dialog: HTMLDialogElement
+  let importText: string = ''
+  let showImportError = false
 
-  let editedCommand: BCFDCommand = command
-    ? { ...command }
-    : {
-        actionArr: [false, false],
-        channelMessage: '',
-        command: '',
-        commandDescription: '',
-        deleteAfter: false,
-        deleteIf: false,
-        deleteIfStrings: '',
-        deleteNum: 0,
-        deleteX: false,
-        ignoreErrorMessage: false,
-        isBan: false,
-        isKick: false,
-        isNSFW: false,
-        isReact: false,
-        isRequiredRole: false,
-        isRoleAssigner: false,
-        isSpecificChannel: false,
-        isSpecificMessage: false,
-        isVoiceMute: false,
-        isAdmin: false,
-        phrase: false,
-        privateMessage: '',
-        reaction: '',
-        roleToAssign: '',
-        sendChannelEmbed: false,
-        sendPrivateEmbed: false,
-        specificChannel: '',
-        specificMessage: '',
-        requiredRole: '',
-        type: 0,
-        channelEmbed: {
-          title: '',
-          description: '',
-          hexColor: '',
-          imageURL: '',
-          thumbnailURL: '',
-          footer: ''
-        },
-        privateEmbed: {
-          title: '',
-          description: '',
-          hexColor: '',
-          imageURL: '',
-          thumbnailURL: '',
-          footer: ''
-        }
-      }
+  let activeActions: Array<{ type: string; name: string }> = []
+
+  function getAvailableActions(
+    activeActions: Array<{ type: string; name: string }>,
+    isLimitedType: boolean
+  ) {
+    const allActions = [
+      { type: 'sendMessage', name: $t('send-message') },
+      { type: 'phrase', name: $t('phrase') },
+      { type: 'sendPrivateMessage', name: $t('send-private-message') },
+      { type: 'sendChannelEmbed', name: $t('send-channel-embed') },
+      { type: 'sendPrivateEmbed', name: $t('send-private-embed') },
+      { type: 'specificChannel', name: $t('is-specific-channel') },
+      { type: 'reaction', name: $t('react-to-message') },
+      { type: 'deleteIf', name: $t('delete-if-contains') },
+      { type: 'deleteAfter', name: $t('delete-after') },
+      { type: 'deleteX', name: $t('delete-x-times') },
+      { type: 'roleAssigner', name: $t('role-assigner') },
+      { type: 'kick', name: $t('kick') },
+      { type: 'ban', name: $t('ban') },
+      { type: 'voiceMute', name: $t('voice-mute') },
+      { type: 'requiredRole', name: $t('requires-role') },
+      { type: 'requireAdmin', name: $t('requires-admin') },
+      { type: 'nsfw', name: $t('is-nsfw') }
+    ]
+
+    return allActions.filter(
+      (action) =>
+        !activeActions.find((active) => active.type === action.type) &&
+        (isLimitedType ? typeLimited.find((t) => t == action.type) : true)
+    )
+  }
+
+  function addAction(type: string) {
+    const action = getAvailableActions(activeActions, isLimitedType).find((a) => a.type === type)
+    if (action) {
+      activeActions = [...activeActions, action]
+      // Set corresponding command property
+      updateCommandProperty(type, true)
+    }
+  }
+
+  function removeAction(type: string) {
+    activeActions = activeActions.filter((a) => a.type !== type)
+    // Clear corresponding command property
+    updateCommandProperty(type, false)
+  }
+
+  function updateCommandProperty(type: string, value: boolean) {
+    // Map action types to command properties
+    switch (type) {
+      case 'sendMessage':
+        editedCommand.actionArr[0] = value
+        break
+      case 'sendPrivateMessage':
+        editedCommand.actionArr[1] = value
+        break
+      case 'sendChannelEmbed':
+        editedCommand.sendChannelEmbed = value
+        break
+      case 'sendPrivateEmbed':
+        editedCommand.sendPrivateEmbed = value
+        break
+      case 'specificChannel':
+        editedCommand.isSpecificChannel = value
+        break
+      case 'reaction':
+        editedCommand.isReact = value
+        break
+      case 'deleteIf':
+        editedCommand.deleteIf = value
+        break
+      case 'deleteAfter':
+        editedCommand.deleteAfter = value
+        break
+      case 'deleteX':
+        editedCommand.deleteX = value
+        break
+      case 'roleAssigner':
+        editedCommand.isRoleAssigner = value
+        break
+      case 'kick':
+        editedCommand.isKick = value
+        break
+      case 'ban':
+        editedCommand.isBan = value
+        break
+      case 'voiceMute':
+        editedCommand.isVoiceMute = value
+        break
+      case 'requiredRole':
+        editedCommand.isRequiredRole = value
+        break
+      case 'requireAdmin':
+        editedCommand.isAdmin = value
+        break
+      case 'nsfw':
+        editedCommand.isNSFW = value
+        break
+      case 'phrase':
+        editedCommand.phrase = value
+        break
+    }
+  }
+
+  let editedCommand: BCFDCommand
+
+  const typeLimited = [
+    'requiredRole',
+    'requireAdmin',
+    'nsfw',
+    'phrase',
+    'deleteAfter',
+    'deleteX',
+    'deleteIf',
+    'reaction',
+    'kick',
+    'ban',
+    'voiceMute'
+  ]
+
+  $: isLimitedType =
+    editedCommand?.type == TYPE_MEMBER_JOIN ||
+    editedCommand?.type == TYPE_MEMBER_LEAVE ||
+    editedCommand?.type == TYPE_MEMBER_BAN
+
+  $: if (isLimitedType) {
+    for (let i of typeLimited) {
+      removeAction(i)
+    }
+    // reset the fields that are not needed for these types
+  }
 
   function handleSubmit() {
     if (
@@ -93,538 +180,506 @@
 
     dispatch(mode === 'edit' ? 'update' : 'add', editedCommand)
   }
+
+  function initializeActiveActions(cmd: BCFDCommand) {
+    activeActions = []
+    if (cmd.actionArr[0]) activeActions.push({ type: 'sendMessage', name: $t('send-message') })
+    if (cmd.actionArr[1])
+      activeActions.push({ type: 'sendPrivateMessage', name: $t('send-private-message') })
+    if (cmd.sendChannelEmbed)
+      activeActions.push({ type: 'sendChannelEmbed', name: $t('send-channel-embed') })
+    if (cmd.sendPrivateEmbed)
+      activeActions.push({ type: 'sendPrivateEmbed', name: $t('send-private-embed') })
+    if (cmd.isSpecificChannel)
+      activeActions.push({ type: 'specificChannel', name: $t('is-specific-channel') })
+    if (cmd.isReact) activeActions.push({ type: 'reaction', name: $t('react-to-message') })
+    if (cmd.deleteIf) activeActions.push({ type: 'deleteIf', name: $t('delete-if-contains') })
+    if (cmd.deleteAfter) activeActions.push({ type: 'deleteAfter', name: $t('delete-after') })
+    if (cmd.deleteX) activeActions.push({ type: 'deleteX', name: $t('delete-x-times') })
+    if (cmd.isRoleAssigner) activeActions.push({ type: 'roleAssigner', name: $t('role-assigner') })
+    if (cmd.isKick) activeActions.push({ type: 'kick', name: $t('kick') })
+    if (cmd.isBan) activeActions.push({ type: 'ban', name: $t('ban') })
+    if (cmd.isVoiceMute) activeActions.push({ type: 'voiceMute', name: $t('voice-mute') })
+    if (cmd.isRequiredRole) activeActions.push({ type: 'requiredRole', name: $t('requires-role') })
+    if (cmd.isAdmin) activeActions.push({ type: 'requireAdmin', name: $t('requires-admin') })
+    if (cmd.isNSFW) activeActions.push({ type: 'nsfw', name: $t('is-nsfw') })
+  }
+
+  onMount(() => {
+    editedCommand = command
+      ? { ...command }
+      : {
+          actionArr: [false, false],
+          channelMessage: '',
+          command: '',
+          commandDescription: '',
+          deleteAfter: false,
+          deleteIf: false,
+          deleteIfStrings: '',
+          deleteNum: 0,
+          deleteX: false,
+          ignoreErrorMessage: false,
+          isBan: false,
+          isKick: false,
+          isNSFW: false,
+          isReact: false,
+          isRequiredRole: false,
+          isRoleAssigner: false,
+          isSpecificChannel: false,
+          isSpecificMessage: false,
+          isVoiceMute: false,
+          isAdmin: false,
+          phrase: false,
+          privateMessage: '',
+          reaction: '',
+          roleToAssign: '',
+          sendChannelEmbed: false,
+          sendPrivateEmbed: false,
+          specificChannel: '',
+          specificMessage: '',
+          requiredRole: '',
+          type: 0,
+          channelEmbed: {
+            title: '',
+            description: '',
+            hexColor: '',
+            imageURL: '',
+            thumbnailURL: '',
+            footer: ''
+          },
+          privateEmbed: {
+            title: '',
+            description: '',
+            hexColor: '',
+            imageURL: '',
+            thumbnailURL: '',
+            footer: ''
+          }
+        }
+
+    if (mode === 'edit' && command) {
+      console.log(command)
+      initializeActiveActions(command)
+    }
+  })
 </script>
 
-<div class="p-4 sticky top-0 z-10 bg-base-300 items-center justify-between flex gap-2">
-  <div class=" font-bold text-4xl">{$t(mode === 'edit' ? 'edit-command' : 'add-command')}</div>
-  <div class="flex justify-end gap-2">
-    <button type="submit" class="btn btn-primary"
-      ><span class="material-symbols-outlined">save</span>{$t(
-        mode === 'edit' ? 'update-command' : 'add-command'
-      )}</button
-    >
-    <!-- cancel button-->
-    <button type="button" class="btn btn-secondary" on:click={() => dispatch('cancel')}
-      ><span class="material-symbols-outlined">close</span></button
-    >
+{#if editedCommand}
+  <Dialog bind:dialog on:close={() => console.log('closed')}>
+    <p>
+      {$t('import-json-command')}:
+    </p>
+    <input
+      type="text"
+      bind:value={importText}
+      placeholder="Paste JSON here"
+      class="input input-bordered w-full"
+    />
+    {#if showImportError}
+      <p>Bad JSON provided. Does not match required structure for command.</p>
+    {/if}
+    <div class="modal-action">
+      <form method="dialog">
+        <button
+          disabled={!importText}
+          class="btn btn-sm btn-error"
+          on:click={(e) => {
+            const newCommand = validateBCFDCommand(importText)
+            if (newCommand) {
+              editedCommand = newCommand
+              initializeActiveActions(editedCommand)
+              dialog.close()
+              importText = ''
+              showImportError = false
+            } else {
+              e.preventDefault()
+              showImportError = true
+            }
+          }}>{$t('import')}</button
+        >
+        <button
+          class="btn btn-sm btn-ghost"
+          on:click={() => {
+            importText = ''
+            showImportError = false
+          }}>{$t('cancel')}</button
+        >
+      </form>
+    </div>
+  </Dialog>
+
+  <HeaderBar>
+    <div class=" font-bold text-2xl">{$t(mode === 'edit' ? 'edit-command' : 'add-command')}</div>
+    <div class="flex justify-end gap-2 items-center">
+      <details class="dropdown">
+        <summary class="btn btn-primary"
+          ><span class="material-symbols-outlined">add</span>Actions</summary
+        >
+        <ul
+          class="menu dropdown-content bg-base-100 rounded-box z-[1] w-52 p-2 shadow max-h-96 overflow-y-auto flex flex-col gap-1 flex-nowrap"
+        >
+          {#each getAvailableActions(activeActions, isLimitedType) as action}
+            <li>
+              <button class="dropdown-item" on:click={() => addAction(action.type)}>
+                {action.name}
+              </button>
+            </li>
+          {/each}
+        </ul>
+      </details>
+      <!-- import button -->
+      <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('import')}>
+        <button type="button" class="btn btn-primary" on:click={() => dialog.showModal()}>
+          <span class="material-symbols-outlined">upload</span>
+        </button>
+      </span>
+
+      <span
+        class="tooltip tooltip-primary tooltip-bottom"
+        data-tip={activeActions.length == 0
+          ? 'Actions Required to Save'
+          : $t(mode === 'edit' ? 'update-command' : 'add-command')}
+      >
+        <button
+          type="submit"
+          disabled={activeActions.length == 0}
+          class="btn btn-primary"
+          on:click={handleSubmit}><span class="material-symbols-outlined">save</span></button
+        >
+      </span>
+      <!-- cancel button-->
+      <button type="button" class="btn btn-secondary" on:click={() => dispatch('cancel')}
+        ><span class="material-symbols-outlined">close</span></button
+      >
+    </div>
+  </HeaderBar>
+
+  <div class="p-4">
+    <div class="">
+      <!-- <div class="break-words">{JSON.stringify(editedCommand)}</div> -->
+      <form on:submit|preventDefault={() => {}} class="space-y-4">
+        <!-- Replace checkbox sections with action cards -->
+        <div class="space-y-4">
+          <div class="card bg-base-200">
+            <div class="card-header flex justify-between items-center p-3">
+              <h3 class="text-lg font-bold">Details</h3>
+            </div>
+            <div class="card-body">
+              <!-- Base Details -->
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="form-control">
+                  <label class="label" for="type">
+                    <span class="label-text">{$t('choose-command-type')}</span>
+                  </label>
+                  <select
+                    id="type"
+                    bind:value={editedCommand.type}
+                    class="select select-bordered"
+                    required
+                  >
+                    <option value={0}>{$t('message-received')}</option>
+                    <option value={1}>{$t('private-message-received')}</option>
+                    <option value={2}>{$t('member-join')}</option>
+                    <option value={3}>{$t('member-leave')}</option>
+                    <option value={4}>{$t('member-ban')}</option>
+                    <option value={5}>{$t('reaction')}</option>
+                  </select>
+                </div>
+                <div class="form-control">
+                  <label class="label" for="commandDescription">
+                    <span class="label-text">{$t('description')}</span>
+                  </label>
+                  <input
+                    type="text"
+                    id="commandDescription"
+                    bind:value={editedCommand.commandDescription}
+                    class="input input-bordered"
+                    placeholder="This is a command that does something"
+                    required
+                  />
+                </div>
+                {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN}
+                  {#if editedCommand.type !== TYPE_REACTION}
+                    <div class="form-control col-span-2">
+                      <label class="label" for="command">
+                        <span class="label-text">{$t('command')}</span>
+                      </label>
+                      <input
+                        type="text"
+                        id="command"
+                        bind:value={editedCommand.command}
+                        class="input input-bordered"
+                        placeholder="!command"
+                        required
+                      />
+                    </div>
+                  {:else}
+                    <div class="form-control col-span-2">
+                      <label class="label" for="reaction">
+                        <span class="label-text">{$t('reaction')}</span>
+                      </label>
+                      <input
+                        type="text"
+                        id="reaction"
+                        bind:value={editedCommand.command}
+                        class="input input-bordered"
+                        placeholder={$t('reaction-placeholder')}
+                        required
+                      />
+                    </div>
+                  {/if}
+                {/if}
+              </div>
+            </div>
+          </div>
+          {#each activeActions as action}
+            <div class="card bg-base-200">
+              <div class="card-header flex justify-between items-center p-3">
+                <h3 class="text-lg font-bold">{action.name}</h3>
+                <button
+                  class="btn btn-sm btn-circle btn-primary"
+                  on:click={() => removeAction(action.type)}
+                >
+                  <span class="material-symbols-outlined">close</span>
+                </button>
+              </div>
+              <div class="card-body">
+                <!-- Action specific fields here -->
+                {#if action.type === 'sendMessage'}
+                  <textarea
+                    id="channelMessage"
+                    bind:value={editedCommand.channelMessage}
+                    class="textarea textarea-bordered"
+                    rows="3"
+                  />
+                {:else if action.type === 'sendEmbed'}
+                  <div class="form-control">
+                    <label class="label" for="channelEmbedTitle">
+                      <span class="label-text">{$t('channel-embed-title')}</span>
+                    </label>
+
+                    <textarea
+                      id="channelEmbedTitle"
+                      bind:value={editedCommand.channelEmbed.title}
+                      class="textarea textarea-bordered"
+                      rows="3"
+                    ></textarea>
+                  </div>
+
+                  <div class="form-control">
+                    <label class="label" for="channelEmbedDescription">
+                      <span class="label-text">{$t('channel-embed-description')}</span>
+                    </label>
+                    <textarea
+                      id="channelEmbedDescription"
+                      bind:value={editedCommand.channelEmbed.description}
+                      class="textarea textarea-bordered"
+                      rows="3"
+                    ></textarea>
+                  </div>
+
+                  <div class="form-control">
+                    <label class="label" for="channelEmbedFooter">
+                      <span class="label-text">{$t('channel-embed-footer')}</span>
+                    </label>
+                    <textarea
+                      id="channelEmbedFooter"
+                      bind:value={editedCommand.channelEmbed.footer}
+                      class="textarea textarea-bordered"
+                      rows="3"
+                    ></textarea>
+                  </div>
+
+                  <div class="form-control">
+                    <label class="label" for="channelEmbedImage">
+                      <span class="label-text">{$t('channel-embed-image')}</span>
+                    </label>
+                    <input
+                      type="text"
+                      id="channelEmbedImage"
+                      bind:value={editedCommand.channelEmbed.imageURL}
+                      class="input input-bordered"
+                    />
+                  </div>
+
+                  <div class="form-control">
+                    <label class="label" for="channelEmbedThumbnail">
+                      <span class="label-text">{$t('channel-embed-thumbnail')}</span>
+                    </label>
+                    <input
+                      type="text"
+                      id="channelEmbedThumbnail"
+                      bind:value={editedCommand.channelEmbed.thumbnailURL}
+                      class="input input-bordered"
+                    />
+                  </div>
+
+                  <div class="form-control">
+                    <label class="label" for="channelEmbedColor">
+                      <span class="label-text">{$t('channel-embed-color')}</span>
+                    </label>
+                    <input
+                      type="text"
+                      id="channelEmbedColor"
+                      bind:value={editedCommand.channelEmbed.hexColor}
+                      class="input input-bordered"
+                    />
+                  </div>
+                {:else if action.type === 'sendPrivateMessage'}<div class="form-control">
+                    <label class="label" for="privateMessage">
+                      <span class="label-text">{$t('private-message')}</span>
+                    </label>
+                    <textarea
+                      id="privateMessage"
+                      bind:value={editedCommand.privateMessage}
+                      class="textarea textarea-bordered"
+                      rows="3"
+                    ></textarea>
+                  </div>{:else if action.type === 'sendPrivateEmbed'}<div class="form-control">
+                    <label class="label" for="privateEmbedTitle">
+                      <span class="label-text">{$t('private-embed-title')}</span>
+                    </label>
+                    <textarea
+                      id="privateEmbedTitle"
+                      bind:value={editedCommand.privateEmbed.title}
+                      class="textarea textarea-bordered"
+                      rows="3"
+                    ></textarea>
+                  </div>
+
+                  <div class="form-control">
+                    <label class="label" for="privateEmbedDescription">
+                      <span class="label-text">{$t('private-embed-description')}</span>
+                    </label>
+                    <textarea
+                      id="privateEmbedDescription"
+                      bind:value={editedCommand.privateEmbed.description}
+                      class="textarea textarea-bordered"
+                      rows="3"
+                    ></textarea>
+                  </div>
+
+                  <div class="form-control">
+                    <label class="label" for="privateEmbedFooter">
+                      <span class="label-text">{$t('private-embed-footer')}</span>
+                    </label>
+                    <textarea
+                      id="privateEmbedFooter"
+                      bind:value={editedCommand.privateEmbed.footer}
+                      class="textarea textarea-bordered"
+                      rows="3"
+                    ></textarea>
+                  </div>
+
+                  <div class="form-control">
+                    <label class="label" for="privateEmbedImage">
+                      <span class="label-text">{$t('private-embed-image')}</span>
+                    </label>
+                    <input
+                      type="text"
+                      id="privateEmbedImage"
+                      bind:value={editedCommand.privateEmbed.imageURL}
+                      class="input input-bordered"
+                    />
+                  </div>
+
+                  <div class="form-control">
+                    <label class="label" for="privateEmbedThumbnail">
+                      <span class="label-text">{$t('private-embed-thumbnail')}</span>
+                    </label>
+                    <input
+                      type="text"
+                      id="privateEmbedThumbnail"
+                      bind:value={editedCommand.privateEmbed.thumbnailURL}
+                      class="input input-bordered"
+                    />
+                  </div>
+
+                  <div class="form-control">
+                    <label class="label" for="privateEmbedColor">
+                      <span class="label-text">{$t('private-embed-color')}</span>
+                    </label>
+                    <input
+                      type="text"
+                      id="privateEmbedColor"
+                      bind:value={editedCommand.privateEmbed.hexColor}
+                      class="input input-bordered"
+                    />
+                  </div>{:else if action.type === 'specificChannel'}<div class="form-control">
+                    <label class="label" for="specificChannel">
+                      <span class="label-text">{$t('specific-channel')}</span>
+                    </label>
+                    <input
+                      type="text"
+                      id="specificChannel"
+                      bind:value={editedCommand.specificChannel}
+                      class="input input-bordered"
+                    />
+                  </div>{:else if action.type === 'reaction'}<div class="form-control">
+                    <label class="label" for="reactToMessage  ">
+                      <span class="label-text">{$t('react-to-message')}</span>
+                    </label>
+                    <input
+                      type="text"
+                      id="reactToMessage"
+                      bind:value={editedCommand.reaction}
+                      class="input input-bordered"
+                    />
+                  </div>{:else if action.type === 'deleteIf'}<div class="form-control">
+                    <label class="label" for="deleteIfStrings">
+                      <span class="label-text">{$t('delete-if-contains')}</span>
+                    </label>
+                    <input
+                      type="text"
+                      id="deleteIfStrings"
+                      bind:value={editedCommand.deleteIfStrings}
+                      class="input input-bordered"
+                    />
+                  </div>{:else if action.type === 'deleteAfter'}Deletes the command message after.{:else if action.type === 'deleteX'}<div
+                    class="form-control"
+                  >
+                    <label class="label" for="deleteNum">
+                      <span class="label-text">{$t('delete-x-times')}</span>
+                    </label>
+                    <input
+                      type="number"
+                      bind:value={editedCommand.deleteNum}
+                      class="input input-bordered"
+                      min="1"
+                      max="99"
+                    />
+                  </div>{:else if action.type === 'roleAssigner'}
+                  <div class="form-control">
+                    <label class="label" for="roleToAssign">
+                      <span class="label-text">{$t('role-to-assign')}</span>
+                    </label>
+                    <input
+                      type="text"
+                      id="roleToAssign"
+                      bind:value={editedCommand.roleToAssign}
+                      class="input input-bordered"
+                    />
+                  </div>{:else if action.type === 'kick'}Kicks the mentioned user{:else if action.type === 'ban'}Bans
+                  the mentioned user{:else if action.type === 'voiceMute'}Voice mutes the mentioned
+                  user{:else if action.type === 'requiredRole'}<div class="form-control">
+                    <label class="label" for="requiredRole">
+                      <span class="label-text">{$t('required-role')}</span>
+                    </label>
+                    <input
+                      type="text"
+                      id="requiredRole"
+                      bind:value={editedCommand.requiredRole}
+                      class="input input-bordered"
+                      placeholder={$t('role-id')}
+                      required
+                    />
+                  </div>{:else if action.type === 'requireAdmin'}Requires Administrator Role{:else if action.type === 'nsfw'}Requires
+                  NSFW Channel{/if}
+              </div>
+            </div>
+          {/each}
+        </div>
+      </form>
+    </div>
   </div>
-</div>
-
-<div class="p-4">
-  <div class="p-4 bg-base-200 rounded-lg">
-    <form on:submit|preventDefault={handleSubmit} class="space-y-4">
-      <div class="form-control">
-        <label class="label" for="type">
-          <span class="label-text">{$t('choose-command-type')}</span>
-        </label>
-        <select id="type" bind:value={editedCommand.type} class="select select-bordered" required>
-          <option value={0}>{$t('message-received')}</option>
-          <option value={1}>{$t('private-message-received')}</option>
-          <option value={2}>{$t('member-join')}</option>
-          <option value={3}>{$t('member-leave')}</option>
-          <option value={4}>{$t('member-ban')}</option>
-          <option value={5}>{$t('reaction')}</option>
-        </select>
-      </div>
-
-      {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN && editedCommand.type !== TYPE_REACTION}
-        <div class="form-control">
-          <label class="label" for="command">
-            <span class="label-text">{$t('command')}</span>
-          </label>
-          <input
-            type="text"
-            id="command"
-            bind:value={editedCommand.command}
-            class="input input-bordered"
-            placeholder="!command"
-            required
-          />
-        </div>
-      {/if}
-
-      <div class="form-control">
-        <label class="label" for="commandDescription">
-          <span class="label-text">{$t('description')}</span>
-        </label>
-        <input
-          type="text"
-          id="commandDescription"
-          bind:value={editedCommand.commandDescription}
-          class="input input-bordered"
-          placeholder="This is a command that does something"
-        />
-      </div>
-
-      {#if editedCommand.type === TYPE_REACTION}
-        <div class="form-control">
-          <label class="label" for="reaction">
-            <span class="label-text">{$t('reaction')}</span>
-          </label>
-          <input
-            type="text"
-            id="reaction"
-            bind:value={editedCommand.command}
-            class="input input-bordered"
-            placeholder={$t('reaction-placeholder')}
-            required
-          />
-        </div>
-
-        <div class="form-control">
-          <label class="label" for="isSpecificMessage">
-            <span class="label-text">{$t('specific-message-only')}</span>
-          </label>
-          <input type="checkbox" bind:checked={editedCommand.isSpecificMessage} class="checkbox" />
-        </div>
-
-        {#if editedCommand.isSpecificMessage}
-          <div class="form-control">
-            <label class="label" for="specificMessage">
-              <span class="label-text">{$t('message-id')}</span>
-            </label>
-            <input
-              type="text"
-              id="specificMessage"
-              bind:value={editedCommand.specificMessage}
-              class="input input-bordered"
-              placeholder="Message ID to watch for reactions"
-              required
-            />
-          </div>
-        {/if}
-      {/if}
-
-      <h3 class="text-xl font-bold mb-2">{$t('action')}</h3>
-
-      {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN && editedCommand.type !== TYPE_REACTION}
-        <div class="form-control">
-          <label class="label" for="phrase">
-            <span class="label-text">{$t('phrase')}</span>
-          </label>
-          <input type="checkbox" bind:checked={editedCommand.phrase} class="checkbox" />
-        </div>
-
-        <div class="form-control">
-          <label class="label" for="requiresRole">
-            <span class="label-text">{$t('requires-role')}</span>
-          </label>
-          <input type="checkbox" bind:checked={editedCommand.isRequiredRole} class="checkbox" />
-        </div>
-
-        {#if editedCommand.isRequiredRole}
-          <div class="form-control">
-            <label class="label" for="requiredRole">
-              <span class="label-text">{$t('required-role')}</span>
-            </label>
-            <input
-              type="text"
-              id="requiredRole"
-              bind:value={editedCommand.requiredRole}
-              class="input input-bordered"
-              placeholder={$t('role-id')}
-              required
-            />
-          </div>
-        {/if}
-
-        <div class="form-control">
-          <label class="label" for="isAdmin ">
-            <span class="label-text">{$t('requires-admin')}</span>
-          </label>
-          <input type="checkbox" bind:checked={editedCommand.isAdmin} class="checkbox" />
-        </div>
-      {/if}
-
-      <div class="form-control">
-        <label class="label" for="sendMessage">
-          <span class="label-text">{$t('send-message')}</span>
-        </label>
-        <input
-          type="checkbox"
-          id="sendMessage"
-          bind:checked={editedCommand.actionArr[0]}
-          class="checkbox"
-        />
-      </div>
-
-      {#if editedCommand.actionArr[0]}
-        <div class="form-control">
-          <label class="label" for="channelMessage">
-            <span class="label-text">{$t('channel-message')}</span>
-          </label>
-          <textarea
-            id="channelMessage"
-            bind:value={editedCommand.channelMessage}
-            class="textarea textarea-bordered"
-            rows="3"
-          ></textarea>
-        </div>
-      {/if}
-
-      <div class="form-control">
-        <label class="label" for="sendChannelEmbed">
-          <span class="label-text">{$t('send-channel-embed')}</span>
-        </label>
-        <input
-          type="checkbox"
-          id="sendChannelEmbed"
-          bind:checked={editedCommand.sendChannelEmbed}
-          class="checkbox"
-        />
-      </div>
-
-      {#if editedCommand.sendChannelEmbed}
-        <div class="form-control">
-          <label class="label" for="channelEmbedTitle">
-            <span class="label-text">{$t('channel-embed-title')}</span>
-          </label>
-
-          <textarea
-            id="channelEmbedTitle"
-            bind:value={editedCommand.channelEmbed.title}
-            class="textarea textarea-bordered"
-            rows="3"
-          ></textarea>
-        </div>
-
-        <div class="form-control">
-          <label class="label" for="channelEmbedDescription">
-            <span class="label-text">{$t('channel-embed-description')}</span>
-          </label>
-          <textarea
-            id="channelEmbedDescription"
-            bind:value={editedCommand.channelEmbed.description}
-            class="textarea textarea-bordered"
-            rows="3"
-          ></textarea>
-        </div>
-
-        <div class="form-control">
-          <label class="label" for="channelEmbedFooter">
-            <span class="label-text">{$t('channel-embed-footer')}</span>
-          </label>
-          <textarea
-            id="channelEmbedFooter"
-            bind:value={editedCommand.channelEmbed.footer}
-            class="textarea textarea-bordered"
-            rows="3"
-          ></textarea>
-        </div>
-
-        <div class="form-control">
-          <label class="label" for="channelEmbedImage">
-            <span class="label-text">{$t('channel-embed-image')}</span>
-          </label>
-          <input
-            type="text"
-            id="channelEmbedImage"
-            bind:value={editedCommand.channelEmbed.imageURL}
-            class="input input-bordered"
-          />
-        </div>
-
-        <div class="form-control">
-          <label class="label" for="channelEmbedThumbnail">
-            <span class="label-text">{$t('channel-embed-thumbnail')}</span>
-          </label>
-          <input
-            type="text"
-            id="channelEmbedThumbnail"
-            bind:value={editedCommand.channelEmbed.thumbnailURL}
-            class="input input-bordered"
-          />
-        </div>
-
-        <div class="form-control">
-          <label class="label" for="channelEmbedColor">
-            <span class="label-text">{$t('channel-embed-color')}</span>
-          </label>
-          <input
-            type="text"
-            id="channelEmbedColor"
-            bind:value={editedCommand.channelEmbed.hexColor}
-            class="input input-bordered"
-          />
-        </div>
-      {/if}
-
-      <div class="form-control">
-        <label class="label" for="isSpecificChannel">
-          <span class="label-text">{$t('is-specific-channel')}</span>
-        </label>
-        <input type="checkbox" bind:checked={editedCommand.isSpecificChannel} class="checkbox" />
-      </div>
-
-      {#if editedCommand.isSpecificChannel}
-        <div class="form-control">
-          <label class="label" for="specificChannel">
-            <span class="label-text">{$t('specific-channel')}</span>
-          </label>
-          <input
-            type="text"
-            id="specificChannel"
-            bind:value={editedCommand.specificChannel}
-            class="input input-bordered"
-          />
-        </div>
-      {/if}
-
-      <div class="form-control">
-        <label class="label" for="sendMessage">
-          <span class="label-text">{$t('send-private-message')}</span>
-        </label>
-        <input
-          type="checkbox"
-          id="sendMessage"
-          bind:checked={editedCommand.actionArr[1]}
-          class="checkbox"
-        />
-      </div>
-
-      {#if editedCommand.actionArr[1]}
-        <div class="form-control">
-          <label class="label" for="privateMessage">
-            <span class="label-text">{$t('private-message')}</span>
-          </label>
-          <textarea
-            id="privateMessage"
-            bind:value={editedCommand.privateMessage}
-            class="textarea textarea-bordered"
-            rows="3"
-          ></textarea>
-        </div>
-      {/if}
-
-      <div class="form-control">
-        <label class="label" for="sendPrivateEmbed">
-          <span class="label-text">{$t('send-private-embed')}</span>
-        </label>
-        <input
-          type="checkbox"
-          id="sendPrivateEmbed"
-          bind:checked={editedCommand.sendPrivateEmbed}
-          class="checkbox"
-        />
-      </div>
-
-      {#if editedCommand.sendPrivateEmbed}
-        <div class="form-control">
-          <label class="label" for="privateEmbedTitle">
-            <span class="label-text">{$t('private-embed-title')}</span>
-          </label>
-          <textarea
-            id="privateEmbedTitle"
-            bind:value={editedCommand.privateEmbed.title}
-            class="textarea textarea-bordered"
-            rows="3"
-          ></textarea>
-        </div>
-
-        <div class="form-control">
-          <label class="label" for="privateEmbedDescription">
-            <span class="label-text">{$t('private-embed-description')}</span>
-          </label>
-          <textarea
-            id="privateEmbedDescription"
-            bind:value={editedCommand.privateEmbed.description}
-            class="textarea textarea-bordered"
-            rows="3"
-          ></textarea>
-        </div>
-
-        <div class="form-control">
-          <label class="label" for="privateEmbedFooter">
-            <span class="label-text">{$t('private-embed-footer')}</span>
-          </label>
-          <textarea
-            id="privateEmbedFooter"
-            bind:value={editedCommand.privateEmbed.footer}
-            class="textarea textarea-bordered"
-            rows="3"
-          ></textarea>
-        </div>
-
-        <div class="form-control">
-          <label class="label" for="privateEmbedImage">
-            <span class="label-text">{$t('private-embed-image')}</span>
-          </label>
-          <input
-            type="text"
-            id="privateEmbedImage"
-            bind:value={editedCommand.privateEmbed.imageURL}
-            class="input input-bordered"
-          />
-        </div>
-
-        <div class="form-control">
-          <label class="label" for="privateEmbedThumbnail">
-            <span class="label-text">{$t('private-embed-thumbnail')}</span>
-          </label>
-          <input
-            type="text"
-            id="privateEmbedThumbnail"
-            bind:value={editedCommand.privateEmbed.thumbnailURL}
-            class="input input-bordered"
-          />
-        </div>
-
-        <div class="form-control">
-          <label class="label" for="privateEmbedColor">
-            <span class="label-text">{$t('private-embed-color')}</span>
-          </label>
-          <input
-            type="text"
-            id="privateEmbedColor"
-            bind:value={editedCommand.privateEmbed.hexColor}
-            class="input input-bordered"
-          />
-        </div>
-      {/if}
-
-      {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN && editedCommand.type !== TYPE_REACTION}
-        <div class="form-control">
-          <label class="label" for="isReact">
-            <span class="label-text">{$t('react-to-message')}</span>
-          </label>
-          <input type="checkbox" bind:checked={editedCommand.isReact} class="checkbox" />
-        </div>
-
-        {#if editedCommand.isReact}
-          <div class="form-control">
-            <label class="label" for="reactToMessage  ">
-              <span class="label-text">{$t('react-to-message')}</span>
-            </label>
-            <input
-              type="text"
-              id="reactToMessage"
-              bind:value={editedCommand.reaction}
-              class="input input-bordered"
-            />
-          </div>
-        {/if}
-      {/if}
-
-      <div class="form-control">
-        <label class="label" for="ignoreErrorMessage">
-          <span class="label-text">{$t('ignore-error-message')}</span>
-        </label>
-        <input type="checkbox" bind:checked={editedCommand.ignoreErrorMessage} class="checkbox" />
-      </div>
-
-      {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN && editedCommand.type !== TYPE_REACTION}
-        <div class="form-control">
-          <label class="label" for="deleteIf">
-            <span class="label-text">{$t('delete-if-contains')}</span>
-          </label>
-          <input type="checkbox" bind:checked={editedCommand.deleteIf} class="checkbox" />
-        </div>
-
-        {#if editedCommand.deleteIf}
-          <div class="form-control">
-            <label class="label" for="deleteIfStrings">
-              <span class="label-text">{$t('delete-if-contains')}</span>
-            </label>
-            <input
-              type="text"
-              id="deleteIfStrings"
-              bind:value={editedCommand.deleteIfStrings}
-              class="input input-bordered"
-            />
-          </div>
-        {/if}
-
-        <div class="form-control">
-          <label class="label" for="deleteAfter">
-            <span class="label-text">{$t('delete-after')}</span>
-          </label>
-          <input type="checkbox" bind:checked={editedCommand.deleteAfter} class="checkbox" />
-        </div>
-
-        <div class="form-control">
-          <label class="label" for="deleteX">
-            <span class="label-text">{$t('delete-x-times')}</span>
-          </label>
-          <input type="checkbox" bind:checked={editedCommand.deleteX} class="checkbox" />
-        </div>
-
-        {#if editedCommand.deleteX}
-          <div class="form-control">
-            <label class="label" for="deleteNum">
-              <span class="label-text">{$t('delete-x-times')}</span>
-            </label>
-            <input
-              type="number"
-              bind:value={editedCommand.deleteNum}
-              class="input input-bordered"
-              min="1"
-              max="99"
-            />
-          </div>
-        {/if}
-
-        <div class="form-control">
-          <label class="label" for="isNSFW">
-            <span class="label-text">{$t('is-nsfw')}</span>
-          </label>
-          <input type="checkbox" bind:checked={editedCommand.isNSFW} class="checkbox" />
-        </div>
-      {/if}
-
-      {#if editedCommand.type === TYPE_REACTION}
-        <div class="form-control">
-          <label class="label" for="isNSFW">
-            <span class="label-text">{$t('is-nsfw')}</span>
-          </label>
-          <input type="checkbox" bind:checked={editedCommand.isNSFW} class="checkbox" />
-        </div>
-      {/if}
-
-      <h3 class="text-xl font-bold mb-2">{$t('moderation')}</h3>
-
-      {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN && editedCommand.type !== TYPE_REACTION}
-        <div class="form-control">
-          <label class="label" for="isKick">
-            <span class="label-text">{$t('kick')}</span>
-          </label>
-          <input type="checkbox" bind:checked={editedCommand.isKick} class="checkbox" />
-        </div>
-
-        <div class="form-control">
-          <label class="label" for="isBan">
-            <span class="label-text">{$t('ban')}</span>
-          </label>
-          <input type="checkbox" bind:checked={editedCommand.isBan} class="checkbox" />
-        </div>
-
-        <div class="form-control">
-          <label class="label" for="isVoiceMute">
-            <span class="label-text">{$t('voice-mute')}</span>
-          </label>
-          <input type="checkbox" bind:checked={editedCommand.isVoiceMute} class="checkbox" />
-        </div>
-      {/if}
-
-      <div class="form-control">
-        <label class="label" for="isRoleAssigner">
-          <span class="label-text">{$t('role-assigner')}</span>
-        </label>
-        <input type="checkbox" bind:checked={editedCommand.isRoleAssigner} class="checkbox" />
-      </div>
-
-      {#if editedCommand.isRoleAssigner}
-        <div class="form-control">
-          <label class="label" for="roleToAssign">
-            <span class="label-text">{$t('role-to-assign')}</span>
-          </label>
-          <input
-            type="text"
-            id="roleToAssign"
-            bind:value={editedCommand.roleToAssign}
-            class="input input-bordered"
-          />
-        </div>
-      {/if}
-    </form>
-  </div>
-</div>
+{/if}

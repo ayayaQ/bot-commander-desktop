@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy } from 'svelte'
   import { t } from '../stores/localisation'
+  import HeaderBar from './HeaderBar.svelte'
 
   let stats = {
     userCount: 0,
@@ -14,43 +15,44 @@
     commandCount: 0,
     webhooksSent: 0,
     timeSpentInApp: 0
-  };
+  }
 
-  let displayTimeSpentInApp = 0;
-  let updateInterval: NodeJS.Timeout;
-  let timeUpdateInterval: NodeJS.Timeout;
+  let displayTimeSpentInApp = 0
+  let updateInterval: NodeJS.Timeout
+  let timeUpdateInterval: NodeJS.Timeout
 
   onMount(() => {
-    updateStats();
-    updateInterval = setInterval(updateStats, 5000); // Update stats every 5 seconds
-    timeUpdateInterval = setInterval(updateDisplayTime, 1000); // Update time every second
-  });
+    updateStats()
+    updateInterval = setInterval(updateStats, 5000) // Update stats every 5 seconds
+    timeUpdateInterval = setInterval(updateDisplayTime, 1000) // Update time every second
+  })
 
   onDestroy(() => {
-    clearInterval(updateInterval);
-    clearInterval(timeUpdateInterval);
-  });
+    clearInterval(updateInterval)
+    clearInterval(timeUpdateInterval)
+  })
 
   async function updateStats() {
-    stats = await (window as any).electron.ipcRenderer.invoke('get-stats');
-    displayTimeSpentInApp = stats.timeSpentInApp;
+    stats = await (window as any).electron.ipcRenderer.invoke('get-stats')
+    displayTimeSpentInApp = stats.timeSpentInApp
   }
 
   function updateDisplayTime() {
-    displayTimeSpentInApp += 1;
+    displayTimeSpentInApp += 1
   }
 
   function formatTime(seconds: number): string {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const remainingSeconds = seconds % 60;
-    return `${hours}${$t('hours')} ${minutes}${$t('minutes')} ${remainingSeconds}${$t('seconds')}`;
+    const hours = Math.floor(seconds / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    const remainingSeconds = seconds % 60
+    return `${hours}${$t('hours')} ${minutes}${$t('minutes')} ${remainingSeconds}${$t('seconds')}`
   }
 </script>
 
+<HeaderBar>
+  <h2 class="text-2xl font-bold">{$t('stats')}</h2>
+</HeaderBar>
 <div class="p-4">
-  <h2 class="text-2xl font-bold mb-4">{$t('stats')}</h2>
-
   <div class="flex flex-row gap-4 flex-wrap">
     <div class="stats shadow">
       <div class="stat">
@@ -109,7 +111,8 @@
     <div class="stats shadow">
       <div class="stat">
         <div class="stat-figure text-primary">
-          <span class="material-symbols-outlined" style="font-size: 48px;">chat_bubble_outline</span>
+          <span class="material-symbols-outlined" style="font-size: 48px;">chat_bubble_outline</span
+          >
         </div>
         <div class="stat-title">{$t('private-messages-received')}</div>
         <div class="stat-value">{stats.privateMessagesReceived}</div>

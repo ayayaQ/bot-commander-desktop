@@ -11,13 +11,14 @@
 
   function exportCommand() {
     const jsonCommand = JSON.stringify(command, null, 2)
-    navigator.clipboard.writeText(jsonCommand)
+    navigator.clipboard
+      .writeText(jsonCommand)
       .then(() => {
         const toast = document.getElementById('toast') as HTMLDivElement
         toast.classList.remove('hidden')
         setTimeout(() => toast.classList.add('hidden'), 3000)
       })
-      .catch(err => console.error('Failed to copy command: ', err))
+      .catch((err) => console.error('Failed to copy command: ', err))
   }
 
   const TYPE_MESSAGE_RECEIVED = 0
@@ -29,25 +30,38 @@
 
   function displayNameForCommand(command: BCFDCommand) {
     switch (command.type) {
-      case TYPE_MESSAGE_RECEIVED: return command.command
-      case TYPE_PM_RECEIVED: return command.command
-      case TYPE_MEMBER_JOIN: return 'Member Join'
-      case TYPE_MEMBER_LEAVE: return 'Member Leave'
-      case TYPE_MEMBER_BAN: return 'Member Ban'
-      default: return command.command
+      case TYPE_MESSAGE_RECEIVED:
+        return command.command
+      case TYPE_PM_RECEIVED:
+        return command.command
+      case TYPE_MEMBER_JOIN:
+        return 'Member Join'
+      case TYPE_MEMBER_LEAVE:
+        return 'Member Leave'
+      case TYPE_MEMBER_BAN:
+        return 'Member Ban'
+      default:
+        return command.command
     }
   }
 
   function displayIconForCommand(command: BCFDCommand) {
     // icons should be unique from material symbols
     switch (command.type) {
-      case TYPE_MESSAGE_RECEIVED: return 'message'
-      case TYPE_PM_RECEIVED: return 'chat'
-      case TYPE_MEMBER_JOIN: return 'person_add'
-      case TYPE_MEMBER_LEAVE: return 'exit_to_app'
-      case TYPE_MEMBER_BAN: return 'person_remove'
-      case TYPE_REACTION: return 'thumb_up'
-      default: return 'message'
+      case TYPE_MESSAGE_RECEIVED:
+        return 'message'
+      case TYPE_PM_RECEIVED:
+        return 'chat'
+      case TYPE_MEMBER_JOIN:
+        return 'person_add'
+      case TYPE_MEMBER_LEAVE:
+        return 'exit_to_app'
+      case TYPE_MEMBER_BAN:
+        return 'person_remove'
+      case TYPE_REACTION:
+        return 'thumb_up'
+      default:
+        return 'message'
     }
   }
 </script>
@@ -56,19 +70,45 @@
   <div class="card-body">
     <div class="flex justify-between items-start">
       <div class="flex items-center justify-center gap-2">
-        <div class="flex items-center justify-center"><span class="material-symbols-outlined" style="font-size: 3rem;">{displayIconForCommand(command)}</span></div>
+        <div class="flex items-center justify-center">
+          <span class="material-symbols-outlined" style="font-size: 3rem;"
+            >{displayIconForCommand(command)}</span
+          >
+        </div>
         <div>
-        <h3 class="card-title">{displayNameForCommand(command)}</h3>
-        <p>{command.commandDescription}</p>
-    </div>
+          <h3 class="card-title">{displayNameForCommand(command)}</h3>
+          <p>{command.commandDescription}</p>
+        </div>
       </div>
       <div class="space-x-2">
-        <button class="btn btn-square btn-ghost" on:click={() => editCommand(command)}><span class="material-symbols-outlined">edit</span></button>
-        <button class="btn btn-square btn-ghost" on:click={exportCommand}><span class="material-symbols-outlined">download</span></button>
-        <button class="btn btn-square btn-ghost" on:click={() => dialog.showModal()}><span class="material-symbols-outlined">delete</span></button>
+        <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('edit')}>
+          <button class="btn btn-square btn-ghost" on:click={() => editCommand(command)}
+            ><span class="material-symbols-outlined">edit</span></button
+          >
+        </span>
+        <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('export')}>
+          <button class="btn btn-square btn-ghost" on:click={exportCommand}
+            ><span class="material-symbols-outlined">download</span></button
+          >
+        </span>
+        <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('delete')}>
+          <button
+            class="btn btn-square btn-ghost"
+            on:click={(e) => {
+              if (e.shiftKey) {
+                deleteCommand(command)
+              } else {
+                dialog.showModal()
+              }
+            }}><span class="material-symbols-outlined">delete</span></button
+          >
+        </span>
 
         <Dialog bind:dialog on:close={() => console.log('closed')}>
-          <p>{$t('are-you-sure-you-want-to-delete-the-command')} {$t('open-quote')}{command.command}{$t('close-quote')}</p>
+          <p>
+            {$t('are-you-sure-you-want-to-delete-the-command')}
+            {$t('open-quote')}{command.command}{$t('close-quote')}
+          </p>
           <div class="modal-action">
             <form method="dialog">
               <button class="btn btn-sm btn-error" on:click={() => deleteCommand(command)}

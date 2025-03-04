@@ -1,264 +1,277 @@
-import { Client, Guild, GuildMember, Message, MessageReaction, OAuth2Scopes, OmitPartialGroupDMChannel, PartialMessageReaction, PermissionsBitField, TextChannel, User } from "discord.js"
-import { BCFDCommand } from "../types/types"
-import { getCommands, getContext } from "./botService"
-import { stringInfoAddEval } from "../utils/virtual"
+import {
+  Client,
+  Guild,
+  GuildMember,
+  Message,
+  MessageReaction,
+  OAuth2Scopes,
+  OmitPartialGroupDMChannel,
+  PermissionsBitField,
+  TextChannel,
+  User
+} from 'discord.js'
+import { BCFDCommand } from '../types/types'
+import { getCommands, getContext } from './botService'
+import { stringInfoAddEval } from '../utils/virtual'
+import OpenAI from 'openai'
 
-export function stringInfoAdd(
-    message: string,
-    messageEvent: OmitPartialGroupDMChannel<Message<boolean>>,
-    command: BCFDCommand
-  ): string {
-    message = stringInfoAddUser(message, messageEvent.author)
-    message = stringInfoAddMember(message, messageEvent.member)
-    message = stringInfoAddClient(message, messageEvent.client)
-    message = stringInfoAddGuild(message, messageEvent.guild)
-    if (messageEvent.channel instanceof TextChannel) {
-      message = stringInfoAddChannel(message, messageEvent.channel)
-    }
-  
-    // add the info of the first mentioned user
-    if (messageEvent.mentions.users.size > 0) {
-      message = stringInfoAddMentionedUser(message, messageEvent.mentions.users.first()!)
-    }
-  
-    message = stringInfoAddGeneral(message)
-  
-    message = stringInfoAddMessageContent(message, messageEvent, command)
-  
-    message = stringInfoAddEval(message, getContext())
-  
-    return message
+export type StringInfoContext = {
+  message: string
+  user?: User
+  member?: GuildMember
+  client?: Client
+  guild?: Guild
+  textChannel?: TextChannel
+  mentionedUser?: User
+  messageEvent?: OmitPartialGroupDMChannel<Message<boolean>> | Message<boolean>
+  command?: BCFDCommand
+}
+
+const searchRegex = /\$(\w+)(?:\{([^}]*)\})?/g
+
+export function contextForMessageEvent(
+  message: string,
+  command: BCFDCommand,
+  event: OmitPartialGroupDMChannel<Message<boolean>>
+): StringInfoContext {
+  return {
+    message: message,
+    user: event.author,
+    member: event.member ?? undefined,
+    client: event.client,
+    guild: event.guild ?? undefined,
+    textChannel: event.channel as TextChannel,
+    mentionedUser: event.mentions.users.first(),
+    messageEvent: event,
+    command: command
   }
-  
-  // string info add for reaction add event
-  export function stringInfoAddReaction(message: string, reaction: MessageReaction | PartialMessageReaction, command: BCFDCommand): string {
-  
-    message = stringInfoAddClient(message, reaction.client)
-    message = stringInfoAddGuild(message, reaction.message.guild)
-    if (reaction.message.channel instanceof TextChannel) {
-      message = stringInfoAddChannel(message, reaction.message.channel)
-    }
-  
-    message = stringInfoAddGeneral(message)
-  
-    message = stringInfoAddMessageContent(message, reaction.message as Message<boolean>, command)
-  
-    message = stringInfoAddEval(message, getContext())
-  
-  
-    return message
+}
+
+export async function stringInfoAdd(ctx: StringInfoContext): Promise<string> {
+  let result = ctx.message
+
+  result = ctx.message.replace(searchRegex, (_match, command) => {
+    if (userReplacements.has(command)) return userReplacements.get(command)!(ctx)
+    if (memberReplacements.has(command)) return memberReplacements.get(command)!(ctx)
+    if (clientReplacements.has(command)) return clientReplacements.get(command)!(ctx)
+    if (guildReplacements.has(command)) return guildReplacements.get(command)!(ctx)
+    if (channelReplacements.has(command)) return channelReplacements.get(command)!(ctx)
+    if (mentionedReplacements.has(command)) return mentionedReplacements.get(command)!(ctx)
+    if (generalReplacements.has(command)) return generalReplacements.get(command)!(ctx)
+    return _match // Return the original match if no replacement is found
+  })
+
+  result = await stringInfoAddGeneral(result)
+
+  result = stringInfoAddEval(result, getContext())
+
+  return result
+}
+
+export function contextForReactionEvent(
+  message: string,
+  event: MessageReaction,
+  command: BCFDCommand
+): StringInfoContext {
+  return {
+    message: message,
+    client: event.client,
+    guild: event.message.guild ?? undefined,
+    textChannel: event.message.channel as TextChannel,
+    messageEvent: event.message as Message<boolean>,
+    command: command
   }
-  
-  
-  export function stringInfoAddUser(message: string, user: User): string {
-    message = message
-      .replaceAll('$namePlain', user.displayName)
-      .replaceAll('$name', `<@${user.id}>`)
-      .replaceAll('$defaultavatar', user.defaultAvatarURL)
-      .replaceAll('$avatar', user.avatarURL({}) ?? user.defaultAvatarURL)
-      .replaceAll('$discriminator', user.discriminator)
-      .replaceAll('$tag', user.tag)
-      .replaceAll('$id', user.id)
-      .replaceAll('$timeCreated', new Date(user.createdTimestamp).toLocaleString())
-  
-    // todo $serversSharedWithBot
-  
-    return message
-  }
-  
-  export function stringInfoAddMember(message: string, member: GuildMember | null): string {
-    if (!member) {
-      return message
-    }
-  
-    message = message
-      .replaceAll('$memberIsOwner', (member.guild.ownerId == member.id).toString())
-      .replaceAll('$memberEffectiveName', member.displayName)
-      .replaceAll('$memberNickname', member.nickname ?? '')
-      .replaceAll('$memberID', member.id)
-      .replaceAll('$memberHasTimeJoined', (member.joinedTimestamp != null).toString())
-      .replaceAll(
-        '$memberTimeJoined',
-        member.joinedTimestamp != null ? new Date(member.joinedTimestamp).toLocaleString() : ''
-      )
-      .replaceAll(
-        '$memberEffectiveAvatar',
-        member.avatarURL({}) ?? member.user.avatarURL({}) ?? member.user.defaultAvatarURL
-      )
-      .replaceAll('$memberHasBoosted', (member.premiumSinceTimestamp != null).toString())
-      .replaceAll(
-        '$memberTimeBoosted',
-        member.premiumSinceTimestamp != null
-          ? new Date(member.premiumSinceTimestamp).toLocaleString()
-          : ''
-      )
-  
-    return message
-  }
-  
-  export function stringInfoAddClient(message: string, client: Client): string {
-    message = message
-      .replaceAll('$ping', client.ws.ping.toString())
-      .replaceAll(
-        '$inviteURL',
-        client.generateInvite({
-          scopes: [OAuth2Scopes.Bot],
-          permissions: [PermissionsBitField.Flags.Administrator]
-        })
-      )
-      .replaceAll('$serverCount', client.guilds.cache.size.toString())
-      .replaceAll('$allMemberCount', client.users.cache.size.toString())
-  
-    if (client.user) {
-      message = message
-        .replaceAll('$botAvatar', client.user.avatarURL({}) ?? client.user.defaultAvatarURL)
-        .replaceAll('$botName', `<@${client.user.id}>`)
-        .replaceAll('$botNamePlain', client.user.displayName)
-        .replaceAll('$botID', client.user.id)
-        .replaceAll('$botDiscriminator', client.user.discriminator)
-        .replaceAll('$botTag', client.user.tag)
-        .replaceAll('$botDefaultAvatar', client.user.defaultAvatarURL)
-        .replaceAll('$botTimeCreated', new Date(client.user.createdTimestamp).toLocaleString())
-        .replaceAll('$botID', client.user.id)
-    }
-  
-    return message
-  }
-  
-  export function stringInfoAddGuild(message: string, guild: Guild | null): string {
-    if (!guild) {
-      return message
-    }
-  
-    message = message
-      .replaceAll('$memberCount', guild.memberCount.toString())
-      .replaceAll('$serverCreateTime', new Date(guild.createdTimestamp).toLocaleString())
-      .replaceAll('$serverIcon', guild.iconURL({}) ?? '')
-      .replaceAll('$serverBanner', guild.bannerURL({}) ?? '')
-      .replaceAll('$serverDescription', guild.description ?? '')
-      .replaceAll('$serverSplash', guild.splashURL({}) ?? '')
-      .replaceAll('$server', guild.name)
-  
-    return message
-  }
-  
-  export function stringInfoAddChannel(message: string, channel: TextChannel | null): string {
-    if (!channel) {
-      return message
-    }
-  
-    message = message
-      .replaceAll('$channel', channel.name)
-      .replaceAll('$channelID', channel.id)
-      .replaceAll('$channelCreateDate', new Date(channel.createdTimestamp).toLocaleString())
-      .replaceAll('$channelAsMention', `<#${channel.id}>`)
-  
-    return message
-  }
-  
-  export function stringInfoAddMentionedUser(message: string, user: User): string {
-    message = message
-      .replaceAll('$mentionedName', `<@${user.id}>`)
-      .replaceAll('$mentionedID', user.id)
-      .replaceAll('$mentionedTag', user.tag)
-      .replaceAll('$mentionedDiscriminator', user.discriminator)
-      .replaceAll('$mentionedAvatar', user.avatarURL({}) ?? user.defaultAvatarURL)
-      .replaceAll('$mentionedTimeCreated', new Date(user.createdTimestamp).toLocaleString())
-      .replaceAll('$mentionedNamePlain', user.displayName)
-      .replaceAll('$mentionedDefaultAvatar', user.defaultAvatarURL)
-      .replaceAll('$mentionedIsBot', user.bot.toString())
-  
-    return message
-  }
-  
-  export function stringInfoAddGeneral(message: string) {
-    // while $random is in the message, a command which comes in the form $random{abc|def|ghi}
-    // replace $random with a random string from the list
-    while (message.includes('$random')) {
-      let start = message.indexOf('$random')
-      let subMessage = message.substring(start + 7)
-      if (subMessage.includes('}') && subMessage.charAt(0) == '{') {
-        let postMessage = subMessage.substring(subMessage.indexOf('}') + 1)
-        subMessage = subMessage.substring(1, subMessage.indexOf('}'))
-        let messageArray = subMessage.split('|')
-        message =
-          message.substring(0, start) +
-          messageArray[Math.floor(Math.random() * messageArray.length)] +
-          postMessage
-      } else {
-        return message + '```ERROR: MISSING { } ON $random```'
+}
+
+const userReplacements = new Map<string, (context: StringInfoContext) => string>([
+  ['namePlain', (ctx) => ctx.user?.displayName ?? ''],
+  ['name', (ctx) => (ctx.user ? `<@${ctx.user?.id}>` : '')],
+  ['avatar', (ctx) => ctx.user?.avatarURL({}) ?? ctx.user?.defaultAvatarURL ?? ''],
+  ['discriminator', (ctx) => ctx.user?.discriminator ?? ''],
+  ['tag', (ctx) => ctx.user?.tag ?? ''],
+  ['id', (ctx) => ctx.user?.id ?? ''],
+  ['timeCreated', (ctx) => (ctx.user ? new Date(ctx.user?.createdTimestamp).toLocaleString() : '')],
+  ['defaultavatar', (ctx) => ctx.user?.defaultAvatarURL ?? '']
+  // todo $serversSharedWithBot
+])
+
+const memberReplacements = new Map<string, (context: StringInfoContext) => string>([
+  ['memberIsOwner', (ctx) => (ctx.member?.guild.ownerId == ctx.member?.id).toString()],
+  ['memberEffectiveName', (ctx) => ctx.member?.displayName ?? ''],
+  ['memberNickname', (ctx) => ctx.member?.nickname ?? ''],
+  ['memberID', (ctx) => ctx.member?.id ?? ''],
+  [
+    'memberHasTimeJoined',
+    (ctx) => (ctx.member ? (ctx.member.joinedTimestamp != null).toString() : '')
+  ],
+  [
+    'memberTimeJoined',
+    (ctx) =>
+      ctx.member?.joinedTimestamp != null
+        ? new Date(ctx.member.joinedTimestamp).toLocaleString()
+        : ''
+  ],
+  [
+    'memberEffectiveAvatar',
+    (ctx) => ctx.member?.displayAvatarURL({}) ?? ctx.member?.user.defaultAvatarURL ?? ''
+  ],
+  ['memberEffectiveTag', (ctx) => ctx.member?.user.tag ?? ''],
+  ['memberEffectiveID', (ctx) => ctx.member?.user.id ?? ''],
+  [
+    'memberEffectiveTimeCreated',
+    (ctx) => (ctx.member ? new Date(ctx.member.user.createdTimestamp).toLocaleString() : '')
+  ],
+  ['memberEffectiveDefaultAvatar', (ctx) => ctx.member?.user.defaultAvatarURL ?? ''],
+  [
+    'memberTimeBoosted',
+    (ctx) =>
+      ctx.member?.premiumSinceTimestamp != null
+        ? new Date(ctx.member.premiumSinceTimestamp).toLocaleString()
+        : ''
+  ],
+  ['memberHasBoosted', (ctx) => (ctx.member?.premiumSinceTimestamp != null).toString()]
+])
+
+const clientReplacements = new Map<string, (context: StringInfoContext) => string>([
+  ['ping', (ctx) => ctx.client?.ws.ping.toString() ?? ''],
+  [
+    'inviteURL',
+    (ctx) =>
+      ctx.client?.generateInvite({
+        scopes: [OAuth2Scopes.Bot],
+        permissions: [PermissionsBitField.Flags.Administrator]
+      }) ?? ''
+  ],
+  ['serverCount', (ctx) => ctx.client?.guilds.cache.size.toString() ?? ''],
+  ['allMemberCount', (ctx) => ctx.client?.users.cache.size.toString() ?? ''],
+  [
+    'botAvatar',
+    (ctx) => ctx.client?.user?.avatarURL({}) ?? ctx.client?.user?.defaultAvatarURL ?? ''
+  ],
+  ['botName', (ctx) => `<@${ctx.client?.user?.id ?? ''}>`],
+  ['botNamePlain', (ctx) => ctx.client?.user?.displayName ?? ''],
+  ['botID', (ctx) => ctx.client?.user?.id ?? ''],
+  ['botTimeCreated', (ctx) => new Date(ctx.client?.user?.createdTimestamp ?? 0).toLocaleString()],
+  ['botDefaultAvatar', (ctx) => ctx.client?.user?.defaultAvatarURL ?? ''],
+  ['botDiscriminator', (ctx) => ctx.client?.user?.discriminator ?? ''],
+  ['botTag', (ctx) => ctx.client?.user?.tag ?? '']
+])
+
+const guildReplacements = new Map<string, (context: StringInfoContext) => string>([
+  ['server', (ctx) => ctx.guild?.name ?? ''],
+  ['serverIcon', (ctx) => ctx.guild?.iconURL({}) ?? ''],
+  ['serverBanner', (ctx) => ctx.guild?.bannerURL({}) ?? ''],
+  ['serverDescription', (ctx) => ctx.guild?.description ?? ''],
+  ['serverSplash', (ctx) => ctx.guild?.splashURL({}) ?? ''],
+  ['serverCreateTime', (ctx) => new Date(ctx.guild?.createdTimestamp ?? 0).toLocaleString()],
+  ['memberCount', (ctx) => ctx.guild?.memberCount.toString() ?? '']
+])
+
+const channelReplacements = new Map<string, (context: StringInfoContext) => string>([
+  ['channel', (ctx) => ctx.textChannel?.name ?? ''],
+  ['channelID', (ctx) => ctx.textChannel?.id ?? ''],
+  ['channelCreateDate', (ctx) => new Date(ctx.textChannel?.createdTimestamp ?? 0).toLocaleString()],
+  ['channelAsMention', (ctx) => `<#${ctx.textChannel?.id ?? ''}>`]
+])
+
+const mentionedReplacements = new Map<string, (context: StringInfoContext) => string>([
+  ['mentionedName', (ctx) => `<@${ctx.mentionedUser?.id ?? ''}>`],
+  ['mentionedID', (ctx) => ctx.mentionedUser?.id ?? ''],
+  ['mentionedTag', (ctx) => ctx.mentionedUser?.tag ?? ''],
+  ['mentionedDiscriminator', (ctx) => ctx.mentionedUser?.discriminator ?? ''],
+  [
+    'mentionedAvatar',
+    (ctx) => ctx.mentionedUser?.avatarURL({}) ?? ctx.mentionedUser?.defaultAvatarURL ?? ''
+  ],
+  [
+    'mentionedTimeCreated',
+    (ctx) => new Date(ctx.mentionedUser?.createdTimestamp ?? 0).toLocaleString()
+  ],
+  ['mentionedNamePlain', (ctx) => ctx.mentionedUser?.displayName ?? ''],
+  ['mentionedDefaultAvatar', (ctx) => ctx.mentionedUser?.defaultAvatarURL ?? ''],
+  ['mentionedIsBot', (ctx) => ctx.mentionedUser?.bot.toString() ?? '']
+])
+
+const generalReplacements = new Map<string, (context: StringInfoContext) => string>([
+  ['randomInt', (_ctx) => Math.floor(Math.random() * 100).toString()],
+  ['randomFloat', (_ctx) => Math.random().toString()],
+  ['randomBoolean', (_ctx) => (Math.random() > 0.5).toString()],
+  ['commandCount', (_ctx) => getCommands().bcfdCommands.length.toString()],
+  ['date', (_ctx) => new Date().toLocaleString()],
+  ['hours', (_ctx) => (new Date().getHours() < 10 ? '0' : '') + new Date().getHours().toString()],
+  [
+    'minutes',
+    (_ctx) => (new Date().getMinutes() < 10 ? '0' : '') + new Date().getMinutes().toString()
+  ],
+  [
+    'seconds',
+    (_ctx) => (new Date().getSeconds() < 10 ? '0' : '') + new Date().getSeconds().toString()
+  ],
+  ['message', (ctx) => ctx.messageEvent?.content ?? ''],
+  [
+    'messageAfterCommandd',
+    (ctx) => ctx.messageEvent?.content.substring(ctx.command?.command.length ?? 0).trim() ?? ''
+  ]
+])
+
+export async function stringInfoAddGeneral(message: string) {
+  // while $random is in the message, a command which comes in the form $random{abc|def|ghi}
+  // replace $random with a random string from the list
+  const random = /\$random\{([^}]+)\}/g
+
+  message = message.replace(random, (match, p1) => {
+    let messageArray = p1.split('|')
+    return messageArray[Math.floor(Math.random() * messageArray.length)]
+  })
+
+  // while $rollnum is in the message which is a command in the form $rollnum(1,10) it inserts a random number in the range inclusive.
+  const rollnumRegex = /\$rollnum\((-?\d+),(-?\d+)\)/
+  message = message.replace(rollnumRegex, (match, x, y) => {
+    const result = Math.floor(Math.random() * (parseInt(y) - parseInt(x) + 1)) + parseInt(x)
+    return result.toString()
+  })
+
+  const sumRegex = /\$sum\{([^}]+)\}/g
+
+  message = message.replace(sumRegex, (match, p1) => {
+    let numberArray = p1.split('|')
+
+    try {
+      let result = 0
+      for (const number of numberArray) {
+        result += parseInt(number)
       }
+
+      return result.toString()
+    } catch (error) {
+      return message + '```ERROR: NOT A NUMBER ON $sum```'
     }
-  
-    message = message
-      .replaceAll('$commandCount', getCommands().bcfdCommands.length.toString())
-      .replaceAll('$date', new Date().toLocaleString())
-      .replaceAll(
-        '$minutes',
-        (new Date().getMinutes() < 10 ? '0' : '') + new Date().getMinutes().toString()
-      )
-      .replaceAll(
-        '$hours',
-        (new Date().getHours() < 10 ? '0' : '') + new Date().getHours().toString()
-      )
-      .replaceAll(
-        '$seconds',
-        (new Date().getSeconds() < 10 ? '0' : '') + new Date().getSeconds().toString()
-      )
-  
-    // while $rollnum is in the message which is a command in the form $rollnum(1,10) it inserts a random number in the range inclusive.
-    while (message.includes('$rollnum')) {
-      let start = message.indexOf('$rollnum')
-      let subMessage = message.substring(start + 8)
-  
-      if (subMessage.includes('(') && subMessage.includes(',') && subMessage.includes(')')) {
-        let x = parseInt(subMessage.substring(1, subMessage.indexOf(',')).trim())
-        let y = parseInt(
-          subMessage.substring(subMessage.indexOf(',') + 1, subMessage.indexOf(')')).trim()
-        )
-  
-        let result = Math.floor(Math.random() * (y - x + 1)) + x
-        message =
-          message.substring(0, start) +
-          result.toString() +
-          subMessage.substring(subMessage.indexOf(')') + 1)
-      } else {
-        return message + '```ERROR: MISSING ( ) ON $rollnum```'
-      }
-    }
-  
-    while (message.includes('$sum')) {
-      let start = message.indexOf('$sum')
-      let subMessage = message.substring(start + 4)
-      if (subMessage.includes('}') && subMessage.charAt(0) == '{') {
-        let postMessage = subMessage.substring(subMessage.indexOf('}') + 1)
-  
-        subMessage = subMessage.substring(1, subMessage.indexOf('}'))
-  
-        let numberArray = subMessage.split('|')
-  
-        try {
-          let result = 0
-          for (const number of numberArray) {
-            result += parseInt(number)
-          }
-  
-          message = message.substring(0, start) + result.toString() + postMessage
-        } catch (error) {
-          return message + '```ERROR: NOT A NUMBER ON $sum```'
-        }
-      } else {
-        return message + '```ERROR: MISSING { } ON $sum```'
-      }
-    }
-  
-    return message
+  })
+
+  const regex = /\$chat\(([^)]+)\)/g
+
+  // Handle async chat replacements
+  for (const match of message.matchAll(regex)) {
+    const [fullMatch, prompt] = match
+    const response = await fetchChatResponse(prompt)
+    message = message.replace(fullMatch, response)
   }
-  
-  export function stringInfoAddMessageContent(message: string, baseMessage: Message, command: BCFDCommand) {
-    message = message
-      .replaceAll('$message', baseMessage.content)
-      .replaceAll('$messageAfterCommand', baseMessage.content.substring(command.command.length))
-  
-    return message
-  }
+
+  return message
+}
+
+async function fetchChatResponse(prompt: string): Promise<string> {
+  const openai = new OpenAI({
+    apiKey: '<OPENAI_API_KEY>'
+  })
+
+  const completion = await openai.chat.completions.create({
+    messages: [
+      { role: 'system', content: 'You are a helpful assistant.' },
+      { role: 'user', content: prompt }
+    ],
+    model: 'deepseek-chat'
+  })
+
+  return completion.choices[0].message.content ?? 'Failed to fetch chat response'
+}

@@ -1,0 +1,16 @@
+---
+description: General App Information
+globs: 
+alwaysApply: false
+---
+
+# App Description
+
+- A bot creating and hosting app for discord.
+- Uses Discord.js
+- Uses Svelte, TypeScript, Electron, Tailwind, DaisyUI.
+- Users create their commands [types.ts](mdc:src/main/types/types.ts) with a variety of fields
+- Content can be inserted into the responses [stringInfo.ts](mdc:src/main/services/stringInfo.ts)
+- Various parts of the app include stat tracking, status, webhooks, help, settings, etc.
+- Back-end like code goes into /src/main, see [index.ts](mdc:src/main/index.ts)
+- Front-end like code goes into /src/renderer
