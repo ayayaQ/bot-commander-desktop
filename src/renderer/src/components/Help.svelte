@@ -2,7 +2,7 @@
   import { t } from '../stores/localisation'
   import HeaderBar from './HeaderBar.svelte'
 
-  const helpUrl = 'https://ayayaq.github.io/DiscordBots-Help/'
+  const helpUrl = 'https://ayayaq.com/DiscordBots-Help/'
 </script>
 
 <div class="flex flex-col h-full">
