@@ -4,6 +4,49 @@ import { app } from 'electron'
 import { join } from 'path'
 
 let botStateContext: vm.Context
+const STARTUP_JS_FILENAME = 'startup.js'
+// Get the path to the startup JS file
+function getStartupJsPath() {
+  return join(app.getPath('userData'), STARTUP_JS_FILENAME)
+}
+
+// Get the current startup JS (returns string)
+export async function getStartupJs(): Promise<string> {
+  const path = getStartupJsPath()
+  try {
+    return await fs.readFile(path, 'utf-8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return ''
+    }
+    throw error
+  }
+}
+
+// Set the startup JS (writes string to file)
+export async function setStartupJs(js: string): Promise<void> {
+  const path = getStartupJsPath()
+  await fs.writeFile(path, js, 'utf-8')
+}
+
+// Run the startup JS in the given context
+export async function runStartupJs(context: vm.Context) {
+  const js = await getStartupJs()
+  if (js && js.trim()) {
+    try {
+      vm.runInContext(js, context)
+    } catch (e) {
+      console.error('Error running startup JS:', e)
+    }
+  }
+}
+
+// Restart the JS engine: re-create context, run startup JS, load botState
+export async function restartJsEngine() {
+  botStateContext = vm.createContext({ botState: {} })
+  await runStartupJs(botStateContext)
+  await loadBotState()
+}
 
 export function get(variableName: string, context: vm.Context) {
   return vm.runInContext(`${variableName}`, context)
@@ -63,6 +106,7 @@ export function stringInfoAddEval(code: string, context: vm.Context) {
 
 export async function initializeBotState() {
   botStateContext = vm.createContext({ botState: {} })
+  await runStartupJs(botStateContext)
   await loadBotState()
 }
 
