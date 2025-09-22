@@ -8,7 +8,8 @@
   let showToken: boolean
   let selectedLanguage: string
   let openaiApiKey: string
-  let openaiModel: 'gpt-4o' | 'gpt-4o-mini'
+  let openaiModel: 'gpt-4.1' | 'gpt-4.1-mini' | 'gpt-4.1-nano'
+  let developerPrompt: string
 
   function changeTheme(event) {
     let theme = event.target.value
@@ -38,12 +39,18 @@
     saveSettings({ ...$settingsStore, openaiModel })
   }
 
+  function updateDeveloperPrompt(event) {
+    developerPrompt = event.target.value
+    saveSettings({ ...$settingsStore, developerPrompt })
+  }
+
   onMount(() => {
     selectedTheme = $settingsStore.theme
     showToken = $settingsStore.showToken
     selectedLanguage = $settingsStore.language
     openaiApiKey = $settingsStore.openaiApiKey
     openaiModel = $settingsStore.openaiModel
+    developerPrompt = $settingsStore.developerPrompt
   })
 </script>
 
@@ -138,9 +145,23 @@
       <span class="label-text">OpenAI Model</span>
     </label>
     <select class="select select-bordered" value={openaiModel} on:change={updateOpenAIModel}>
-      <option value="gpt-4o">GPT-4o</option>
-      <option value="gpt-4o-mini">GPT-4o Mini</option>
+      <option value="gpt-4.1">GPT-4.1</option>
+      <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
+      <option value="gpt-4.1-nano">GPT-4.1 Nano</option>
     </select>
+  </div>
+
+  <div class="form-control">
+    <label class="label">
+      <span class="label-text">Developer Prompt</span>
+    </label>
+    <textarea
+      class="textarea textarea-bordered"
+      value={developerPrompt}
+      on:input={updateDeveloperPrompt}
+      placeholder="Enter your custom developer prompt"
+      rows="4"
+    />
   </div>
 
   <div class="divider"></div>

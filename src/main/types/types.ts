@@ -68,7 +68,8 @@ export type AppSettings = {
   showToken: boolean
   language: string
   openaiApiKey: string
-  openaiModel: 'gpt-4o' | 'gpt-4o-mini'
+  openaiModel: 'gpt-4.1' | 'gpt-4.1-mini' | 'gpt-4.1-nano'
+  developerPrompt: string
 }
 
 export type BotStatus = {

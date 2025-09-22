@@ -5,7 +5,8 @@ let settings: AppSettings = {
   showToken: false,
   language: 'en',
   openaiApiKey: '',
-  openaiModel: 'gpt-4o-mini'
+  openaiModel: 'gpt-4.1-nano',
+  developerPrompt: ''
 } // Default settings
 
 export function getSettings() {
@@ -31,7 +32,11 @@ export function setSettings(newSettings: AppSettings) {
   }
 
   if (!newSettings.openaiModel) {
-    newSettings.openaiModel = 'gpt-4o-mini'
+    newSettings.openaiModel = 'gpt-4.1-nano'
+  }
+
+  if (!newSettings.developerPrompt) {
+    newSettings.developerPrompt = ''
   }
 
   settings = newSettings
