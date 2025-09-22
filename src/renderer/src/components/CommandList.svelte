@@ -10,6 +10,7 @@
   let commands: BCFDCommand[] = []
   let isEditing = false
   let editingCommand: BCFDCommand | null = null
+  let editingIndex: number | null = null
   let searchQuery = ''
 
   onMount(async () => {
@@ -33,6 +34,7 @@
   function editCommand(command: BCFDCommand) {
     isEditing = true
     editingCommand = command
+    editingIndex = commands.findIndex((cmd) => cmd === command)
   }
 
   async function handleAdd(event: CustomEvent<BCFDCommand>) {
@@ -41,13 +43,13 @@
     isEditing = false
   }
 
-  async function handleUpdate(event: CustomEvent<BCFDCommand>) {
-    const updatedCommand = event.detail
-    commands = commands.map((cmd) =>
-      cmd.command === updatedCommand.command ? updatedCommand : cmd
-    )
+  async function handleUpdate(event: CustomEvent<{ command: BCFDCommand; index: number | null }>) {
+    const { command: updatedCommand, index } = event.detail
+    commands = commands.map((cmd, i) => (i === index ? updatedCommand : cmd))
     await saveCommands()
     isEditing = false
+    editingCommand = null
+    editingIndex = null
   }
 
   async function deleteCommand(command: BCFDCommand) {
@@ -67,6 +69,7 @@
     <CommandEditor
       mode={editingCommand ? 'edit' : 'add'}
       command={editingCommand}
+      index={editingIndex}
       on:add={handleAdd}
       on:update={handleUpdate}
       on:cancel={() => (isEditing = false)}

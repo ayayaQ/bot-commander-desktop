@@ -28,6 +28,7 @@ export type BCFDCommand = {
   sendPrivateEmbed: boolean
   specificChannel: string
   specificMessage: string
+  startsWith: boolean
   type: BCFDCommandType
   channelEmbed: BCFDEmbedMessageTemplate
   privateEmbed: BCFDEmbedMessageTemplate

@@ -7,9 +7,10 @@
 
   export let mode: 'edit' | 'add' = 'add'
   export let command: BCFDCommand | null = null
+  export let index: number | null = null
 
-  //const TYPE_MESSAGE_RECEIVED = 0
-  //const TYPE_PM_RECEIVED = 1
+  const TYPE_MESSAGE_RECEIVED = 0
+  const TYPE_PM_RECEIVED = 1
   const TYPE_MEMBER_JOIN = 2
   const TYPE_MEMBER_LEAVE = 3
   const TYPE_MEMBER_BAN = 4
@@ -20,7 +21,10 @@
   let importText: string = ''
   let showImportError = false
 
+  let dropdownOpen = false
+
   let activeActions: Array<{ type: string; name: string }> = []
+  let triggerDropdown = 0
 
   function getAvailableActions(
     activeActions: Array<{ type: string; name: string }>,
@@ -28,7 +32,6 @@
   ) {
     const allActions = [
       { type: 'sendMessage', name: $t('send-message') },
-      { type: 'phrase', name: $t('phrase') },
       { type: 'sendPrivateMessage', name: $t('send-private-message') },
       { type: 'sendChannelEmbed', name: $t('send-channel-embed') },
       { type: 'sendPrivateEmbed', name: $t('send-private-embed') },
@@ -54,6 +57,7 @@
   }
 
   function addAction(type: string) {
+    dropdownOpen = false
     const action = getAvailableActions(activeActions, isLimitedType).find((a) => a.type === type)
     if (action) {
       activeActions = [...activeActions, action]
@@ -122,6 +126,9 @@
       case 'phrase':
         editedCommand.phrase = value
         break
+      case 'startsWith':
+        editedCommand.startsWith = value
+        break
     }
   }
 
@@ -178,6 +185,12 @@
       editedCommand.command = ''
     }
 
+    if (mode === 'edit') {
+      dispatch('update', { command: editedCommand, index })
+    } else {
+      dispatch('add', editedCommand)
+    }
+
     dispatch(mode === 'edit' ? 'update' : 'add', editedCommand)
   }
 
@@ -203,6 +216,10 @@
     if (cmd.isRequiredRole) activeActions.push({ type: 'requiredRole', name: $t('requires-role') })
     if (cmd.isAdmin) activeActions.push({ type: 'requireAdmin', name: $t('requires-admin') })
     if (cmd.isNSFW) activeActions.push({ type: 'nsfw', name: $t('is-nsfw') })
+
+    if (cmd.phrase) triggerDropdown = 2
+    else if (cmd.startsWith) triggerDropdown = 1
+    else triggerDropdown = 0
   }
 
   onMount(() => {
@@ -237,6 +254,7 @@
           sendPrivateEmbed: false,
           specificChannel: '',
           specificMessage: '',
+          startsWith: false,
           requiredRole: '',
           type: 0,
           channelEmbed: {
@@ -311,9 +329,9 @@
   <HeaderBar>
     <div class=" font-bold text-2xl">{$t(mode === 'edit' ? 'edit-command' : 'add-command')}</div>
     <div class="flex justify-end gap-2 items-center">
-      <details class="dropdown">
+      <details class="dropdown" bind:open={dropdownOpen}>
         <summary class="btn btn-primary"
-          ><span class="material-symbols-outlined">add</span>Actions</summary
+          ><span class="material-symbols-outlined">add</span>{$t('actions')}</summary
         >
         <ul
           class="menu dropdown-content bg-base-100 rounded-box z-[1] w-52 p-2 shadow max-h-96 overflow-y-auto flex flex-col gap-1 flex-nowrap"
@@ -413,6 +431,27 @@
                         required
                       />
                     </div>
+                    {#if editedCommand.type == TYPE_MESSAGE_RECEIVED || editedCommand.type === TYPE_PM_RECEIVED}
+                      <div class="form-control">
+                        <label class="label" for="type">
+                          <span class="label-text">{$t('command-trigger')}</span>
+                        </label>
+                        <select
+                          id="type"
+                          bind:value={triggerDropdown}
+                          class="select select-bordered"
+                          required
+                          on:change={() => {
+                            editedCommand.phrase = triggerDropdown == 2
+                            editedCommand.startsWith = triggerDropdown == 1
+                          }}
+                        >
+                          <option value={0}>{$t('command-only')}</option>
+                          <option value={1}>{$t('starts-with')}</option>
+                          <option value={2}>{$t('phrase')}</option>
+                        </select>
+                      </div>
+                    {/if}
                   {:else}
                     <div class="form-control col-span-2">
                       <label class="label" for="reaction">
@@ -452,7 +491,7 @@
                     class="textarea textarea-bordered"
                     rows="3"
                   />
-                {:else if action.type === 'sendEmbed'}
+                {:else if action.type === 'sendChannelEmbed'}
                   <div class="form-control">
                     <label class="label" for="channelEmbedTitle">
                       <span class="label-text">{$t('channel-embed-title')}</span>
