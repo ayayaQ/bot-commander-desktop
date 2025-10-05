@@ -53,8 +53,26 @@
   }
 
   async function deleteCommand(command: BCFDCommand) {
-    commands = commands.filter((cmd) => cmd.command !== command.command)
+    commands = commands.filter((cmd) => cmd !== command)
     await saveCommands()
+  }
+
+  async function exportCommands() {
+    const result = await (window as any).electron.ipcRenderer.invoke('export-commands')
+    if (result.success) {
+    } else if (!result.canceled) {
+      alert('Error exporting commands: ' + result.error)
+    }
+  }
+
+  async function importCommands() {
+    const result = await (window as any).electron.ipcRenderer.invoke('import-commands')
+    if (result.success) {
+      commands = [...commands, ...result.commands]
+      await saveCommands()
+    } else if (!result.canceled) {
+      alert('Error importing commands: ' + result.error)
+    }
   }
 
   $: filteredCommands = commands.filter(
@@ -79,13 +97,25 @@
       <div class=" basis-full">
         <div class="flex justify-between items-center mb-4">
           <h2 class="text-2xl font-bold">{$t('commands')}</h2>
-          <button class="btn btn-primary" on:click={addCommand}
-            ><span class="material-symbols-outlined">add</span>{$t('add-command')}</button
-          >
+          <div class="flex gap-2">
+            <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('export')}>
+              <button class="btn btn-primary" on:click={exportCommands}>
+                <span class="material-symbols-outlined">download</span>
+              </button>
+            </span>
+            <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('import')}>
+              <button class="btn btn-primary" on:click={importCommands}>
+                <span class="material-symbols-outlined">upload</span>
+              </button>
+            </span>
+            <button class="btn btn-primary" on:click={addCommand}>
+              <span class="material-symbols-outlined">add</span>{$t('add-command')}
+            </button>
+          </div>
         </div>
         <div class="">
           <label class="input input-bordered flex items-center gap-2">
-            <input type="text" class="grow" placeholder="Search" bind:value={searchQuery} />
+            <input type="text" class="grow" placeholder={$t('search')} bind:value={searchQuery} />
             <span class="material-symbols-outlined">search</span>
           </label>
         </div>
