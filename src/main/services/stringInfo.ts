@@ -62,7 +62,7 @@ export async function stringInfoAdd(ctx: StringInfoContext): Promise<string> {
     return _match // Return the original match if no replacement is found
   })
 
-  result = await stringInfoAddGeneral(result)
+  result = await stringInfoAddGeneral(result, ctx)
 
   result = stringInfoAddEval(result, getContext())
 
@@ -210,12 +210,24 @@ const generalReplacements = new Map<string, (context: StringInfoContext) => stri
   ],
   ['message', (ctx) => ctx.messageEvent?.content ?? ''],
   [
-    'messageAfterCommandd',
+    'messageAfterCommand',
     (ctx) => ctx.messageEvent?.content.substring(ctx.command?.command.length ?? 0).trim() ?? ''
+  ],
+  [
+    'argsCount',
+    (ctx) => {
+      const after =
+        ctx.messageEvent?.content.substring(ctx.command?.command.length ?? 0).trim() ?? ''
+      const args = after.split(' ').filter((s) => s.length > 0)
+      return args.length.toString()
+    }
   ]
 ])
 
-export async function stringInfoAddGeneral(message: string) {
+export async function stringInfoAddGeneral(
+  message: string,
+  ctx: StringInfoContext
+): Promise<string> {
   // while $random is in the message, a command which comes in the form $random{abc|def|ghi}
   // replace $random with a random string from the list
   const random = /\$random\{([^}]+)\}/g
@@ -247,6 +259,15 @@ export async function stringInfoAddGeneral(message: string) {
     } catch (error) {
       return message + '```ERROR: NOT A NUMBER ON $sum```'
     }
+  })
+
+  const argsRegex = /\$args\((\d+)\)/g
+
+  message = message.replace(argsRegex, (match, indexStr) => {
+    const index = parseInt(indexStr)
+    const after = ctx.messageEvent?.content.substring(ctx.command?.command.length ?? 0).trim() ?? ''
+    const args = after.split(' ').filter((s) => s.length > 0)
+    return args[index] ?? ''
   })
 
   const regex = /\$chat\(([^)]+)\)/g
