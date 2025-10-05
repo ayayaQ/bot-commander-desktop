@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, session } from 'electron'
+import { BrowserWindow, ipcMain, session, dialog, shell } from 'electron'
 import { OAuth2Scopes, PermissionsBitField, WebhookClient } from 'discord.js'
 import {
   getBotStateContext,
@@ -8,6 +8,7 @@ import {
   restartJsEngine
 } from '../utils/virtual'
 import vm from 'node:vm'
+import fs from 'fs/promises'
 import {
   applyBotStatus,
   Connect,
@@ -185,5 +186,64 @@ export function addIPCHandlers() {
   ipcMain.handle('restart-js-engine', async () => {
     await restartJsEngine()
     return true
+  })
+
+  // Export commands to JSON file
+  ipcMain.handle('export-commands', async () => {
+    const commands = getCommands()
+    const result = await dialog.showSaveDialog(BrowserWindow.getFocusedWindow()!, {
+      title: 'Export Commands',
+      defaultPath: 'commands.json',
+      filters: [
+        { name: 'JSON Files', extensions: ['json'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    })
+
+    if (!result.canceled && result.filePath) {
+      try {
+        await fs.writeFile(result.filePath, JSON.stringify(commands.bcfdCommands, null, 2))
+        return { success: true }
+      } catch (error) {
+        console.error('Error exporting commands:', error)
+        return { success: false, error: (error as Error).message }
+      }
+    }
+    return { success: false, canceled: true }
+  })
+
+  // Import commands from JSON file
+  ipcMain.handle('import-commands', async () => {
+    const result = await dialog.showOpenDialog(BrowserWindow.getFocusedWindow()!, {
+      title: 'Import Commands',
+      filters: [
+        { name: 'JSON Files', extensions: ['json'] },
+        { name: 'All Files', extensions: ['*'] }
+      ],
+      properties: ['openFile']
+    })
+
+    if (!result.canceled && result.filePaths.length > 0) {
+      try {
+        const data = await fs.readFile(result.filePaths[0], 'utf-8')
+        const importedCommands = JSON.parse(data) as BCFDCommand[]
+        return { success: true, commands: importedCommands }
+      } catch (error) {
+        console.error('Error importing commands:', error)
+        return { success: false, error: (error as Error).message }
+      }
+    }
+    return { success: false, canceled: true }
+  })
+
+  // Open external URLs in default browser
+  ipcMain.handle('open-external-url', async (event, url: string) => {
+    try {
+      await shell.openExternal(url)
+      return { success: true }
+    } catch (error) {
+      console.error('Error opening external URL:', error)
+      return { success: false, error: (error as Error).message }
+    }
   })
 }
