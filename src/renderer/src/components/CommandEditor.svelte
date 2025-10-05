@@ -190,8 +190,6 @@
     } else {
       dispatch('add', editedCommand)
     }
-
-    dispatch(mode === 'edit' ? 'update' : 'add', editedCommand)
   }
 
   function initializeActiveActions(cmd: BCFDCommand) {
