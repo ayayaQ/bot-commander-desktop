@@ -44,6 +44,12 @@
     saveSettings({ ...$settingsStore, developerPrompt })
   }
 
+  function openExternalLink(event) {
+    event.preventDefault()
+    const url = event.target.href
+    ;(window as any).electron.ipcRenderer.invoke('open-external-url', url)
+  }
+
   onMount(() => {
     selectedTheme = $settingsStore.theme
     showToken = $settingsStore.showToken
@@ -59,7 +65,7 @@
 </HeaderBar>
 
 <div class="p-4">
-  <h2 class="text-2xl font-bold mb-4">General</h2>
+  <h2 class="text-2xl font-bold mb-4">{$t('general')}</h2>
   <div class="form-control">
     <!-- svelte-ignore a11y-label-has-associated-control -->
     <label class="label">
@@ -125,24 +131,24 @@
   </div>
 
   <div class="divider"></div>
-  <h2 class="text-2xl font-bold mb-4">OpenAI</h2>
+  <h2 class="text-2xl font-bold mb-4">{$t('openai')}</h2>
 
   <div class="form-control">
     <label class="label">
-      <span class="label-text">OpenAI API Key</span>
+      <span class="label-text">{$t('openai-api-key')}</span>
     </label>
     <input
       type={showToken ? 'text' : 'password'}
       class="input input-bordered"
       value={openaiApiKey}
       on:input={updateOpenAIKey}
-      placeholder="Enter your OpenAI API key"
+      placeholder={$t('enter-your-openai-api-key')}
     />
   </div>
 
   <div class="form-control">
     <label class="label">
-      <span class="label-text">OpenAI Model</span>
+      <span class="label-text">{$t('openai-model')}</span>
     </label>
     <select class="select select-bordered" value={openaiModel} on:change={updateOpenAIModel}>
       <option value="gpt-4.1">GPT-4.1</option>
@@ -153,13 +159,13 @@
 
   <div class="form-control">
     <label class="label">
-      <span class="label-text">Developer Prompt</span>
+      <span class="label-text">{$t('developer-prompt')}</span>
     </label>
     <textarea
       class="textarea textarea-bordered"
       value={developerPrompt}
       on:input={updateDeveloperPrompt}
-      placeholder="Enter your custom developer prompt"
+      placeholder={$t('enter-your-custom-developer-prompt')}
       rows="4"
     />
   </div>
@@ -167,10 +173,18 @@
   <div class="divider"></div>
   <h2 class="text-2xl font-bold mb-4">{$t('about')}</h2>
   <p>Version: {$t('version-value')}</p>
-  <p>Author: <a href="https://github.com/ayayaQ" class="link link-primary">ayayaQ</a></p>
   <p>
-    Discord: <a href="https://discord.com/invite/mZp54sZ" class="link link-primary"
-      >Bot Commander for Discord Official Server</a
+    Author: <a
+      href="https://github.com/ayayaQ"
+      class="link link-primary"
+      on:click={openExternalLink}>ayayaQ</a
+    >
+  </p>
+  <p>
+    Discord: <a
+      href="https://discord.com/invite/mZp54sZ"
+      class="link link-primary"
+      on:click={openExternalLink}>Bot Commander for Discord Official Server</a
     >
   </p>
 </div>

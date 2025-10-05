@@ -197,14 +197,14 @@
   <!-- Startup JS Section -->
   <div class="bg-base-200 p-4 rounded-lg shadow-lg mb-4">
     <div class="flex flex-row justify-between items-center mb-2">
-      <h3 class="text-xl font-bold">Startup JS</h3>
+      <h3 class="text-xl font-bold">{$t('startup-js')}</h3>
       <div class="flex gap-2">
         <button
           class="btn btn-primary"
           on:click={saveStartupJs}
           disabled={startupJsSaved || startupJsLoading}
         >
-          <span class="material-symbols-outlined">save</span> Save
+          <span class="material-symbols-outlined">save</span>{$t('save')}
         </button>
       </div>
     </div>
@@ -273,8 +273,8 @@
         <button class="btn btn-primary mb-2 grow-0" on:click={runCode}
           ><span class="material-symbols-outlined">play_arrow</span>{$t('run')}</button
         >
-        <button class="btn btn-warning" on:click={restartJsEngine}>
-          <span class="material-symbols-outlined">restart_alt</span> Restart JS Engine
+        <button class="btn btn-secondary" on:click={restartJsEngine}>
+          <span class="material-symbols-outlined">restart_alt</span>{$t('restart-js-engine')}
         </button>
       </div>
     </div>
