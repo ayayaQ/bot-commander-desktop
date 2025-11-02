@@ -6,7 +6,8 @@ let settings: AppSettings = {
   language: 'en',
   openaiApiKey: '',
   openaiModel: 'gpt-4.1-nano',
-  developerPrompt: ''
+  developerPrompt: '',
+  useCustomApi: false
 } // Default settings
 
 export function getSettings() {
@@ -37,6 +38,10 @@ export function setSettings(newSettings: AppSettings) {
 
   if (!newSettings.developerPrompt) {
     newSettings.developerPrompt = ''
+  }
+
+  if (newSettings.useCustomApi === undefined) {
+    newSettings.useCustomApi = false
   }
 
   settings = newSettings

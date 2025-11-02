@@ -10,6 +10,7 @@
   let openaiApiKey: string
   let openaiModel: 'gpt-4.1' | 'gpt-4.1-mini' | 'gpt-4.1-nano'
   let developerPrompt: string
+  let useCustomApi: boolean
 
   function changeTheme(event) {
     let theme = event.target.value
@@ -44,6 +45,10 @@
     saveSettings({ ...$settingsStore, developerPrompt })
   }
 
+  function toggleCustomApi() {
+    saveSettings({ ...$settingsStore, useCustomApi })
+  }
+
   function openExternalLink(event) {
     event.preventDefault()
     const url = event.target.href
@@ -57,6 +62,7 @@
     openaiApiKey = $settingsStore.openaiApiKey
     openaiModel = $settingsStore.openaiModel
     developerPrompt = $settingsStore.developerPrompt
+    useCustomApi = $settingsStore.useCustomApi
   })
 </script>
 
@@ -142,6 +148,7 @@
       class="input input-bordered"
       value={openaiApiKey}
       on:input={updateOpenAIKey}
+      disabled={$settingsStore.useCustomApi}
       placeholder={$t('enter-your-openai-api-key')}
     />
   </div>
@@ -150,7 +157,12 @@
     <label class="label">
       <span class="label-text">{$t('openai-model')}</span>
     </label>
-    <select class="select select-bordered" value={openaiModel} on:change={updateOpenAIModel}>
+    <select
+      class="select select-bordered"
+      value={openaiModel}
+      on:change={updateOpenAIModel}
+      disabled={$settingsStore.useCustomApi}
+    >
       <option value="gpt-4.1">GPT-4.1</option>
       <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
       <option value="gpt-4.1-nano">GPT-4.1 Nano</option>
@@ -169,6 +181,23 @@
       rows="4"
     />
   </div>
+
+  {#if false}
+    <div class="divider"></div>
+    <h2 class="text-2xl font-bold mb-4">ayayaQ API (Optional)</h2>
+
+    <div class="form-control">
+      <label class="label cursor-pointer">
+        <span class="label-text">Use ayayaQ API instead of OpenAI</span>
+        <input
+          type="checkbox"
+          class="toggle toggle-primary"
+          bind:checked={useCustomApi}
+          on:change={toggleCustomApi}
+        />
+      </label>
+    </div>
+  {/if}
 
   <div class="divider"></div>
   <h2 class="text-2xl font-bold mb-4">{$t('about')}</h2>

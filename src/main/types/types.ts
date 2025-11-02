@@ -70,6 +70,7 @@ export type AppSettings = {
   openaiApiKey: string
   openaiModel: 'gpt-4.1' | 'gpt-4.1-mini' | 'gpt-4.1-nano'
   developerPrompt: string
+  useCustomApi: boolean
 }
 
 export type BotStatus = {
