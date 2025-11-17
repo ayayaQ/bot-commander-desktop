@@ -378,7 +378,7 @@
         <div class="space-y-4">
           <div class="card bg-base-200">
             <div class="card-header flex justify-between items-center p-3">
-              <h3 class="text-lg font-bold">Details</h3>
+              <h3 class="text-lg font-bold">{$t('details')}</h3>
             </div>
             <div class="card-body">
               <!-- Base Details -->
