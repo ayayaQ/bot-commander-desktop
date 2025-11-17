@@ -377,24 +377,28 @@ async function fetchChatResponse(prompt: string): Promise<string> {
     return 'Error: OpenAI API key not set in settings'
   }
 
-  const openai = new OpenAI({
-    apiKey: settings.openaiApiKey
-  })
+  try {
+    const openai = new OpenAI({
+      apiKey: settings.openaiApiKey
+    })
 
-  const completion = await openai.chat.completions.create({
-    messages: [
-      {
-        role: 'system',
-        content: basePrompt
-      },
-      {
-        role: 'system',
-        content: settings.developerPrompt
-      },
-      { role: 'user', content: prompt }
-    ],
-    model: settings.openaiModel
-  })
+    const completion = await openai.chat.completions.create({
+      messages: [
+        {
+          role: 'system',
+          content: basePrompt
+        },
+        {
+          role: 'system',
+          content: settings.developerPrompt
+        },
+        { role: 'user', content: prompt }
+      ],
+      model: settings.openaiModel
+    })
 
-  return completion.choices[0].message.content ?? 'Failed to fetch chat response'
+    return completion.choices[0].message.content ?? 'Failed to fetch chat response'
+  } catch (error) {
+    return 'OpenAI API Unavailable'
+  }
 }
