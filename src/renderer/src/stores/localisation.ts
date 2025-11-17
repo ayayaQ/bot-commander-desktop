@@ -134,7 +134,24 @@ const translations: Languages = {
     'activity-competing': 'Competing',
     'language-tooltip': 'The language may be machine translated.',
     'no-state-data': 'No state data found.',
-    help: 'Help'
+    help: 'Help',
+    details: 'Details',
+    actions: 'Actions',
+    'command-trigger': 'Command Trigger',
+    'command-only': 'Command Only',
+    'starts-with': 'Starts With',
+    'startup-js': 'Startup JavaScript',
+    save: 'Save',
+    'restart-js-engine': 'Restart JS Engine',
+    export: 'Export',
+    import: 'Import',
+    general: 'General',
+    openai: 'OpenAI',
+    'openai-api-key': 'OpenAI API Key',
+    'enter-your-openai-api-key': 'Enter your OpenAI API key...',
+    'openai-model': 'OpenAI Model',
+    'developer-prompt': 'Developer Prompt',
+    'enter-your-custom-developer-prompt': 'Enter your custom developer prompt...'
     // ... more English strings
   },
   es: {
@@ -257,7 +274,24 @@ const translations: Languages = {
     'activity-competing': 'Competiendo',
     'language-tooltip': 'El idioma puede ser una traducción automática.',
     'no-state-data': 'No hay datos de estado.',
-    help: 'Ayuda'
+    help: 'Ayuda',
+    details: 'Detalles',
+    actions: 'Acciones',
+    'command-trigger': 'Disparador de comando',
+    'command-only': 'Solo comando',
+    'starts-with': 'Comienza con',
+    'startup-js': 'JavaScript de inicio',
+    save: 'Guardar',
+    'restart-js-engine': 'Reiniciar motor JS',
+    export: 'Exportar',
+    import: 'Importar',
+    general: 'General',
+    openai: 'OpenAI',
+    'openai-api-key': 'Clave de API de OpenAI',
+    'enter-your-openai-api-key': 'Introduce tu clave de API de OpenAI...',
+    'openai-model': 'Modelo de OpenAI',
+    'developer-prompt': 'Prompt del desarrollador',
+    'enter-your-custom-developer-prompt': 'Introduce tu prompt de desarrollador personalizado...'
     // ... more Spanish strings
   },
   ja: {
@@ -379,7 +413,24 @@ const translations: Languages = {
     'activity-competing': 'コンペティング',
     'language-tooltip': '言語は自動翻訳される可能性があります。',
     'no-state-data': '状態データがありません。',
-    help: 'ヘルプ'
+    help: 'ヘルプ',
+    details: '詳細',
+    actions: 'アクション',
+    'command-trigger': 'コマンドトリガー',
+    'command-only': 'コマンドのみ',
+    'starts-with': 'で始まる',
+    'startup-js': '起動JavaScript',
+    save: '保存',
+    'restart-js-engine': 'JSエンジンを再起動',
+    export: 'エクスポート',
+    import: 'インポート',
+    general: '一般',
+    openai: 'OpenAI',
+    'openai-api-key': 'OpenAI APIキー',
+    'enter-your-openai-api-key': 'OpenAI APIキーを入力してください...',
+    'openai-model': 'OpenAIモデル',
+    'developer-prompt': '開発者プロンプト',
+    'enter-your-custom-developer-prompt': 'カスタム開発者プロンプトを入力してください...'
     // ... more Japanese strings
   },
   zh: {
@@ -501,7 +552,24 @@ const translations: Languages = {
     'activity-competing': '竞争',
     'language-tooltip': '语言可能是机器翻译的。',
     'no-state-data': '没有状态数据。',
-    help: '帮助'
+    help: '帮助',
+    details: '详情',
+    actions: '操作',
+    'command-trigger': '命令触发器',
+    'command-only': '仅命令',
+    'starts-with': '以...开始',
+    'startup-js': '启动JavaScript',
+    save: '保存',
+    'restart-js-engine': '重启JS引擎',
+    export: '导出',
+    import: '导入',
+    general: '通用',
+    openai: 'OpenAI',
+    'openai-api-key': 'OpenAI API密钥',
+    'enter-your-openai-api-key': '输入您的OpenAI API密钥...',
+    'openai-model': 'OpenAI模型',
+    'developer-prompt': '开发者提示',
+    'enter-your-custom-developer-prompt': '输入您的自定义开发者提示...'
     // ... more Simplified Chinese strings
   },
   ko: {
@@ -623,7 +691,24 @@ const translations: Languages = {
     'activity-competing': '경쟁',
     'language-tooltip': '언어는 자동 번역일 수 있습니다.',
     'no-state-data': '상태 데이터가 없습니다.',
-    help: '도움말'
+    help: '도움말',
+    details: '세부 정보',
+    actions: '작업',
+    'command-trigger': '명령 트리거',
+    'command-only': '명령만',
+    'starts-with': '시작',
+    'startup-js': '시작 JavaScript',
+    save: '저장',
+    'restart-js-engine': 'JS 엔진 재시작',
+    export: '내보내기',
+    import: '가져오기',
+    general: '일반',
+    openai: 'OpenAI',
+    'openai-api-key': 'OpenAI API 키',
+    'enter-your-openai-api-key': 'OpenAI API 키를 입력하세요...',
+    'openai-model': 'OpenAI 모델',
+    'developer-prompt': '개발자 프롬프트',
+    'enter-your-custom-developer-prompt': '사용자 정의 개발자 프롬프트를 입력하세요...'
     // ... more Korean strings
   },
   ru: {
@@ -745,7 +830,24 @@ const translations: Languages = {
     'activity-competing': 'Соревнование',
     'language-tooltip': 'Язык может быть машинным переводом.',
     'no-state-data': 'Нет данных о состоянии.',
-    help: 'Помощь'
+    help: 'Помощь',
+    details: 'Подробности',
+    actions: 'Действия',
+    'command-trigger': 'Триггер команды',
+    'command-only': 'Только команда',
+    'starts-with': 'Начинается с',
+    'startup-js': 'Запуск JavaScript',
+    save: 'Сохранить',
+    'restart-js-engine': 'Перезапустить JS-движок',
+    export: 'Экспорт',
+    import: 'Импорт',
+    general: 'Общие',
+    openai: 'OpenAI',
+    'openai-api-key': 'API-ключ OpenAI',
+    'enter-your-openai-api-key': 'Введите ваш API-ключ OpenAI...',
+    'openai-model': 'Модель OpenAI',
+    'developer-prompt': 'Запрос разработчика',
+    'enter-your-custom-developer-prompt': 'Введите свой пользовательский запрос разработчика...'
     // ... more Russian strings
   }
   // ... more languages

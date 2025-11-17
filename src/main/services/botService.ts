@@ -721,10 +721,12 @@ async function onMessageCreate(message: OmitPartialGroupDMChannel<Message<boolea
 
   let filteredCommands = commands.bcfdCommands.filter(
     (c) =>
-      (c.type == 0 && message.content == c.command) ||
-      (c.phrase && message.content.toLowerCase().includes(c.command.toLowerCase())) ||
-      c.command == '*' ||
-      ((c.isBan || c.isKick || c.isVoiceMute) && c.command == firstItem && messageWordCount == 2)
+      c.type == 0 &&
+      (message.content == c.command ||
+        (c.startsWith && message.content.startsWith(c.command)) ||
+        (c.phrase && message.content.toLowerCase().includes(c.command.toLowerCase())) ||
+        c.command == '*' ||
+        ((c.isBan || c.isKick || c.isVoiceMute) && c.command == firstItem && messageWordCount == 2))
   )
 
   for (const command of filteredCommands) {

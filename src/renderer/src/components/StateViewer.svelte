@@ -2,6 +2,49 @@
   import { onMount, onDestroy } from 'svelte'
   import { t } from '../stores/localisation'
   import HeaderBar from './HeaderBar.svelte'
+  import AutoResizingTextarea from './AutoResizingTextarea.svelte'
+
+  // Startup JS logic
+  let startupJs = ''
+  let startupJsSaved = true
+  let startupJsLoading = false
+
+  async function loadStartupJs() {
+    startupJsLoading = true
+    try {
+      startupJs = await (window as any).electron.ipcRenderer.invoke('get-startup-js')
+      startupJsSaved = true
+    } catch (e) {
+      showErrorToast('Failed to load startup JS')
+    } finally {
+      startupJsLoading = false
+    }
+  }
+
+  async function saveStartupJs() {
+    try {
+      await (window as any).electron.ipcRenderer.invoke('set-startup-js', startupJs)
+      startupJsSaved = true
+    } catch (e) {
+      showErrorToast('Failed to save startup JS')
+    }
+  }
+
+  function onStartupJsInput(e: Event) {
+    startupJs = (e.target as HTMLTextAreaElement).value
+    startupJsSaved = false
+  }
+
+  async function restartJsEngine() {
+    try {
+      await (window as any).electron.ipcRenderer.invoke('restart-js-engine')
+      await updateBotState()
+      await loadStartupJs()
+      showErrorToast('JS engine restarted!')
+    } catch (e) {
+      showErrorToast('Failed to restart JS engine')
+    }
+  }
 
   let botState: Record<string, any> = {}
   let editingKey: string | null = null
@@ -117,18 +160,13 @@
 
   onMount(() => {
     updateBotState()
+    loadStartupJs()
     interval = setInterval(updateBotState, 1000) // Update every second
   })
 
   onDestroy(() => {
     clearInterval(interval)
   })
-
-  function autoResize(e: Event) {
-    const textarea = e.target as HTMLTextAreaElement
-    textarea.style.height = 'auto'
-    textarea.style.height = textarea.scrollHeight + 'px'
-  }
 </script>
 
 <HeaderBar>
@@ -156,6 +194,37 @@
 </HeaderBar>
 
 <div class="p-4">
+  <!-- Startup JS Section -->
+  <div class="bg-base-200 p-4 rounded-lg shadow-lg mb-4">
+    <div class="flex flex-row justify-between items-center mb-2">
+      <h3 class="text-xl font-bold">{$t('startup-js')}</h3>
+      <div class="flex gap-2">
+        <button
+          class="btn btn-primary"
+          on:click={saveStartupJs}
+          disabled={startupJsSaved || startupJsLoading}
+        >
+          <span class="material-symbols-outlined">save</span>{$t('save')}
+        </button>
+      </div>
+    </div>
+    <AutoResizingTextarea
+      bind:value={startupJs}
+      onInput={onStartupJsInput}
+      placeholder="// JS to run at context startup"
+      className="textarea textarea-bordered w-full min-h-[2.5rem] resize-none overflow-hidden font-mono"
+      spellcheck={false}
+      disabled={startupJsLoading}
+      minHeight="2.5rem"
+      resize="none"
+    />
+    {#if startupJsLoading}
+      <div class="text-sm text-gray-500 mt-1">Loading...</div>
+    {/if}
+    {#if !startupJsSaved && !startupJsLoading}
+      <div class="text-sm text-warning mt-1">Unsaved changes</div>
+    {/if}
+  </div>
   <div class="bg-base-200 p-4 rounded-lg shadow-lg mb-4">
     <div class="overflow-x-auto">
       <table class="table table-compact w-full">
@@ -200,19 +269,26 @@
   <div class="bg-base-200 p-4 rounded-lg shadow-lg">
     <div class="flex flex-row justify-between items-center">
       <h3 class="text-xl font-bold mb-2">{$t('run-code')}</h3>
-      <button class="btn btn-primary mb-2 grow-0" on:click={runCode}
-        ><span class="material-symbols-outlined">play_arrow</span>{$t('run')}</button
-      >
+      <div class="flex gap-2">
+        <button class="btn btn-primary mb-2 grow-0" on:click={runCode}
+          ><span class="material-symbols-outlined">play_arrow</span>{$t('run')}</button
+        >
+        <button class="btn btn-secondary" on:click={restartJsEngine}>
+          <span class="material-symbols-outlined">restart_alt</span>{$t('restart-js-engine')}
+        </button>
+      </div>
     </div>
 
     <div class="mb-2">
-      <textarea
+      <AutoResizingTextarea
         bind:value={codeToRun}
+        onInput={undefined}
         placeholder={$t('run-code-placeholder')}
-        class="textarea textarea-bordered w-full min-h-[2.5rem] resize-none overflow-hidden"
-        spellcheck="false"
-        on:input={autoResize}
-      ></textarea>
+        className="textarea textarea-bordered w-full min-h-[2.5rem] resize-none overflow-hidden"
+        spellcheck={false}
+        minHeight="2.5rem"
+        resize="none"
+      />
     </div>
     {#if codeOutput}
       <div class="flex justify-start gap-2">
@@ -226,8 +302,8 @@
 </div>
 
 {#if showToast}
-  <div class="toast toast-top toast-end">
-    <div class="alert alert-error">
+  <div class="toast toast-start toast-bottom">
+    <div class="alert alert-info">
       <div>
         <span>{toastMessage}</span>
       </div>

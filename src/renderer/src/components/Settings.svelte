@@ -8,7 +8,9 @@
   let showToken: boolean
   let selectedLanguage: string
   let openaiApiKey: string
-  let openaiModel: 'gpt-4o' | 'gpt-4o-mini'
+  let openaiModel: 'gpt-4.1' | 'gpt-4.1-mini' | 'gpt-4.1-nano'
+  let developerPrompt: string
+  let useCustomApi: boolean
 
   function changeTheme(event) {
     let theme = event.target.value
@@ -38,12 +40,29 @@
     saveSettings({ ...$settingsStore, openaiModel })
   }
 
+  function updateDeveloperPrompt(event) {
+    developerPrompt = event.target.value
+    saveSettings({ ...$settingsStore, developerPrompt })
+  }
+
+  function toggleCustomApi() {
+    saveSettings({ ...$settingsStore, useCustomApi })
+  }
+
+  function openExternalLink(event) {
+    event.preventDefault()
+    const url = event.target.href
+    ;(window as any).electron.ipcRenderer.invoke('open-external-url', url)
+  }
+
   onMount(() => {
     selectedTheme = $settingsStore.theme
     showToken = $settingsStore.showToken
     selectedLanguage = $settingsStore.language
     openaiApiKey = $settingsStore.openaiApiKey
     openaiModel = $settingsStore.openaiModel
+    developerPrompt = $settingsStore.developerPrompt
+    useCustomApi = $settingsStore.useCustomApi
   })
 </script>
 
@@ -52,7 +71,7 @@
 </HeaderBar>
 
 <div class="p-4">
-  <h2 class="text-2xl font-bold mb-4">General</h2>
+  <h2 class="text-2xl font-bold mb-4">{$t('general')}</h2>
   <div class="form-control">
     <!-- svelte-ignore a11y-label-has-associated-control -->
     <label class="label">
@@ -118,38 +137,83 @@
   </div>
 
   <div class="divider"></div>
-  <h2 class="text-2xl font-bold mb-4">OpenAI</h2>
+  <h2 class="text-2xl font-bold mb-4">{$t('openai')}</h2>
 
   <div class="form-control">
     <label class="label">
-      <span class="label-text">OpenAI API Key</span>
+      <span class="label-text">{$t('openai-api-key')}</span>
     </label>
     <input
       type={showToken ? 'text' : 'password'}
       class="input input-bordered"
       value={openaiApiKey}
       on:input={updateOpenAIKey}
-      placeholder="Enter your OpenAI API key"
+      disabled={$settingsStore.useCustomApi}
+      placeholder={$t('enter-your-openai-api-key')}
     />
   </div>
 
   <div class="form-control">
     <label class="label">
-      <span class="label-text">OpenAI Model</span>
+      <span class="label-text">{$t('openai-model')}</span>
     </label>
-    <select class="select select-bordered" value={openaiModel} on:change={updateOpenAIModel}>
-      <option value="gpt-4o">GPT-4o</option>
-      <option value="gpt-4o-mini">GPT-4o Mini</option>
+    <select
+      class="select select-bordered"
+      value={openaiModel}
+      on:change={updateOpenAIModel}
+      disabled={$settingsStore.useCustomApi}
+    >
+      <option value="gpt-4.1">GPT-4.1</option>
+      <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
+      <option value="gpt-4.1-nano">GPT-4.1 Nano</option>
     </select>
   </div>
+
+  <div class="form-control">
+    <label class="label">
+      <span class="label-text">{$t('developer-prompt')}</span>
+    </label>
+    <textarea
+      class="textarea textarea-bordered"
+      value={developerPrompt}
+      on:input={updateDeveloperPrompt}
+      placeholder={$t('enter-your-custom-developer-prompt')}
+      rows="4"
+    />
+  </div>
+
+  {#if false}
+    <div class="divider"></div>
+    <h2 class="text-2xl font-bold mb-4">ayayaQ API (Optional)</h2>
+
+    <div class="form-control">
+      <label class="label cursor-pointer">
+        <span class="label-text">Use ayayaQ API instead of OpenAI</span>
+        <input
+          type="checkbox"
+          class="toggle toggle-primary"
+          bind:checked={useCustomApi}
+          on:change={toggleCustomApi}
+        />
+      </label>
+    </div>
+  {/if}
 
   <div class="divider"></div>
   <h2 class="text-2xl font-bold mb-4">{$t('about')}</h2>
   <p>Version: {$t('version-value')}</p>
-  <p>Author: <a href="https://github.com/ayayaQ" class="link link-primary">ayayaQ</a></p>
   <p>
-    Discord: <a href="https://discord.com/invite/mZp54sZ" class="link link-primary"
-      >Bot Commander for Discord Official Server</a
+    Author: <a
+      href="https://github.com/ayayaQ"
+      class="link link-primary"
+      on:click={openExternalLink}>ayayaQ</a
+    >
+  </p>
+  <p>
+    Discord: <a
+      href="https://discord.com/invite/mZp54sZ"
+      class="link link-primary"
+      on:click={openExternalLink}>Bot Commander for Discord Official Server</a
     >
   </p>
 </div>
