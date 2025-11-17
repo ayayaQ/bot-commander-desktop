@@ -49,11 +49,13 @@ export async function restartJsEngine() {
 }
 
 export function get(variableName: string, context: vm.Context) {
-  return vm.runInContext(`${variableName}`, context)
+  return context[variableName]
+  //return vm.runInContext(`${variableName}`, context)
 }
 
 export function set(variableName: string, value: any, context: vm.Context) {
-  vm.runInContext(`${variableName} = ${value}`, context)
+  context[variableName] = value
+  //vm.runInContext(`${variableName} = ${value}`, context)
 }
 
 function run(code: string, context: vm.Context) {
@@ -78,28 +80,37 @@ export function evaluate(code: string, context: vm.Context) {
 
 export function evaluateGet(code: string, context: vm.Context) {
   // there will be a $get keyword in the form $get(variableName), we will take that and run the get function and replace the $get(variableName) with the return value
-  const variableName = code.slice(code.indexOf('$get(') + 5, code.indexOf(')'))
+  const getStartIndex = code.indexOf('$get(')
+  const startIndex = getStartIndex + 5
+  const endIndex = code.indexOf(')', startIndex)
+  const variableName = code.slice(startIndex, endIndex)
   const value = get(variableName, context)
-  return code.replace(`$get(${variableName})`, value)
+  // Replace using the exact substring we found
+  return code.slice(0, getStartIndex) + value + code.slice(endIndex + 1)
 }
 
 export function evaluateSet(code: string, context: vm.Context) {
   // there will be a $set keyword in the form $set(variableName, value), we will take that and run the set function and replace the $set(variableName, value) with nothing
-  const variableName = code.slice(code.indexOf('$set(') + 5, code.indexOf(','))
-  const value = code.slice(code.indexOf(',') + 1, code.indexOf(')'))
+  const setStartIndex = code.indexOf('$set(')
+  const startIndex = setStartIndex + 5
+  const commaIndex = code.indexOf(',', startIndex)
+  const endIndex = code.indexOf(')', commaIndex)
+  const variableName = code.slice(startIndex, commaIndex)
+  const value = code.slice(commaIndex + 1, endIndex).trim()
   set(variableName, value, context)
-  return code.replace(`$set(${variableName}, ${value})`, '')
+  // Replace using the exact substring we found, removing the entire $set(...) call
+  return code.slice(0, setStartIndex) + code.slice(endIndex + 1)
 }
 
 export function stringInfoAddEval(code: string, context: vm.Context) {
   if (code.includes('$eval')) {
     code = evaluate(code, context)
   }
-  if (code.includes('$get')) {
-    code = evaluateGet(code, context)
-  }
   if (code.includes('$set')) {
     code = evaluateSet(code, context)
+  }
+  if (code.includes('$get')) {
+    code = evaluateGet(code, context)
   }
   return code
 }
