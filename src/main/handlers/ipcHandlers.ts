@@ -237,7 +237,7 @@ export function addIPCHandlers() {
   })
 
   // Open external URLs in default browser
-  ipcMain.handle('open-external-url', async (event, url: string) => {
+  ipcMain.handle('open-external-url', async (_event, url: string) => {
     try {
       await shell.openExternal(url)
       return { success: true }

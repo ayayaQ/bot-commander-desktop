@@ -232,21 +232,21 @@ export async function stringInfoAddGeneral(
   // replace $random with a random string from the list
   const random = /\$random\{([^}]+)\}/g
 
-  message = message.replace(random, (match, p1) => {
+  message = message.replace(random, (_match, p1) => {
     let messageArray = p1.split('|')
     return messageArray[Math.floor(Math.random() * messageArray.length)]
   })
 
   // while $rollnum is in the message which is a command in the form $rollnum(1,10) it inserts a random number in the range inclusive.
   const rollnumRegex = /\$rollnum\((-?\d+),(-?\d+)\)/
-  message = message.replace(rollnumRegex, (match, x, y) => {
+  message = message.replace(rollnumRegex, (_match, x, y) => {
     const result = Math.floor(Math.random() * (parseInt(y) - parseInt(x) + 1)) + parseInt(x)
     return result.toString()
   })
 
   const sumRegex = /\$sum\{([^}]+)\}/g
 
-  message = message.replace(sumRegex, (match, p1) => {
+  message = message.replace(sumRegex, (_match, p1) => {
     let numberArray = p1.split('|')
 
     try {
@@ -263,7 +263,7 @@ export async function stringInfoAddGeneral(
 
   const argsRegex = /\$args\((\d+)\)/g
 
-  message = message.replace(argsRegex, (match, indexStr) => {
+  message = message.replace(argsRegex, (_match, indexStr) => {
     const index = parseInt(indexStr)
     const after = ctx.messageEvent?.content.substring(ctx.command?.command.length ?? 0).trim() ?? ''
     const args = after.split(' ').filter((s) => s.length > 0)

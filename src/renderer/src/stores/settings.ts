@@ -8,7 +8,8 @@ export const settingsStore = writable<AppSettings>({
   language: 'en',
   openaiApiKey: '',
   openaiModel: 'gpt-4.1-nano',
-  developerPrompt: ''
+  developerPrompt: '',
+  useCustomApi: false
 })
 
 export async function loadSettings() {
