@@ -15,7 +15,7 @@ const DEFAULT_LANGUAGE = 'en'
 // Translation dictionaries
 const translations: Languages = {
   en: {
-    'version-value': '1.0.0',
+    'version-value': '1.1.0',
     'send-webhook': 'Send Discord Webhook',
     'webhook-url': 'Webhook URL',
     name: 'Name',
