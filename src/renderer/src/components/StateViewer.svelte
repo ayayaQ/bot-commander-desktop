@@ -302,8 +302,8 @@
 </div>
 
 {#if showToast}
-  <div class="toast toast-top toast-end">
-    <div class="alert alert-error">
+  <div class="toast toast-start toast-bottom">
+    <div class="alert alert-info">
       <div>
         <span>{toastMessage}</span>
       </div>
