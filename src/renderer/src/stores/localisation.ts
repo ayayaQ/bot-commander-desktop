@@ -148,6 +148,7 @@ const translations: Languages = {
     general: 'General',
     openai: 'OpenAI',
     'openai-api-key': 'OpenAI API Key',
+    'enter-your-openai-api-key': 'Enter your OpenAI API key...',
     'openai-model': 'OpenAI Model',
     'developer-prompt': 'Developer Prompt',
     'enter-your-custom-developer-prompt': 'Enter your custom developer prompt...'
@@ -287,6 +288,7 @@ const translations: Languages = {
     general: 'General',
     openai: 'OpenAI',
     'openai-api-key': 'Clave de API de OpenAI',
+    'enter-your-openai-api-key': 'Introduce tu clave de API de OpenAI...',
     'openai-model': 'Modelo de OpenAI',
     'developer-prompt': 'Prompt del desarrollador',
     'enter-your-custom-developer-prompt': 'Introduce tu prompt de desarrollador personalizado...'
@@ -425,6 +427,7 @@ const translations: Languages = {
     general: '一般',
     openai: 'OpenAI',
     'openai-api-key': 'OpenAI APIキー',
+    'enter-your-openai-api-key': 'OpenAI APIキーを入力してください...',
     'openai-model': 'OpenAIモデル',
     'developer-prompt': '開発者プロンプト',
     'enter-your-custom-developer-prompt': 'カスタム開発者プロンプトを入力してください...'
@@ -563,6 +566,7 @@ const translations: Languages = {
     general: '通用',
     openai: 'OpenAI',
     'openai-api-key': 'OpenAI API密钥',
+    'enter-your-openai-api-key': '输入您的OpenAI API密钥...',
     'openai-model': 'OpenAI模型',
     'developer-prompt': '开发者提示',
     'enter-your-custom-developer-prompt': '输入您的自定义开发者提示...'
@@ -701,6 +705,7 @@ const translations: Languages = {
     general: '일반',
     openai: 'OpenAI',
     'openai-api-key': 'OpenAI API 키',
+    'enter-your-openai-api-key': 'OpenAI API 키를 입력하세요...',
     'openai-model': 'OpenAI 모델',
     'developer-prompt': '개발자 프롬프트',
     'enter-your-custom-developer-prompt': '사용자 정의 개발자 프롬프트를 입력하세요...'
@@ -839,6 +844,7 @@ const translations: Languages = {
     general: 'Общие',
     openai: 'OpenAI',
     'openai-api-key': 'API-ключ OpenAI',
+    'enter-your-openai-api-key': 'Введите ваш API-ключ OpenAI...',
     'openai-model': 'Модель OpenAI',
     'developer-prompt': 'Запрос разработчика',
     'enter-your-custom-developer-prompt': 'Введите свой пользовательский запрос разработчика...'
