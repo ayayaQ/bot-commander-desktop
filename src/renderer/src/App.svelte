@@ -4,6 +4,7 @@
   import Login from './components/Login.svelte'
   import Settings from './components/Settings.svelte'
   import Webhooks from './components/Webhooks.svelte'
+  import Console from './components/Console.svelte'
   import { onMount } from 'svelte'
   import { loadSettings, settingsStore } from './stores/settings'
   import { loadBotStatus } from './stores/status'
@@ -25,8 +26,13 @@
 <TitleBar />
 
 <div class="flex flex-row items-center justify-center h-[calc(100vh-40px)]">
-  <div class="basis-1/3 h-full overflow-y-auto shrink-0 grow">
-    <Login />
+  <div class="basis-1/3 h-full shrink-0 grow relative flex flex-col bg-base-200">
+    <div class="flex-grow overflow-y-auto">
+      <Login />
+    </div>
+    <div class="w-full">
+      <Console />
+    </div>
   </div>
   <div class="basis-2/3 h-full overflow-y-auto flex flex-col shrink grow shadow-md">
     <div class="flex-grow">
