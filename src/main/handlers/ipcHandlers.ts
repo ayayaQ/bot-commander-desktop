@@ -22,6 +22,7 @@ import { saveBotStatus, saveCommands, saveSettings } from '../services/fileServi
 import { getSettings, setSettings } from '../services/settingsService'
 import { getBotStatus, setBotStatus } from '../services/statusService'
 import { getStatsInstance } from '../utils/stats'
+import { checkForUpdates } from '../services/updateService'
 
 export function addWindowIPCHandlers(mainWindow: BrowserWindow) {
   ipcMain.on('minimize-window', () => {
@@ -244,6 +245,17 @@ export function addIPCHandlers() {
     } catch (error) {
       console.error('Error opening external URL:', error)
       return { success: false, error: (error as Error).message }
+    }
+  })
+
+  // Check for updates
+  ipcMain.handle('check-for-updates', async () => {
+    try {
+      const updateInfo = await checkForUpdates()
+      return updateInfo
+    } catch (error) {
+      console.error('Error checking for updates:', error)
+      throw error
     }
   })
 }
