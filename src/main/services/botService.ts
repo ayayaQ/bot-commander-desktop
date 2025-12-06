@@ -34,6 +34,7 @@ import { session } from 'electron'
 import { getBotStatus } from './statusService'
 import { contextForMessageEvent, contextForReactionEvent, stringInfoAdd } from './stringInfo'
 import { getStatsInstance, Stats } from '../utils/stats'
+import { rendererConsole } from '../utils/rendererConsole'
 
 let client: Client | null = null
 let connection: boolean = false
@@ -111,6 +112,11 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
 
     connection = true
 
+    rendererConsole.success(`Connected as ${client.user.username}`)
+    rendererConsole.info(
+      `Serving ${client.guilds.cache.size} servers with ${commands.bcfdCommands.length} commands`
+    )
+
     return event.reply('connect', {
       user: client.user.username,
       avatar: client.user.avatarURL()
@@ -119,37 +125,50 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
 
   client.on(Events.MessageCreate, (message) => {
     stats.incrementMessagesReceived()
+    if (!message.author.bot) {
+      rendererConsole.event(`Message received`)
+    }
     onMessageCreate(message)
   })
 
   // when a user joins a guild
   client.on(Events.GuildMemberAdd, (member) => {
     stats.incrementJoinEventsReceived()
+    rendererConsole.event(`User joined a guild`)
     onGuildMemberAdd(member)
   })
 
   // when a user leaves a guild
   client.on(Events.GuildMemberRemove, (member) => {
     stats.incrementLeaveEventsReceived()
+    rendererConsole.event(`User left a guild`)
     onGuildMemberRemove(member)
   })
 
   // when a user is banned from a guild
   client.on(Events.GuildBanAdd, (ban) => {
     stats.incrementBanEventsReceived()
+    rendererConsole.warning(`User was banned from a guild`)
     onGuildBanAdd(ban)
   })
 
   // when a reaction is added to a message
   client.on(Events.MessageReactionAdd, (reaction, user) => {
+    if (!user.bot) {
+      rendererConsole.event(`User reacted with ${reaction.emoji.name}`)
+    }
     onMessageReactionAdd(reaction, user)
   })
 
   client.on(Events.InteractionCreate, (interaction) => {
+    if (interaction.isChatInputCommand()) {
+      rendererConsole.event(`Slash command: /${interaction.commandName}`)
+    }
     onInteractionCreate(interaction)
   })
 
   client.login(token).catch((err) => {
+    rendererConsole.error(`Login failed: ${err.message || err}`)
     event.reply('fail', { error: err })
   })
 }
@@ -160,6 +179,7 @@ export function Disconnect(event: Electron.IpcMainEvent) {
     client.destroy()
     client = null
     connection = false
+    rendererConsole.info('Disconnected from Discord')
   }
 
   return event.reply('disconnect')
@@ -221,6 +241,7 @@ async function onInteractionCreate(interaction: Interaction) {
 
   if (!command) return
 
+  rendererConsole.info(`Executing slash command: /${interaction.commandName}`)
   interaction.reply(command.commandReply)
 }
 
@@ -731,6 +752,7 @@ async function onMessageCreate(message: OmitPartialGroupDMChannel<Message<boolea
 
   for (const command of filteredCommands) {
     if (!(await requiredRole(command, message))) {
+      rendererConsole.warning(`Command "${command.command}" blocked: missing required role`)
       continue
     }
 
@@ -745,6 +767,8 @@ async function onMessageCreate(message: OmitPartialGroupDMChannel<Message<boolea
         continue
       }
     }
+
+    rendererConsole.info(`Executing command: "${command.command}"`)
 
     deleteIf(command, message)
 
