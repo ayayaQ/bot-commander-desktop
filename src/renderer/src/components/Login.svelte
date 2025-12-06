@@ -41,7 +41,7 @@
   })
 </script>
 
-<div class="flex flex-col items-center justify-center min-h-[calc(100vh-40px)] bg-base-200 p-4">
+<div class="flex flex-col items-center justify-center bg-base-200 p-4 h-full">
   <div class="card w-96 bg-base-100 shadow-xl">
     <div class="card-body items-center text-center">
       {#if avatar}
