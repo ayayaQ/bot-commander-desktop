@@ -11,6 +11,7 @@
   let openaiModel: 'gpt-4.1' | 'gpt-4.1-mini' | 'gpt-4.1-nano'
   let developerPrompt: string
   let useCustomApi: boolean
+  let useLegacyInterpreter: boolean
 
   function changeTheme(event) {
     let theme = event.target.value
@@ -49,6 +50,10 @@
     saveSettings({ ...$settingsStore, useCustomApi })
   }
 
+  function toggleLegacyInterpreter() {
+    saveSettings({ ...$settingsStore, useLegacyInterpreter })
+  }
+
   function openExternalLink(event) {
     event.preventDefault()
     const url = event.target.href
@@ -63,6 +68,7 @@
     openaiModel = $settingsStore.openaiModel
     developerPrompt = $settingsStore.developerPrompt
     useCustomApi = $settingsStore.useCustomApi
+    useLegacyInterpreter = $settingsStore.useLegacyInterpreter
   })
 </script>
 
@@ -198,6 +204,21 @@
       </label>
     </div>
   {/if}
+
+  <div class="divider"></div>
+  <h2 class="text-2xl font-bold mb-4">{$t('advanced')}</h2>
+
+  <div class="form-control">
+    <label class="label cursor-pointer">
+      <span class="label-text">{$t('use-legacy-interpreter')}</span>
+      <input
+        type="checkbox"
+        class="toggle"
+        bind:checked={useLegacyInterpreter}
+        on:change={toggleLegacyInterpreter}
+      />
+    </label>
+  </div>
 
   <div class="divider"></div>
   <h2 class="text-2xl font-bold mb-4">{$t('about')}</h2>

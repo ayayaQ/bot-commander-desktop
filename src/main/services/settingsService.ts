@@ -7,7 +7,8 @@ let settings: AppSettings = {
   openaiApiKey: '',
   openaiModel: 'gpt-4.1-nano',
   developerPrompt: '',
-  useCustomApi: false
+  useCustomApi: false,
+  useLegacyInterpreter: false // Default to new interpreter
 } // Default settings
 
 export function getSettings() {
@@ -42,6 +43,10 @@ export function setSettings(newSettings: AppSettings) {
 
   if (newSettings.useCustomApi === undefined) {
     newSettings.useCustomApi = false
+  }
+
+  if (newSettings.useLegacyInterpreter === undefined) {
+    newSettings.useLegacyInterpreter = false
   }
 
   settings = newSettings

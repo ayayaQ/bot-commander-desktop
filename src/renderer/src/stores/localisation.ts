@@ -15,7 +15,7 @@ const DEFAULT_LANGUAGE = 'en'
 // Translation dictionaries
 const translations: Languages = {
   en: {
-    'version-value': '1.1.0',
+    'version-value': '1.2.0',
     'send-webhook': 'Send Discord Webhook',
     'webhook-url': 'Webhook URL',
     name: 'Name',
@@ -151,7 +151,9 @@ const translations: Languages = {
     'enter-your-openai-api-key': 'Enter your OpenAI API key...',
     'openai-model': 'OpenAI Model',
     'developer-prompt': 'Developer Prompt',
-    'enter-your-custom-developer-prompt': 'Enter your custom developer prompt...'
+    'enter-your-custom-developer-prompt': 'Enter your custom developer prompt...',
+    advanced: 'Advanced',
+    'use-legacy-interpreter': 'Use Legacy Interpreter'
     // ... more English strings
   },
   es: {
@@ -289,9 +291,11 @@ const translations: Languages = {
     openai: 'OpenAI',
     'openai-api-key': 'Clave de API de OpenAI',
     'enter-your-openai-api-key': 'Introduce tu clave de API de OpenAI...',
-    'openai-model': 'Modelo de OpenAI',
-    'developer-prompt': 'Prompt del desarrollador',
-    'enter-your-custom-developer-prompt': 'Introduce tu prompt de desarrollador personalizado...'
+    'openai-model': 'Modelo OpenAI',
+    'developer-prompt': 'Prompt del Desarrollador',
+    'enter-your-custom-developer-prompt': 'Introduce tu prompt de desarrollador personalizado...',
+    advanced: 'Avanzado',
+    'use-legacy-interpreter': 'Usar Intérprete Antiguo'
     // ... more Spanish strings
   },
   ja: {
@@ -430,7 +434,9 @@ const translations: Languages = {
     'enter-your-openai-api-key': 'OpenAI APIキーを入力してください...',
     'openai-model': 'OpenAIモデル',
     'developer-prompt': '開発者プロンプト',
-    'enter-your-custom-developer-prompt': 'カスタム開発者プロンプトを入力してください...'
+    'enter-your-custom-developer-prompt': 'カスタム開発者プロンプトを入力してください...',
+    advanced: '詳細設定',
+    'use-legacy-interpreter': '旧インタープリターを使用'
     // ... more Japanese strings
   },
   zh: {
@@ -569,7 +575,9 @@ const translations: Languages = {
     'enter-your-openai-api-key': '输入您的OpenAI API密钥...',
     'openai-model': 'OpenAI模型',
     'developer-prompt': '开发者提示',
-    'enter-your-custom-developer-prompt': '输入您的自定义开发者提示...'
+    'enter-your-custom-developer-prompt': '输入您的自定义开发者提示...',
+    advanced: '高级',
+    'use-legacy-interpreter': '使用旧版解释器'
     // ... more Simplified Chinese strings
   },
   ko: {
@@ -708,7 +716,9 @@ const translations: Languages = {
     'enter-your-openai-api-key': 'OpenAI API 키를 입력하세요...',
     'openai-model': 'OpenAI 모델',
     'developer-prompt': '개발자 프롬프트',
-    'enter-your-custom-developer-prompt': '사용자 정의 개발자 프롬프트를 입력하세요...'
+    'enter-your-custom-developer-prompt': '사용자 정의 개발자 프롬프트를 입력하세요...',
+    advanced: '고급',
+    'use-legacy-interpreter': '레거시 인터프리터 사용'
     // ... more Korean strings
   },
   ru: {
@@ -847,7 +857,9 @@ const translations: Languages = {
     'enter-your-openai-api-key': 'Введите ваш API-ключ OpenAI...',
     'openai-model': 'Модель OpenAI',
     'developer-prompt': 'Запрос разработчика',
-    'enter-your-custom-developer-prompt': 'Введите свой пользовательский запрос разработчика...'
+    'enter-your-custom-developer-prompt': 'Введите свой пользовательский запрос разработчика...',
+    advanced: 'Дополнительно',
+    'use-legacy-interpreter': 'Использовать старый интерпретатор'
     // ... more Russian strings
   }
   // ... more languages

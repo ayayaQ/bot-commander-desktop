@@ -9,7 +9,8 @@ export const settingsStore = writable<AppSettings>({
   openaiApiKey: '',
   openaiModel: 'gpt-4.1-nano',
   developerPrompt: '',
-  useCustomApi: false
+  useCustomApi: false,
+  useLegacyInterpreter: false
 })
 
 export async function loadSettings() {

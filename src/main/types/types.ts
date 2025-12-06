@@ -71,6 +71,7 @@ export type AppSettings = {
   openaiModel: 'gpt-4.1' | 'gpt-4.1-mini' | 'gpt-4.1-nano'
   developerPrompt: string
   useCustomApi: boolean
+  useLegacyInterpreter: boolean // Use old string replacement instead of new interpreter
 }
 
 export type BotStatus = {
