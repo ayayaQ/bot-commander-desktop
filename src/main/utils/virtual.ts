@@ -5,6 +5,36 @@ import { join } from 'path'
 
 let botStateContext: vm.Context
 const STARTUP_JS_FILENAME = 'startup.js'
+
+/**
+ * Create a sandboxed VM context that blocks dangerous globals
+ * while allowing safe operations and shared state like botState
+ */
+function createSafeContext(initialContext: Record<string, any>): vm.Context {
+  const context = vm.createContext({
+    ...initialContext,
+    // Provide safe built-in objects
+    Math: Math,
+    Date: Date,
+    String: String,
+    Number: Number,
+    Boolean: Boolean,
+    Array: Array,
+    Object: Object,
+    JSON: JSON,
+    // Block dangerous globals to prevent code injection
+    process: undefined,
+    require: undefined,
+    import: undefined,
+    eval: undefined,
+    Function: undefined,
+    globalThis: undefined,
+    global: undefined,
+    console: undefined
+  })
+  return context
+}
+
 // Get the path to the startup JS file
 function getStartupJsPath() {
   return join(app.getPath('userData'), STARTUP_JS_FILENAME)
@@ -34,7 +64,10 @@ export async function runStartupJs(context: vm.Context) {
   const js = await getStartupJs()
   if (js && js.trim()) {
     try {
-      vm.runInContext(js, context)
+      vm.runInContext(js, context, {
+        timeout: 5000, // 5 second timeout for startup
+        breakOnSigint: true
+      })
     } catch (e) {
       console.error('Error running startup JS:', e)
     }
@@ -43,7 +76,7 @@ export async function runStartupJs(context: vm.Context) {
 
 // Restart the JS engine: re-create context, run startup JS, load botState
 export async function restartJsEngine() {
-  botStateContext = vm.createContext({ botState: {} })
+  botStateContext = createSafeContext({ botState: {} })
   await runStartupJs(botStateContext)
   await loadBotState()
 }
@@ -59,7 +92,10 @@ export function set(variableName: string, value: any, context: vm.Context) {
 }
 
 function run(code: string, context: vm.Context) {
-  vm.runInContext(code, context)
+  vm.runInContext(code, context, {
+    timeout: 1000, // 1 second timeout
+    breakOnSigint: true
+  })
 }
 
 // This function will take in a string that will have a $eval keyword at the start of a codeblock and a $halt keyword at the end of the codeblock.
@@ -116,7 +152,7 @@ export function stringInfoAddEval(code: string, context: vm.Context) {
 }
 
 export async function initializeBotState() {
-  botStateContext = vm.createContext({ botState: {} })
+  botStateContext = createSafeContext({ botState: {} })
   await runStartupJs(botStateContext)
   await loadBotState()
 }

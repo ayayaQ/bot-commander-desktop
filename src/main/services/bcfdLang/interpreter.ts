@@ -365,6 +365,7 @@ async function fetchChatResponse(prompt: string): Promise<string> {
 export class Interpreter {
   private registry: FunctionRegistry
   private errors: BCFDError[] = []
+  private static interpreterCounter = 0
 
   constructor(customRegistry?: FunctionRegistry) {
     this.registry = customRegistry ?? createFunctionRegistry()
@@ -511,25 +512,63 @@ export class Interpreter {
       return '[BCFD Error: VM context not available]'
     }
 
-    // First, resolve all $expressions within the code
+    // Security: Store evaluated values in temporary variables to prevent code injection
+    // Use unique ID to prevent conflicts between concurrent command executions
+    const uniqueId = `${Date.now()}_${Interpreter.interpreterCounter++}`
     let resolvedCode = node.code
+    const tempVars: Record<string, string> = {}
+    let varCounter = 0
+
     for (const innerNode of node.innerNodes) {
       if (innerNode.type !== NodeType.TEXT) {
-        // Find the original text in the code and replace with evaluated value
-        const originalText = this.nodeToOriginalText(innerNode)
+        // Evaluate the expression to get its value
         const evaluatedValue = await this.evaluateNode(innerNode, ctx)
-        resolvedCode = resolvedCode.replace(originalText, evaluatedValue)
+
+        // Create a unique temporary variable name with unique ID to prevent race conditions
+        const tempVarName = `__bcfd_${uniqueId}_${varCounter++}`
+
+        // Store the value in the VM context
+        tempVars[tempVarName] = evaluatedValue
+        ctx.vmContext[tempVarName] = evaluatedValue
+
+        // Replace the $expression with the variable reference
+        const originalText = this.nodeToOriginalText(innerNode)
+        resolvedCode = resolvedCode.replace(originalText, tempVarName)
       }
     }
 
     try {
-      // Execute the JavaScript code
+      // Execute the JavaScript code with timeout protection
       // Wrap in a function to support 'return' statements
       const wrappedCode = `(function() { ${resolvedCode} })()`
-      const result = vm.runInContext(wrappedCode, ctx.vmContext)
+      const result = vm.runInContext(wrappedCode, ctx.vmContext, {
+        timeout: 1000, // 1 second timeout
+        breakOnSigint: true
+      })
+
+      // Clean up temporary variables
+      for (const tempVarName of Object.keys(tempVars)) {
+        delete ctx.vmContext[tempVarName]
+      }
+
       return result !== undefined ? String(result) : ''
     } catch (e) {
-      const message = e instanceof Error ? e.message : 'Unknown error'
+      // Clean up temporary variables even on error
+      for (const tempVarName of Object.keys(tempVars)) {
+        delete ctx.vmContext[tempVarName]
+      }
+
+      // Extract error message - VM errors can be objects, strings, or Error instances
+      let message = 'Unknown error'
+      if (e instanceof Error) {
+        message = e.message
+      } else if (typeof e === 'string') {
+        message = e
+      } else if (e && typeof e === 'object') {
+        // VM context errors are often plain objects with message/stack properties
+        message = (e as any).message || (e as any).toString?.() || JSON.stringify(e)
+      }
+
       this.addError(`JavaScript error: ${message}`, node.position, node.length)
       return `[BCFD Error: ${message}]`
     }
