@@ -149,7 +149,7 @@ export function addIPCHandlers() {
   ipcMain.handle('runCodeInContext', (_event, code: string) => {
     try {
       const context = getBotStateContext()
-      const result = vm.runInContext(code, context)
+      const result = vm.runInContext(code, context, { timeout: 2000, breakOnSigint: true })
       saveBotState() // Save the state in case it was modified
       return JSON.stringify(result, null, 2)
     } catch (error) {
