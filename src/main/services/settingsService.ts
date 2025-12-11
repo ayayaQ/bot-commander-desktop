@@ -3,6 +3,7 @@ import { AppSettings } from '../types/types'
 let settings: AppSettings = {
   theme: 'light',
   showToken: false,
+  hideOutput: false,
   language: 'en',
   openaiApiKey: '',
   openaiModel: 'gpt-4.1-nano',
@@ -27,6 +28,10 @@ export function setSettings(newSettings: AppSettings) {
 
   if (!newSettings.showToken) {
     newSettings.showToken = false
+  }
+
+  if (newSettings.hideOutput === undefined) {
+    newSettings.hideOutput = false
   }
 
   if (!newSettings.openaiApiKey) {

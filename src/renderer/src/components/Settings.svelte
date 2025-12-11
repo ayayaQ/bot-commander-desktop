@@ -12,6 +12,7 @@
   let developerPrompt: string
   let useCustomApi: boolean
   let useLegacyInterpreter: boolean
+  let hideOutput: boolean
 
   function changeTheme(event) {
     let theme = event.target.value
@@ -29,6 +30,10 @@
 
   function toggleShowToken() {
     saveSettings({ ...$settingsStore, showToken: showToken })
+  }
+
+  function toggleHideOutput() {
+    saveSettings({ ...$settingsStore, hideOutput })
   }
 
   function updateOpenAIKey(event) {
@@ -69,6 +74,7 @@
     developerPrompt = $settingsStore.developerPrompt
     useCustomApi = $settingsStore.useCustomApi
     useLegacyInterpreter = $settingsStore.useLegacyInterpreter
+    hideOutput = $settingsStore.hideOutput
   })
 </script>
 
@@ -120,6 +126,18 @@
     <label class="label cursor-pointer">
       <span class="label-text">{$t('show-token')}</span>
       <input type="checkbox" class="toggle" bind:checked={showToken} on:change={toggleShowToken} />
+    </label>
+  </div>
+
+  <div class="form-control">
+    <label class="label cursor-pointer">
+      <span class="label-text">Hide output preview</span>
+      <input
+        type="checkbox"
+        class="toggle"
+        bind:checked={hideOutput}
+        on:change={toggleHideOutput}
+      />
     </label>
   </div>
 

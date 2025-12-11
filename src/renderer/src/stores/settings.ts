@@ -5,6 +5,7 @@ import { currentLanguage } from './localisation'
 export const settingsStore = writable<AppSettings>({
   theme: 'light',
   showToken: false,
+  hideOutput: false,
   language: 'en',
   openaiApiKey: '',
   openaiModel: 'gpt-4.1-nano',

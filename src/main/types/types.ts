@@ -66,6 +66,7 @@ export type BCFDSlashCommand = {
 export type AppSettings = {
   theme: string
   showToken: boolean
+  hideOutput: boolean
   language: string
   openaiApiKey: string
   openaiModel: 'gpt-4.1' | 'gpt-4.1-mini' | 'gpt-4.1-nano'
