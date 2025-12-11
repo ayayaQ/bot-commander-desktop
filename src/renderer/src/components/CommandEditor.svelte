@@ -4,6 +4,7 @@
   import { createEventDispatcher, onMount } from 'svelte'
   import HeaderBar from './HeaderBar.svelte'
   import Dialog from './Dialog.svelte'
+  import CodeEditor from './CodeEditor.svelte'
 
   export let mode: 'edit' | 'add' = 'add'
   export let command: BCFDCommand | null = null
@@ -483,185 +484,104 @@
               <div class="card-body">
                 <!-- Action specific fields here -->
                 {#if action.type === 'sendMessage'}
-                  <textarea
-                    id="channelMessage"
-                    bind:value={editedCommand.channelMessage}
-                    class="textarea textarea-bordered"
-                    rows="3"
-                  />
+                  <CodeEditor bind:value={editedCommand.channelMessage} />
                 {:else if action.type === 'sendChannelEmbed'}
                   <div class="form-control">
                     <label class="label" for="channelEmbedTitle">
                       <span class="label-text">{$t('channel-embed-title')}</span>
                     </label>
-
-                    <textarea
-                      id="channelEmbedTitle"
-                      bind:value={editedCommand.channelEmbed.title}
-                      class="textarea textarea-bordered"
-                      rows="3"
-                    ></textarea>
+                    <CodeEditor bind:value={editedCommand.channelEmbed.title} />
                   </div>
 
                   <div class="form-control">
                     <label class="label" for="channelEmbedDescription">
                       <span class="label-text">{$t('channel-embed-description')}</span>
                     </label>
-                    <textarea
-                      id="channelEmbedDescription"
-                      bind:value={editedCommand.channelEmbed.description}
-                      class="textarea textarea-bordered"
-                      rows="3"
-                    ></textarea>
+                    <CodeEditor bind:value={editedCommand.channelEmbed.description} />
                   </div>
 
                   <div class="form-control">
                     <label class="label" for="channelEmbedFooter">
                       <span class="label-text">{$t('channel-embed-footer')}</span>
                     </label>
-                    <textarea
-                      id="channelEmbedFooter"
-                      bind:value={editedCommand.channelEmbed.footer}
-                      class="textarea textarea-bordered"
-                      rows="3"
-                    ></textarea>
+                    <CodeEditor bind:value={editedCommand.channelEmbed.footer} />
                   </div>
 
                   <div class="form-control">
                     <label class="label" for="channelEmbedImage">
                       <span class="label-text">{$t('channel-embed-image')}</span>
                     </label>
-                    <input
-                      type="text"
-                      id="channelEmbedImage"
-                      bind:value={editedCommand.channelEmbed.imageURL}
-                      class="input input-bordered"
-                    />
+                    <CodeEditor bind:value={editedCommand.channelEmbed.imageURL} />
                   </div>
 
                   <div class="form-control">
                     <label class="label" for="channelEmbedThumbnail">
                       <span class="label-text">{$t('channel-embed-thumbnail')}</span>
                     </label>
-                    <input
-                      type="text"
-                      id="channelEmbedThumbnail"
-                      bind:value={editedCommand.channelEmbed.thumbnailURL}
-                      class="input input-bordered"
-                    />
+                    <CodeEditor bind:value={editedCommand.channelEmbed.thumbnailURL} />
                   </div>
 
                   <div class="form-control">
                     <label class="label" for="channelEmbedColor">
                       <span class="label-text">{$t('channel-embed-color')}</span>
                     </label>
-                    <input
-                      type="text"
-                      id="channelEmbedColor"
-                      bind:value={editedCommand.channelEmbed.hexColor}
-                      class="input input-bordered"
-                    />
+                    <CodeEditor bind:value={editedCommand.channelEmbed.hexColor} />
                   </div>
                 {:else if action.type === 'sendPrivateMessage'}<div class="form-control">
                     <label class="label" for="privateMessage">
                       <span class="label-text">{$t('private-message')}</span>
                     </label>
-                    <textarea
-                      id="privateMessage"
-                      bind:value={editedCommand.privateMessage}
-                      class="textarea textarea-bordered"
-                      rows="3"
-                    ></textarea>
+                    <CodeEditor bind:value={editedCommand.privateMessage} />
                   </div>{:else if action.type === 'sendPrivateEmbed'}<div class="form-control">
                     <label class="label" for="privateEmbedTitle">
                       <span class="label-text">{$t('private-embed-title')}</span>
                     </label>
-                    <textarea
-                      id="privateEmbedTitle"
-                      bind:value={editedCommand.privateEmbed.title}
-                      class="textarea textarea-bordered"
-                      rows="3"
-                    ></textarea>
+                    <CodeEditor bind:value={editedCommand.privateEmbed.title} />
                   </div>
 
                   <div class="form-control">
                     <label class="label" for="privateEmbedDescription">
                       <span class="label-text">{$t('private-embed-description')}</span>
                     </label>
-                    <textarea
-                      id="privateEmbedDescription"
-                      bind:value={editedCommand.privateEmbed.description}
-                      class="textarea textarea-bordered"
-                      rows="3"
-                    ></textarea>
+                    <CodeEditor bind:value={editedCommand.privateEmbed.description} />
                   </div>
 
                   <div class="form-control">
                     <label class="label" for="privateEmbedFooter">
                       <span class="label-text">{$t('private-embed-footer')}</span>
                     </label>
-                    <textarea
-                      id="privateEmbedFooter"
-                      bind:value={editedCommand.privateEmbed.footer}
-                      class="textarea textarea-bordered"
-                      rows="3"
-                    ></textarea>
+                    <CodeEditor bind:value={editedCommand.privateEmbed.footer} />
                   </div>
 
                   <div class="form-control">
                     <label class="label" for="privateEmbedImage">
                       <span class="label-text">{$t('private-embed-image')}</span>
                     </label>
-                    <input
-                      type="text"
-                      id="privateEmbedImage"
-                      bind:value={editedCommand.privateEmbed.imageURL}
-                      class="input input-bordered"
-                    />
+                    <CodeEditor bind:value={editedCommand.privateEmbed.imageURL} />
                   </div>
 
                   <div class="form-control">
                     <label class="label" for="privateEmbedThumbnail">
                       <span class="label-text">{$t('private-embed-thumbnail')}</span>
                     </label>
-                    <input
-                      type="text"
-                      id="privateEmbedThumbnail"
-                      bind:value={editedCommand.privateEmbed.thumbnailURL}
-                      class="input input-bordered"
-                    />
+                    <CodeEditor bind:value={editedCommand.privateEmbed.thumbnailURL} />
                   </div>
 
                   <div class="form-control">
                     <label class="label" for="privateEmbedColor">
                       <span class="label-text">{$t('private-embed-color')}</span>
                     </label>
-                    <input
-                      type="text"
-                      id="privateEmbedColor"
-                      bind:value={editedCommand.privateEmbed.hexColor}
-                      class="input input-bordered"
-                    />
+                    <CodeEditor bind:value={editedCommand.privateEmbed.hexColor} />
                   </div>{:else if action.type === 'specificChannel'}<div class="form-control">
                     <label class="label" for="specificChannel">
                       <span class="label-text">{$t('specific-channel')}</span>
                     </label>
-                    <input
-                      type="text"
-                      id="specificChannel"
-                      bind:value={editedCommand.specificChannel}
-                      class="input input-bordered"
-                    />
+                    <CodeEditor bind:value={editedCommand.specificChannel} />
                   </div>{:else if action.type === 'reaction'}<div class="form-control">
                     <label class="label" for="reactToMessage  ">
                       <span class="label-text">{$t('react-to-message')}</span>
                     </label>
-                    <input
-                      type="text"
-                      id="reactToMessage"
-                      bind:value={editedCommand.reaction}
-                      class="input input-bordered"
-                    />
+                    <CodeEditor bind:value={editedCommand.reaction} />
                   </div>{:else if action.type === 'deleteIf'}<div class="form-control">
                     <label class="label" for="deleteIfStrings">
                       <span class="label-text">{$t('delete-if-contains')}</span>
@@ -690,26 +610,14 @@
                     <label class="label" for="roleToAssign">
                       <span class="label-text">{$t('role-to-assign')}</span>
                     </label>
-                    <input
-                      type="text"
-                      id="roleToAssign"
-                      bind:value={editedCommand.roleToAssign}
-                      class="input input-bordered"
-                    />
+                    <CodeEditor bind:value={editedCommand.roleToAssign} />
                   </div>{:else if action.type === 'kick'}Kicks the mentioned user{:else if action.type === 'ban'}Bans
                   the mentioned user{:else if action.type === 'voiceMute'}Voice mutes the mentioned
                   user{:else if action.type === 'requiredRole'}<div class="form-control">
                     <label class="label" for="requiredRole">
                       <span class="label-text">{$t('required-role')}</span>
                     </label>
-                    <input
-                      type="text"
-                      id="requiredRole"
-                      bind:value={editedCommand.requiredRole}
-                      class="input input-bordered"
-                      placeholder={$t('role-id')}
-                      required
-                    />
+                    <CodeEditor bind:value={editedCommand.requiredRole} />
                   </div>{:else if action.type === 'requireAdmin'}Requires Administrator Role{:else if action.type === 'nsfw'}Requires
                   NSFW Channel{/if}
               </div>
