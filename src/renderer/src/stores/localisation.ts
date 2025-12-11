@@ -879,6 +879,7 @@ export const t = derived(currentLanguage, ($currentLanguage) => (key: string) =>
   if (fallback) return fallback
 
   // Return the key itself if no translation is found
+  console.warn(`Missing translation for key: "${key}" in language: "${$currentLanguage}"`)
   return key
 })
 
