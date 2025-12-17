@@ -39,7 +39,7 @@ export function highlightBCFD(code: string): string {
   return html
 }
 
-function highlightJavaScript(code: string): string {
+export function highlightJavaScript(code: string): string {
   // Use unique placeholder markers that won't appear in code
   const placeholders: Map<string, string> = new Map()
   let placeholderIndex = 0
@@ -52,20 +52,24 @@ function highlightJavaScript(code: string): string {
 
   let result = code
 
-  // Highlight strings (double quotes) - must come before other patterns
-  result = result.replace(/"([^"\\]|\\.)*"/g, (match) =>
-    addPlaceholder(`<span class="js-string">${match}</span>`)
-  )
-
-  // Highlight strings (single quotes)
-  result = result.replace(/'([^'\\]|\\.)*'/g, (match) =>
-    addPlaceholder(`<span class="js-string">${match}</span>`)
-  )
-
-  // Highlight template literals (backticks)
-  result = result.replace(/`([^`\\]|\\.)*`/g, (match) =>
-    addPlaceholder(`<span class="js-string">${match}</span>`)
-  )
+  // Process all string types in order of appearance to handle nesting correctly
+  // This regex matches double quotes, single quotes, or template literals
+  result = result.replace(/"([^"\\]|\\.)*"|'([^'\\]|\\.)*'|`([^`\\]|\\.)*`/g, (match) => {
+    // Check which type of quote was matched
+    if (match.startsWith('`')) {
+      // Template literal - process interpolations
+      let processed = match
+      processed = processed.replace(/\$\{([^}]*)\}/g, (interpolationMatch, content) => {
+        // Recursively highlight the interpolated JavaScript code
+        const highlightedContent = highlightJavaScript(content)
+        return `<span class="bcfd-args">\${</span>${highlightedContent}<span class="bcfd-args">}</span>`
+      })
+      return addPlaceholder(`<span class="js-string">${processed}</span>`)
+    } else {
+      // Regular string (single or double quotes)
+      return addPlaceholder(`<span class="js-string">${match}</span>`)
+    }
+  })
 
   // Highlight single-line comments
   result = result.replace(/\/\/[^\n]*/g, (match) =>

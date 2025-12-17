@@ -1,10 +1,11 @@
 <script lang="ts">
   import { createEventDispatcher, onMount, tick } from 'svelte'
-  import { highlightBCFD } from '../utils/highlight'
+  import { highlightBCFD, highlightJavaScript } from '../utils/highlight'
 
   export let value: string = ''
   export let placeholder: string = ''
   export let minHeight: string = '200px'
+  export let mode: 'bcfd' | 'js' = 'bcfd' // 'bcfd' for template language, 'js' for pure JavaScript
 
   const dispatch = createEventDispatcher<{ change: string }>()
 
@@ -299,34 +300,36 @@
   function checkAutocomplete() {
     const cursorPos = textareaElement.selectionStart
     const textBeforeCursor = value.substring(0, cursorPos)
-    const insideEval = isInsideEvalBlock(value, cursorPos)
+    const insideEval = mode === 'js' || isInsideEvalBlock(value, cursorPos)
 
-    // Check for $ prefix (BCFD variables/functions)
-    const lastDollarIndex = textBeforeCursor.lastIndexOf('$')
-    const dollarValid =
-      lastDollarIndex !== -1 &&
-      !/[\s\n\r({|})]/.test(textBeforeCursor.substring(lastDollarIndex + 1))
+    // In BCFD mode, check for $ prefix (BCFD variables/functions)
+    if (mode === 'bcfd') {
+      const lastDollarIndex = textBeforeCursor.lastIndexOf('$')
+      const dollarValid =
+        lastDollarIndex !== -1 &&
+        !/[\s\n\r({|})]/.test(textBeforeCursor.substring(lastDollarIndex + 1))
 
-    if (dollarValid) {
-      const textAfterDollar = textBeforeCursor.substring(lastDollarIndex + 1)
-      currentWord = textAfterDollar.toLowerCase()
-      wordStartIndex = lastDollarIndex + 1
-      isJsAutocomplete = false
+      if (dollarValid) {
+        const textAfterDollar = textBeforeCursor.substring(lastDollarIndex + 1)
+        currentWord = textAfterDollar.toLowerCase()
+        wordStartIndex = lastDollarIndex + 1
+        isJsAutocomplete = false
 
-      // Filter BCFD items
-      autocompleteItems = bcfdItems
-        .filter((item) => item.name.toLowerCase().startsWith(currentWord))
-        .slice(0, 10)
+        // Filter BCFD items
+        autocompleteItems = bcfdItems
+          .filter((item) => item.name.toLowerCase().startsWith(currentWord))
+          .slice(0, 10)
 
-      if (autocompleteItems.length > 0) {
-        autocompleteVisible = true
-        autocompleteIndex = 0
-        updateAutocompletePosition()
-        return
+        if (autocompleteItems.length > 0) {
+          autocompleteVisible = true
+          autocompleteIndex = 0
+          updateAutocompletePosition()
+          return
+        }
       }
     }
 
-    // Check for JS keywords inside eval blocks (no $ prefix needed)
+    // Check for JS keywords inside eval blocks or in JS mode (no $ prefix needed)
     if (insideEval) {
       // Find the current word being typed
       const wordMatch = textBeforeCursor.match(/([a-zA-Z_][a-zA-Z0-9_]*)$/)
@@ -397,7 +400,18 @@
 
   function updateHighlighting() {
     if (!highlightElement) return
-    highlightElement.innerHTML = highlightBCFD(value)
+    if (mode === 'js') {
+      // Pure JavaScript mode - use JS highlighting with line breaks
+      let html = value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      html = highlightJavaScript(html)
+      html = html.replace(/\n/g, '<br>')
+      if (html.endsWith('<br>')) {
+        html += '&nbsp;'
+      }
+      highlightElement.innerHTML = html
+    } else {
+      highlightElement.innerHTML = highlightBCFD(value)
+    }
   }
 
   function updateLineNumbers() {
@@ -412,6 +426,15 @@
 
   function handleClick() {
     checkAutocomplete()
+  }
+
+  let scrollAreaElement: HTMLDivElement
+  let contentSizerElement: HTMLPreElement
+
+  function syncScroll() {
+    if (lineNumbersElement && scrollAreaElement) {
+      lineNumbersElement.scrollTop = scrollAreaElement.scrollTop
+    }
   }
 
   onMount(() => {
@@ -434,36 +457,52 @@
 
 <div
   bind:this={containerElement}
-  class="code-editor-container relative rounded-lg border border-base-300 bg-base-100"
+  class="code-editor-container relative rounded-lg border border-base-300 bg-base-100 overflow-hidden"
   style="min-height: {minHeight}; height: {computedHeight}px;"
 >
   <!-- Line Numbers -->
   <div
     bind:this={lineNumbersElement}
-    class="line-numbers absolute left-0 top-0 bottom-0 w-12 bg-base-200 text-base-content/50 text-right pr-2 pt-2 select-none font-mono text-sm leading-6"
+    class="line-numbers absolute left-0 top-0 bottom-0 w-12 bg-base-200 text-base-content/50 text-right pr-2 pt-2 pb-4 select-none font-mono text-sm leading-6 overflow-hidden"
   >
     <div class="line-number">1</div>
   </div>
 
-  <!-- Syntax Highlighting Layer -->
+  <!-- Scrollable Editor Area -->
   <div
-    bind:this={highlightElement}
-    class="highlight-layer absolute left-12 top-0 right-0 bottom-0 p-2 font-mono text-sm leading-6 whitespace-pre-wrap break-words pointer-events-none"
-  ></div>
+    bind:this={scrollAreaElement}
+    class="editor-scroll-area absolute left-12 top-0 right-0 bottom-0 overflow-x-auto overflow-y-hidden"
+    on:scroll={syncScroll}
+  >
+    <!-- Inner container that sizes to content -->
+    <div class="editor-content relative">
+      <!-- Hidden pre element to determine content size -->
+      <pre
+        bind:this={contentSizerElement}
+        class="content-sizer p-2 pb-4 font-mono text-sm leading-6 whitespace-pre invisible"
+        aria-hidden="true">{value || ' '}</pre>
 
-  <!-- Textarea (input layer) -->
-  <textarea
-    bind:this={textareaElement}
-    bind:value
-    on:input={handleInput}
-    on:keydown={handleKeydown}
-    on:click={handleClick}
-    {placeholder}
-    class="textarea-input absolute left-12 top-0 right-0 bottom-0 w-[calc(100%-3rem)] h-full p-2 font-mono text-sm leading-6 bg-transparent text-transparent caret-base-content resize-none outline-none border-none overflow-hidden"
-    spellcheck="false"
-    autocomplete="off"
-    autocapitalize="off"
-  ></textarea>
+      <!-- Syntax Highlighting Layer -->
+      <div
+        bind:this={highlightElement}
+        class="highlight-layer absolute top-0 left-0 right-0 bottom-0 p-2 pb-4 font-mono text-sm leading-6 whitespace-pre pointer-events-none"
+      ></div>
+
+      <!-- Textarea (input layer) -->
+      <textarea
+        bind:this={textareaElement}
+        bind:value
+        on:input={handleInput}
+        on:keydown={handleKeydown}
+        on:click={handleClick}
+        {placeholder}
+        class="textarea-input absolute top-0 left-0 w-full h-full p-2 pb-4 font-mono text-sm leading-6 bg-transparent text-transparent caret-base-content resize-none outline-none border-none whitespace-pre overflow-hidden"
+        spellcheck="false"
+        autocomplete="off"
+        autocapitalize="off"
+      ></textarea>
+    </div>
+  </div>
 
   <!-- Autocomplete Dropdown -->
   {#if autocompleteVisible}
@@ -511,12 +550,51 @@
     line-height: 1.5rem;
   }
 
-  .highlight-layer {
+  .editor-scroll-area {
     z-index: 2;
+    scrollbar-gutter: stable;
+  }
+
+  /* Use overlay scrollbars where supported */
+  .editor-scroll-area::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+
+  .editor-scroll-area::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .editor-scroll-area::-webkit-scrollbar-thumb {
+    background: oklch(var(--bc) / 0.3);
+    border-radius: 4px;
+  }
+
+  .editor-scroll-area::-webkit-scrollbar-thumb:hover {
+    background: oklch(var(--bc) / 0.5);
+  }
+
+  .editor-content {
+    display: inline-block;
+    min-width: 100%;
+    min-height: 100%;
+    position: relative;
+  }
+
+  .content-sizer {
+    display: block;
+    min-width: max-content;
+    margin: 0;
+  }
+
+  .highlight-layer {
+    z-index: 1;
   }
 
   .textarea-input {
-    z-index: 3;
+    z-index: 2;
+    word-wrap: normal;
+    overflow-wrap: normal;
   }
 
   .autocomplete-dropdown {
