@@ -50,7 +50,7 @@
         <StateViewer />
       {/if}
     </div>
-    <div class="sticky bottom-0">
+    <div class="sticky bottom-0 z-10">
       <div class="btm-nav static bg-base-200">
         <button
           class={selectedMenu === 'commands' ? 'active bg-base-200' : ''}
