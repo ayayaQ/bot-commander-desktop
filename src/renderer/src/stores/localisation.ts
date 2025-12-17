@@ -153,7 +153,31 @@ const translations: Languages = {
     'developer-prompt': 'Developer Prompt',
     'enter-your-custom-developer-prompt': 'Enter your custom developer prompt...',
     advanced: 'Advanced',
-    'use-legacy-interpreter': 'Use Legacy Interpreter'
+    'use-legacy-interpreter': 'Use Legacy Interpreter',
+    // AI Chat strings
+    'ai-assistant': 'AI Assistant',
+    'ai-chat-started': 'AI assistant ready to help edit command:',
+    'proposed-changes': 'Proposed Changes',
+    changes: 'changes',
+    'accept-changes': 'Accept Changes',
+    reject: 'Reject',
+    'changes-applied': 'Changes applied successfully',
+    'changes-rejected': 'Changes rejected',
+    'describe-changes': 'Describe what you want to change...',
+    'api-key-needed': 'OpenAI API key required',
+    'openai-key-required': 'Please add your OpenAI API key in Settings to use the AI assistant.',
+    'select-model': 'Select AI Model',
+    'total-tokens': 'Total tokens used',
+    'new-chat': 'New Chat',
+    close: 'Close',
+    'make-funnier': 'Make funnier',
+    'add-randomness': 'Add randomness',
+    'use-mentions': 'Use mentions',
+    'add-counter': 'Add counter',
+    'quick-make-funnier': 'Make this command response funnier and more engaging',
+    'quick-add-random': 'Add random variations to the response using $random{}',
+    'quick-add-mentions': 'Include user mentions like $name and $botName in the response',
+    'quick-add-counter': 'Add a counter using $eval and botState to track command usage'
     // ... more English strings
   },
   es: {
@@ -295,7 +319,32 @@ const translations: Languages = {
     'developer-prompt': 'Prompt del Desarrollador',
     'enter-your-custom-developer-prompt': 'Introduce tu prompt de desarrollador personalizado...',
     advanced: 'Avanzado',
-    'use-legacy-interpreter': 'Usar Intérprete Antiguo'
+    'use-legacy-interpreter': 'Usar Intérprete Antiguo',
+    // AI Chat strings
+    'ai-assistant': 'Asistente IA',
+    'ai-chat-started': 'Asistente IA listo para editar comando:',
+    'proposed-changes': 'Cambios Propuestos',
+    changes: 'cambios',
+    'accept-changes': 'Aceptar Cambios',
+    reject: 'Rechazar',
+    'changes-applied': 'Cambios aplicados exitosamente',
+    'changes-rejected': 'Cambios rechazados',
+    'describe-changes': 'Describe lo que quieres cambiar...',
+    'api-key-needed': 'Se requiere clave API de OpenAI',
+    'openai-key-required':
+      'Por favor agrega tu clave API de OpenAI en Configuración para usar el asistente IA.',
+    'select-model': 'Seleccionar Modelo IA',
+    'total-tokens': 'Tokens totales usados',
+    'new-chat': 'Nueva Conversación',
+    close: 'Cerrar',
+    'make-funnier': 'Hacer más divertido',
+    'add-randomness': 'Agregar aleatoriedad',
+    'use-mentions': 'Usar menciones',
+    'add-counter': 'Agregar contador',
+    'quick-make-funnier': 'Hacer esta respuesta de comando más divertida y atractiva',
+    'quick-add-random': 'Agregar variaciones aleatorias a la respuesta usando $random{}',
+    'quick-add-mentions': 'Incluir menciones de usuario como $name y $botName en la respuesta',
+    'quick-add-counter': 'Agregar un contador usando $eval y botState para rastrear uso del comando'
     // ... more Spanish strings
   },
   ja: {
@@ -436,7 +485,31 @@ const translations: Languages = {
     'developer-prompt': '開発者プロンプト',
     'enter-your-custom-developer-prompt': 'カスタム開発者プロンプトを入力してください...',
     advanced: '詳細設定',
-    'use-legacy-interpreter': '旧インタープリターを使用'
+    'use-legacy-interpreter': '旧インタープリターを使用',
+    // AI Chat strings
+    'ai-assistant': 'AIアシスタント',
+    'ai-chat-started': 'AIアシスタントがコマンド編集の準備ができました:',
+    'proposed-changes': '提案された変更',
+    changes: '変更',
+    'accept-changes': '変更を承認',
+    reject: '拒否',
+    'changes-applied': '変更が正常に適用されました',
+    'changes-rejected': '変更が拒否されました',
+    'describe-changes': '変更したい内容を説明してください...',
+    'api-key-needed': 'OpenAI APIキーが必要です',
+    'openai-key-required': 'AIアシスタントを使用するには、設定でOpenAI APIキーを追加してください。',
+    'select-model': 'AIモデルを選択',
+    'total-tokens': '合計トークン使用量',
+    'new-chat': '新しいチャット',
+    close: '閉じる',
+    'make-funnier': 'もっと面白く',
+    'add-randomness': 'ランダム性を追加',
+    'use-mentions': 'メンションを使用',
+    'add-counter': 'カウンターを追加',
+    'quick-make-funnier': 'このコマンドの応答をより面白く魅力的にする',
+    'quick-add-random': '$random{}を使用して応答にランダムなバリエーションを追加',
+    'quick-add-mentions': '$nameや$botNameなどのユーザーメンションを応答に含める',
+    'quick-add-counter': '$evalとbotStateを使用してコマンド使用回数を追跡するカウンターを追加'
     // ... more Japanese strings
   },
   zh: {
@@ -577,7 +650,31 @@ const translations: Languages = {
     'developer-prompt': '开发者提示',
     'enter-your-custom-developer-prompt': '输入您的自定义开发者提示...',
     advanced: '高级',
-    'use-legacy-interpreter': '使用旧版解释器'
+    'use-legacy-interpreter': '使用旧版解释器',
+    // AI Chat strings
+    'ai-assistant': 'AI助手',
+    'ai-chat-started': 'AI助手已准备好帮助编辑命令:',
+    'proposed-changes': '建议的更改',
+    changes: '更改',
+    'accept-changes': '接受更改',
+    reject: '拒绝',
+    'changes-applied': '更改已成功应用',
+    'changes-rejected': '更改已拒绝',
+    'describe-changes': '描述您想要更改的内容...',
+    'api-key-needed': '需要OpenAI API密钥',
+    'openai-key-required': '请在设置中添加您的OpenAI API密钥以使用AI助手。',
+    'select-model': '选择AI模型',
+    'total-tokens': '总Token使用量',
+    'new-chat': '新对话',
+    close: '关闭',
+    'make-funnier': '更有趣',
+    'add-randomness': '添加随机性',
+    'use-mentions': '使用提及',
+    'add-counter': '添加计数器',
+    'quick-make-funnier': '使此命令响应更有趣和吸引人',
+    'quick-add-random': '使用$random{}为响应添加随机变化',
+    'quick-add-mentions': '在响应中包含用户提及，如$name和$botName',
+    'quick-add-counter': '使用$eval和botState添加计数器来跟踪命令使用情况'
     // ... more Simplified Chinese strings
   },
   ko: {
@@ -718,7 +815,31 @@ const translations: Languages = {
     'developer-prompt': '개발자 프롬프트',
     'enter-your-custom-developer-prompt': '사용자 정의 개발자 프롬프트를 입력하세요...',
     advanced: '고급',
-    'use-legacy-interpreter': '레거시 인터프리터 사용'
+    'use-legacy-interpreter': '레거시 인터프리터 사용',
+    // AI Chat strings
+    'ai-assistant': 'AI 어시스턴트',
+    'ai-chat-started': 'AI 어시스턴트가 명령 편집 준비 완료:',
+    'proposed-changes': '제안된 변경 사항',
+    changes: '변경',
+    'accept-changes': '변경 수락',
+    reject: '거부',
+    'changes-applied': '변경 사항이 성공적으로 적용되었습니다',
+    'changes-rejected': '변경 사항이 거부되었습니다',
+    'describe-changes': '변경하고 싶은 내용을 설명하세요...',
+    'api-key-needed': 'OpenAI API 키가 필요합니다',
+    'openai-key-required': 'AI 어시스턴트를 사용하려면 설정에서 OpenAI API 키를 추가하세요.',
+    'select-model': 'AI 모델 선택',
+    'total-tokens': '총 토큰 사용량',
+    'new-chat': '새 채팅',
+    close: '닫기',
+    'make-funnier': '더 재미있게',
+    'add-randomness': '무작위성 추가',
+    'use-mentions': '멘션 사용',
+    'add-counter': '카운터 추가',
+    'quick-make-funnier': '이 명령 응답을 더 재미있고 매력적으로 만들기',
+    'quick-add-random': '$random{}을 사용하여 응답에 무작위 변형 추가',
+    'quick-add-mentions': '$name 및 $botName과 같은 사용자 멘션을 응답에 포함',
+    'quick-add-counter': '$eval 및 botState를 사용하여 명령 사용량을 추적하는 카운터 추가'
     // ... more Korean strings
   },
   ru: {
@@ -859,7 +980,33 @@ const translations: Languages = {
     'developer-prompt': 'Запрос разработчика',
     'enter-your-custom-developer-prompt': 'Введите свой пользовательский запрос разработчика...',
     advanced: 'Дополнительно',
-    'use-legacy-interpreter': 'Использовать старый интерпретатор'
+    'use-legacy-interpreter': 'Использовать старый интерпретатор',
+    // AI Chat strings
+    'ai-assistant': 'ИИ Ассистент',
+    'ai-chat-started': 'ИИ ассистент готов помочь отредактировать команду:',
+    'proposed-changes': 'Предлагаемые изменения',
+    changes: 'изменения',
+    'accept-changes': 'Принять изменения',
+    reject: 'Отклонить',
+    'changes-applied': 'Изменения успешно применены',
+    'changes-rejected': 'Изменения отклонены',
+    'describe-changes': 'Опишите, что вы хотите изменить...',
+    'api-key-needed': 'Требуется API-ключ OpenAI',
+    'openai-key-required':
+      'Пожалуйста, добавьте ваш API-ключ OpenAI в настройках для использования ИИ ассистента.',
+    'select-model': 'Выберите модель ИИ',
+    'total-tokens': 'Всего использовано токенов',
+    'new-chat': 'Новый чат',
+    close: 'Закрыть',
+    'make-funnier': 'Сделать смешнее',
+    'add-randomness': 'Добавить случайность',
+    'use-mentions': 'Использовать упоминания',
+    'add-counter': 'Добавить счётчик',
+    'quick-make-funnier': 'Сделать этот ответ команды смешнее и увлекательнее',
+    'quick-add-random': 'Добавить случайные вариации в ответ с помощью $random{}',
+    'quick-add-mentions': 'Включить упоминания пользователей, такие как $name и $botName, в ответ',
+    'quick-add-counter':
+      'Добавить счётчик с использованием $eval и botState для отслеживания использования команды'
     // ... more Russian strings
   }
   // ... more languages
