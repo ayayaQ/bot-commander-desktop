@@ -5,6 +5,7 @@
   let consoleElement: HTMLDivElement
   let autoScroll = true
   let collapsed = true
+  let copiedId: number | null = null
 
   $: messages = $consoleStore
 
@@ -55,6 +56,25 @@
     consoleStore.clear()
   }
 
+  async function copyMessage(text: string, id: number) {
+    try {
+      await navigator.clipboard.writeText(text)
+      copiedId = id
+      setTimeout(() => (copiedId = null), 1500)
+    } catch (e) {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      document.body.appendChild(ta)
+      ta.select()
+      try {
+        document.execCommand('copy')
+      } catch {}
+      document.body.removeChild(ta)
+      copiedId = id
+      setTimeout(() => (copiedId = null), 1500)
+    }
+  }
+
   onMount(() => {
     initConsoleListeners()
   })
@@ -100,7 +120,10 @@
         <div class="text-base-content/50 italic">No messages yet...</div>
       {:else}
         {#each messages as message (message.id)}
-          <div class="flex items-start gap-2 hover:bg-base-content/5 rounded px-1">
+          <div
+            class="flex items-start gap-2 hover:bg-base-content/5 rounded px-1 cursor-pointer"
+            on:click={() => copyMessage(message.message, message.id)}
+          >
             <span
               class="material-symbols-outlined text-sm {getColorForType(message.type)}"
               style="font-size: 14px;"
@@ -109,6 +132,9 @@
             </span>
             <span class="text-base-content/50 shrink-0">[{formatTimestamp(message.timestamp)}]</span
             >
+            {#if copiedId === message.id}
+              <span class="ml-2 text-success text-xs">Copied!</span>
+            {/if}
             <span class={getColorForType(message.type)}>{message.message}</span>
           </div>
         {/each}
