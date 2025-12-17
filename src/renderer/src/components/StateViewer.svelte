@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { t } from '../stores/localisation'
   import HeaderBar from './HeaderBar.svelte'
-  import AutoResizingTextarea from './AutoResizingTextarea.svelte'
+  import CodeEditor from './CodeEditor.svelte'
 
   // Startup JS logic
   let startupJs = ''
@@ -30,8 +30,8 @@
     }
   }
 
-  function onStartupJsInput(e: Event) {
-    startupJs = (e.target as HTMLTextAreaElement).value
+  function onStartupJsChange(e: CustomEvent<string>) {
+    startupJs = e.detail
     startupJsSaved = false
   }
 
@@ -208,16 +208,15 @@
         </button>
       </div>
     </div>
-    <AutoResizingTextarea
-      bind:value={startupJs}
-      onInput={onStartupJsInput}
-      placeholder="// JS to run at context startup"
-      className="textarea textarea-bordered w-full min-h-[2.5rem] resize-none overflow-hidden font-mono"
-      spellcheck={false}
-      disabled={startupJsLoading}
-      minHeight="2.5rem"
-      resize="none"
-    />
+    {#if !startupJsLoading}
+      <CodeEditor
+        bind:value={startupJs}
+        on:change={onStartupJsChange}
+        placeholder="// JS to run at context startup"
+        mode="js"
+        minHeight="100px"
+      />
+    {/if}
     {#if startupJsLoading}
       <div class="text-sm text-gray-500 mt-1">Loading...</div>
     {/if}
@@ -280,14 +279,11 @@
     </div>
 
     <div class="mb-2">
-      <AutoResizingTextarea
+      <CodeEditor
         bind:value={codeToRun}
-        onInput={undefined}
         placeholder={$t('run-code-placeholder')}
-        className="textarea textarea-bordered w-full min-h-[2.5rem] resize-none overflow-hidden"
-        spellcheck={false}
-        minHeight="2.5rem"
-        resize="none"
+        mode="js"
+        minHeight="100px"
       />
     </div>
     {#if codeOutput}
