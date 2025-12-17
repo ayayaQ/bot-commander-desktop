@@ -2,6 +2,7 @@ import vm from 'vm'
 import fs from 'fs/promises'
 import { app } from 'electron'
 import { join } from 'path'
+import { rendererConsole } from './rendererConsole'
 
 let botStateContext: vm.Context
 const STARTUP_JS_FILENAME = 'startup.js'
@@ -22,6 +23,8 @@ function createSafeContext(initialContext: Record<string, any>): vm.Context {
     Array: Array,
     Object: Object,
     JSON: JSON,
+    // Provide safe debug function
+    debug: debug,
     // Block dangerous globals to prevent code injection
     process: undefined,
     require: undefined,
@@ -33,6 +36,12 @@ function createSafeContext(initialContext: Record<string, any>): vm.Context {
     console: undefined
   })
   return context
+}
+
+function debug(msg: any) {
+  // convert msg to string if it's not and then render to client console via rendererConsole.info
+  const message = typeof msg === 'string' ? msg : JSON.stringify(msg, null, 2)
+  rendererConsole.info(message)
 }
 
 // Get the path to the startup JS file
