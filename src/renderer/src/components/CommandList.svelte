@@ -88,6 +88,7 @@
       mode={editingCommand ? 'edit' : 'add'}
       command={editingCommand}
       index={editingIndex}
+      allCommands={commands}
       on:add={handleAdd}
       on:update={handleUpdate}
       on:cancel={() => (isEditing = false)}

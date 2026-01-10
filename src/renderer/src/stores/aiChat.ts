@@ -1,5 +1,11 @@
-import { writable, get } from 'svelte/store'
-import type { BCFDCommand } from '../types/types'
+import { writable, get, derived } from 'svelte/store'
+import type {
+  BCFDCommand,
+  ChatContext,
+  SavedChat,
+  ChatMessageData,
+  ChatsData
+} from '../types/types'
 
 export interface ChatMessage {
   id: string
@@ -54,17 +60,142 @@ export const selectedModel = writable<string>('gpt-4.1-nano')
 export const totalTokens = writable<number>(0)
 export const aiPanelOpen = writable<boolean>(false)
 
+// Persistence state
+export const allChats = writable<SavedChat[]>([])
+export const activeChatId = writable<string | null>(null)
+export const chatHistoryOpen = writable<boolean>(false)
+
+// Context state
+export const selectedContexts = writable<ChatContext[]>([])
+export const contextPickerOpen = writable<boolean>(false)
+
+// Derived store for active chat
+export const activeChat = derived(
+  [allChats, activeChatId],
+  ([$allChats, $activeChatId]) => $allChats.find((c) => c.id === $activeChatId) || null
+)
+
 // Generate unique message ID
 function generateId(): string {
   return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 }
 
-// Add a message to the chat
-export function addMessage(
+// Convert ChatMessage to ChatMessageData for storage
+function messageToData(msg: ChatMessage): ChatMessageData {
+  return {
+    id: msg.id,
+    role: msg.role,
+    content: msg.content,
+    timestamp: msg.timestamp.toISOString(),
+    pendingChanges: msg.pendingChanges
+  }
+}
+
+// Convert ChatMessageData to ChatMessage
+function dataToMessage(data: ChatMessageData): ChatMessage {
+  return {
+    id: data.id,
+    role: data.role,
+    content: data.content,
+    timestamp: new Date(data.timestamp),
+    pendingChanges: data.pendingChanges
+  }
+}
+
+// Initialize from stored chats
+export async function initializeChats(): Promise<void> {
+  try {
+    const data: ChatsData = await (window as any).electron.ipcRenderer.invoke('get-chats')
+    allChats.set(data.chats || [])
+    activeChatId.set(data.activeChat)
+
+    // Load active chat messages if there's an active chat
+    if (data.activeChat) {
+      const chat = data.chats.find((c) => c.id === data.activeChat)
+      if (chat) {
+        chatMessages.set(chat.messages.map(dataToMessage))
+        selectedContexts.set(chat.contexts || [])
+      }
+    }
+  } catch (error) {
+    console.error('Failed to initialize chats:', error)
+  }
+}
+
+// Create a new chat
+export async function createNewChat(
+  title: string = 'New Chat',
+  commandId?: string,
+  initialContexts: ChatContext[] = []
+): Promise<SavedChat | null> {
+  try {
+    const chat: SavedChat = await (window as any).electron.ipcRenderer.invoke('create-chat', {
+      title,
+      commandId,
+      contexts: initialContexts
+    })
+
+    allChats.update((chats) => [chat, ...chats])
+    activeChatId.set(chat.id)
+    chatMessages.set([])
+    selectedContexts.set(initialContexts)
+    totalTokens.set(0)
+
+    return chat
+  } catch (error) {
+    console.error('Failed to create chat:', error)
+    return null
+  }
+}
+
+// Load a chat by ID
+export async function loadChat(chatId: string): Promise<void> {
+  try {
+    const chat: SavedChat | null = await (window as any).electron.ipcRenderer.invoke(
+      'get-chat',
+      chatId
+    )
+    if (chat) {
+      activeChatId.set(chat.id)
+      chatMessages.set(chat.messages.map(dataToMessage))
+      selectedContexts.set(chat.contexts || [])
+
+      // Update active chat on backend
+      await (window as any).electron.ipcRenderer.invoke('set-active-chat', chatId)
+    }
+  } catch (error) {
+    console.error('Failed to load chat:', error)
+  }
+}
+
+// Delete a chat
+export async function deleteStoredChat(chatId: string): Promise<boolean> {
+  try {
+    const result = await (window as any).electron.ipcRenderer.invoke('delete-chat', chatId)
+    if (result) {
+      allChats.update((chats) => chats.filter((c) => c.id !== chatId))
+
+      // If we deleted the active chat, clear the UI
+      if (get(activeChatId) === chatId) {
+        activeChatId.set(null)
+        chatMessages.set([])
+        selectedContexts.set([])
+        totalTokens.set(0)
+      }
+    }
+    return result
+  } catch (error) {
+    console.error('Failed to delete chat:', error)
+    return false
+  }
+}
+
+// Add a message to the chat (and persist)
+export async function addMessage(
   role: 'user' | 'assistant' | 'system',
   content: string,
   pendingChanges?: CommandDiff | null
-): ChatMessage {
+): Promise<ChatMessage> {
   const message: ChatMessage = {
     id: generateId(),
     role,
@@ -74,18 +205,64 @@ export function addMessage(
   }
 
   chatMessages.update((msgs) => [...msgs, message])
+
+  // Persist to backend if there's an active chat
+  const currentChatId = get(activeChatId)
+  if (currentChatId) {
+    try {
+      const result = await (window as any).electron.ipcRenderer.invoke(
+        'add-message-to-chat',
+        currentChatId,
+        messageToData(message)
+      )
+
+      // Update the chat in allChats
+      if (result) {
+        allChats.update((chats) => chats.map((c) => (c.id === currentChatId ? result : c)))
+      }
+    } catch (error) {
+      console.error('Failed to persist message:', error)
+    }
+  }
+
   return message
 }
 
-// Clear all messages
+// Clear all messages (for current session, not persisted)
 export function clearChat(): void {
   chatMessages.set([])
   totalTokens.set(0)
+  activeChatId.set(null)
+  selectedContexts.set([])
 }
 
 // Update a message (e.g., to add token count or remove pending changes)
-export function updateMessage(id: string, updates: Partial<ChatMessage>): void {
+export async function updateMessage(id: string, updates: Partial<ChatMessage>): Promise<void> {
   chatMessages.update((msgs) => msgs.map((msg) => (msg.id === id ? { ...msg, ...updates } : msg)))
+
+  // Persist to backend if there's an active chat
+  const currentChatId = get(activeChatId)
+  if (currentChatId) {
+    try {
+      // Convert updates to serializable format
+      const serializedUpdates: Partial<ChatMessageData> = {}
+      if ('pendingChanges' in updates) {
+        serializedUpdates.pendingChanges = updates.pendingChanges
+      }
+      if ('content' in updates) {
+        serializedUpdates.content = updates.content
+      }
+
+      await (window as any).electron.ipcRenderer.invoke(
+        'update-message-in-chat',
+        currentChatId,
+        id,
+        serializedUpdates
+      )
+    } catch (error) {
+      console.error('Failed to persist message update:', error)
+    }
+  }
 }
 
 // Calculate rough token estimate (4 chars ~= 1 token)
@@ -98,6 +275,126 @@ export function getMessagesForAPI(): Array<{ role: string; content: string }> {
   return get(chatMessages)
     .filter((msg) => msg.role !== 'system')
     .map((msg) => ({ role: msg.role, content: msg.content }))
+}
+
+// Context management functions
+export function addContext(context: ChatContext): void {
+  selectedContexts.update((contexts) => {
+    // Prevent duplicates
+    if (contexts.some((c) => c.type === context.type && c.id === context.id)) {
+      return contexts
+    }
+    return [...contexts, context]
+  })
+
+  // Persist contexts
+  persistContexts()
+}
+
+export function removeContext(context: ChatContext): void {
+  selectedContexts.update((contexts) =>
+    contexts.filter((c) => !(c.type === context.type && c.id === context.id))
+  )
+
+  // Persist contexts
+  persistContexts()
+}
+
+export function clearContexts(): void {
+  selectedContexts.set([])
+  persistContexts()
+}
+
+async function persistContexts(): Promise<void> {
+  const currentChatId = get(activeChatId)
+  if (currentChatId) {
+    try {
+      await (window as any).electron.ipcRenderer.invoke(
+        'update-chat-contexts',
+        currentChatId,
+        get(selectedContexts)
+      )
+    } catch (error) {
+      console.error('Failed to persist contexts:', error)
+    }
+  }
+}
+
+// Build context string for AI from selected contexts
+export async function buildContextString(): Promise<string> {
+  const contexts = get(selectedContexts)
+  if (contexts.length === 0) return ''
+
+  const contextParts: string[] = []
+
+  for (const ctx of contexts) {
+    switch (ctx.type) {
+      case 'startup-js':
+        try {
+          const startupJs = await (window as any).electron.ipcRenderer.invoke('get-startup-js')
+          if (startupJs) {
+            contextParts.push(`=== Startup JavaScript ===\n${startupJs}`)
+          }
+        } catch (error) {
+          console.error('Failed to load startup JS:', error)
+        }
+        break
+
+      case 'bot-state':
+        try {
+          const botState = await (window as any).electron.ipcRenderer.invoke('getBotState')
+          if (botState) {
+            contextParts.push(`=== Bot State ===\n${JSON.stringify(botState, null, 2)}`)
+          }
+        } catch (error) {
+          console.error('Failed to load bot state:', error)
+        }
+        break
+
+      case 'all-commands':
+        try {
+          const commands = await (window as any).electron.ipcRenderer.invoke('get-commands')
+          if (commands?.bcfdCommands) {
+            contextParts.push(
+              `=== All Commands ===\n${JSON.stringify(commands.bcfdCommands, null, 2)}`
+            )
+          }
+        } catch (error) {
+          console.error('Failed to load commands:', error)
+        }
+        break
+
+      case 'command':
+        if (ctx.content) {
+          contextParts.push(`=== Command: ${ctx.label} ===\n${ctx.content}`)
+        }
+        break
+    }
+  }
+
+  return contextParts.join('\n\n')
+}
+
+// Get recent chats for the history panel
+export async function fetchRecentChats(limit: number = 20): Promise<SavedChat[]> {
+  try {
+    const chats = await (window as any).electron.ipcRenderer.invoke('get-recent-chats', limit)
+    allChats.set(chats)
+    return chats
+  } catch (error) {
+    console.error('Failed to fetch recent chats:', error)
+    return []
+  }
+}
+
+// Search chats
+export async function searchStoredChats(query: string): Promise<SavedChat[]> {
+  try {
+    return await (window as any).electron.ipcRenderer.invoke('search-chats', query)
+  } catch (error) {
+    console.error('Failed to search chats:', error)
+    return []
+  }
 }
 
 // Compare two commands and generate a diff

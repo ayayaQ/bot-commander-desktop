@@ -11,6 +11,7 @@
   export let mode: 'edit' | 'add' = 'add'
   export let command: BCFDCommand | null = null
   export let index: number | null = null
+  export let allCommands: BCFDCommand[] = []
 
   const TYPE_MESSAGE_RECEIVED = 0
   const TYPE_PM_RECEIVED = 1
@@ -669,6 +670,7 @@
         <AIChat
           command={editedCommand}
           onCommandUpdate={handleAiCommandUpdate}
+          {allCommands}
           on:close={toggleAiPanel}
         />
       </div>

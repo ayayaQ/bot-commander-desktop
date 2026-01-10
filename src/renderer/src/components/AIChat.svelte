@@ -1,25 +1,39 @@
 <script lang="ts">
-  import { createEventDispatcher, onMount, tick } from 'svelte'
+  import { createEventDispatcher, onDestroy, onMount, tick } from 'svelte'
   import { t } from '../stores/localisation'
   import { settingsStore } from '../stores/settings'
   import DiffViewer from './DiffViewer.svelte'
-  import type { BCFDCommand } from '../types/types'
+  import type { BCFDCommand, ChatContext, SavedChat } from '../types/types'
   import {
     chatMessages,
     isAiLoading,
     selectedModel,
     totalTokens,
     addMessage,
-    clearChat,
     updateMessage,
     estimateTokens,
     generateCommandDiff,
     AI_MODELS,
-    type CommandDiff
+    type CommandDiff,
+    // New imports for persistence and context
+    allChats,
+    activeChatId,
+    chatHistoryOpen,
+    selectedContexts,
+    contextPickerOpen,
+    initializeChats,
+    createNewChat,
+    loadChat,
+    deleteStoredChat,
+    fetchRecentChats,
+    addContext,
+    removeContext,
+    buildContextString
   } from '../stores/aiChat'
 
   export let command: BCFDCommand
   export let onCommandUpdate: (updated: BCFDCommand) => void
+  export let allCommands: BCFDCommand[] = []
 
   const dispatch = createEventDispatcher<{
     close: void
@@ -28,6 +42,29 @@
   let inputMessage = ''
   let messagesContainer: HTMLDivElement
   let inputElement: HTMLTextAreaElement
+  let searchQuery = ''
+  let filteredChats: SavedChat[] = []
+
+  // Available context options
+  $: availableContexts = [
+    {
+      type: 'command' as const,
+      id: command.command,
+      label: `Current: ${command.commandDescription || command.command}`,
+      content: JSON.stringify(command, null, 2)
+    },
+    { type: 'startup-js' as const, label: 'Startup JavaScript' },
+    { type: 'bot-state' as const, label: 'Bot State' },
+    { type: 'all-commands' as const, label: 'All Commands' },
+    ...allCommands
+      .filter((cmd) => cmd.command !== command.command)
+      .map((cmd) => ({
+        type: 'command' as const,
+        id: cmd.command,
+        label: cmd.commandDescription || cmd.command,
+        content: JSON.stringify(cmd, null, 2)
+      }))
+  ]
 
   // BCFD Language system prompt
   const BCFD_SYSTEM_PROMPT = `You are an expert Discord bot command editor. You help users create and modify commands using the BCFD Template Language.
@@ -136,6 +173,19 @@ When answering questions without changes:
     const userMessage = inputMessage.trim()
     inputMessage = ''
 
+    // Ensure we have an active chat, create one if not
+    if (!$activeChatId) {
+      const commandLabel = command.commandDescription || command.command || 'New Command'
+      await createNewChat(commandLabel, command.command, [
+        {
+          type: 'command',
+          id: command.command,
+          label: commandLabel,
+          content: JSON.stringify(command, null, 2)
+        }
+      ])
+    }
+
     // Add user message
     addMessage('user', userMessage)
 
@@ -150,18 +200,22 @@ When answering questions without changes:
     isAiLoading.set(true)
 
     try {
+      // Build additional context from selected contexts
+      const additionalContext = await buildContextString()
+
       // Build conversation history
       const conversationHistory = $chatMessages.map((msg) => ({
         role: msg.role,
         content: msg.content
       }))
 
-      // Call AI API
+      // Call AI API with context
       const response = await (window as any).electron.ipcRenderer.invoke('ai-command-chat', {
         messages: conversationHistory,
         currentCommand: command,
         model: $selectedModel,
-        systemPrompt: BCFD_SYSTEM_PROMPT
+        systemPrompt: BCFD_SYSTEM_PROMPT,
+        additionalContext: additionalContext
       })
 
       if (response.error) {
@@ -197,20 +251,21 @@ When answering questions without changes:
     }
   }
 
-  function handleAcceptChanges(event: CustomEvent<CommandDiff>) {
+  async function handleAcceptChanges(event: CustomEvent<CommandDiff>) {
     const diff = event.detail
     onCommandUpdate(diff.after)
 
-    // Remove pending changes from the message
-    chatMessages.update((msgs) =>
-      msgs.map((msg) => (msg.pendingChanges === diff ? { ...msg, pendingChanges: null } : msg))
-    )
+    // Find the message with this diff and update it to remove pending changes
+    const messageWithDiff = $chatMessages.find((msg) => msg.pendingChanges === diff)
+    if (messageWithDiff) {
+      await updateMessage(messageWithDiff.id, { pendingChanges: null })
+    }
 
     addMessage('system', `✓ ${$t('changes-applied')}`)
   }
 
-  function handleRejectChanges(messageId: string) {
-    updateMessage(messageId, { pendingChanges: null })
+  async function handleRejectChanges(messageId: string) {
+    await updateMessage(messageId, { pendingChanges: null })
     addMessage('system', `✗ ${$t('changes-rejected')}`)
   }
 
@@ -227,22 +282,86 @@ When answering questions without changes:
     }
   }
 
-  function handleNewChat() {
-    clearChat()
+  async function handleNewChat() {
+    const commandLabel = command.commandDescription || command.command || 'New Command'
+
+    // Create a new chat with the current command as default context
+    await createNewChat(commandLabel, command.command, [
+      {
+        type: 'command',
+        id: command.command,
+        label: commandLabel,
+        content: JSON.stringify(command, null, 2)
+      }
+    ])
+
     // Add initial context message
-    addMessage(
-      'system',
-      `${$t('ai-chat-started')} "${command.commandDescription || command.command || 'New Command'}"`
-    )
+    addMessage('system', `${$t('ai-chat-started')} "${commandLabel}"`)
   }
 
-  onMount(() => {
-    // Initialize with context
-    if ($chatMessages.length === 0) {
+  async function handleLoadChat(chat: SavedChat) {
+    await loadChat(chat.id)
+    chatHistoryOpen.set(false)
+    await tick()
+    scrollToBottom()
+  }
+
+  async function handleDeleteChat(chatId: string) {
+    await deleteStoredChat(chatId)
+    filteredChats = $allChats
+  }
+
+  function toggleContext(ctx: ChatContext) {
+    const exists = $selectedContexts.some((c) => c.type === ctx.type && c.id === ctx.id)
+    if (exists) {
+      removeContext(ctx)
+    } else {
+      addContext(ctx)
+    }
+  }
+
+  function isContextSelected(ctx: ChatContext): boolean {
+    return $selectedContexts.some((c) => c.type === ctx.type && c.id === ctx.id)
+  }
+
+  onMount(async () => {
+    // Initialize chats from storage
+    await initializeChats()
+    await fetchRecentChats()
+    filteredChats = $allChats
+
+    // Initialize with new chat if no active chat
+    if (!$activeChatId && $chatMessages.length === 0) {
       handleNewChat()
     }
+
     inputElement?.focus()
   })
+
+  onDestroy(() => {
+    // If the chat only has a system message (or is empty), delete it
+    // This prevents saving empty/unused chats
+    if ($activeChatId && $chatMessages.length <= 1) {
+      const chatIdToDelete = $activeChatId
+      // Fire and forget - we're destroying so we can't await
+      deleteStoredChat(chatIdToDelete)
+    }
+    // Clear the active chat state
+    activeChatId.set(null)
+    chatMessages.set([])
+    selectedContexts.set([])
+  })
+
+  // Update filtered chats when search query changes
+  $: {
+    if (searchQuery.trim()) {
+      filteredChats = $allChats.filter((chat) =>
+        chat.title.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    } else {
+      filteredChats = $allChats
+    }
+  }
 
   $: hasApiKey = $settingsStore.openaiApiKey && $settingsStore.openaiApiKey.length > 0
 </script>
@@ -257,6 +376,26 @@ When answering questions without changes:
       <span class="font-bold">{$t('ai-assistant')}</span>
     </div>
     <div class="flex items-center gap-2">
+      <!-- Chat History -->
+      <button
+        class="btn btn-ghost btn-sm btn-circle"
+        class:btn-active={$chatHistoryOpen}
+        on:click={() => chatHistoryOpen.update((v) => !v)}
+        title="Chat History"
+      >
+        <span class="material-symbols-outlined">history</span>
+      </button>
+
+      <!-- Context Picker -->
+      <button
+        class="btn btn-ghost btn-sm btn-circle"
+        class:btn-active={$contextPickerOpen}
+        on:click={() => contextPickerOpen.update((v) => !v)}
+        title="Select Context"
+      >
+        <span class="material-symbols-outlined">attach_file</span>
+      </button>
+
       <!-- Model Picker -->
       <select
         bind:value={$selectedModel}
@@ -280,7 +419,7 @@ When answering questions without changes:
         on:click={handleNewChat}
         title={$t('new-chat')}
       >
-        <span class="material-symbols-outlined">refresh</span>
+        <span class="material-symbols-outlined">add</span>
       </button>
 
       <!-- Close -->
@@ -293,6 +432,92 @@ When answering questions without changes:
       </button>
     </div>
   </div>
+
+  <!-- Context Pills -->
+  {#if $selectedContexts.length > 0}
+    <div class="flex flex-wrap gap-1 p-2 border-b border-base-300 bg-base-200/50">
+      {#each $selectedContexts as ctx}
+        <div class="badge badge-primary badge-sm gap-1">
+          <span class="text-xs truncate max-w-24">{ctx.label}</span>
+          <button class="hover:text-error" on:click={() => removeContext(ctx)}>
+            <span class="material-symbols-outlined text-xs">close</span>
+          </button>
+        </div>
+      {/each}
+    </div>
+  {/if}
+
+  <!-- Context Picker Panel -->
+  {#if $contextPickerOpen}
+    <div class="border-b border-base-300 bg-base-200 p-3 max-h-48 overflow-y-auto">
+      <div class="text-xs font-semibold mb-2 text-base-content/70">Select Context</div>
+      <div class="space-y-1">
+        {#each availableContexts as ctx}
+          <label class="flex items-center gap-2 cursor-pointer hover:bg-base-300 p-1 rounded">
+            <input
+              type="checkbox"
+              class="checkbox checkbox-xs checkbox-primary"
+              checked={isContextSelected(ctx)}
+              on:change={() => toggleContext(ctx)}
+            />
+            <span class="text-sm truncate">{ctx.label}</span>
+            {#if ctx.type === 'startup-js'}
+              <span class="badge badge-xs badge-ghost">JS</span>
+            {:else if ctx.type === 'bot-state'}
+              <span class="badge badge-xs badge-ghost">State</span>
+            {:else if ctx.type === 'all-commands'}
+              <span class="badge badge-xs badge-ghost">All</span>
+            {:else if ctx.type === 'command'}
+              <span class="badge badge-xs badge-ghost">Cmd</span>
+            {/if}
+          </label>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
+  <!-- Chat History Panel -->
+  {#if $chatHistoryOpen}
+    <div class="border-b border-base-300 bg-base-200 p-3 max-h-64 overflow-y-auto">
+      <div class="flex items-center gap-2 mb-2">
+        <input
+          type="text"
+          bind:value={searchQuery}
+          placeholder="Search chats..."
+          class="input input-xs input-bordered flex-1"
+        />
+      </div>
+      {#if filteredChats.length === 0}
+        <div class="text-xs text-base-content/50 text-center py-2">No chats found</div>
+      {:else}
+        <div class="space-y-1">
+          {#each filteredChats as chat}
+            <div
+              class="flex items-center gap-2 p-2 rounded hover:bg-base-300 cursor-pointer group"
+              class:bg-base-300={$activeChatId === chat.id}
+            >
+              <button
+                class="flex-1 text-left text-sm truncate"
+                on:click={() => handleLoadChat(chat)}
+              >
+                {chat.title}
+              </button>
+              <span class="text-xs text-base-content/50">
+                {new Date(chat.updatedAt).toLocaleDateString()}
+              </span>
+              <button
+                class="btn btn-ghost btn-xs opacity-0 group-hover:opacity-100"
+                on:click|stopPropagation={() => handleDeleteChat(chat.id)}
+                title="Delete chat"
+              >
+                <span class="material-symbols-outlined text-xs">delete</span>
+              </button>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  {/if}
 
   <!-- API Key Warning -->
   {#if !hasApiKey}

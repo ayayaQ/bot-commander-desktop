@@ -24,6 +24,25 @@ import { getBotStatus, setBotStatus } from '../services/statusService'
 import { getStatsInstance } from '../utils/stats'
 import { checkForUpdates } from '../services/updateService'
 import OpenAI from 'openai'
+import {
+  loadChats,
+  saveChats,
+  getChats,
+  getChat,
+  createChat,
+  updateChat,
+  deleteChat,
+  addMessageToChat,
+  updateMessageInChat,
+  updateChatContexts,
+  setActiveChat,
+  getActiveChat,
+  getRecentChats,
+  searchChats,
+  type SavedChat,
+  type ChatContext,
+  type ChatMessage
+} from '../services/chatService'
 
 export function addWindowIPCHandlers(mainWindow: BrowserWindow) {
   ipcMain.on('minimize-window', () => {
@@ -270,6 +289,7 @@ export function addIPCHandlers() {
         currentCommand: BCFDCommand
         model: string
         systemPrompt: string
+        additionalContext?: string
       }
     ) => {
       const settings = getSettings()
@@ -294,6 +314,14 @@ export function addIPCHandlers() {
             content: `Current command state:\n${JSON.stringify(payload.currentCommand, null, 2)}`
           }
         ]
+
+        // Add additional context if provided (startup JS, bot state, other commands, etc.)
+        if (payload.additionalContext) {
+          apiMessages.push({
+            role: 'system',
+            content: `Additional context:\n${payload.additionalContext}`
+          })
+        }
 
         // Add developer prompt if set
         if (settings.developerPrompt) {
@@ -489,4 +517,82 @@ export function addIPCHandlers() {
       }
     }
   )
+
+  // Chat persistence IPC handlers
+  ipcMain.handle('load-chats', async () => {
+    return await loadChats()
+  })
+
+  ipcMain.handle('save-chats', async () => {
+    await saveChats()
+    return true
+  })
+
+  ipcMain.handle('get-chats', () => {
+    return getChats()
+  })
+
+  ipcMain.handle('get-chat', (_, chatId: string) => {
+    return getChat(chatId)
+  })
+
+  ipcMain.handle(
+    'create-chat',
+    (_, payload: { title: string; commandId?: string; contexts?: ChatContext[] }) => {
+      const chat = createChat(payload.title, payload.commandId, payload.contexts || [])
+      saveChats() // Auto-save
+      return chat
+    }
+  )
+
+  ipcMain.handle('update-chat', async (_, chatId: string, updates: Partial<SavedChat>) => {
+    const result = updateChat(chatId, updates)
+    if (result) await saveChats()
+    return result
+  })
+
+  ipcMain.handle('delete-chat', async (_, chatId: string) => {
+    const result = deleteChat(chatId)
+    if (result) await saveChats()
+    return result
+  })
+
+  ipcMain.handle('add-message-to-chat', async (_, chatId: string, message: ChatMessage) => {
+    const result = addMessageToChat(chatId, message)
+    if (result) await saveChats()
+    return result
+  })
+
+  ipcMain.handle(
+    'update-message-in-chat',
+    async (_, chatId: string, messageId: string, updates: Partial<ChatMessage>) => {
+      const result = updateMessageInChat(chatId, messageId, updates)
+      if (result) await saveChats()
+      return result
+    }
+  )
+
+  ipcMain.handle('update-chat-contexts', async (_, chatId: string, contexts: ChatContext[]) => {
+    const result = updateChatContexts(chatId, contexts)
+    if (result) await saveChats()
+    return result
+  })
+
+  ipcMain.handle('set-active-chat', (_, chatId: string | null) => {
+    setActiveChat(chatId)
+    saveChats()
+    return true
+  })
+
+  ipcMain.handle('get-active-chat', () => {
+    return getActiveChat()
+  })
+
+  ipcMain.handle('get-recent-chats', (_, limit?: number) => {
+    return getRecentChats(limit)
+  })
+
+  ipcMain.handle('search-chats', (_, query: string) => {
+    return searchChats(query)
+  })
 }
