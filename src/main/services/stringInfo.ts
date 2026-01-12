@@ -1,5 +1,8 @@
 import {
+  ButtonInteraction,
+  ChatInputCommandInteraction,
   Client,
+  CommandInteractionOptionResolver,
   Guild,
   GuildMember,
   Message,
@@ -10,7 +13,7 @@ import {
   TextChannel,
   User
 } from 'discord.js'
-import { BCFDCommand } from '../types/types'
+import { BCFDCommand, BCFDInteractionCommand } from '../types/types'
 import { getCommands, getContext } from './botService'
 import { stringInfoAddEval } from '../utils/virtual'
 import OpenAI from 'openai'
@@ -28,6 +31,9 @@ export type StringInfoContext = {
   mentionedUser?: User
   messageEvent?: OmitPartialGroupDMChannel<Message<boolean>> | Message<boolean>
   command?: BCFDCommand
+  // Interaction-specific fields
+  interactionCommand?: BCFDInteractionCommand
+  interactionOptions?: CommandInteractionOptionResolver
 }
 
 const searchRegex = /\$(\w+)(?:\{([^}]*)\})?/g
@@ -81,6 +87,8 @@ async function stringInfoAddNew(ctx: StringInfoContext): Promise<string> {
     mentionedUser: ctx.mentionedUser,
     messageEvent: ctx.messageEvent,
     command: ctx.command,
+    interactionCommand: ctx.interactionCommand,
+    interactionOptions: ctx.interactionOptions,
     vmContext: getContext()
   }
 
@@ -134,6 +142,25 @@ export function contextForReactionEvent(
     textChannel: event.message.channel as TextChannel,
     messageEvent: event.message as Message<boolean>,
     command: command
+  }
+}
+
+export function contextForInteractionEvent(
+  message: string,
+  interaction: ChatInputCommandInteraction | ButtonInteraction,
+  command: BCFDInteractionCommand
+): StringInfoContext {
+  return {
+    message: message,
+    user: interaction.user,
+    member: (interaction.member as GuildMember) ?? undefined,
+    client: interaction.client,
+    guild: interaction.guild ?? undefined,
+    textChannel: (interaction.channel as TextChannel) ?? undefined,
+    interactionCommand: command,
+    interactionOptions: interaction.isChatInputCommand()
+      ? (interaction.options as CommandInteractionOptionResolver)
+      : undefined
   }
 }
 

@@ -223,6 +223,18 @@ function createFunctionRegistry(): FunctionRegistry {
     return messageArgs[index] ?? ''
   })
 
+  // $option(name) - get slash command option value
+  registry.set('option', (args, ctx) => {
+    if (args.length < 1 || !ctx.interactionOptions) return ''
+    const name = args[0]
+    const option = ctx.interactionOptions.get(name)
+    if (!option) return ''
+    // Handle different option types
+    const value = option.value
+    if (value === null || value === undefined) return ''
+    return String(value)
+  })
+
   // $set(name, value) - store a variable
   registry.set('set', (args, ctx) => {
     if (args.length < 2 || !ctx.vmContext) return ''
