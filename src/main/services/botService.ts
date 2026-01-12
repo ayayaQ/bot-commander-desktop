@@ -1,6 +1,11 @@
 import {
+  ActionRowBuilder,
   ActivityType,
+  ButtonBuilder,
+  ButtonInteraction,
+  ButtonStyle,
   ChannelType,
+  ChatInputCommandInteraction,
   Client,
   DMChannel,
   EmbedBuilder,
@@ -27,12 +32,25 @@ import {
   User,
   VoiceChannel
 } from 'discord.js'
-import { BCFDCommand, BCFDSlashCommand, BotStatus } from '../types/types'
+import {
+  BCFDCommand,
+  BCFDSlashCommand,
+  BotStatus,
+  BCFDInteractionCommand,
+  BCFDInteractionAction,
+  BCFDInteractionButton
+} from '../types/types'
+import { findInteractionByCommandName, findInteractionByButtonId } from './interactionService'
 import { getBotStateContext, loadBotState, saveBotState } from '../utils/virtual'
 import vm from 'node:vm'
 import { session } from 'electron'
 import { getBotStatus } from './statusService'
-import { contextForMessageEvent, contextForReactionEvent, stringInfoAdd } from './stringInfo'
+import {
+  contextForMessageEvent,
+  contextForReactionEvent,
+  contextForInteractionEvent,
+  stringInfoAdd
+} from './stringInfo'
 import { getStatsInstance, Stats } from '../utils/stats'
 import { rendererConsole } from '../utils/rendererConsole'
 
@@ -235,14 +253,290 @@ export function applyBotStatus(botStatus: BotStatus) {
 }
 
 async function onInteractionCreate(interaction: Interaction) {
-  if (!interaction.isChatInputCommand()) return
+  if (interaction.isChatInputCommand()) {
+    await handleSlashCommand(interaction)
+  } else if (interaction.isButton()) {
+    await handleButtonClick(interaction)
+  }
+}
 
-  let command = commands.bcfdSlashCommands.find((c) => c.commandName == interaction.commandName)
+async function handleSlashCommand(interaction: ChatInputCommandInteraction) {
+  // First check for new interaction commands
+  const interactionCommand = findInteractionByCommandName(interaction.commandName)
 
-  if (!command) return
+  if (interactionCommand) {
+    rendererConsole.info(`Executing interaction command: /${interaction.commandName}`)
+    await executeInteractionCommand(interaction, interactionCommand)
+    return
+  }
 
-  rendererConsole.info(`Executing slash command: /${interaction.commandName}`)
-  interaction.reply(command.commandReply)
+  // No command found
+  rendererConsole.warning(`Slash command not found: /${interaction.commandName}`)
+}
+
+async function handleButtonClick(interaction: ButtonInteraction) {
+  const result = findInteractionByButtonId(interaction.customId)
+
+  if (!result) {
+    await interaction.reply({
+      content: 'This button is no longer active.',
+      ephemeral: true
+    })
+    return
+  }
+
+  const { command, button } = result
+  rendererConsole.info(`Button clicked: ${button.customId} from /${command.commandName}`)
+
+  await executeButtonAction(interaction, command, button)
+}
+
+async function executeInteractionCommand(
+  interaction: ChatInputCommandInteraction,
+  command: BCFDInteractionCommand
+) {
+  const action = command.rootAction
+
+  // Defer if needed for long-running operations
+  if (action.deferReply) {
+    await interaction.deferReply({ ephemeral: action.ephemeral })
+  }
+
+  // Build the response
+  const response = await buildActionResponse(action, interaction, command)
+
+  // Build buttons if any
+  const components =
+    command.buttons.length > 0 ? [await buildButtonRow(command.buttons, interaction, command)] : []
+
+  // Send response
+  try {
+    if (action.deferReply) {
+      await interaction.editReply({ ...response, components })
+    } else {
+      await interaction.reply({
+        ...response,
+        components,
+        ephemeral: action.ephemeral
+      })
+    }
+
+    // Handle DM actions after the reply
+    if (action.sendPrivateMessage && action.privateMessage) {
+      const dmContent = await stringInfoAdd(
+        contextForInteractionEvent(action.privateMessage, interaction, command)
+      )
+      await interaction.user.send(dmContent).catch(() => {
+        rendererConsole.warning(`Could not send DM to ${interaction.user.username}`)
+      })
+    }
+
+    if (action.sendPrivateEmbed) {
+      const embed = await buildEmbed(action.privateEmbed, interaction, command)
+      await interaction.user.send({ embeds: [embed] }).catch(() => {
+        rendererConsole.warning(`Could not send DM embed to ${interaction.user.username}`)
+      })
+    }
+
+    // Handle role assignment
+    if (action.isRoleAssigner && action.roleToAssign && interaction.member) {
+      const roleId = await stringInfoAdd(
+        contextForInteractionEvent(action.roleToAssign, interaction, command)
+      )
+      const member = interaction.member as GuildMember
+      if (member.roles.cache.has(roleId)) {
+        await member.roles.remove(roleId)
+      } else {
+        await member.roles.add(roleId)
+      }
+    }
+
+    stats.incrementMessagesSent()
+  } catch (error) {
+    rendererConsole.error(`Error executing interaction command: ${error}`)
+  }
+}
+
+async function executeButtonAction(
+  interaction: ButtonInteraction,
+  command: BCFDInteractionCommand,
+  button: BCFDInteractionButton
+) {
+  const action = button.action
+
+  // Defer if needed
+  if (action.deferReply) {
+    await interaction.deferReply({ ephemeral: action.ephemeral })
+  }
+
+  // Build the response
+  const response = await buildActionResponse(action, interaction, command)
+
+  // Send response
+  try {
+    if (action.deferReply) {
+      await interaction.editReply(response)
+    } else {
+      await interaction.reply({
+        ...response,
+        ephemeral: action.ephemeral
+      })
+    }
+
+    // Handle DM actions after the reply
+    if (action.sendPrivateMessage && action.privateMessage) {
+      const dmContent = await stringInfoAdd(
+        contextForInteractionEvent(action.privateMessage, interaction, command)
+      )
+      await interaction.user.send(dmContent).catch(() => {
+        rendererConsole.warning(`Could not send DM to ${interaction.user.username}`)
+      })
+    }
+
+    if (action.sendPrivateEmbed) {
+      const embed = await buildEmbed(action.privateEmbed, interaction, command)
+      await interaction.user.send({ embeds: [embed] }).catch(() => {
+        rendererConsole.warning(`Could not send DM embed to ${interaction.user.username}`)
+      })
+    }
+
+    // Handle role assignment
+    if (action.isRoleAssigner && action.roleToAssign && interaction.member) {
+      const roleId = await stringInfoAdd(
+        contextForInteractionEvent(action.roleToAssign, interaction, command)
+      )
+      const member = interaction.member as GuildMember
+      if (member.roles.cache.has(roleId)) {
+        await member.roles.remove(roleId)
+      } else {
+        await member.roles.add(roleId)
+      }
+    }
+
+    stats.incrementMessagesSent()
+  } catch (error) {
+    rendererConsole.error(`Error executing button action: ${error}`)
+  }
+}
+
+async function buildActionResponse(
+  action: BCFDInteractionAction,
+  interaction: ChatInputCommandInteraction | ButtonInteraction,
+  command: BCFDInteractionCommand
+): Promise<{ content?: string; embeds?: EmbedBuilder[] }> {
+  const result: { content?: string; embeds?: EmbedBuilder[] } = {}
+
+  // Channel message
+  if (action.sendChannelMessage && action.channelMessage) {
+    result.content = await stringInfoAdd(
+      contextForInteractionEvent(action.channelMessage, interaction, command)
+    )
+  }
+
+  // Channel embed
+  if (action.sendChannelEmbed) {
+    result.embeds = [await buildEmbed(action.channelEmbed, interaction, command)]
+  }
+
+  // Ensure we have some response (Discord requires a response to interactions)
+  if (!result.content && !result.embeds) {
+    result.content = '\u200B' // Zero-width space as minimal response
+  }
+
+  return result
+}
+
+async function buildEmbed(
+  embedTemplate: BCFDInteractionAction['channelEmbed'],
+  interaction: ChatInputCommandInteraction | ButtonInteraction,
+  command: BCFDInteractionCommand
+): Promise<EmbedBuilder> {
+  const embed = new EmbedBuilder()
+
+  if (embedTemplate.title) {
+    embed.setTitle(
+      await stringInfoAdd(contextForInteractionEvent(embedTemplate.title, interaction, command))
+    )
+  }
+
+  if (embedTemplate.description) {
+    embed.setDescription(
+      await stringInfoAdd(
+        contextForInteractionEvent(embedTemplate.description, interaction, command)
+      )
+    )
+  }
+
+  if (embedTemplate.hexColor) {
+    const colorStr = await stringInfoAdd(
+      contextForInteractionEvent(embedTemplate.hexColor, interaction, command)
+    )
+    const color = parseInt(colorStr.replace('#', ''), 16)
+    if (!isNaN(color)) {
+      embed.setColor(color)
+    }
+  }
+
+  if (embedTemplate.imageURL) {
+    embed.setImage(
+      await stringInfoAdd(contextForInteractionEvent(embedTemplate.imageURL, interaction, command))
+    )
+  }
+
+  if (embedTemplate.thumbnailURL) {
+    embed.setThumbnail(
+      await stringInfoAdd(
+        contextForInteractionEvent(embedTemplate.thumbnailURL, interaction, command)
+      )
+    )
+  }
+
+  if (embedTemplate.footer) {
+    embed.setFooter({
+      text: await stringInfoAdd(
+        contextForInteractionEvent(embedTemplate.footer, interaction, command)
+      )
+    })
+  }
+
+  return embed
+}
+
+async function buildButtonRow(
+  buttons: BCFDInteractionButton[],
+  interaction: ChatInputCommandInteraction,
+  command: BCFDInteractionCommand
+): Promise<ActionRowBuilder<ButtonBuilder>> {
+  const row = new ActionRowBuilder<ButtonBuilder>()
+
+  // Discord allows max 5 buttons per row
+  for (const btn of buttons.slice(0, 5)) {
+    const builder = new ButtonBuilder()
+      .setCustomId(btn.customId)
+      .setStyle(btn.style as ButtonStyle)
+      .setDisabled(btn.disabled)
+
+    // Process label with BCFD templates
+    const label = await stringInfoAdd(
+      contextForInteractionEvent(btn.label || 'Button', interaction, command)
+    )
+    builder.setLabel(label)
+
+    if (btn.emoji) {
+      builder.setEmoji(btn.emoji)
+    }
+
+    // Link style buttons need a URL instead of customId
+    if (btn.style === 5 && btn.url) {
+      builder.setURL(btn.url)
+      // Link buttons don't use customId
+      builder.setCustomId(undefined as any)
+    }
+
+    row.addComponents(builder)
+  }
+
+  return row
 }
 
 async function requiredRole(
