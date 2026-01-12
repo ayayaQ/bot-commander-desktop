@@ -1,0 +1,242 @@
+<script lang="ts">
+  import type { BCFDInteractionAction } from '../types/types'
+  import { t } from '../stores/localisation'
+  import CodeEditor from './CodeEditor.svelte'
+
+  export let action: BCFDInteractionAction
+  export let showEphemeral = true
+  export let showDefer = true
+  export let title = ''
+
+  type ActionType = {
+    id: string
+    name: string
+    field: keyof BCFDInteractionAction
+  }
+
+  const actionTypes: ActionType[] = [
+    { id: 'sendMessage', name: 'send-channel-message', field: 'sendChannelMessage' },
+    { id: 'sendPrivateMessage', name: 'send-private-message', field: 'sendPrivateMessage' },
+    { id: 'sendChannelEmbed', name: 'send-channel-embed', field: 'sendChannelEmbed' },
+    { id: 'sendPrivateEmbed', name: 'send-private-embed', field: 'sendPrivateEmbed' },
+    { id: 'roleAssigner', name: 'role-assigner', field: 'isRoleAssigner' }
+  ]
+
+  let activeActions: string[] = []
+  let dropdownOpen = false
+
+  // Initialize active actions based on the action object
+  $: {
+    activeActions = []
+    if (action.sendChannelMessage) activeActions.push('sendMessage')
+    if (action.sendPrivateMessage) activeActions.push('sendPrivateMessage')
+    if (action.sendChannelEmbed) activeActions.push('sendChannelEmbed')
+    if (action.sendPrivateEmbed) activeActions.push('sendPrivateEmbed')
+    if (action.isRoleAssigner) activeActions.push('roleAssigner')
+  }
+
+  function toggleAction(actionId: string) {
+    const actionType = actionTypes.find((a) => a.id === actionId)
+    if (!actionType) return
+
+    const field = actionType.field
+    ;(action as any)[field] = !(action as any)[field]
+    dropdownOpen = false
+  }
+
+  function removeAction(actionId: string) {
+    const actionType = actionTypes.find((a) => a.id === actionId)
+    if (!actionType) return
+
+    const field = actionType.field
+    ;(action as any)[field] = false
+  }
+
+  function getAvailableActions(): ActionType[] {
+    return actionTypes.filter((a) => !activeActions.includes(a.id))
+  }
+</script>
+
+<div class="space-y-4">
+  {#if title}
+    <h4 class="font-semibold text-base">{title}</h4>
+  {/if}
+
+  <!-- Action toggles -->
+  {#if showEphemeral || showDefer}
+    <div class="flex flex-wrap gap-4">
+      {#if showEphemeral}
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" class="checkbox checkbox-sm" bind:checked={action.ephemeral} />
+          <span class="text-sm">{$t('ephemeral')}</span>
+        </label>
+      {/if}
+      {#if showDefer}
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" class="checkbox checkbox-sm" bind:checked={action.deferReply} />
+          <span class="text-sm">{$t('defer-reply')}</span>
+        </label>
+      {/if}
+    </div>
+  {/if}
+
+  <!-- Add Action Dropdown -->
+  <div class="dropdown" class:dropdown-open={dropdownOpen}>
+    <button
+      class="btn btn-sm btn-outline"
+      on:click={() => (dropdownOpen = !dropdownOpen)}
+      type="button"
+    >
+      <span class="material-symbols-outlined text-sm">add</span>
+      {$t('add-action')}
+    </button>
+    {#if dropdownOpen}
+      <ul class="dropdown-content z-[1] menu p-2 shadow bg-base-200 rounded-box w-52">
+        {#each getAvailableActions() as actionType}
+          <li>
+            <button on:click={() => toggleAction(actionType.id)} type="button">
+              {$t(actionType.name)}
+            </button>
+          </li>
+        {/each}
+        {#if getAvailableActions().length === 0}
+          <li class="text-base-content/50 p-2 text-sm">{$t('all-actions-added')}</li>
+        {/if}
+      </ul>
+    {/if}
+  </div>
+
+  <!-- Active Actions -->
+  <div class="space-y-4">
+    {#if action.sendChannelMessage}
+      <div class="card bg-base-200 p-4">
+        <div class="flex justify-between items-center mb-2">
+          <span class="font-medium">{$t('send-channel-message')}</span>
+          <button
+            class="btn btn-xs btn-ghost text-error"
+            on:click={() => removeAction('sendMessage')}
+            type="button"
+          >
+            <span class="material-symbols-outlined text-sm">close</span>
+          </button>
+        </div>
+        <CodeEditor bind:value={action.channelMessage} minHeight="80px" mode="bcfd" />
+      </div>
+    {/if}
+
+    {#if action.sendPrivateMessage}
+      <div class="card bg-base-200 p-4">
+        <div class="flex justify-between items-center mb-2">
+          <span class="font-medium">{$t('send-private-message')}</span>
+          <button
+            class="btn btn-xs btn-ghost text-error"
+            on:click={() => removeAction('sendPrivateMessage')}
+            type="button"
+          >
+            <span class="material-symbols-outlined text-sm">close</span>
+          </button>
+        </div>
+        <CodeEditor bind:value={action.privateMessage} minHeight="80px" mode="bcfd" />
+      </div>
+    {/if}
+
+    {#if action.sendChannelEmbed}
+      <div class="card bg-base-200 p-4">
+        <div class="flex justify-between items-center mb-2">
+          <span class="font-medium">{$t('send-channel-embed')}</span>
+          <button
+            class="btn btn-xs btn-ghost text-error"
+            on:click={() => removeAction('sendChannelEmbed')}
+            type="button"
+          >
+            <span class="material-symbols-outlined text-sm">close</span>
+          </button>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="label"><span class="label-text">{$t('embed-title')}</span></label>
+            <CodeEditor bind:value={action.channelEmbed.title} minHeight="40px" mode="bcfd" />
+          </div>
+          <div>
+            <label class="label"><span class="label-text">{$t('embed-color')}</span></label>
+            <CodeEditor bind:value={action.channelEmbed.hexColor} minHeight="40px" mode="bcfd" />
+          </div>
+          <div class="md:col-span-2">
+            <label class="label"><span class="label-text">{$t('embed-description')}</span></label>
+            <CodeEditor bind:value={action.channelEmbed.description} minHeight="80px" mode="bcfd" />
+          </div>
+          <div>
+            <label class="label"><span class="label-text">{$t('embed-image')}</span></label>
+            <CodeEditor bind:value={action.channelEmbed.imageURL} minHeight="40px" mode="bcfd" />
+          </div>
+          <div>
+            <label class="label"><span class="label-text">{$t('embed-thumbnail')}</span></label>
+            <CodeEditor bind:value={action.channelEmbed.thumbnailURL} minHeight="40px" mode="bcfd" />
+          </div>
+          <div class="md:col-span-2">
+            <label class="label"><span class="label-text">{$t('embed-footer')}</span></label>
+            <CodeEditor bind:value={action.channelEmbed.footer} minHeight="40px" mode="bcfd" />
+          </div>
+        </div>
+      </div>
+    {/if}
+
+    {#if action.sendPrivateEmbed}
+      <div class="card bg-base-200 p-4">
+        <div class="flex justify-between items-center mb-2">
+          <span class="font-medium">{$t('send-private-embed')}</span>
+          <button
+            class="btn btn-xs btn-ghost text-error"
+            on:click={() => removeAction('sendPrivateEmbed')}
+            type="button"
+          >
+            <span class="material-symbols-outlined text-sm">close</span>
+          </button>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="label"><span class="label-text">{$t('embed-title')}</span></label>
+            <CodeEditor bind:value={action.privateEmbed.title} minHeight="40px" mode="bcfd" />
+          </div>
+          <div>
+            <label class="label"><span class="label-text">{$t('embed-color')}</span></label>
+            <CodeEditor bind:value={action.privateEmbed.hexColor} minHeight="40px" mode="bcfd" />
+          </div>
+          <div class="md:col-span-2">
+            <label class="label"><span class="label-text">{$t('embed-description')}</span></label>
+            <CodeEditor bind:value={action.privateEmbed.description} minHeight="80px" mode="bcfd" />
+          </div>
+          <div>
+            <label class="label"><span class="label-text">{$t('embed-image')}</span></label>
+            <CodeEditor bind:value={action.privateEmbed.imageURL} minHeight="40px" mode="bcfd" />
+          </div>
+          <div>
+            <label class="label"><span class="label-text">{$t('embed-thumbnail')}</span></label>
+            <CodeEditor bind:value={action.privateEmbed.thumbnailURL} minHeight="40px" mode="bcfd" />
+          </div>
+          <div class="md:col-span-2">
+            <label class="label"><span class="label-text">{$t('embed-footer')}</span></label>
+            <CodeEditor bind:value={action.privateEmbed.footer} minHeight="40px" mode="bcfd" />
+          </div>
+        </div>
+      </div>
+    {/if}
+
+    {#if action.isRoleAssigner}
+      <div class="card bg-base-200 p-4">
+        <div class="flex justify-between items-center mb-2">
+          <span class="font-medium">{$t('role-assigner')}</span>
+          <button
+            class="btn btn-xs btn-ghost text-error"
+            on:click={() => removeAction('roleAssigner')}
+            type="button"
+          >
+            <span class="material-symbols-outlined text-sm">close</span>
+          </button>
+        </div>
+        <label class="label"><span class="label-text">{$t('role-id')}</span></label>
+        <CodeEditor bind:value={action.roleToAssign} minHeight="40px" mode="bcfd" />
+      </div>
+    {/if}
+  </div>
+</div>
