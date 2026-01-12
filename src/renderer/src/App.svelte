@@ -12,6 +12,7 @@
   import Stats from './components/Stats.svelte'
   import StateViewer from './components/StateViewer.svelte'
   import TitleBar from './components/TitleBar.svelte'
+  import { bottomNavVisible } from './stores/navigation'
 
   let selectedMenu:
     | 'commands'
@@ -74,51 +75,53 @@
         <StateViewer />
       {/if}
     </div>
-    <div class="sticky bottom-0 z-10">
-      <div class="btm-nav static bg-base-200">
-        <button
-          class={selectedMenu === 'commands' ? 'active bg-base-200' : ''}
-          on:click={() => (selectedMenu = 'commands')}
-        >
-          <span class="material-symbols-outlined">home</span>
-        </button>
-        <button
-          class={selectedMenu === 'interactions' ? 'active bg-base-200' : ''}
-          on:click={() => (selectedMenu = 'interactions')}
-        >
-          <span class="material-symbols-outlined">smart_button</span>
-        </button>
-        <button
-          class={selectedMenu === 'webhooks' ? 'active bg-base-200' : ''}
-          on:click={() => (selectedMenu = 'webhooks')}
-        >
-          <span class="material-symbols-outlined">webhook</span>
-        </button>
-        <button
-          class={selectedMenu === 'stats' ? 'active bg-base-200' : ''}
-          on:click={() => (selectedMenu = 'stats')}
-        >
-          <span class="material-symbols-outlined">bar_chart</span>
-        </button>
-        <button
-          class={selectedMenu === 'debugger' ? 'active bg-base-200' : ''}
-          on:click={() => (selectedMenu = 'debugger')}
-        >
-          <span class="material-symbols-outlined">bug_report</span>
-        </button>
-        <button
-          class={selectedMenu === 'help' ? 'active bg-base-200' : ''}
-          on:click={() => (selectedMenu = 'help')}
-        >
-          <span class="material-symbols-outlined">help</span>
-        </button>
-        <button
-          class={selectedMenu === 'settings' ? 'active bg-base-200' : ''}
-          on:click={() => (selectedMenu = 'settings')}
-        >
-          <span class="material-symbols-outlined">settings</span>
-        </button>
+    {#if $bottomNavVisible}
+      <div class="sticky bottom-0 z-10">
+        <div class="btm-nav static bg-base-200">
+          <button
+            class={selectedMenu === 'commands' ? 'active bg-base-200' : ''}
+            on:click={() => (selectedMenu = 'commands')}
+          >
+            <span class="material-symbols-outlined">home</span>
+          </button>
+          <button
+            class={selectedMenu === 'interactions' ? 'active bg-base-200' : ''}
+            on:click={() => (selectedMenu = 'interactions')}
+          >
+            <span class="material-symbols-outlined">smart_button</span>
+          </button>
+          <button
+            class={selectedMenu === 'webhooks' ? 'active bg-base-200' : ''}
+            on:click={() => (selectedMenu = 'webhooks')}
+          >
+            <span class="material-symbols-outlined">webhook</span>
+          </button>
+          <button
+            class={selectedMenu === 'stats' ? 'active bg-base-200' : ''}
+            on:click={() => (selectedMenu = 'stats')}
+          >
+            <span class="material-symbols-outlined">bar_chart</span>
+          </button>
+          <button
+            class={selectedMenu === 'debugger' ? 'active bg-base-200' : ''}
+            on:click={() => (selectedMenu = 'debugger')}
+          >
+            <span class="material-symbols-outlined">bug_report</span>
+          </button>
+          <button
+            class={selectedMenu === 'help' ? 'active bg-base-200' : ''}
+            on:click={() => (selectedMenu = 'help')}
+          >
+            <span class="material-symbols-outlined">help</span>
+          </button>
+          <button
+            class={selectedMenu === 'settings' ? 'active bg-base-200' : ''}
+            on:click={() => (selectedMenu = 'settings')}
+          >
+            <span class="material-symbols-outlined">settings</span>
+          </button>
+        </div>
       </div>
-    </div>
+    {/if}
   </div>
 </div>

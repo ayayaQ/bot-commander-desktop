@@ -1,15 +1,24 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte'
+  import { createEventDispatcher, onDestroy, onMount } from 'svelte'
   import { type BCFDInteractionCommand, createDefaultInteractionCommand } from '../types/types'
   import { t } from '../stores/localisation'
   import HeaderBar from './HeaderBar.svelte'
   import InteractionActionEditor from './InteractionActionEditor.svelte'
+  import { bottomNavVisible } from '../stores/navigation'
 
   export let mode: 'edit' | 'add' = 'add'
   export let interaction: BCFDInteractionCommand | null = null
   export let index: number | null = null
 
   const dispatch = createEventDispatcher()
+
+  onMount(() => {
+    bottomNavVisible.hide()
+  })
+
+  onDestroy(() => {
+    bottomNavVisible.show()
+  })
 
   // Create a working copy of the interaction
   let editedInteraction: BCFDInteractionCommand = interaction

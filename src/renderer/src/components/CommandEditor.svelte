@@ -1,12 +1,13 @@
 <script lang="ts">
   import { t } from '../stores/localisation'
   import { validateBCFDCommand, type BCFDCommand } from '../types/types'
-  import { createEventDispatcher, onMount } from 'svelte'
+  import { createEventDispatcher, onDestroy, onMount } from 'svelte'
   import HeaderBar from './HeaderBar.svelte'
   import Dialog from './Dialog.svelte'
   import CodeEditor from './CodeEditor.svelte'
   import AIChat from './AIChat.svelte'
   import { aiPanelOpen, clearChat } from '../stores/aiChat'
+  import { bottomNavVisible } from '../stores/navigation'
 
   export let mode: 'edit' | 'add' = 'add'
   export let command: BCFDCommand | null = null
@@ -19,6 +20,14 @@
   const TYPE_MEMBER_LEAVE = 3
   const TYPE_MEMBER_BAN = 4
   const TYPE_REACTION = 5
+
+  onMount(() => {
+    bottomNavVisible.hide()
+  })
+
+  onDestroy(() => {
+    bottomNavVisible.show()
+  })
 
   const dispatch = createEventDispatcher()
   let dialog: HTMLDialogElement
