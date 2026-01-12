@@ -22,6 +22,8 @@
     | 'stats'
     | 'debugger' = 'commands'
 
+  let leftPanelCollapsed = false
+
   onMount(async () => {
     await loadSettings()
     await loadBotStatus()
@@ -33,7 +35,9 @@
 <TitleBar />
 
 <div class="flex flex-row items-center justify-center h-[calc(100vh-40px)]">
-  <div class="basis-1/3 h-full shrink-0 grow relative flex flex-col bg-base-200">
+  <div
+    class={`${!leftPanelCollapsed ? 'basis-1/3 grow' : 'w-0'} h-full shrink-0 relative flex flex-col bg-base-200 transition-all duration-0 overflow-hidden`}
+  >
     <div class="flex-grow overflow-y-auto">
       <Login />
     </div>
@@ -41,6 +45,17 @@
       <Console />
     </div>
   </div>
+  <button
+    class="h-full w-4 bg-base-300 hover:bg-primary transition-colors flex items-center justify-center group relative"
+    on:click={() => (leftPanelCollapsed = !leftPanelCollapsed)}
+    title={leftPanelCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+  >
+    <span
+      class="material-symbols-outlined text-base-content group-hover:text-primary-content text-xs absolute"
+    >
+      {leftPanelCollapsed ? 'chevron_right' : 'chevron_left'}
+    </span>
+  </button>
   <div class="basis-2/3 h-full overflow-y-auto flex flex-col shrink grow shadow-md">
     <div class="flex-grow">
       {#if selectedMenu === 'commands'}
