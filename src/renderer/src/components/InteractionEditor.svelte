@@ -16,6 +16,11 @@
     ? JSON.parse(JSON.stringify(interaction))
     : createDefaultInteractionCommand()
 
+  // Store original values for registration comparison
+  const originalName = interaction?.commandName
+  const originalDescription = interaction?.commandDescription
+  const originalOptions = interaction?.options ? JSON.stringify(interaction.options) : ''
+
   const optionTypes = [
     { value: 3, label: 'String' },
     { value: 4, label: 'Integer' },
@@ -64,8 +69,14 @@
       return
     }
 
-    // Mark as not registered since we changed it
-    editedInteraction.isRegistered = false
+    // Mark as not registered only if registration-affecting fields changed
+    const nameChanged = originalName !== editedInteraction.commandName
+    const descriptionChanged = originalDescription !== editedInteraction.commandDescription
+    const optionsChanged = originalOptions !== JSON.stringify(editedInteraction.options)
+
+    if (nameChanged || descriptionChanged || optionsChanged) {
+      editedInteraction.isRegistered = false
+    }
 
     if (mode === 'add') {
       dispatch('add', editedInteraction)
