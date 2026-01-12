@@ -122,6 +122,11 @@
         {#each messages as message (message.id)}
           <div
             class="flex items-start gap-2 hover:bg-base-content/5 rounded px-1 cursor-pointer"
+            role="button"
+            tabindex="0"
+            on:keydown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') copyMessage(message.message, message.id)
+            }}
             on:click={() => copyMessage(message.message, message.id)}
           >
             <span

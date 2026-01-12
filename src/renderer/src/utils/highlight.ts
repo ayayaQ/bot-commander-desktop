@@ -59,7 +59,7 @@ export function highlightJavaScript(code: string): string {
     if (match.startsWith('`')) {
       // Template literal - process interpolations
       let processed = match
-      processed = processed.replace(/\$\{([^}]*)\}/g, (interpolationMatch, content) => {
+      processed = processed.replace(/\$\{([^}]*)\}/g, (_interpolationMatch, content) => {
         // Recursively highlight the interpolated JavaScript code
         const highlightedContent = highlightJavaScript(content)
         return `<span class="bcfd-args">\${</span>${highlightedContent}<span class="bcfd-args">}</span>`

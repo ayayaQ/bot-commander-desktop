@@ -1,14 +1,9 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte'
-  import {
-    type BCFDInteractionCommand,
-    createDefaultInteractionCommand,
-    createDefaultInteractionButton
-  } from '../types/types'
+  import { type BCFDInteractionCommand, createDefaultInteractionCommand } from '../types/types'
   import { t } from '../stores/localisation'
   import HeaderBar from './HeaderBar.svelte'
   import InteractionActionEditor from './InteractionActionEditor.svelte'
-  import InteractionButtonEditor from './InteractionButtonEditor.svelte'
 
   export let mode: 'edit' | 'add' = 'add'
   export let interaction: BCFDInteractionCommand | null = null
@@ -45,14 +40,6 @@
 
   function removeOption(idx: number) {
     editedInteraction.options = editedInteraction.options.filter((_, i) => i !== idx)
-  }
-
-  function addButton() {
-    editedInteraction.buttons = [...editedInteraction.buttons, createDefaultInteractionButton()]
-  }
-
-  function removeButton(idx: number) {
-    editedInteraction.buttons = editedInteraction.buttons.filter((_, i) => i !== idx)
   }
 
   function handleSave() {
@@ -120,6 +107,7 @@
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="form-control">
+          <!-- svelte-ignore a11y-label-has-associated-control -->
           <label class="label">
             <span class="label-text">{$t('command-name')}</span>
           </label>
@@ -132,6 +120,7 @@
               placeholder="greet"
             />
           </div>
+          <!-- svelte-ignore a11y-label-has-associated-control -->
           <label class="label">
             <span class="label-text-alt text-base-content/50">
               {$t('command-name-hint')}
@@ -140,6 +129,7 @@
         </div>
 
         <div class="form-control">
+          <!-- svelte-ignore a11y-label-has-associated-control -->
           <label class="label">
             <span class="label-text">{$t('command-description')}</span>
           </label>
@@ -184,6 +174,7 @@
 
               <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div class="form-control">
+                  <!-- svelte-ignore a11y-label-has-associated-control -->
                   <label class="label py-1">
                     <span class="label-text text-sm">{$t('option-name')}</span>
                   </label>
@@ -196,6 +187,7 @@
                 </div>
 
                 <div class="form-control">
+                  <!-- svelte-ignore a11y-label-has-associated-control -->
                   <label class="label py-1">
                     <span class="label-text text-sm">{$t('option-type')}</span>
                   </label>
@@ -207,6 +199,7 @@
                 </div>
 
                 <div class="form-control">
+                  <!-- svelte-ignore a11y-label-has-associated-control -->
                   <label class="label py-1">
                     <span class="label-text text-sm">{$t('option-required')}</span>
                   </label>
@@ -221,6 +214,7 @@
                 </div>
 
                 <div class="form-control md:col-span-3">
+                  <!-- svelte-ignore a11y-label-has-associated-control -->
                   <label class="label py-1">
                     <span class="label-text text-sm">{$t('option-description')}</span>
                   </label>
@@ -250,38 +244,6 @@
         showEphemeral={true}
         showDefer={true}
       />
-    </div>
-  </div>
-
-  <!-- Buttons -->
-  <div class="card bg-base-100 shadow-sm mb-4">
-    <div class="card-body">
-      <div class="flex justify-between items-center">
-        <h3 class="card-title text-lg">{$t('buttons')}</h3>
-        <button
-          class="btn btn-sm btn-outline"
-          on:click={addButton}
-          type="button"
-          disabled={editedInteraction.buttons.length >= 5}
-        >
-          <span class="material-symbols-outlined text-sm">add</span>
-          {$t('add-button')}
-        </button>
-      </div>
-
-      {#if editedInteraction.buttons.length === 0}
-        <p class="text-base-content/50 text-sm">{$t('no-buttons-hint')}</p>
-      {:else}
-        <div class="space-y-4 mt-4">
-          {#each editedInteraction.buttons as button, idx}
-            <InteractionButtonEditor {button} onDelete={() => removeButton(idx)} />
-          {/each}
-        </div>
-      {/if}
-
-      {#if editedInteraction.buttons.length >= 5}
-        <p class="text-warning text-sm mt-2">{$t('max-buttons-warning')}</p>
-      {/if}
     </div>
   </div>
 </div>

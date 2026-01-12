@@ -164,6 +164,7 @@
   <h2 class="text-2xl font-bold mb-4">{$t('openai')}</h2>
 
   <div class="form-control">
+    <!-- svelte-ignore a11y-label-has-associated-control -->
     <label class="label">
       <span class="label-text">{$t('openai-api-key')}</span>
     </label>
@@ -178,6 +179,7 @@
   </div>
 
   <div class="form-control">
+    <!-- svelte-ignore a11y-label-has-associated-control -->
     <label class="label">
       <span class="label-text">{$t('openai-model')}</span>
     </label>
@@ -194,6 +196,7 @@
   </div>
 
   <div class="form-control">
+    <!-- svelte-ignore a11y-label-has-associated-control -->
     <label class="label">
       <span class="label-text">{$t('developer-prompt')}</span>
     </label>

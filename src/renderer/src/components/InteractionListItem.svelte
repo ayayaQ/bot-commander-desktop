@@ -37,17 +37,6 @@
       isRegistering = false
     }
   }
-
-  function getButtonStyleColor(style: number): string {
-    const colors: Record<number, string> = {
-      1: 'badge-primary',
-      2: 'badge-neutral',
-      3: 'badge-success',
-      4: 'badge-error',
-      5: 'badge-info'
-    }
-    return colors[style] || 'badge-neutral'
-  }
 </script>
 
 <li class="card bg-base-200 hover:bg-base-300 transition-colors duration-200">
@@ -77,18 +66,6 @@
               {#each interaction.options as option}
                 <span class="badge badge-outline badge-sm">
                   {option.name}{option.required ? '*' : ''}
-                </span>
-              {/each}
-            </div>
-          {/if}
-
-          <!-- Buttons preview -->
-          {#if interaction.buttons.length > 0}
-            <div class="mt-2 flex flex-wrap gap-1">
-              <span class="text-xs text-base-content/50">{$t('buttons')}:</span>
-              {#each interaction.buttons as button}
-                <span class="badge {getButtonStyleColor(button.style)} badge-sm">
-                  {button.label || 'Button'}
                 </span>
               {/each}
             </div>

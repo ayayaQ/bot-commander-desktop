@@ -429,7 +429,6 @@
   }
 
   let scrollAreaElement: HTMLDivElement
-  let contentSizerElement: HTMLPreElement
 
   function syncScroll() {
     if (lineNumbersElement && scrollAreaElement) {
@@ -478,7 +477,6 @@
     <div class="editor-content relative">
       <!-- Hidden pre element to determine content size -->
       <pre
-        bind:this={contentSizerElement}
         class="content-sizer p-2 pb-4 font-mono text-sm leading-6 whitespace-pre invisible"
         aria-hidden="true">{value || ' '}</pre>
 
