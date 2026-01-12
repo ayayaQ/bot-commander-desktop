@@ -164,7 +164,7 @@
   </div>
 </HeaderBar>
 
-<div class="p-4 overflow-y-auto" style="height: calc(100vh - 184px);">
+<div class="p-4 overflow-y-auto" style="height: calc(100vh - 124px);">
   <!-- Command Details -->
   <div class="card bg-base-100 shadow-sm mb-4">
     <div class="card-body">

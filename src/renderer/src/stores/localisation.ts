@@ -238,7 +238,20 @@ const translations: Languages = {
     'embed-thumbnail': 'Thumbnail URL',
     'embed-footer': 'Footer',
     disabled: 'Disabled',
-    search: 'Search'
+    search: 'Search',
+    // Validation messages
+    'fix-errors-to-save': 'Fix errors to save',
+    'description-required': 'Description is required',
+    'command-required': 'Command is required',
+    'message-is-required': 'Message is required',
+    'embed-field-required': 'At least one embed field is required',
+    'channel-id-required': 'Channel ID is required',
+    'reaction-required': 'Reaction is required',
+    'delete-strings-required': 'Delete strings are required',
+    'delete-number-required': 'Delete number must be at least 1',
+    'role-id-is-required': 'Role ID is required',
+    'no-actions-added-hint': 'No actions added. Add at least one action.',
+    'send-channel-message': 'Send Channel Message'
   },
   es: {
     'send-webhook': 'Enviar Webhook de Discord',
@@ -404,7 +417,20 @@ const translations: Languages = {
     'quick-make-funnier': 'Hacer esta respuesta de comando más divertida y atractiva',
     'quick-add-random': 'Agregar variaciones aleatorias a la respuesta usando $random{}',
     'quick-add-mentions': 'Incluir menciones de usuario como $name y $botName en la respuesta',
-    'quick-add-counter': 'Agregar un contador usando $eval y botState para rastrear uso del comando'
+    'quick-add-counter': 'Agregar un contador usando $eval y botState para rastrear uso del comando',
+    // Validation messages
+    'fix-errors-to-save': 'Corregir errores para guardar',
+    'description-required': 'La descripción es obligatoria',
+    'command-required': 'El comando es obligatorio',
+    'message-is-required': 'El mensaje es obligatorio',
+    'embed-field-required': 'Se requiere al menos un campo de embed',
+    'channel-id-required': 'Se requiere el ID del canal',
+    'reaction-required': 'Se requiere la reacción',
+    'delete-strings-required': 'Se requieren las cadenas de eliminación',
+    'delete-number-required': 'El número de eliminación debe ser al menos 1',
+    'role-id-is-required': 'Se requiere el ID del rol',
+    'no-actions-added-hint': 'No hay acciones añadidas. Añade al menos una acción.',
+    'send-channel-message': 'Enviar mensaje de canal'
     // ... more Spanish strings
   },
   ja: {

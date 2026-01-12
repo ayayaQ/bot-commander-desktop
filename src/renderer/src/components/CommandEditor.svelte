@@ -187,6 +187,107 @@
     // reset the fields that are not needed for these types
   }
 
+  // Validation
+  let descriptionError = ''
+  let commandError = ''
+  let actionErrors: Record<string, string> = {}
+
+  function isEmbedValid(embed: {
+    title: string
+    description: string
+    hexColor: string
+    imageURL: string
+    thumbnailURL: string
+    footer: string
+  }): boolean {
+    if (!embed) return false
+    return !!(
+      embed.title?.trim() ||
+      embed.description?.trim() ||
+      embed.hexColor?.trim() ||
+      embed.imageURL?.trim() ||
+      embed.thumbnailURL?.trim() ||
+      embed.footer?.trim()
+    )
+  }
+
+  // Reactive validation for description
+  $: descriptionError = editedCommand?.commandDescription?.trim() ? '' : 'description-required'
+
+  // Reactive validation for command field (only for types that need it)
+  $: {
+    const needsCommand =
+      editedCommand?.type === TYPE_MESSAGE_RECEIVED ||
+      editedCommand?.type === TYPE_PM_RECEIVED ||
+      editedCommand?.type === TYPE_REACTION
+    commandError = needsCommand && !editedCommand?.command?.trim() ? 'command-required' : ''
+  }
+
+  // Reactive validation for action fields
+  $: {
+    actionErrors = {}
+    for (const action of activeActions) {
+      switch (action.type) {
+        case 'sendMessage':
+          if (!editedCommand?.channelMessage?.trim()) {
+            actionErrors['sendMessage'] = 'message-is-required'
+          }
+          break
+        case 'sendPrivateMessage':
+          if (!editedCommand?.privateMessage?.trim()) {
+            actionErrors['sendPrivateMessage'] = 'message-is-required'
+          }
+          break
+        case 'sendChannelEmbed':
+          if (!isEmbedValid(editedCommand?.channelEmbed)) {
+            actionErrors['sendChannelEmbed'] = 'embed-field-required'
+          }
+          break
+        case 'sendPrivateEmbed':
+          if (!isEmbedValid(editedCommand?.privateEmbed)) {
+            actionErrors['sendPrivateEmbed'] = 'embed-field-required'
+          }
+          break
+        case 'specificChannel':
+          if (!editedCommand?.specificChannel?.trim()) {
+            actionErrors['specificChannel'] = 'channel-id-required'
+          }
+          break
+        case 'reaction':
+          if (!editedCommand?.reaction?.trim()) {
+            actionErrors['reaction'] = 'reaction-required'
+          }
+          break
+        case 'deleteIf':
+          if (!editedCommand?.deleteIfStrings?.trim()) {
+            actionErrors['deleteIf'] = 'delete-strings-required'
+          }
+          break
+        case 'deleteX':
+          if (!editedCommand?.deleteNum || editedCommand.deleteNum < 1) {
+            actionErrors['deleteX'] = 'delete-number-required'
+          }
+          break
+        case 'roleAssigner':
+          if (!editedCommand?.roleToAssign?.trim()) {
+            actionErrors['roleAssigner'] = 'role-id-is-required'
+          }
+          break
+        case 'requiredRole':
+          if (!editedCommand?.requiredRole?.trim()) {
+            actionErrors['requiredRole'] = 'role-id-is-required'
+          }
+          break
+      }
+    }
+  }
+
+  $: hasErrors =
+    descriptionError !== '' ||
+    commandError !== '' ||
+    Object.keys(actionErrors).length > 0 ||
+    activeActions.length === 0
+
   function handleSubmit() {
     if (
       editedCommand.type === TYPE_MEMBER_JOIN ||
@@ -390,15 +491,12 @@
 
       <span
         class="tooltip tooltip-primary tooltip-bottom"
-        data-tip={activeActions.length == 0
-          ? 'Actions Required to Save'
+        data-tip={hasErrors
+          ? $t('fix-errors-to-save')
           : $t(mode === 'edit' ? 'update-command' : 'add-command')}
       >
-        <button
-          type="submit"
-          disabled={activeActions.length == 0}
-          class="btn btn-primary"
-          on:click={handleSubmit}><span class="material-symbols-outlined">save</span></button
+        <button type="submit" disabled={hasErrors} class="btn btn-primary" on:click={handleSubmit}
+          ><span class="material-symbols-outlined">save</span></button
         >
       </span>
       <!-- cancel button-->
@@ -409,7 +507,7 @@
   </HeaderBar>
 
   <!-- Split view container -->
-  <div class="flex flex-1 overflow-hidden" style="height: calc(100vh - 184px);">
+  <div class="flex flex-1 overflow-hidden" style="height: calc(100vh - 120px);">
     <!-- Left side: Editor (scrollable) -->
     <div
       class="flex-1 overflow-y-auto {$aiPanelOpen ? 'w-1/2' : 'w-full'} transition-all duration-300"
@@ -454,9 +552,15 @@
                         id="commandDescription"
                         bind:value={editedCommand.commandDescription}
                         class="input input-bordered"
+                        class:input-error={descriptionError}
                         placeholder="This is a command that does something"
                         required
                       />
+                      {#if descriptionError}
+                        <label class="label" for="commandDescription">
+                          <span class="label-text-alt text-error">{$t(descriptionError)}</span>
+                        </label>
+                      {/if}
                     </div>
                     {#if editedCommand.type !== TYPE_MEMBER_JOIN && editedCommand.type !== TYPE_MEMBER_LEAVE && editedCommand.type !== TYPE_MEMBER_BAN}
                       {#if editedCommand.type !== TYPE_REACTION}
@@ -469,9 +573,15 @@
                             id="command"
                             bind:value={editedCommand.command}
                             class="input input-bordered"
+                            class:input-error={commandError}
                             placeholder="!command"
                             required
                           />
+                          {#if commandError}
+                            <label class="label" for="command">
+                              <span class="label-text-alt text-error">{$t(commandError)}</span>
+                            </label>
+                          {/if}
                         </div>
                         {#if editedCommand.type == TYPE_MESSAGE_RECEIVED || editedCommand.type === TYPE_PM_RECEIVED}
                           <div class="form-control">
@@ -504,15 +614,24 @@
                             id="reaction"
                             bind:value={editedCommand.command}
                             class="input input-bordered"
+                            class:input-error={commandError}
                             placeholder={$t('reaction-placeholder')}
                             required
                           />
+                          {#if commandError}
+                            <label class="label" for="reaction">
+                              <span class="label-text-alt text-error">{$t(commandError)}</span>
+                            </label>
+                          {/if}
                         </div>
                       {/if}
                     {/if}
                   </div>
                 </div>
               </div>
+              {#if activeActions.length === 0}
+                <p class="text-center text-error text-xs mt-2">{$t('no-actions-added-hint')}</p>
+              {/if}
               {#each activeActions as action}
                 <div class="card bg-base-200">
                   <div class="card-header flex justify-between items-center p-3">
@@ -527,105 +646,149 @@
                   <div class="card-body">
                     <!-- Action specific fields here -->
                     {#if action.type === 'sendMessage'}
-                      <CodeEditor bind:value={editedCommand.channelMessage} />
+                      <div class={actionErrors['sendMessage'] ? 'ring-2 ring-error rounded' : ''}>
+                        <CodeEditor bind:value={editedCommand.channelMessage} />
+                      </div>
+                      {#if actionErrors['sendMessage']}
+                        <p class="text-error text-xs mt-2">{$t(actionErrors['sendMessage'])}</p>
+                      {/if}
                     {:else if action.type === 'sendChannelEmbed'}
-                      <div class="form-control">
-                        <label class="label" for="channelEmbedTitle">
-                          <span class="label-text">{$t('channel-embed-title')}</span>
-                        </label>
-                        <CodeEditor bind:value={editedCommand.channelEmbed.title} />
-                      </div>
+                      <div
+                        class={actionErrors['sendChannelEmbed']
+                          ? 'ring-2 ring-error rounded p-2 -m-2'
+                          : ''}
+                      >
+                        <div class="form-control">
+                          <label class="label" for="channelEmbedTitle">
+                            <span class="label-text">{$t('channel-embed-title')}</span>
+                          </label>
+                          <CodeEditor bind:value={editedCommand.channelEmbed.title} />
+                        </div>
 
-                      <div class="form-control">
-                        <label class="label" for="channelEmbedDescription">
-                          <span class="label-text">{$t('channel-embed-description')}</span>
-                        </label>
-                        <CodeEditor bind:value={editedCommand.channelEmbed.description} />
-                      </div>
+                        <div class="form-control">
+                          <label class="label" for="channelEmbedDescription">
+                            <span class="label-text">{$t('channel-embed-description')}</span>
+                          </label>
+                          <CodeEditor bind:value={editedCommand.channelEmbed.description} />
+                        </div>
 
-                      <div class="form-control">
-                        <label class="label" for="channelEmbedFooter">
-                          <span class="label-text">{$t('channel-embed-footer')}</span>
-                        </label>
-                        <CodeEditor bind:value={editedCommand.channelEmbed.footer} />
-                      </div>
+                        <div class="form-control">
+                          <label class="label" for="channelEmbedFooter">
+                            <span class="label-text">{$t('channel-embed-footer')}</span>
+                          </label>
+                          <CodeEditor bind:value={editedCommand.channelEmbed.footer} />
+                        </div>
 
-                      <div class="form-control">
-                        <label class="label" for="channelEmbedImage">
-                          <span class="label-text">{$t('channel-embed-image')}</span>
-                        </label>
-                        <CodeEditor bind:value={editedCommand.channelEmbed.imageURL} />
-                      </div>
+                        <div class="form-control">
+                          <label class="label" for="channelEmbedImage">
+                            <span class="label-text">{$t('channel-embed-image')}</span>
+                          </label>
+                          <CodeEditor bind:value={editedCommand.channelEmbed.imageURL} />
+                        </div>
 
-                      <div class="form-control">
-                        <label class="label" for="channelEmbedThumbnail">
-                          <span class="label-text">{$t('channel-embed-thumbnail')}</span>
-                        </label>
-                        <CodeEditor bind:value={editedCommand.channelEmbed.thumbnailURL} />
-                      </div>
+                        <div class="form-control">
+                          <label class="label" for="channelEmbedThumbnail">
+                            <span class="label-text">{$t('channel-embed-thumbnail')}</span>
+                          </label>
+                          <CodeEditor bind:value={editedCommand.channelEmbed.thumbnailURL} />
+                        </div>
 
-                      <div class="form-control">
-                        <label class="label" for="channelEmbedColor">
-                          <span class="label-text">{$t('channel-embed-color')}</span>
-                        </label>
-                        <CodeEditor bind:value={editedCommand.channelEmbed.hexColor} />
+                        <div class="form-control">
+                          <label class="label" for="channelEmbedColor">
+                            <span class="label-text">{$t('channel-embed-color')}</span>
+                          </label>
+                          <CodeEditor bind:value={editedCommand.channelEmbed.hexColor} />
+                        </div>
                       </div>
-                    {:else if action.type === 'sendPrivateMessage'}<div class="form-control">
-                        <label class="label" for="privateMessage">
-                          <span class="label-text">{$t('private-message')}</span>
-                        </label>
+                      {#if actionErrors['sendChannelEmbed']}
+                        <p class="text-error text-xs mt-2">
+                          {$t(actionErrors['sendChannelEmbed'])}
+                        </p>
+                      {/if}
+                    {:else if action.type === 'sendPrivateMessage'}
+                      <div
+                        class={actionErrors['sendPrivateMessage']
+                          ? 'ring-2 ring-error rounded'
+                          : ''}
+                      >
                         <CodeEditor bind:value={editedCommand.privateMessage} />
-                      </div>{:else if action.type === 'sendPrivateEmbed'}<div class="form-control">
-                        <label class="label" for="privateEmbedTitle">
-                          <span class="label-text">{$t('private-embed-title')}</span>
-                        </label>
-                        <CodeEditor bind:value={editedCommand.privateEmbed.title} />
                       </div>
+                      {#if actionErrors['sendPrivateMessage']}
+                        <p class="text-error text-xs mt-2">
+                          {$t(actionErrors['sendPrivateMessage'])}
+                        </p>
+                      {/if}
+                    {:else if action.type === 'sendPrivateEmbed'}
+                      <div
+                        class={actionErrors['sendPrivateEmbed']
+                          ? 'ring-2 ring-error rounded p-2 -m-2'
+                          : ''}
+                      >
+                        <div class="form-control">
+                          <label class="label" for="privateEmbedTitle">
+                            <span class="label-text">{$t('private-embed-title')}</span>
+                          </label>
+                          <CodeEditor bind:value={editedCommand.privateEmbed.title} />
+                        </div>
 
-                      <div class="form-control">
-                        <label class="label" for="privateEmbedDescription">
-                          <span class="label-text">{$t('private-embed-description')}</span>
-                        </label>
-                        <CodeEditor bind:value={editedCommand.privateEmbed.description} />
+                        <div class="form-control">
+                          <label class="label" for="privateEmbedDescription">
+                            <span class="label-text">{$t('private-embed-description')}</span>
+                          </label>
+                          <CodeEditor bind:value={editedCommand.privateEmbed.description} />
+                        </div>
+
+                        <div class="form-control">
+                          <label class="label" for="privateEmbedFooter">
+                            <span class="label-text">{$t('private-embed-footer')}</span>
+                          </label>
+                          <CodeEditor bind:value={editedCommand.privateEmbed.footer} />
+                        </div>
+
+                        <div class="form-control">
+                          <label class="label" for="privateEmbedImage">
+                            <span class="label-text">{$t('private-embed-image')}</span>
+                          </label>
+                          <CodeEditor bind:value={editedCommand.privateEmbed.imageURL} />
+                        </div>
+
+                        <div class="form-control">
+                          <label class="label" for="privateEmbedThumbnail">
+                            <span class="label-text">{$t('private-embed-thumbnail')}</span>
+                          </label>
+                          <CodeEditor bind:value={editedCommand.privateEmbed.thumbnailURL} />
+                        </div>
+
+                        <div class="form-control">
+                          <label class="label" for="privateEmbedColor">
+                            <span class="label-text">{$t('private-embed-color')}</span>
+                          </label>
+                          <CodeEditor bind:value={editedCommand.privateEmbed.hexColor} />
+                        </div>
                       </div>
-
-                      <div class="form-control">
-                        <label class="label" for="privateEmbedFooter">
-                          <span class="label-text">{$t('private-embed-footer')}</span>
-                        </label>
-                        <CodeEditor bind:value={editedCommand.privateEmbed.footer} />
-                      </div>
-
-                      <div class="form-control">
-                        <label class="label" for="privateEmbedImage">
-                          <span class="label-text">{$t('private-embed-image')}</span>
-                        </label>
-                        <CodeEditor bind:value={editedCommand.privateEmbed.imageURL} />
-                      </div>
-
-                      <div class="form-control">
-                        <label class="label" for="privateEmbedThumbnail">
-                          <span class="label-text">{$t('private-embed-thumbnail')}</span>
-                        </label>
-                        <CodeEditor bind:value={editedCommand.privateEmbed.thumbnailURL} />
-                      </div>
-
-                      <div class="form-control">
-                        <label class="label" for="privateEmbedColor">
-                          <span class="label-text">{$t('private-embed-color')}</span>
-                        </label>
-                        <CodeEditor bind:value={editedCommand.privateEmbed.hexColor} />
-                      </div>{:else if action.type === 'specificChannel'}<div class="form-control">
-                        <label class="label" for="specificChannel">
-                          <span class="label-text">{$t('specific-channel')}</span>
-                        </label>
+                      {#if actionErrors['sendPrivateEmbed']}
+                        <p class="text-error text-xs mt-2">
+                          {$t(actionErrors['sendPrivateEmbed'])}
+                        </p>
+                      {/if}
+                    {:else if action.type === 'specificChannel'}
+                      <div
+                        class={actionErrors['specificChannel'] ? 'ring-2 ring-error rounded' : ''}
+                      >
                         <CodeEditor bind:value={editedCommand.specificChannel} />
-                      </div>{:else if action.type === 'reaction'}<div class="form-control">
-                        <label class="label" for="reactToMessage  ">
-                          <span class="label-text">{$t('react-to-message')}</span>
-                        </label>
+                      </div>
+                      {#if actionErrors['specificChannel']}
+                        <p class="text-error text-xs mt-2">{$t(actionErrors['specificChannel'])}</p>
+                      {/if}
+                    {:else if action.type === 'reaction'}
+                      <div class={actionErrors['reaction'] ? 'ring-2 ring-error rounded' : ''}>
                         <CodeEditor bind:value={editedCommand.reaction} />
-                      </div>{:else if action.type === 'deleteIf'}<div class="form-control">
+                      </div>
+                      {#if actionErrors['reaction']}
+                        <p class="text-error text-xs mt-2">{$t(actionErrors['reaction'])}</p>
+                      {/if}
+                    {:else if action.type === 'deleteIf'}
+                      <div class="form-control">
                         <label class="label" for="deleteIfStrings">
                           <span class="label-text">{$t('delete-if-contains')}</span>
                         </label>
@@ -634,9 +797,20 @@
                           id="deleteIfStrings"
                           bind:value={editedCommand.deleteIfStrings}
                           class="input input-bordered"
+                          class:input-error={actionErrors['deleteIf']}
                         />
-                      </div>{:else if action.type === 'deleteAfter'}Deletes the command message
-                      after.{:else if action.type === 'deleteX'}<div class="form-control">
+                        {#if actionErrors['deleteIf']}
+                          <label class="label" for="deleteIfStrings">
+                            <span class="label-text-alt text-error"
+                              >{$t(actionErrors['deleteIf'])}</span
+                            >
+                          </label>
+                        {/if}
+                      </div>
+                    {:else if action.type === 'deleteAfter'}
+                      Deletes the command message after.
+                    {:else if action.type === 'deleteX'}
+                      <div class="form-control">
                         <label class="label" for="deleteNum">
                           <span class="label-text">{$t('delete-x-times')}</span>
                         </label>
@@ -644,26 +818,43 @@
                           type="number"
                           bind:value={editedCommand.deleteNum}
                           class="input input-bordered"
+                          class:input-error={actionErrors['deleteX']}
                           min="1"
                           max="99"
                         />
-                      </div>{:else if action.type === 'roleAssigner'}
-                      <div class="form-control">
-                        <label class="label" for="roleToAssign">
-                          <span class="label-text">{$t('role-to-assign')}</span>
-                        </label>
+                        {#if actionErrors['deleteX']}
+                          <label class="label" for="deleteNum">
+                            <span class="label-text-alt text-error"
+                              >{$t(actionErrors['deleteX'])}</span
+                            >
+                          </label>
+                        {/if}
+                      </div>
+                    {:else if action.type === 'roleAssigner'}
+                      <div class={actionErrors['roleAssigner'] ? 'ring-2 ring-error rounded' : ''}>
                         <CodeEditor bind:value={editedCommand.roleToAssign} />
-                      </div>{:else if action.type === 'kick'}Kicks the mentioned user{:else if action.type === 'ban'}Bans
-                      the mentioned user{:else if action.type === 'voiceMute'}Voice mutes the
-                      mentioned user{:else if action.type === 'requiredRole'}<div
-                        class="form-control"
-                      >
-                        <label class="label" for="requiredRole">
-                          <span class="label-text">{$t('required-role')}</span>
-                        </label>
+                      </div>
+                      {#if actionErrors['roleAssigner']}
+                        <p class="text-error text-xs mt-2">{$t(actionErrors['roleAssigner'])}</p>
+                      {/if}
+                    {:else if action.type === 'kick'}
+                      Kicks the mentioned user
+                    {:else if action.type === 'ban'}
+                      Bans the mentioned user
+                    {:else if action.type === 'voiceMute'}
+                      Voice mutes the mentioned user
+                    {:else if action.type === 'requiredRole'}
+                      <div class={actionErrors['requiredRole'] ? 'ring-2 ring-error rounded' : ''}>
                         <CodeEditor bind:value={editedCommand.requiredRole} />
-                      </div>{:else if action.type === 'requireAdmin'}Requires Administrator Role{:else if action.type === 'nsfw'}Requires
-                      NSFW Channel{/if}
+                      </div>
+                      {#if actionErrors['requiredRole']}
+                        <p class="text-error text-xs mt-2">{$t(actionErrors['requiredRole'])}</p>
+                      {/if}
+                    {:else if action.type === 'requireAdmin'}
+                      Requires Administrator Role
+                    {:else if action.type === 'nsfw'}
+                      Requires NSFW Channel
+                    {/if}
                   </div>
                 </div>
               {/each}
