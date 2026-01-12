@@ -22,7 +22,7 @@
   }
 </script>
 
-<div class="card bg-base-200 overflow-hidden" style="margin-left: {nestingDepth * 16}px">
+<div class="card bg-base-200" style="margin-left: {nestingDepth * 16}px">
   <!-- Button Header (always visible) -->
   <button
     class="w-full p-4 flex items-center justify-between hover:bg-base-300 transition-colors"

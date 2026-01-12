@@ -77,6 +77,54 @@
   // Check if we can add more nested buttons
   $: canAddNestedButtons =
     showButtons && nestingDepth < MAX_NESTING_DEPTH && (action.buttons?.length ?? 0) < 5
+
+  // Validation errors
+  let channelMessageError = ''
+  let privateMessageError = ''
+  let channelEmbedError = ''
+  let privateEmbedError = ''
+  let roleToAssignError = ''
+  let hasErrors = false
+
+  function isEmbedValid(embed: any): boolean {
+    if (!embed) return false
+    return !!(
+      embed.title?.trim() ||
+      embed.hexColor?.trim() ||
+      embed.description?.trim() ||
+      embed.imageURL?.trim() ||
+      embed.thumbnailURL?.trim() ||
+      embed.footer?.trim()
+    )
+  }
+
+  $: channelMessageError =
+    action.sendChannelMessage && !action.channelMessage?.trim() ? 'message-is-required' : ''
+  $: privateMessageError =
+    action.sendPrivateMessage && !action.privateMessage?.trim() ? 'message-is-required' : ''
+  $: channelEmbedError =
+    action.sendChannelEmbed && !isEmbedValid(action.channelEmbed) ? 'embed-field-required' : ''
+  $: privateEmbedError =
+    action.sendPrivateEmbed && !isEmbedValid(action.privateEmbed) ? 'embed-field-required' : ''
+  $: roleToAssignError =
+    action.isRoleAssigner && !action.roleToAssign?.trim() ? 'role-id-is-required' : ''
+
+  $: hasErrors =
+    channelMessageError !== '' ||
+    privateMessageError !== '' ||
+    channelEmbedError !== '' ||
+    privateEmbedError !== '' ||
+    roleToAssignError !== '' ||
+    (!action.sendChannelMessage &&
+      !action.sendPrivateMessage &&
+      !action.sendChannelEmbed &&
+      !action.sendPrivateEmbed &&
+      !action.isRoleAssigner)
+
+  export let errors = false
+  $: if (errors !== hasErrors) {
+    errors = hasErrors
+  }
 </script>
 
 <div class="space-y-4">
@@ -113,7 +161,7 @@
       {$t('add-action')}
     </button>
     {#if dropdownOpen}
-      <ul class="dropdown-content z-[1] menu p-2 shadow bg-base-200 rounded-box w-52">
+      <ul class="dropdown-content z-10 menu p-2 shadow bg-base-200 rounded-box w-52">
         {#each getAvailableActions() as actionType}
           <li>
             <button on:click={() => toggleAction(actionType.id)} type="button">
@@ -130,6 +178,10 @@
 
   <!-- Active Actions -->
   <div class="space-y-4">
+    {#if !action.sendChannelMessage && !action.sendPrivateMessage && !action.sendChannelEmbed && !action.sendPrivateEmbed && !action.isRoleAssigner}
+      <p class="text-error text-xs mt-2">{$t('no-actions-added-hint')}</p>
+    {/if}
+
     {#if action.sendChannelMessage}
       <div class="card bg-base-200 p-4">
         <div class="flex justify-between items-center mb-2">
@@ -142,7 +194,12 @@
             <span class="material-symbols-outlined text-sm">close</span>
           </button>
         </div>
-        <CodeEditor bind:value={action.channelMessage} minHeight="80px" mode="bcfd" />
+        <div class={channelMessageError ? 'ring-2 ring-error rounded' : ''}>
+          <CodeEditor bind:value={action.channelMessage} minHeight="80px" mode="bcfd" />
+        </div>
+        {#if channelMessageError}
+          <p class="text-error text-xs mt-2">{$t(channelMessageError)}</p>
+        {/if}
       </div>
     {/if}
 
@@ -158,7 +215,12 @@
             <span class="material-symbols-outlined text-sm">close</span>
           </button>
         </div>
-        <CodeEditor bind:value={action.privateMessage} minHeight="80px" mode="bcfd" />
+        <div class={privateMessageError ? 'ring-2 ring-error rounded' : ''}>
+          <CodeEditor bind:value={action.privateMessage} minHeight="80px" mode="bcfd" />
+        </div>
+        {#if privateMessageError}
+          <p class="text-error text-xs mt-2">{$t(privateMessageError)}</p>
+        {/if}
       </div>
     {/if}
 
@@ -174,42 +236,51 @@
             <span class="material-symbols-outlined text-sm">close</span>
           </button>
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <!-- svelte-ignore a11y-label-has-associated-control -->
-            <label class="label"><span class="label-text">{$t('embed-title')}</span></label>
-            <CodeEditor bind:value={action.channelEmbed.title} minHeight="40px" mode="bcfd" />
-          </div>
-          <div>
-            <!-- svelte-ignore a11y-label-has-associated-control -->
-            <label class="label"><span class="label-text">{$t('embed-color')}</span></label>
-            <CodeEditor bind:value={action.channelEmbed.hexColor} minHeight="40px" mode="bcfd" />
-          </div>
-          <div class="md:col-span-2">
-            <!-- svelte-ignore a11y-label-has-associated-control -->
-            <label class="label"><span class="label-text">{$t('embed-description')}</span></label>
-            <CodeEditor bind:value={action.channelEmbed.description} minHeight="80px" mode="bcfd" />
-          </div>
-          <div>
-            <!-- svelte-ignore a11y-label-has-associated-control -->
-            <label class="label"><span class="label-text">{$t('embed-image')}</span></label>
-            <CodeEditor bind:value={action.channelEmbed.imageURL} minHeight="40px" mode="bcfd" />
-          </div>
-          <div>
-            <!-- svelte-ignore a11y-label-has-associated-control -->
-            <label class="label"><span class="label-text">{$t('embed-thumbnail')}</span></label>
-            <CodeEditor
-              bind:value={action.channelEmbed.thumbnailURL}
-              minHeight="40px"
-              mode="bcfd"
-            />
-          </div>
-          <div class="md:col-span-2">
-            <!-- svelte-ignore a11y-label-has-associated-control -->
-            <label class="label"><span class="label-text">{$t('embed-footer')}</span></label>
-            <CodeEditor bind:value={action.channelEmbed.footer} minHeight="40px" mode="bcfd" />
+        <div class={channelEmbedError ? 'ring-2 ring-error rounded p-4 -m-4' : ''}>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <label class="label"><span class="label-text">{$t('embed-title')}</span></label>
+              <CodeEditor bind:value={action.channelEmbed.title} minHeight="40px" mode="bcfd" />
+            </div>
+            <div>
+              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <label class="label"><span class="label-text">{$t('embed-color')}</span></label>
+              <CodeEditor bind:value={action.channelEmbed.hexColor} minHeight="40px" mode="bcfd" />
+            </div>
+            <div class="md:col-span-2">
+              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <label class="label"><span class="label-text">{$t('embed-description')}</span></label>
+              <CodeEditor
+                bind:value={action.channelEmbed.description}
+                minHeight="80px"
+                mode="bcfd"
+              />
+            </div>
+            <div>
+              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <label class="label"><span class="label-text">{$t('embed-image')}</span></label>
+              <CodeEditor bind:value={action.channelEmbed.imageURL} minHeight="40px" mode="bcfd" />
+            </div>
+            <div>
+              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <label class="label"><span class="label-text">{$t('embed-thumbnail')}</span></label>
+              <CodeEditor
+                bind:value={action.channelEmbed.thumbnailURL}
+                minHeight="40px"
+                mode="bcfd"
+              />
+            </div>
+            <div class="md:col-span-2">
+              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <label class="label"><span class="label-text">{$t('embed-footer')}</span></label>
+              <CodeEditor bind:value={action.channelEmbed.footer} minHeight="40px" mode="bcfd" />
+            </div>
           </div>
         </div>
+        {#if channelEmbedError}
+          <p class="text-error text-xs mt-2">{$t(channelEmbedError)}</p>
+        {/if}
       </div>
     {/if}
 
@@ -225,42 +296,51 @@
             <span class="material-symbols-outlined text-sm">close</span>
           </button>
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <!-- svelte-ignore a11y-label-has-associated-control -->
-            <label class="label"><span class="label-text">{$t('embed-title')}</span></label>
-            <CodeEditor bind:value={action.privateEmbed.title} minHeight="40px" mode="bcfd" />
-          </div>
-          <div>
-            <!-- svelte-ignore a11y-label-has-associated-control -->
-            <label class="label"><span class="label-text">{$t('embed-color')}</span></label>
-            <CodeEditor bind:value={action.privateEmbed.hexColor} minHeight="40px" mode="bcfd" />
-          </div>
-          <div class="md:col-span-2">
-            <!-- svelte-ignore a11y-label-has-associated-control -->
-            <label class="label"><span class="label-text">{$t('embed-description')}</span></label>
-            <CodeEditor bind:value={action.privateEmbed.description} minHeight="80px" mode="bcfd" />
-          </div>
-          <div>
-            <!-- svelte-ignore a11y-label-has-associated-control -->
-            <label class="label"><span class="label-text">{$t('embed-image')}</span></label>
-            <CodeEditor bind:value={action.privateEmbed.imageURL} minHeight="40px" mode="bcfd" />
-          </div>
-          <div>
-            <!-- svelte-ignore a11y-label-has-associated-control -->
-            <label class="label"><span class="label-text">{$t('embed-thumbnail')}</span></label>
-            <CodeEditor
-              bind:value={action.privateEmbed.thumbnailURL}
-              minHeight="40px"
-              mode="bcfd"
-            />
-          </div>
-          <div class="md:col-span-2">
-            <!-- svelte-ignore a11y-label-has-associated-control -->
-            <label class="label"><span class="label-text">{$t('embed-footer')}</span></label>
-            <CodeEditor bind:value={action.privateEmbed.footer} minHeight="40px" mode="bcfd" />
+        <div class={privateEmbedError ? 'ring-2 ring-error rounded p-4 -m-4' : ''}>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <label class="label"><span class="label-text">{$t('embed-title')}</span></label>
+              <CodeEditor bind:value={action.privateEmbed.title} minHeight="40px" mode="bcfd" />
+            </div>
+            <div>
+              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <label class="label"><span class="label-text">{$t('embed-color')}</span></label>
+              <CodeEditor bind:value={action.privateEmbed.hexColor} minHeight="40px" mode="bcfd" />
+            </div>
+            <div class="md:col-span-2">
+              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <label class="label"><span class="label-text">{$t('embed-description')}</span></label>
+              <CodeEditor
+                bind:value={action.privateEmbed.description}
+                minHeight="80px"
+                mode="bcfd"
+              />
+            </div>
+            <div>
+              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <label class="label"><span class="label-text">{$t('embed-image')}</span></label>
+              <CodeEditor bind:value={action.privateEmbed.imageURL} minHeight="40px" mode="bcfd" />
+            </div>
+            <div>
+              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <label class="label"><span class="label-text">{$t('embed-thumbnail')}</span></label>
+              <CodeEditor
+                bind:value={action.privateEmbed.thumbnailURL}
+                minHeight="40px"
+                mode="bcfd"
+              />
+            </div>
+            <div class="md:col-span-2">
+              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <label class="label"><span class="label-text">{$t('embed-footer')}</span></label>
+              <CodeEditor bind:value={action.privateEmbed.footer} minHeight="40px" mode="bcfd" />
+            </div>
           </div>
         </div>
+        {#if privateEmbedError}
+          <p class="text-error text-xs mt-2">{$t(privateEmbedError)}</p>
+        {/if}
       </div>
     {/if}
 
@@ -276,9 +356,14 @@
             <span class="material-symbols-outlined text-sm">close</span>
           </button>
         </div>
-        <!-- svelte-ignore a11y-label-has-associated-control -->
-        <label class="label"><span class="label-text">{$t('role-id')}</span></label>
-        <CodeEditor bind:value={action.roleToAssign} minHeight="40px" mode="bcfd" />
+        <div class={roleToAssignError ? 'ring-2 ring-error rounded' : ''}>
+          <!-- svelte-ignore a11y-label-has-associated-control -->
+          <label class="label"><span class="label-text">{$t('role-id')}</span></label>
+          <CodeEditor bind:value={action.roleToAssign} minHeight="40px" mode="bcfd" />
+        </div>
+        {#if roleToAssignError}
+          <p class="text-error text-xs mt-2">{$t(roleToAssignError)}</p>
+        {/if}
       </div>
     {/if}
   </div>

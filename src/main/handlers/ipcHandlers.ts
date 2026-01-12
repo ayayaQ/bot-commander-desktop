@@ -17,10 +17,29 @@ import {
   getCommands,
   setCommands
 } from '../services/botService'
-import { AppSettings, BCFDCommand, BCFDSlashCommand, BotStatus, BCFDInteractionCommand } from '../types/types'
-import { saveBotStatus, saveCommands, saveSettings, saveInteractions } from '../services/fileService'
-import { getInteractions, setInteractions, findInteractionById } from '../services/interactionService'
-import { registerSlashCommand, unregisterSlashCommand, syncAllSlashCommands } from '../services/slashCommandRegistry'
+import {
+  AppSettings,
+  BCFDCommand,
+  BCFDSlashCommand,
+  BotStatus,
+  BCFDInteractionCommand
+} from '../types/types'
+import {
+  saveBotStatus,
+  saveCommands,
+  saveSettings,
+  saveInteractions
+} from '../services/fileService'
+import {
+  getInteractions,
+  setInteractions,
+  findInteractionById
+} from '../services/interactionService'
+import {
+  registerSlashCommand,
+  unregisterSlashCommand,
+  syncAllSlashCommands
+} from '../services/slashCommandRegistry'
 import { getSettings, setSettings } from '../services/settingsService'
 import { getBotStatus, setBotStatus } from '../services/statusService'
 import { getStatsInstance } from '../utils/stats'
@@ -155,7 +174,7 @@ export function addIPCHandlers() {
     try {
       await syncAllSlashCommands(interactions)
       // Mark all as registered
-      interactions.forEach(i => i.isRegistered = true)
+      interactions.forEach((i) => (i.isRegistered = true))
       await saveInteractions()
       return { success: true, synced: interactions.length }
     } catch (error) {

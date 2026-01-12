@@ -32,7 +32,6 @@
   }
 
   function handleSubmit(): void {
-
     console.log({ status, activity, activityDetails, streamUrl })
     // validate stream url
     if (activity === 'Streaming') {
@@ -44,7 +43,7 @@
     saveBotStatus({ status, activity, activityDetails, streamUrl })
   }
 
-  let unsubscribe: () => void;
+  let unsubscribe: () => void
 
   onMount(async () => {
     unsubscribe = botStatusStore.subscribe((storeStatus) => {

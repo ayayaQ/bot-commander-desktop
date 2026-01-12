@@ -130,9 +130,7 @@ export async function unregisterSlashCommand(
   }
 }
 
-export async function syncAllSlashCommands(
-  interactions: BCFDInteractionCommand[]
-): Promise<void> {
+export async function syncAllSlashCommands(interactions: BCFDInteractionCommand[]): Promise<void> {
   const client = getClient()
   if (!client?.token || !client.user) {
     throw new Error('Bot not connected')

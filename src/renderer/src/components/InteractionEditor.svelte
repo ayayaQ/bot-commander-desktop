@@ -21,6 +21,67 @@
   const originalDescription = interaction?.commandDescription
   const originalOptions = interaction?.options ? JSON.stringify(interaction.options) : ''
 
+  const nameRegex = /^[-_'\p{L}\p{N}\p{sc=Deva}\p{sc=Thai}]{1,32}$/u
+
+  let commandNameError = ''
+  let commandDescriptionError = ''
+  let optionErrors: Record<number, { nameError: string; descriptionError: string }> = {}
+  let actionErrors = false
+
+  function validateName(name: string): string {
+    if (!name.trim()) {
+      return 'Name is required'
+    }
+    if (!nameRegex.test(name)) {
+      return 'Must be 1-32 characters with letters, numbers, hyphens, underscores, or apostrophes'
+    }
+    return ''
+  }
+
+  function validateDescription(description: string): string {
+    if (!description.trim()) {
+      return 'Description is required'
+    }
+    if (description.length > 100) {
+      return 'Description must be 1-100 characters'
+    }
+    return ''
+  }
+
+  function getDuplicateOptionNames(): Set<string> {
+    const duplicates = new Set<string>()
+    const seen = new Map<string, number>()
+    editedInteraction.options.forEach((option, idx) => {
+      const name = option.name.toLowerCase()
+      if (seen.has(name)) {
+        duplicates.add(name)
+        duplicates.add(editedInteraction.options[seen.get(name)!].name)
+      }
+      seen.set(name, idx)
+    })
+    return duplicates
+  }
+
+  $: commandNameError = validateName(editedInteraction.commandName)
+  $: commandDescriptionError = validateDescription(editedInteraction.commandDescription)
+  $: {
+    const duplicates = getDuplicateOptionNames()
+    optionErrors = {}
+    editedInteraction.options.forEach((option, idx) => {
+      const isDuplicate = duplicates.has(option.name)
+      optionErrors[idx] = {
+        nameError: isDuplicate ? 'Duplicate option name' : validateName(option.name),
+        descriptionError: validateDescription(option.description)
+      }
+    })
+  }
+
+  $: hasErrors =
+    commandNameError !== '' ||
+    commandDescriptionError !== '' ||
+    Object.values(optionErrors).some((e) => e.nameError !== '' || e.descriptionError !== '') ||
+    actionErrors
+
   const optionTypes = [
     { value: 3, label: 'String' },
     { value: 4, label: 'Integer' },
@@ -48,24 +109,8 @@
   }
 
   function handleSave() {
-    // Validate command name
-    if (!editedInteraction.commandName.trim()) {
-      alert('Command name is required')
-      return
-    }
-
-    // Validate command name format (lowercase, no spaces, alphanumeric and hyphens only)
-    const nameRegex = /^[\w-]{1,32}$/
-    if (!nameRegex.test(editedInteraction.commandName)) {
-      alert(
-        'Command name must be 1-32 characters, lowercase, and contain only letters, numbers, hyphens, and underscores'
-      )
-      return
-    }
-
-    // Validate description
-    if (!editedInteraction.commandDescription.trim()) {
-      alert('Command description is required')
+    if (hasErrors) {
+      alert('Please fix validation errors before saving')
       return
     }
 
@@ -101,7 +146,7 @@
           <span class="material-symbols-outlined">close</span>
           {$t('cancel')}
         </button>
-        <button class="btn btn-primary" on:click={handleSave}>
+        <button class="btn btn-primary" disabled={hasErrors} on:click={handleSave}>
           <span class="material-symbols-outlined">save</span>
           {$t('save')}
         </button>
@@ -126,17 +171,25 @@
             <span class="bg-base-200 px-3 flex items-center">/</span>
             <input
               type="text"
+              class:input-error={commandNameError}
               class="input input-bordered flex-1"
               bind:value={editedInteraction.commandName}
               placeholder="greet"
             />
           </div>
-          <!-- svelte-ignore a11y-label-has-associated-control -->
-          <label class="label">
-            <span class="label-text-alt text-base-content/50">
-              {$t('command-name-hint')}
-            </span>
-          </label>
+          {#if commandNameError}
+            <!-- svelte-ignore a11y-label-has-associated-control -->
+            <label class="label">
+              <span class="label-text-alt text-error">{commandNameError}</span>
+            </label>
+          {:else}
+            <!-- svelte-ignore a11y-label-has-associated-control -->
+            <label class="label">
+              <span class="label-text-alt text-base-content/50">
+                {$t('command-name-hint')}
+              </span>
+            </label>
+          {/if}
         </div>
 
         <div class="form-control">
@@ -146,10 +199,17 @@
           </label>
           <input
             type="text"
+            class:input-error={commandDescriptionError}
             class="input input-bordered"
             bind:value={editedInteraction.commandDescription}
             placeholder="A friendly greeting command"
           />
+          {#if commandDescriptionError}
+            <!-- svelte-ignore a11y-label-has-associated-control -->
+            <label class="label">
+              <span class="label-text-alt text-error">{commandDescriptionError}</span>
+            </label>
+          {/if}
         </div>
       </div>
     </div>
@@ -191,10 +251,19 @@
                   </label>
                   <input
                     type="text"
+                    class:input-error={optionErrors[idx]?.nameError}
                     class="input input-bordered input-sm"
                     bind:value={option.name}
                     placeholder="username"
                   />
+                  {#if optionErrors[idx]?.nameError}
+                    <!-- svelte-ignore a11y-label-has-associated-control -->
+                    <label class="label py-0">
+                      <span class="label-text-alt text-error text-xs"
+                        >{optionErrors[idx]?.nameError}</span
+                      >
+                    </label>
+                  {/if}
                 </div>
 
                 <div class="form-control">
@@ -231,10 +300,19 @@
                   </label>
                   <input
                     type="text"
+                    class:input-error={optionErrors[idx]?.descriptionError}
                     class="input input-bordered input-sm"
                     bind:value={option.description}
                     placeholder="The user to greet"
                   />
+                  {#if optionErrors[idx]?.descriptionError}
+                    <!-- svelte-ignore a11y-label-has-associated-control -->
+                    <label class="label py-0">
+                      <span class="label-text-alt text-error text-xs"
+                        >{optionErrors[idx]?.descriptionError}</span
+                      >
+                    </label>
+                  {/if}
                 </div>
               </div>
             </div>
@@ -254,6 +332,7 @@
         action={editedInteraction.rootAction}
         showEphemeral={true}
         showDefer={true}
+        bind:errors={actionErrors}
       />
     </div>
   </div>

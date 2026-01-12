@@ -50,7 +50,6 @@ function addConnectionListener() {
       avatar: data.avatar
     }))
   })
-
   ;(window as any).electron.ipcRenderer.on('disconnect', (event) => {
     console.log('Disconnected from server', event)
   })
