@@ -127,8 +127,8 @@
   }
 </script>
 
-<li class="card bg-base-200 shadow-xl">
-  <div class="card-body">
+<li class="card bg-base-200">
+  <div class="card-body p-4">
     <div class="flex justify-between items-start">
       <div class="flex items-center justify-center gap-2">
         <div class="flex items-center justify-center">

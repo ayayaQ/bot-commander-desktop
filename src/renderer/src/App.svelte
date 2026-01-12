@@ -1,5 +1,6 @@
 <script lang="ts">
   import CommandList from './components/CommandList.svelte'
+  import InteractionList from './components/InteractionList.svelte'
   import Help from './components/Help.svelte'
   import Login from './components/Login.svelte'
   import Settings from './components/Settings.svelte'
@@ -12,8 +13,14 @@
   import StateViewer from './components/StateViewer.svelte'
   import TitleBar from './components/TitleBar.svelte'
 
-  let selectedMenu: 'commands' | 'help' | 'settings' | 'webhooks' | 'stats' | 'debugger' =
-    'commands'
+  let selectedMenu:
+    | 'commands'
+    | 'interactions'
+    | 'help'
+    | 'settings'
+    | 'webhooks'
+    | 'stats'
+    | 'debugger' = 'commands'
 
   onMount(async () => {
     await loadSettings()
@@ -38,6 +45,8 @@
     <div class="flex-grow">
       {#if selectedMenu === 'commands'}
         <CommandList />
+      {:else if selectedMenu === 'interactions'}
+        <InteractionList />
       {:else if selectedMenu === 'help'}
         <Help />
       {:else if selectedMenu === 'settings'}
@@ -57,6 +66,12 @@
           on:click={() => (selectedMenu = 'commands')}
         >
           <span class="material-symbols-outlined">home</span>
+        </button>
+        <button
+          class={selectedMenu === 'interactions' ? 'active bg-base-200' : ''}
+          on:click={() => (selectedMenu = 'interactions')}
+        >
+          <span class="material-symbols-outlined">smart_button</span>
         </button>
         <button
           class={selectedMenu === 'webhooks' ? 'active bg-base-200' : ''}
