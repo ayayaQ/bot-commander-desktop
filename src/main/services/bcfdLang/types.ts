@@ -125,6 +125,10 @@ export interface BCFDContext {
     | import('discord.js').Message<boolean>
   command?: import('../../types/types').BCFDCommand
 
+  // Interaction context (for slash commands)
+  interactionCommand?: import('../../types/types').BCFDInteractionCommand
+  interactionOptions?: import('discord.js').CommandInteractionOptionResolver
+
   // VM context for $eval blocks
   vmContext?: import('vm').Context
 

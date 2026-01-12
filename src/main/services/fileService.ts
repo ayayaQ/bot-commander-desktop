@@ -1,10 +1,11 @@
 import { app } from "electron"
 import { join } from "path"
 import fs from 'fs/promises'
-import { AppSettings, BCFDCommand, BCFDSlashCommand, BotStatus } from "../types/types"
+import { AppSettings, BCFDCommand, BCFDSlashCommand, BotStatus, BCFDInteractionCommand } from "../types/types"
 import { getCommands, setCommands } from "./botService";
 import { getSettings, setSettings } from "./settingsService";
 import { getBotStatus, setBotStatus } from "./statusService";
+import { getInteractions, setInteractions } from "./interactionService";
 
 export async function loadCommands(): Promise<void> {
     const commandsPath = join(app.getPath('userData'), 'commands.json')
@@ -78,5 +79,30 @@ export async function loadSettings(): Promise<void> {
       } else {
         console.error('Error loading settings:', error)
       }
+    }
+  }
+
+export async function loadInteractions(): Promise<void> {
+    const interactionsPath = join(app.getPath('userData'), 'interactions.json')
+    try {
+      const data = await fs.readFile(interactionsPath, 'utf-8')
+      const interactions = JSON.parse(data) as BCFDInteractionCommand[]
+      setInteractions(interactions)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        // File doesn't exist, create it with empty array
+        await fs.writeFile(interactionsPath, JSON.stringify([]))
+      } else {
+        console.error('Error loading interactions:', error)
+      }
+    }
+  }
+
+export async function saveInteractions(): Promise<void> {
+    const interactionsPath = join(app.getPath('userData'), 'interactions.json')
+    try {
+      await fs.writeFile(interactionsPath, JSON.stringify(getInteractions(), null, 2))
+    } catch (error) {
+      console.error('Error saving interactions:', error)
     }
   }

@@ -6,7 +6,7 @@ import iconIco from '../../resources/icon.ico?asset'
 import { getStatsInstance, Stats } from './utils/stats'
 import { initializeBotState, saveBotState } from './utils/virtual'
 import { addIPCHandlers, addWindowIPCHandlers } from './handlers/ipcHandlers'
-import { loadBotStatus, loadCommands, loadSettings } from './services/fileService'
+import { loadBotStatus, loadCommands, loadSettings, loadInteractions } from './services/fileService'
 import { loadChats } from './services/chatService'
 
 // Extend the Electron.App interface to include our custom property
@@ -123,6 +123,7 @@ app.whenReady().then(async () => {
   await loadSettings()
   await loadBotStatus()
   await loadChats()
+  await loadInteractions()
 
   stats = getStatsInstance()
   await stats.loadFromFile(statsFilePath)

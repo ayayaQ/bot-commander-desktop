@@ -17,8 +17,10 @@ import {
   getCommands,
   setCommands
 } from '../services/botService'
-import { AppSettings, BCFDCommand, BCFDSlashCommand, BotStatus } from '../types/types'
-import { saveBotStatus, saveCommands, saveSettings } from '../services/fileService'
+import { AppSettings, BCFDCommand, BCFDSlashCommand, BotStatus, BCFDInteractionCommand } from '../types/types'
+import { saveBotStatus, saveCommands, saveSettings, saveInteractions } from '../services/fileService'
+import { getInteractions, setInteractions, findInteractionById } from '../services/interactionService'
+import { registerSlashCommand, unregisterSlashCommand, syncAllSlashCommands } from '../services/slashCommandRegistry'
 import { getSettings, setSettings } from '../services/settingsService'
 import { getBotStatus, setBotStatus } from '../services/statusService'
 import { getStatsInstance } from '../utils/stats'
@@ -103,6 +105,63 @@ export function addIPCHandlers() {
       return true
     }
   )
+
+  // Interaction Commands IPC handlers
+  ipcMain.handle('get-interactions', () => {
+    return getInteractions()
+  })
+
+  ipcMain.handle('save-interactions', async (_, newInteractions: BCFDInteractionCommand[]) => {
+    setInteractions(newInteractions)
+    await saveInteractions()
+    return true
+  })
+
+  ipcMain.handle('register-slash-command', async (_, commandId: string) => {
+    const interaction = findInteractionById(commandId)
+    if (!interaction) {
+      return { success: false, error: 'Command not found' }
+    }
+
+    try {
+      await registerSlashCommand(interaction)
+      interaction.isRegistered = true
+      await saveInteractions()
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: (error as Error).message }
+    }
+  })
+
+  ipcMain.handle('unregister-slash-command', async (_, commandId: string) => {
+    const interaction = findInteractionById(commandId)
+    if (!interaction) {
+      return { success: false, error: 'Command not found' }
+    }
+
+    try {
+      await unregisterSlashCommand(interaction)
+      interaction.isRegistered = false
+      await saveInteractions()
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: (error as Error).message }
+    }
+  })
+
+  ipcMain.handle('sync-all-slash-commands', async () => {
+    const interactions = getInteractions()
+
+    try {
+      await syncAllSlashCommands(interactions)
+      // Mark all as registered
+      interactions.forEach(i => i.isRegistered = true)
+      await saveInteractions()
+      return { success: true, synced: interactions.length }
+    } catch (error) {
+      return { success: false, error: (error as Error).message }
+    }
+  })
 
   ipcMain.handle('get-settings', () => {
     return getSettings()
