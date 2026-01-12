@@ -1,12 +1,18 @@
 <script lang="ts">
   import type { BCFDInteractionAction } from '../types/types'
+  import { createDefaultInteractionButton } from '../types/types'
   import { t } from '../stores/localisation'
   import CodeEditor from './CodeEditor.svelte'
+  import InteractionButtonEditor from './InteractionButtonEditor.svelte'
 
   export let action: BCFDInteractionAction
   export let showEphemeral = true
   export let showDefer = true
+  export let showButtons = true
+  export let nestingDepth = 0 // Track nesting level to prevent infinite nesting
   export let title = ''
+
+  const MAX_NESTING_DEPTH = 3 // Maximum levels of nested buttons
 
   type ActionType = {
     id: string
@@ -55,6 +61,22 @@
   function getAvailableActions(): ActionType[] {
     return actionTypes.filter((a) => !activeActions.includes(a.id))
   }
+
+  // Nested button management
+  function addNestedButton() {
+    if (!action.buttons) {
+      action.buttons = []
+    }
+    action.buttons = [...action.buttons, createDefaultInteractionButton()]
+  }
+
+  function removeNestedButton(idx: number) {
+    action.buttons = action.buttons.filter((_, i) => i !== idx)
+  }
+
+  // Check if we can add more nested buttons
+  $: canAddNestedButtons =
+    showButtons && nestingDepth < MAX_NESTING_DEPTH && (action.buttons?.length ?? 0) < 5
 </script>
 
 <div class="space-y-4">
@@ -154,26 +176,36 @@
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
+            <!-- svelte-ignore a11y-label-has-associated-control -->
             <label class="label"><span class="label-text">{$t('embed-title')}</span></label>
             <CodeEditor bind:value={action.channelEmbed.title} minHeight="40px" mode="bcfd" />
           </div>
           <div>
+            <!-- svelte-ignore a11y-label-has-associated-control -->
             <label class="label"><span class="label-text">{$t('embed-color')}</span></label>
             <CodeEditor bind:value={action.channelEmbed.hexColor} minHeight="40px" mode="bcfd" />
           </div>
           <div class="md:col-span-2">
+            <!-- svelte-ignore a11y-label-has-associated-control -->
             <label class="label"><span class="label-text">{$t('embed-description')}</span></label>
             <CodeEditor bind:value={action.channelEmbed.description} minHeight="80px" mode="bcfd" />
           </div>
           <div>
+            <!-- svelte-ignore a11y-label-has-associated-control -->
             <label class="label"><span class="label-text">{$t('embed-image')}</span></label>
             <CodeEditor bind:value={action.channelEmbed.imageURL} minHeight="40px" mode="bcfd" />
           </div>
           <div>
+            <!-- svelte-ignore a11y-label-has-associated-control -->
             <label class="label"><span class="label-text">{$t('embed-thumbnail')}</span></label>
-            <CodeEditor bind:value={action.channelEmbed.thumbnailURL} minHeight="40px" mode="bcfd" />
+            <CodeEditor
+              bind:value={action.channelEmbed.thumbnailURL}
+              minHeight="40px"
+              mode="bcfd"
+            />
           </div>
           <div class="md:col-span-2">
+            <!-- svelte-ignore a11y-label-has-associated-control -->
             <label class="label"><span class="label-text">{$t('embed-footer')}</span></label>
             <CodeEditor bind:value={action.channelEmbed.footer} minHeight="40px" mode="bcfd" />
           </div>
@@ -195,26 +227,36 @@
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
+            <!-- svelte-ignore a11y-label-has-associated-control -->
             <label class="label"><span class="label-text">{$t('embed-title')}</span></label>
             <CodeEditor bind:value={action.privateEmbed.title} minHeight="40px" mode="bcfd" />
           </div>
           <div>
+            <!-- svelte-ignore a11y-label-has-associated-control -->
             <label class="label"><span class="label-text">{$t('embed-color')}</span></label>
             <CodeEditor bind:value={action.privateEmbed.hexColor} minHeight="40px" mode="bcfd" />
           </div>
           <div class="md:col-span-2">
+            <!-- svelte-ignore a11y-label-has-associated-control -->
             <label class="label"><span class="label-text">{$t('embed-description')}</span></label>
             <CodeEditor bind:value={action.privateEmbed.description} minHeight="80px" mode="bcfd" />
           </div>
           <div>
+            <!-- svelte-ignore a11y-label-has-associated-control -->
             <label class="label"><span class="label-text">{$t('embed-image')}</span></label>
             <CodeEditor bind:value={action.privateEmbed.imageURL} minHeight="40px" mode="bcfd" />
           </div>
           <div>
+            <!-- svelte-ignore a11y-label-has-associated-control -->
             <label class="label"><span class="label-text">{$t('embed-thumbnail')}</span></label>
-            <CodeEditor bind:value={action.privateEmbed.thumbnailURL} minHeight="40px" mode="bcfd" />
+            <CodeEditor
+              bind:value={action.privateEmbed.thumbnailURL}
+              minHeight="40px"
+              mode="bcfd"
+            />
           </div>
           <div class="md:col-span-2">
+            <!-- svelte-ignore a11y-label-has-associated-control -->
             <label class="label"><span class="label-text">{$t('embed-footer')}</span></label>
             <CodeEditor bind:value={action.privateEmbed.footer} minHeight="40px" mode="bcfd" />
           </div>
@@ -234,9 +276,52 @@
             <span class="material-symbols-outlined text-sm">close</span>
           </button>
         </div>
+        <!-- svelte-ignore a11y-label-has-associated-control -->
         <label class="label"><span class="label-text">{$t('role-id')}</span></label>
         <CodeEditor bind:value={action.roleToAssign} minHeight="40px" mode="bcfd" />
       </div>
     {/if}
   </div>
+
+  <!-- Nested Buttons Section -->
+  {#if showButtons && nestingDepth < MAX_NESTING_DEPTH}
+    <div class="mt-4">
+      <div class="flex justify-between items-center mb-2">
+        <span class="font-medium text-sm flex items-center gap-2">
+          <span class="material-symbols-outlined text-sm">smart_button</span>
+          {$t('response-buttons')}
+          {#if nestingDepth > 0}
+            <span class="badge badge-sm badge-ghost">{$t('nesting-level')} {nestingDepth}</span>
+          {/if}
+        </span>
+        <button
+          class="btn btn-xs btn-outline"
+          on:click={addNestedButton}
+          type="button"
+          disabled={!canAddNestedButtons}
+        >
+          <span class="material-symbols-outlined text-sm">add</span>
+          {$t('add-button')}
+        </button>
+      </div>
+
+      {#if action.buttons && action.buttons.length > 0}
+        <div class="space-y-2">
+          {#each action.buttons as button, idx}
+            <InteractionButtonEditor
+              {button}
+              onDelete={() => removeNestedButton(idx)}
+              {nestingDepth}
+            />
+          {/each}
+        </div>
+      {:else}
+        <p class="text-base-content/50 text-xs">{$t('no-response-buttons-hint')}</p>
+      {/if}
+
+      {#if action.buttons && action.buttons.length >= 5}
+        <p class="text-warning text-xs mt-1">{$t('max-buttons-warning')}</p>
+      {/if}
+    </div>
+  {/if}
 </div>

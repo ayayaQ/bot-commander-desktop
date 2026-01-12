@@ -125,6 +125,17 @@ export type TYPE_MEMBER_ADD = 5
 // Button styles (mirrors discord.js ButtonStyle)
 export type BCFDButtonStyle = 1 | 2 | 3 | 4 | 5 // Primary, Secondary, Success, Danger, Link
 
+// Forward declaration for recursive type
+export type BCFDInteractionButton = {
+  customId: string
+  label: string
+  style: BCFDButtonStyle
+  emoji?: string
+  url?: string // Only for Link style
+  disabled: boolean
+  action: BCFDInteractionAction
+}
+
 // Reusable action definition for slash commands and buttons
 export type BCFDInteractionAction = {
   sendChannelMessage: boolean
@@ -139,18 +150,10 @@ export type BCFDInteractionAction = {
   roleToAssign: string
   ephemeral: boolean // Response only visible to user
   deferReply: boolean // For long-running actions
+  buttons: BCFDInteractionButton[] // Nested buttons for this action's response
 }
 
-// Button with nested action
-export type BCFDInteractionButton = {
-  customId: string
-  label: string
-  style: BCFDButtonStyle
-  emoji?: string
-  url?: string // Only for Link style
-  disabled: boolean
-  action: BCFDInteractionAction
-}
+// BCFDInteractionButton is defined above with BCFDInteractionAction for recursive typing
 
 // Slash command option types (mirrors discord.js ApplicationCommandOptionType)
 export type BCFDSlashCommandOptionType = 3 | 4 | 5 | 6 | 7 | 8 | 10 // String, Integer, Boolean, User, Channel, Role, Number
@@ -171,7 +174,6 @@ export type BCFDInteractionCommand = {
   commandDescription: string
   options: BCFDSlashCommandOption[]
   rootAction: BCFDInteractionAction
-  buttons: BCFDInteractionButton[]
   isRegistered: boolean
   guildId?: string
 }
@@ -204,7 +206,8 @@ export function createDefaultInteractionAction(): BCFDInteractionAction {
     isRoleAssigner: false,
     roleToAssign: '',
     ephemeral: false,
-    deferReply: false
+    deferReply: false,
+    buttons: []
   }
 }
 
@@ -216,7 +219,6 @@ export function createDefaultInteractionCommand(): BCFDInteractionCommand {
     commandDescription: '',
     options: [],
     rootAction: createDefaultInteractionAction(),
-    buttons: [],
     isRegistered: false
   }
 }

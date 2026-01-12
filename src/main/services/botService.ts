@@ -307,7 +307,9 @@ async function executeInteractionCommand(
 
   // Build buttons if any
   const components =
-    command.buttons.length > 0 ? [await buildButtonRow(command.buttons, interaction, command)] : []
+    command.rootAction.buttons.length > 0
+      ? [await buildButtonRow(command.rootAction.buttons, interaction, command)]
+      : []
 
   // Send response
   try {
@@ -372,13 +374,20 @@ async function executeButtonAction(
   // Build the response
   const response = await buildActionResponse(action, interaction, command)
 
+  // Build nested buttons if any
+  const components =
+    action.buttons && action.buttons.length > 0
+      ? [await buildButtonRowFromAction(action.buttons, interaction, command)]
+      : []
+
   // Send response
   try {
     if (action.deferReply) {
-      await interaction.editReply(response)
+      await interaction.editReply({ ...response, components })
     } else {
       await interaction.reply({
         ...response,
+        components,
         ephemeral: action.ephemeral
       })
     }
@@ -505,6 +514,44 @@ async function buildEmbed(
 async function buildButtonRow(
   buttons: BCFDInteractionButton[],
   interaction: ChatInputCommandInteraction,
+  command: BCFDInteractionCommand
+): Promise<ActionRowBuilder<ButtonBuilder>> {
+  const row = new ActionRowBuilder<ButtonBuilder>()
+
+  // Discord allows max 5 buttons per row
+  for (const btn of buttons.slice(0, 5)) {
+    const builder = new ButtonBuilder()
+      .setCustomId(btn.customId)
+      .setStyle(btn.style as ButtonStyle)
+      .setDisabled(btn.disabled)
+
+    // Process label with BCFD templates
+    const label = await stringInfoAdd(
+      contextForInteractionEvent(btn.label || 'Button', interaction, command)
+    )
+    builder.setLabel(label)
+
+    if (btn.emoji) {
+      builder.setEmoji(btn.emoji)
+    }
+
+    // Link style buttons need a URL instead of customId
+    if (btn.style === 5 && btn.url) {
+      builder.setURL(btn.url)
+      // Link buttons don't use customId
+      builder.setCustomId(undefined as any)
+    }
+
+    row.addComponents(builder)
+  }
+
+  return row
+}
+
+// Build button row from action's nested buttons (for button click responses)
+async function buildButtonRowFromAction(
+  buttons: BCFDInteractionButton[],
+  interaction: ChatInputCommandInteraction | ButtonInteraction,
   command: BCFDInteractionCommand
 ): Promise<ActionRowBuilder<ButtonBuilder>> {
   const row = new ActionRowBuilder<ButtonBuilder>()
