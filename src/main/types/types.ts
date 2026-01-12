@@ -63,6 +63,64 @@ export type BCFDSlashCommand = {
   commandReply: string
 }
 
+// =============================================================================
+// Interaction Command Types (Slash Commands with Buttons)
+// =============================================================================
+
+// Button styles (mirrors discord.js ButtonStyle)
+export type BCFDButtonStyle = 1 | 2 | 3 | 4 | 5 // Primary, Secondary, Success, Danger, Link
+
+// Reusable action definition for slash commands and buttons
+export type BCFDInteractionAction = {
+  sendChannelMessage: boolean
+  channelMessage: string
+  sendPrivateMessage: boolean
+  privateMessage: string
+  sendChannelEmbed: boolean
+  channelEmbed: BCFDEmbedMessageTemplate
+  sendPrivateEmbed: boolean
+  privateEmbed: BCFDEmbedMessageTemplate
+  isRoleAssigner: boolean
+  roleToAssign: string
+  ephemeral: boolean // Response only visible to user
+  deferReply: boolean // For long-running actions
+}
+
+// Button with nested action
+export type BCFDInteractionButton = {
+  customId: string
+  label: string
+  style: BCFDButtonStyle
+  emoji?: string
+  url?: string // Only for Link style
+  disabled: boolean
+  action: BCFDInteractionAction
+}
+
+// Slash command option types (mirrors discord.js ApplicationCommandOptionType)
+export type BCFDSlashCommandOptionType = 3 | 4 | 5 | 6 | 7 | 8 | 10 // String, Integer, Boolean, User, Channel, Role, Number
+
+// Slash command option
+export type BCFDSlashCommandOption = {
+  name: string
+  description: string
+  type: BCFDSlashCommandOptionType
+  required: boolean
+  choices?: { name: string; value: string | number }[]
+}
+
+// Main interaction command type
+export type BCFDInteractionCommand = {
+  id: string
+  commandName: string
+  commandDescription: string
+  options: BCFDSlashCommandOption[]
+  rootAction: BCFDInteractionAction
+  buttons: BCFDInteractionButton[]
+  isRegistered: boolean
+  guildId?: string
+}
+
 export type AppSettings = {
   theme: string
   showToken: boolean
