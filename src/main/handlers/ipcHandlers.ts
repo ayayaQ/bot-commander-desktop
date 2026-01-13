@@ -22,13 +22,16 @@ import {
   BCFDCommand,
   BCFDSlashCommand,
   BotStatus,
-  BCFDInteractionCommand
+  BCFDInteractionCommand,
+  WebhookPreset
 } from '../types/types'
 import {
   saveBotStatus,
   saveCommands,
   saveSettings,
-  saveInteractions
+  saveInteractions,
+  getWebhookPresets,
+  saveWebhookPresets
 } from '../services/fileService'
 import {
   getInteractions,
@@ -259,11 +262,30 @@ export function addIPCHandlers() {
   // send a webhook using discord.js
   ipcMain.on('send-webhook', async (_event, webhook) => {
     const webhookClient = new WebhookClient({ url: webhook.webhookUrl })
-    await webhookClient.send({
-      username: webhook.name ?? undefined,
-      avatarURL: webhook.avatarUrl ?? undefined,
-      content: webhook.message ?? undefined
-    })
+
+    if (webhook.messageType === 'embed') {
+      const embed = {
+        title: webhook.embedTitle || undefined,
+        description: webhook.embedDescription || undefined,
+        color: webhook.embedColor ? parseInt(webhook.embedColor.replace('#', ''), 16) : undefined,
+        footer: webhook.embedFooter ? { text: webhook.embedFooter } : undefined,
+        image: webhook.embedImageUrl ? { url: webhook.embedImageUrl } : undefined,
+        thumbnail: webhook.embedThumbnailUrl ? { url: webhook.embedThumbnailUrl } : undefined
+      }
+
+      await webhookClient.send({
+        username: webhook.name ?? undefined,
+        avatarURL: webhook.avatarUrl ?? undefined,
+        embeds: [embed]
+      })
+    } else {
+      await webhookClient.send({
+        username: webhook.name ?? undefined,
+        avatarURL: webhook.avatarUrl ?? undefined,
+        content: webhook.message ?? undefined
+      })
+    }
+
     webhookClient.destroy()
     getStatsInstance().incrementWebhooksSent()
   })
@@ -284,6 +306,15 @@ export function addIPCHandlers() {
 
   ipcMain.handle('restart-js-engine', async () => {
     await restartJsEngine()
+    return true
+  })
+
+  ipcMain.handle('get-webhook-presets', async () => {
+    return await getWebhookPresets()
+  })
+
+  ipcMain.handle('save-webhook-presets', async (_, presets: WebhookPreset[]) => {
+    await saveWebhookPresets(presets)
     return true
   })
 

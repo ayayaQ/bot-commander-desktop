@@ -141,3 +141,18 @@ export type BotStatus = {
   activityDetails: string
   streamUrl: string
 }
+export interface WebhookPreset {
+  id: string
+  alias: string
+  webhookUrl: string
+  name: string
+  avatarUrl: string
+  messageType: 'message' | 'embed'
+  message: string
+  embedTitle?: string
+  embedDescription?: string
+  embedColor?: string
+  embedFooter?: string
+  embedImageUrl?: string
+  embedThumbnailUrl?: string
+}

@@ -6,7 +6,8 @@ import {
   BCFDCommand,
   BCFDSlashCommand,
   BotStatus,
-  BCFDInteractionCommand
+  BCFDInteractionCommand,
+  WebhookPreset
 } from '../types/types'
 import { getCommands, setCommands } from './botService'
 import { getSettings, setSettings } from './settingsService'
@@ -111,5 +112,28 @@ export async function saveInteractions(): Promise<void> {
     await fs.writeFile(interactionsPath, JSON.stringify(getInteractions(), null, 2))
   } catch (error) {
     console.error('Error saving interactions:', error)
+  }
+}
+
+export async function getWebhookPresets(): Promise<WebhookPreset[]> {
+  const presetsPath = join(app.getPath('userData'), 'webhook_presets.json')
+  try {
+    const data = await fs.readFile(presetsPath, 'utf-8')
+    return JSON.parse(data)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return []
+    }
+    console.error('Error loading webhook presets:', error)
+    return []
+  }
+}
+
+export async function saveWebhookPresets(presets: WebhookPreset[]): Promise<void> {
+  const presetsPath = join(app.getPath('userData'), 'webhook_presets.json')
+  try {
+    await fs.writeFile(presetsPath, JSON.stringify(presets, null, 2))
+  } catch (error) {
+    console.error('Error saving webhook presets:', error)
   }
 }
