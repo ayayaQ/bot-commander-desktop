@@ -151,14 +151,19 @@
         {mode === 'add' ? $t('add-interaction') : $t('edit-interaction')}
       </h2>
       <div class="flex gap-2">
-        <button class="btn btn-ghost" on:click={handleCancel}>
-          <span class="material-symbols-outlined">close</span>
-          {$t('cancel')}
-        </button>
-        <button class="btn btn-primary" disabled={hasErrors} on:click={handleSave}>
-          <span class="material-symbols-outlined">save</span>
-          {$t('save')}
-        </button>
+        <span
+          class="tooltip tooltip-primary tooltip-bottom"
+          data-tip={hasErrors
+            ? $t('fix-errors-to-save')
+            : $t(mode === 'edit' ? 'update-command' : 'add-command')}
+        >
+          <button type="submit" disabled={hasErrors} class="btn btn-primary" on:click={handleSave}
+            ><span class="material-symbols-outlined">save</span></button
+          >
+        </span>
+        <button type="button" class="btn btn-secondary" on:click={handleCancel}
+          ><span class="material-symbols-outlined">close</span></button
+        >
       </div>
     </div>
   </div>
@@ -176,8 +181,11 @@
           <label class="label">
             <span class="label-text">{$t('command-name')}</span>
           </label>
-          <div class="input-group">
-            <span class="bg-base-200 px-3 flex items-center">/</span>
+          <div class="input-group flex gap-1">
+            <span
+              class="bg-base-200 px-2 text-3xl flex items-center rounded-xl font-bold opacity-80"
+              >/</span
+            >
             <input
               type="text"
               class:input-error={commandNameError}
@@ -244,11 +252,10 @@
               <div class="flex justify-between items-start mb-3">
                 <span class="badge badge-neutral">Option {idx + 1}</span>
                 <button
-                  class="btn btn-xs btn-ghost text-error"
+                  class="btn btn-sm btn-circle btn-primary"
                   on:click={() => removeOption(idx)}
-                  type="button"
                 >
-                  <span class="material-symbols-outlined text-sm">close</span>
+                  <span class="material-symbols-outlined">close</span>
                 </button>
               </div>
 

@@ -82,7 +82,7 @@
             class={selectedMenu === 'commands' ? 'active bg-base-200' : ''}
             on:click={() => (selectedMenu = 'commands')}
           >
-            <span class="material-symbols-outlined">home</span>
+            <span class="material-symbols-outlined">chat</span>
           </button>
           <button
             class={selectedMenu === 'interactions' ? 'active bg-base-200' : ''}

@@ -22,7 +22,10 @@
   }
 </script>
 
-<div class="card bg-base-200" style="margin-left: {nestingDepth * 16}px">
+<div
+  class="card bg-base-200 outline outline-primary outline-1"
+  style="margin-left: {nestingDepth * 16}px"
+>
   <!-- Button Header (always visible) -->
   <button
     class="w-full p-4 flex items-center justify-between hover:bg-base-300 transition-colors"
@@ -41,11 +44,11 @@
       {/if}
     </div>
     <button
-      class="btn btn-sm btn-ghost text-error"
+      class="btn btn-sm btn-circle btn-primary"
       on:click|stopPropagation={onDelete}
       type="button"
     >
-      <span class="material-symbols-outlined">delete</span>
+      <span class="material-symbols-outlined">close</span>
     </button>
   </button>
 

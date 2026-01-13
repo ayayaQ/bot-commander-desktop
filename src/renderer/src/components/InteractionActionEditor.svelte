@@ -187,11 +187,10 @@
         <div class="flex justify-between items-center mb-2">
           <span class="font-medium">{$t('send-channel-message')}</span>
           <button
-            class="btn btn-xs btn-ghost text-error"
+            class="btn btn-sm btn-circle btn-primary"
             on:click={() => removeAction('sendMessage')}
-            type="button"
           >
-            <span class="material-symbols-outlined text-sm">close</span>
+            <span class="material-symbols-outlined">close</span>
           </button>
         </div>
         <div class={channelMessageError ? 'ring-2 ring-error rounded' : ''}>
@@ -208,11 +207,10 @@
         <div class="flex justify-between items-center mb-2">
           <span class="font-medium">{$t('send-private-message')}</span>
           <button
-            class="btn btn-xs btn-ghost text-error"
+            class="btn btn-sm btn-circle btn-primary"
             on:click={() => removeAction('sendPrivateMessage')}
-            type="button"
           >
-            <span class="material-symbols-outlined text-sm">close</span>
+            <span class="material-symbols-outlined">close</span>
           </button>
         </div>
         <div class={privateMessageError ? 'ring-2 ring-error rounded' : ''}>
@@ -229,11 +227,10 @@
         <div class="flex justify-between items-center mb-2">
           <span class="font-medium">{$t('send-channel-embed')}</span>
           <button
-            class="btn btn-xs btn-ghost text-error"
+            class="btn btn-sm btn-circle btn-primary"
             on:click={() => removeAction('sendChannelEmbed')}
-            type="button"
           >
-            <span class="material-symbols-outlined text-sm">close</span>
+            <span class="material-symbols-outlined">close</span>
           </button>
         </div>
         <div class={channelEmbedError ? 'ring-2 ring-error rounded p-4 -m-4' : ''}>
@@ -289,11 +286,10 @@
         <div class="flex justify-between items-center mb-2">
           <span class="font-medium">{$t('send-private-embed')}</span>
           <button
-            class="btn btn-xs btn-ghost text-error"
+            class="btn btn-sm btn-circle btn-primary"
             on:click={() => removeAction('sendPrivateEmbed')}
-            type="button"
           >
-            <span class="material-symbols-outlined text-sm">close</span>
+            <span class="material-symbols-outlined">close</span>
           </button>
         </div>
         <div class={privateEmbedError ? 'ring-2 ring-error rounded p-4 -m-4' : ''}>
@@ -349,11 +345,10 @@
         <div class="flex justify-between items-center mb-2">
           <span class="font-medium">{$t('role-assigner')}</span>
           <button
-            class="btn btn-xs btn-ghost text-error"
+            class="btn btn-sm btn-circle btn-primary"
             on:click={() => removeAction('roleAssigner')}
-            type="button"
           >
-            <span class="material-symbols-outlined text-sm">close</span>
+            <span class="material-symbols-outlined">close</span>
           </button>
         </div>
         <div class={roleToAssignError ? 'ring-2 ring-error rounded' : ''}>
