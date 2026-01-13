@@ -1,4 +1,5 @@
 import { BrowserWindow, ipcMain, session, dialog, shell } from 'electron'
+import crypto from 'crypto'
 import { OAuth2Scopes, PermissionsBitField, WebhookClient } from 'discord.js'
 import {
   getBotStateContext,
@@ -332,7 +333,9 @@ export function addIPCHandlers() {
 
     if (!result.canceled && result.filePath) {
       try {
-        await fs.writeFile(result.filePath, JSON.stringify(commands.bcfdCommands, null, 2))
+        // Strip IDs before export (they are internal identifiers)
+        const commandsToExport = commands.bcfdCommands.map(({ id, ...rest }) => rest)
+        await fs.writeFile(result.filePath, JSON.stringify(commandsToExport, null, 2))
         return { success: true }
       } catch (error) {
         console.error('Error exporting commands:', error)
@@ -357,6 +360,12 @@ export function addIPCHandlers() {
       try {
         const data = await fs.readFile(result.filePaths[0], 'utf-8')
         const importedCommands = JSON.parse(data) as BCFDCommand[]
+        // Add IDs to imported commands that don't have them
+        for (const cmd of importedCommands) {
+          if (!cmd.id) {
+            cmd.id = crypto.randomUUID()
+          }
+        }
         return { success: true, commands: importedCommands }
       } catch (error) {
         console.error('Error importing commands:', error)

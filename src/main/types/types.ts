@@ -1,4 +1,5 @@
 export type BCFDCommand = {
+  id: string
   actionArr: boolean[]
   channelMessage: string
   command: string

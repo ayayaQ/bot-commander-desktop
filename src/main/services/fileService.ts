@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { join } from 'path'
 import fs from 'fs/promises'
+import crypto from 'crypto'
 import {
   AppSettings,
   BCFDCommand,
@@ -20,7 +21,22 @@ export async function loadCommands(): Promise<void> {
     const data = await fs.readFile(commandsPath, 'utf-8')
     let commands: { bcfdCommands: BCFDCommand[]; bcfdSlashCommands: BCFDSlashCommand[] } =
       JSON.parse(data)
+
+    // Migration: Add IDs to commands that don't have them
+    let needsSave = false
+    for (const cmd of commands.bcfdCommands) {
+      if (!cmd.id) {
+        cmd.id = crypto.randomUUID()
+        needsSave = true
+      }
+    }
+
     setCommands(commands)
+
+    // Save if we migrated any commands
+    if (needsSave) {
+      await saveCommands()
+    }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       // File doesn't exist, create it with empty commands

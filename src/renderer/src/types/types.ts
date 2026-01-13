@@ -1,4 +1,5 @@
 export type BCFDCommand = {
+  id: string
   actionArr: boolean[]
   channelMessage: string
   command: string
@@ -73,11 +74,14 @@ export function validateBCFDCommand(jsonString: string): BCFDCommand | null {
       'privateEmbed'
     ]
 
+    // id is optional (added at runtime, stripped on export)
+    const allowedFields = [...requiredFields, 'id']
+
     // Check if all required fields exist
     const hasAllFields = requiredFields.every((field) => field in parsed)
 
-    // Check if there are no extra fields
-    const hasNoExtraFields = Object.keys(parsed).every((key) => requiredFields.includes(key))
+    // Check if there are no extra fields (allowing optional id field)
+    const hasNoExtraFields = Object.keys(parsed).every((key) => allowedFields.includes(key))
 
     // Validate embed templates
     const embedFields = ['title', 'description', 'hexColor', 'imageURL', 'thumbnailURL', 'footer']
@@ -86,6 +90,10 @@ export function validateBCFDCommand(jsonString: string): BCFDCommand | null {
     )
 
     if (hasAllFields && hasNoExtraFields && hasValidEmbeds) {
+      // Add id if missing
+      if (!parsed.id) {
+        parsed.id = crypto.randomUUID()
+      }
       return parsed as BCFDCommand
     }
 

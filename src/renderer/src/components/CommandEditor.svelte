@@ -352,6 +352,7 @@
     editedCommand = command
       ? { ...command }
       : {
+          id: crypto.randomUUID(),
           actionArr: [false, false],
           channelMessage: '',
           command: '',
