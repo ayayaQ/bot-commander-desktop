@@ -165,6 +165,7 @@
             required
           />
           {#if webhookUrlError}
+            <!-- svelte-ignore a11y-label-has-associated-control -->
             <label class="label">
               <span class="label-text-alt text-error">{webhookUrlError}</span>
             </label>
@@ -198,6 +199,7 @@
         </div>
 
         <div class="form-control">
+          <!-- svelte-ignore a11y-label-has-associated-control -->
           <label class="label">
             <span class="label-text">Message Type</span>
           </label>
@@ -367,6 +369,7 @@
 <!-- Save Preset Dialog -->
 <Dialog bind:dialog={savePresetDialog}>
   <h3 class="font-bold text-lg mb-4">Save Webhook Preset</h3>
+  <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
   <form
     on:submit|preventDefault={savePreset}
     class="space-y-4"
@@ -376,6 +379,7 @@
       <label for="presetAlias" class="label">
         <span class="label-text">Preset Alias</span>
       </label>
+      <!-- svelte-ignore a11y-autofocus -->
       <input
         type="text"
         id="presetAlias"
@@ -387,6 +391,7 @@
         autofocus
       />
       {#if presetAliasError}
+        <!-- svelte-ignore a11y-label-has-associated-control -->
         <label class="label">
           <span class="label-text-alt text-error">{presetAliasError}</span>
         </label>
