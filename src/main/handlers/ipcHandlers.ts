@@ -60,6 +60,7 @@ import {
   addMessageToChat,
   updateMessageInChat,
   updateChatContexts,
+  clearChatMessages,
   setActiveChat,
   getActiveChat,
   getRecentChats,
@@ -692,6 +693,12 @@ export function addIPCHandlers() {
 
   ipcMain.handle('update-chat-contexts', async (_, chatId: string, contexts: ChatContext[]) => {
     const result = updateChatContexts(chatId, contexts)
+    if (result) await saveChats()
+    return result
+  })
+
+  ipcMain.handle('clear-chat-messages', async (_, chatId: string) => {
+    const result = clearChatMessages(chatId)
     if (result) await saveChats()
     return result
   })

@@ -169,6 +169,15 @@ export function updateMessageInChat(
   return chat
 }
 
+export function clearChatMessages(chatId: string): SavedChat | null {
+  const chat = getChat(chatId)
+  if (!chat) return null
+
+  chat.messages = []
+  chat.updatedAt = new Date().toISOString()
+  return chat
+}
+
 export function setActiveChat(chatId: string | null): void {
   chatsData.activeChat = chatId
 }

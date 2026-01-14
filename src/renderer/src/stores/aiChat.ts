@@ -50,7 +50,8 @@ export const AI_MODELS: AIModel[] = [
     description: 'Fast and efficient',
     maxTokens: 128000
   },
-  { id: 'gpt-5.1', name: 'GPT-5.1', description: 'Next-gen model' }
+  { id: 'gpt-5.1', name: 'GPT-5.1', description: 'Next-gen model' },
+  { id: 'gpt-5.2', name: 'GPT-5.2', description: 'Next-gen model' }
 ]
 
 // Chat state
@@ -63,7 +64,6 @@ export const aiPanelOpen = writable<boolean>(false)
 // Persistence state
 export const allChats = writable<SavedChat[]>([])
 export const activeChatId = writable<string | null>(null)
-export const chatHistoryOpen = writable<boolean>(false)
 
 // Context state
 export const selectedContexts = writable<ChatContext[]>([])
@@ -145,6 +145,69 @@ export async function createNewChat(
   } catch (error) {
     console.error('Failed to create chat:', error)
     return null
+  }
+}
+
+// Load or create the single chat for a command
+export async function loadOrCreateChatForCommand(
+  commandId: string,
+  commandLabel: string,
+  commandContext: ChatContext
+): Promise<SavedChat | null> {
+  try {
+    // First, check if a chat exists for this command
+    const chats = get(allChats)
+    const existingChat = chats.find((c) => c.commandId === commandId)
+
+    if (existingChat) {
+      // Load the existing chat
+      await loadChat(existingChat.id)
+      // Ensure the command context is always present and updated
+      const contexts = get(selectedContexts)
+      const hasCommandContext = contexts.some((c) => c.type === 'command' && c.id === commandId)
+      if (!hasCommandContext) {
+        // Add the command context at the beginning
+        selectedContexts.update((ctxs) => [
+          commandContext,
+          ...ctxs.filter((c) => c.id !== commandId)
+        ])
+        await persistContexts()
+      } else {
+        // Update the command context content (in case command was edited)
+        selectedContexts.update((ctxs) =>
+          ctxs.map((c) => (c.type === 'command' && c.id === commandId ? commandContext : c))
+        )
+        await persistContexts()
+      }
+      return existingChat
+    } else {
+      // Create a new chat for this command
+      return await createNewChat(commandLabel, commandId, [commandContext])
+    }
+  } catch (error) {
+    console.error('Failed to load or create chat for command:', error)
+    return null
+  }
+}
+
+// Clear all messages from the current chat (but keep the chat itself)
+export async function clearChatMessages(): Promise<void> {
+  const currentChatId = get(activeChatId)
+  if (!currentChatId) return
+
+  try {
+    await (window as any).electron.ipcRenderer.invoke('clear-chat-messages', currentChatId)
+    chatMessages.set([])
+    totalTokens.set(0)
+
+    // Update the chat in allChats to reflect empty messages
+    allChats.update((chats) =>
+      chats.map((c) =>
+        c.id === currentChatId ? { ...c, messages: [], updatedAt: new Date().toISOString() } : c
+      )
+    )
+  } catch (error) {
+    console.error('Failed to clear chat messages:', error)
   }
 }
 
