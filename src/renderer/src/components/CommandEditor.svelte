@@ -47,10 +47,74 @@
     }
   }
 
-  function handleAiCommandUpdate(updatedCommand: BCFDCommand) {
-    editedCommand = updatedCommand
-    // Re-initialize active actions based on updated command
+  function cloneValue<T>(value: T): T {
+    // Avoid sharing object references between AI output and local editor state.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+      return structuredClone(value)
+    } catch {
+      return JSON.parse(JSON.stringify(value)) as T
+    }
+  }
+
+  function ensureActionArr(cmd: BCFDCommand) {
+    if (!Array.isArray(cmd.actionArr)) cmd.actionArr = [false, false]
+    if (cmd.actionArr.length < 2) cmd.actionArr = [!!cmd.actionArr[0], !!cmd.actionArr[1]]
+  }
+
+  function applyAiCommandUpdate(updatedCommand: BCFDCommand) {
+    // Apply field-by-field so we can run extra logic per property.
+    for (const [key, value] of Object.entries(updatedCommand) as Array<
+      [keyof BCFDCommand, BCFDCommand[keyof BCFDCommand]]
+    >) {
+      // Keep the existing id stable for this editor session.
+      if (key === 'id') continue
+      ;(editedCommand as any)[key] = cloneValue(value)
+    }
+
+    // Special operations / derived flags.
+    ensureActionArr(editedCommand)
+
+    if (updatedCommand.channelMessage?.trim()) {
+      editedCommand.actionArr[0] = true
+    }
+    if (updatedCommand.privateMessage?.trim()) {
+      editedCommand.actionArr[1] = true
+    }
+    if (updatedCommand.channelEmbed && isEmbedValid(updatedCommand.channelEmbed)) {
+      editedCommand.sendChannelEmbed = true
+    }
+    if (updatedCommand.privateEmbed && isEmbedValid(updatedCommand.privateEmbed)) {
+      editedCommand.sendPrivateEmbed = true
+    }
+    if (updatedCommand.specificChannel?.trim()) {
+      editedCommand.isSpecificChannel = true
+    }
+    if (updatedCommand.reaction?.trim()) {
+      editedCommand.isReact = true
+    }
+    if (updatedCommand.deleteIfStrings?.trim()) {
+      editedCommand.deleteIf = true
+    }
+    if (typeof updatedCommand.deleteNum === 'number' && updatedCommand.deleteNum > 0) {
+      editedCommand.deleteX = true
+    }
+    if (updatedCommand.roleToAssign?.trim()) {
+      editedCommand.isRoleAssigner = true
+    }
+    if (updatedCommand.requiredRole?.trim()) {
+      editedCommand.isRequiredRole = true
+    }
+
+    // Force reactivity after a batch of in-place assignments.
+    editedCommand = { ...editedCommand }
+
+    // Re-initialize active actions based on updated command.
     initializeActiveActions(editedCommand)
+  }
+
+  function handleAiCommandUpdate(updatedCommand: BCFDCommand) {
+    applyAiCommandUpdate(updatedCommand)
   }
 
   function getAvailableActions(

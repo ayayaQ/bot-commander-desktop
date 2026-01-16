@@ -476,6 +476,13 @@ export function generateCommandDiff(before: BCFDCommand, after: BCFDCommand): Co
     requiredRole: 'Required Role',
     deleteIfStrings: 'Delete If Contains',
     deleteNum: 'Delete Count',
+    startsWith: 'Starts With',
+    phrase: 'Phrase',
+    isNSFW: 'NSFW Only',
+    isAdmin: 'Admin Only',
+    isKick: 'Is Kick',
+    isBan: 'Is Ban',
+    isVoiceMute: 'Is Voice Mute',
     'channelEmbed.title': 'Embed Title',
     'channelEmbed.description': 'Embed Description',
     'channelEmbed.footer': 'Embed Footer',
@@ -532,16 +539,6 @@ export function generateCommandDiff(before: BCFDCommand, after: BCFDCommand): Co
         newValue: afterVal
       })
     }
-  }
-
-  // Compare actionArr
-  if (JSON.stringify(before.actionArr) !== JSON.stringify(after.actionArr)) {
-    changes.push({
-      field: 'actionArr',
-      fieldLabel: 'Actions',
-      oldValue: JSON.stringify(before.actionArr),
-      newValue: JSON.stringify(after.actionArr)
-    })
   }
 
   // Compare embed fields

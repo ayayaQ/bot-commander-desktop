@@ -113,7 +113,7 @@ $halt
 
 **Key JavaScript Rules:**
 1. **ALL $ variables are evaluated BEFORE JavaScript execution**
-   - Write: \`let name = $namePlain;\`
+   - Write: \`let name = $namePlain;\` NOT \`let name = "$namePlain";\`
    - The $ variables become their values as strings before JS sees the code
 2. **botState object persists** across all command executions (saved to disk)
 3. **$set variables accessed without $** - If $set(foo, bar), use \`foo\` in JS
@@ -349,10 +349,7 @@ When answering questions without changes:
 
       <!-- Model Picker -->
       <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('select-model')}>
-        <select
-          bind:value={$selectedModel}
-          class="select select-sm select-bordered w-32"
-        >
+        <select bind:value={$selectedModel} class="select select-sm select-bordered w-32">
           {#each AI_MODELS as model}
             <option value={model.id}>{model.name}</option>
           {/each}
@@ -369,20 +366,14 @@ When answering questions without changes:
 
       <!-- Clear Chat -->
       <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('clear-chat')}>
-        <button
-          class="btn btn-ghost btn-sm btn-circle"
-          on:click={handleClearChat}
-        >
+        <button class="btn btn-ghost btn-sm btn-circle" on:click={handleClearChat}>
           <span class="material-symbols-outlined">delete_sweep</span>
         </button>
       </span>
 
       <!-- Close -->
       <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('close')}>
-        <button
-          class="btn btn-ghost btn-sm btn-circle"
-          on:click={() => dispatch('close')}
-        >
+        <button class="btn btn-ghost btn-sm btn-circle" on:click={() => dispatch('close')}>
           <span class="material-symbols-outlined">close</span>
         </button>
       </span>
