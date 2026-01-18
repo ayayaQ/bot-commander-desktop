@@ -6,6 +6,7 @@ import type {
   ChatMessageData,
   ChatsData
 } from '../types/types'
+import { consoleStore } from './console'
 
 export interface ChatMessage {
   id: string
@@ -14,6 +15,7 @@ export interface ChatMessage {
   timestamp: Date
   tokenCount?: number
   pendingChanges?: CommandDiff | null
+  thinkingContent?: string
 }
 
 export interface CommandDiff {
@@ -34,6 +36,7 @@ export interface AIModel {
   name: string
   description: string
   maxTokens?: number
+  reasoning?: boolean // For thinking models: whether reasoning is enabled
 }
 
 export const AI_MODELS: AIModel[] = [
@@ -50,9 +53,44 @@ export const AI_MODELS: AIModel[] = [
     description: 'Fast and efficient',
     maxTokens: 128000
   },
-  { id: 'gpt-5.1', name: 'GPT-5.1', description: 'Next-gen model' },
-  { id: 'gpt-5.2', name: 'GPT-5.2', description: 'Next-gen model' }
+  {
+    id: 'gpt-5.1:reasoning',
+    name: 'GPT-5.1',
+    description: 'Next-gen with reasoning',
+    reasoning: true
+  },
+  {
+    id: 'gpt-5.1:fast',
+    name: 'GPT-5.1 (Fast)',
+    description: 'Next-gen, no reasoning',
+    reasoning: false
+  },
+  {
+    id: 'gpt-5.2:reasoning',
+    name: 'GPT-5.2',
+    description: 'Latest with reasoning',
+    reasoning: true
+  },
+  {
+    id: 'gpt-5.2:fast',
+    name: 'GPT-5.2 (Fast)',
+    description: 'Latest, no reasoning',
+    reasoning: false
+  }
 ]
+
+// Parse a model selection ID to get the actual model ID and reasoning preference
+export function parseModelSelection(selectionId: string): { modelId: string; useReasoning: boolean } {
+  if (selectionId.endsWith(':reasoning')) {
+    return { modelId: selectionId.replace(':reasoning', ''), useReasoning: true }
+  }
+  if (selectionId.endsWith(':fast')) {
+    return { modelId: selectionId.replace(':fast', ''), useReasoning: false }
+  }
+  // Default: check if it's a thinking model
+  const isThinking = THINKING_MODELS.some((m) => selectionId.startsWith(m))
+  return { modelId: selectionId, useReasoning: isThinking }
+}
 
 // Chat state
 export const chatMessages = writable<ChatMessage[]>([])
@@ -68,6 +106,11 @@ export const activeChatId = writable<string | null>(null)
 // Context state
 export const selectedContexts = writable<ChatContext[]>([])
 export const contextPickerOpen = writable<boolean>(false)
+
+// Thinking state (for streaming reasoning tokens from thinking models)
+export const thinkingContent = writable<string>('')
+export const isThinking = writable<boolean>(false)
+export const thinkingExpanded = writable<boolean>(true)
 
 // Derived store for active chat
 export const activeChat = derived(
@@ -87,7 +130,8 @@ function messageToData(msg: ChatMessage): ChatMessageData {
     role: msg.role,
     content: msg.content,
     timestamp: msg.timestamp.toISOString(),
-    pendingChanges: msg.pendingChanges
+    pendingChanges: msg.pendingChanges,
+    thinkingContent: msg.thinkingContent
   }
 }
 
@@ -98,7 +142,8 @@ function dataToMessage(data: ChatMessageData): ChatMessage {
     role: data.role,
     content: data.content,
     timestamp: new Date(data.timestamp),
-    pendingChanges: data.pendingChanges
+    pendingChanges: data.pendingChanges,
+    thinkingContent: data.thinkingContent
   }
 }
 
@@ -223,6 +268,9 @@ export async function loadChat(chatId: string): Promise<void> {
       chatMessages.set(chat.messages.map(dataToMessage))
       selectedContexts.set(chat.contexts || [])
 
+      console.log(`Loaded chat: ${chat.title} (${chat.id})`)
+      console.log(JSON.stringify(chat, null, 2))
+
       // Update active chat on backend
       await (window as any).electron.ipcRenderer.invoke('set-active-chat', chatId)
     }
@@ -257,14 +305,16 @@ export async function deleteStoredChat(chatId: string): Promise<boolean> {
 export async function addMessage(
   role: 'user' | 'assistant' | 'system',
   content: string,
-  pendingChanges?: CommandDiff | null
+  pendingChanges?: CommandDiff | null,
+  thinkingContent?: string
 ): Promise<ChatMessage> {
   const message: ChatMessage = {
     id: generateId(),
     role,
     content,
     timestamp: new Date(),
-    pendingChanges
+    pendingChanges,
+    thinkingContent
   }
 
   chatMessages.update((msgs) => [...msgs, message])
@@ -562,4 +612,88 @@ export function generateCommandDiff(before: BCFDCommand, after: BCFDCommand): Co
   }
 
   return { before, after, changes }
+}
+
+// Thinking models that support reasoning tokens
+const THINKING_MODELS = ['gpt-5.1', 'gpt-5.2']
+
+export function isThinkingModel(modelId: string): boolean {
+  return THINKING_MODELS.some((m) => modelId.startsWith(m))
+}
+
+// Streaming response type from thinking models
+export interface StreamingDoneResponse {
+  thinkingContent: string
+  explanation: string
+  hasChanges: boolean
+  updatedCommand: any | null
+  tokenCount: number
+}
+
+// Initialize IPC listeners for streaming AI chat responses
+// Call this once when the AIChat component mounts
+export function initAiChatStreamListeners(
+  onDone: (response: StreamingDoneResponse, pendingChanges: CommandDiff | null) => void,
+  getCurrentCommand: () => any
+) {
+  const electron = (window as any).electron
+
+  if (!electron?.ipcRenderer) {
+    console.warn('IPC renderer not available for AI chat streaming')
+    return () => {}
+  }
+
+  // Handler for thinking token deltas
+  const thinkingHandler = (
+    _event: any,
+    data: { delta: string; accumulated: string }
+  ) => {
+    console.log('[aiChat] thinkingHandler received:', data)
+    isThinking.set(true)
+    thinkingContent.set(data.accumulated)
+  }
+
+  // Handler for completed response
+  const doneHandler = (_event: any, response: StreamingDoneResponse) => {
+    console.log('[aiChat] doneHandler received:', response)
+    isThinking.set(false)
+    thinkingExpanded.set(false) // Auto-collapse when complete
+
+    // Generate pending changes if the AI proposed updates
+    let pendingChanges: CommandDiff | null = null
+    if (response.hasChanges && response.updatedCommand) {
+      const currentCommand = getCurrentCommand()
+      const mergedCommand = { ...currentCommand, ...response.updatedCommand }
+      pendingChanges = generateCommandDiff(currentCommand, mergedCommand)
+    }
+
+    onDone(response, pendingChanges)
+
+    // Clear streaming state
+    thinkingContent.set('')
+  }
+
+  // Handler for errors
+  const errorHandler = (_event: any, data: { error: string }) => {
+    console.log('[aiChat] errorHandler received:', data)
+    isThinking.set(false)
+    thinkingContent.set('')
+    thinkingExpanded.set(false)
+    isAiLoading.set(false)
+    consoleStore.error('AI chat streaming error:' + data.error)
+  }
+
+  // Register listeners
+  console.log('[aiChat] Registering IPC listeners for ai-chat:thinking, ai-chat:done, ai-chat:error')
+  electron.ipcRenderer.on('ai-chat:thinking', thinkingHandler)
+  electron.ipcRenderer.on('ai-chat:done', doneHandler)
+  electron.ipcRenderer.on('ai-chat:error', errorHandler)
+  console.log('[aiChat] IPC listeners registered')
+
+  // Return cleanup function
+  return () => {
+    electron.ipcRenderer.removeListener('ai-chat:thinking', thinkingHandler)
+    electron.ipcRenderer.removeListener('ai-chat:done', doneHandler)
+    electron.ipcRenderer.removeListener('ai-chat:error', errorHandler)
+  }
 }

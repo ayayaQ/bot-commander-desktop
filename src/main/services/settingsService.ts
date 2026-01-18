@@ -9,7 +9,8 @@ let settings: AppSettings = {
   openaiModel: 'gpt-4.1-nano',
   developerPrompt: '',
   useCustomApi: false,
-  useLegacyInterpreter: false // Default to new interpreter
+  useLegacyInterpreter: false, // Default to new interpreter
+  disableReasoningApi: false // Default to using reasoning API for thinking models
 } // Default settings
 
 export function getSettings() {
@@ -52,6 +53,10 @@ export function setSettings(newSettings: AppSettings) {
 
   if (newSettings.useLegacyInterpreter === undefined) {
     newSettings.useLegacyInterpreter = false
+  }
+
+  if (newSettings.disableReasoningApi === undefined) {
+    newSettings.disableReasoningApi = false
   }
 
   settings = newSettings

@@ -3,6 +3,7 @@
   import { saveSettings, settingsStore } from '../stores/settings'
   import { currentLanguage, t } from '../stores/localisation'
   import HeaderBar from './HeaderBar.svelte'
+  import ApiAuth from './ApiAuth.svelte'
 
   let selectedTheme: string
   let showToken: boolean
@@ -13,6 +14,7 @@
   let useCustomApi: boolean
   let useLegacyInterpreter: boolean
   let hideOutput: boolean
+  let disableReasoningApi: boolean
 
   function changeTheme(event) {
     let theme = event.target.value
@@ -59,6 +61,10 @@
     saveSettings({ ...$settingsStore, useLegacyInterpreter })
   }
 
+  function toggleDisableReasoningApi() {
+    saveSettings({ ...$settingsStore, disableReasoningApi })
+  }
+
   function openExternalLink(event) {
     event.preventDefault()
     const url = event.target.href
@@ -75,6 +81,7 @@
     useCustomApi = $settingsStore.useCustomApi
     useLegacyInterpreter = $settingsStore.useLegacyInterpreter
     hideOutput = $settingsStore.hideOutput
+    disableReasoningApi = $settingsStore.disableReasoningApi
   })
 </script>
 
@@ -83,6 +90,10 @@
 </HeaderBar>
 
 <div class="p-4">
+  <h2 class="text-2xl font-bold mb-4">{$t('account')}</h2>
+  <ApiAuth />
+
+  <div class="divider"></div>
   <h2 class="text-2xl font-bold mb-4">{$t('general')}</h2>
   <div class="form-control">
     <!-- svelte-ignore a11y-label-has-associated-control -->
@@ -207,6 +218,23 @@
       placeholder={$t('enter-your-custom-developer-prompt')}
       rows="4"
     />
+  </div>
+
+  <div class="form-control mt-4">
+    <label class="label cursor-pointer">
+      <div class="flex flex-col">
+        <span class="label-text">{$t('disable-reasoning-api')}</span>
+        <span class="label-text text-xs opacity-60"
+          >{$t('disable-reasoning-api-description')}</span
+        >
+      </div>
+      <input
+        type="checkbox"
+        class="toggle"
+        bind:checked={disableReasoningApi}
+        on:change={toggleDisableReasoningApi}
+      />
+    </label>
   </div>
 
   {#if false}

@@ -252,6 +252,7 @@ export type AppSettings = {
   developerPrompt: string
   useCustomApi: boolean
   useLegacyInterpreter: boolean
+  disableReasoningApi: boolean
 }
 
 export type BotStatus = {
@@ -285,6 +286,7 @@ export interface ChatMessageData {
   content: string
   timestamp: string
   pendingChanges?: any | null
+  thinkingContent?: string
 }
 
 export interface ChatsData {

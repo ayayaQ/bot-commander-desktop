@@ -6,6 +6,7 @@
   export let placeholder: string = ''
   export let minHeight: string = '200px'
   export let mode: 'bcfd' | 'js' = 'bcfd' // 'bcfd' for template language, 'js' for pure JavaScript
+  export let readonly: boolean = false
 
   const dispatch = createEventDispatcher<{ change: string }>()
 
@@ -298,6 +299,10 @@
   }
 
   function checkAutocomplete() {
+    if (readonly) {
+      autocompleteVisible = false
+      return
+    }
     const cursorPos = textareaElement.selectionStart
     const textBeforeCursor = value.substring(0, cursorPos)
     const insideEval = mode === 'js' || isInsideEvalBlock(value, cursorPos)
@@ -494,7 +499,9 @@
         on:keydown={handleKeydown}
         on:click={handleClick}
         {placeholder}
+        readonly={readonly}
         class="textarea-input absolute top-0 left-0 w-full h-full p-2 pb-4 font-mono text-sm leading-6 bg-transparent text-transparent caret-base-content resize-none outline-none border-none whitespace-pre overflow-hidden"
+        class:cursor-default={readonly}
         spellcheck="false"
         autocomplete="off"
         autocapitalize="off"

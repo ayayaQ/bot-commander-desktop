@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, onMount, tick } from 'svelte'
+  import { marked } from 'marked'
   import { t } from '../stores/localisation'
   import { settingsStore } from '../stores/settings'
   import DiffViewer from './DiffViewer.svelte'
@@ -25,8 +26,16 @@
     clearChatMessages,
     addContext,
     removeContext,
-    buildContextString
+    buildContextString,
+    // Thinking state (for streaming reasoning tokens)
+    thinkingContent,
+    isThinking,
+    thinkingExpanded,
+    isThinkingModel,
+    initAiChatStreamListeners,
+    type StreamingDoneResponse
   } from '../stores/aiChat'
+  import { consoleStore } from '../stores/console'
 
   export let command: BCFDCommand
   export let onCommandUpdate: (updated: BCFDCommand) => void
@@ -39,6 +48,7 @@
   let inputMessage = ''
   let messagesContainer: HTMLDivElement
   let inputElement: HTMLTextAreaElement
+  let cleanupStreamListeners: (() => void) | null = null
 
   // Available context options
   $: availableContexts = [
@@ -181,6 +191,12 @@ When answering questions without changes:
     // Set loading state
     isAiLoading.set(true)
 
+    // Reset thinking state for thinking models
+    if (isThinkingModel($selectedModel)) {
+      thinkingContent.set('')
+      thinkingExpanded.set(true) // Expand while thinking
+    }
+
     try {
       // Build additional context from selected contexts
       const additionalContext = await buildContextString()
@@ -200,6 +216,14 @@ When answering questions without changes:
         additionalContext: additionalContext
       })
 
+      // For streaming responses, the stream listeners handle the response
+      if (response.streaming) {
+        // Response will come via IPC events (ai-chat:thinking, ai-chat:done)
+        // The stream listeners will handle adding the message and updating state
+        return
+      }
+
+      // Handle non-streaming response (regular models)
       if (response.error) {
         addMessage('assistant', `Error: ${response.error}`)
       } else {
@@ -221,13 +245,17 @@ When answering questions without changes:
         totalTokens.update((t) => t + (response.tokenCount || estimateTokens(response.explanation)))
       }
     } catch (error) {
-      console.error('AI chat error:', error)
+      consoleStore.error('AI chat error:' + JSON.stringify(error))
       addMessage(
         'assistant',
         `Error: ${error instanceof Error ? error.message : 'Unknown error occurred'}`
       )
     } finally {
-      isAiLoading.set(false)
+      // Only set loading to false for non-streaming responses
+      // Streaming responses will set this in the done handler
+      if (!isThinkingModel($selectedModel)) {
+        isAiLoading.set(false)
+      }
       await tick()
       scrollToBottom()
     }
@@ -311,19 +339,66 @@ When answering questions without changes:
       addMessage('system', `${$t('ai-chat-started')} "${commandLabel}"`)
     }
 
+    // Initialize stream listeners for thinking models
+    cleanupStreamListeners = initAiChatStreamListeners(
+      async (response: StreamingDoneResponse, pendingChanges: CommandDiff | null) => {
+        // Add the assistant message with thinking content
+        addMessage('assistant', response.explanation, pendingChanges, response.thinkingContent)
+
+        // Update token count
+        totalTokens.update((t) => t + (response.tokenCount || estimateTokens(response.explanation)))
+
+        // Finish loading
+        isAiLoading.set(false)
+
+        await tick()
+        scrollToBottom()
+      },
+      () => command // Provide current command for diff generation
+    )
+
     await tick()
     scrollToBottom()
     inputElement?.focus()
   })
 
   onDestroy(() => {
+    // Clean up stream listeners
+    if (cleanupStreamListeners) {
+      cleanupStreamListeners()
+    }
+
     // Clear the local state when component is destroyed
     activeChatId.set(null)
     chatMessages.set([])
     selectedContexts.set([])
+
+    // Clear thinking state
+    thinkingContent.set('')
+    isThinking.set(false)
   })
 
   $: hasApiKey = $settingsStore.openaiApiKey && $settingsStore.openaiApiKey.length > 0
+
+  // Render markdown to HTML
+  function renderMarkdown(content: string): string {
+    return marked.parse(content, { async: false }) as string
+  }
+
+  async function test() {
+console.log('[AIChat] Testing IPC events...')
+            isAiLoading.set(true)
+            thinkingContent.set('')
+            thinkingExpanded.set(true)
+            isThinking.set(true)
+            try {
+              const result = await (window as any).electron.ipcRenderer.invoke('ai-chat-test-ipc')
+              console.log('[AIChat] IPC test result:', result)
+            } catch (err) {
+              console.error('[AIChat] IPC test error:', err)
+              isAiLoading.set(false)
+            }
+  }
 </script>
 
 <div class="ai-chat flex flex-col h-full bg-base-100 border-l border-base-300">
@@ -368,6 +443,19 @@ When answering questions without changes:
       <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('clear-chat')}>
         <button class="btn btn-ghost btn-sm btn-circle" on:click={handleClearChat}>
           <span class="material-symbols-outlined">delete_sweep</span>
+        </button>
+      </span>
+
+      <!-- Test IPC Button (Debug) -->
+      <span class="tooltip tooltip-primary tooltip-bottom" data-tip="Test IPC Events">
+        <button
+          class="btn btn-ghost btn-sm btn-circle text-warning"
+          on:click={async () => {
+            test()
+          }}
+          disabled={$isAiLoading}
+        >
+          <span class="material-symbols-outlined">bug_report</span>
         </button>
       </span>
 
@@ -466,6 +554,22 @@ When answering questions without changes:
               ? 'chat-bubble-primary'
               : 'chat-bubble-secondary'}"
           >
+            {#if message.role === 'assistant' && message.thinkingContent}
+              <!-- Collapsible thinking section for completed messages -->
+              <details class="thinking-section mb-2 border-b border-base-content/10 pb-2">
+                <summary
+                  class="flex items-center gap-1 text-xs opacity-70 hover:opacity-100 transition-opacity cursor-pointer list-none"
+                >
+                  <span class="material-symbols-outlined text-xs">psychology</span>
+                  <span>View reasoning</span>
+                </summary>
+                <div
+                  class="thinking-content prose prose-sm mt-2 p-2 bg-base-300/50 rounded text-xs max-h-40 overflow-y-auto"
+                >
+                  {@html renderMarkdown(message.thinkingContent)}
+                </div>
+              </details>
+            {/if}
             <div class="whitespace-pre-wrap">{message.content}</div>
           </div>
         {:else}
@@ -494,6 +598,31 @@ When answering questions without changes:
           </div>
         </div>
         <div class="chat-bubble chat-bubble-secondary">
+          {#if $isThinking && $thinkingContent}
+            <!-- Collapsible thinking section while streaming -->
+            <div class="thinking-section mb-2">
+              <button
+                class="flex items-center gap-1 text-xs opacity-70 hover:opacity-100 transition-opacity"
+                on:click={() => thinkingExpanded.update((v) => !v)}
+              >
+                <span
+                  class="material-symbols-outlined text-xs transition-transform"
+                  class:rotate-180={$thinkingExpanded}
+                >
+                  expand_more
+                </span>
+                <span class="material-symbols-outlined text-xs animate-pulse">psychology</span>
+                <span>Thinking...</span>
+              </button>
+              {#if $thinkingExpanded}
+                <div
+                  class="thinking-content prose prose-sm mt-2 p-2 bg-base-300/50 rounded text-xs max-h-40 overflow-y-auto"
+                >
+                  {@html renderMarkdown($thinkingContent)}
+                </div>
+              {/if}
+            </div>
+          {/if}
           <span class="loading loading-dots loading-sm"></span>
         </div>
       </div>
@@ -587,5 +716,26 @@ When answering questions without changes:
 
   textarea {
     field-sizing: content;
+  }
+
+  /* Thinking section styles */
+  .thinking-content {
+    animation: fadeIn 0.2s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      max-height: 0;
+    }
+    to {
+      opacity: 1;
+      max-height: 160px;
+    }
+  }
+
+  /* Hide default details marker */
+  details.thinking-section > summary::-webkit-details-marker {
+    display: none;
   }
 </style>

@@ -4,14 +4,20 @@
   import CommandEditor from './CommandEditor.svelte'
   import CommandListItem from './CommandListItem.svelte'
   import HeaderBar from './HeaderBar.svelte'
+  import CommandRepository from './CommandRepository.svelte'
+  import ShareCommandModal from './ShareCommandModal.svelte'
   import { fade } from 'svelte/transition'
   import { t } from '../stores/localisation'
+  import { apiAuthStore } from '../stores/apiAuth'
 
   let commands: BCFDCommand[] = []
   let isEditing = false
   let editingCommand: BCFDCommand | null = null
   let editingIndex: number | null = null
   let searchQuery = ''
+  let showRepository = false
+  let shareDialog: HTMLDialogElement
+  let commandToShare: BCFDCommand | null = null
 
   onMount(async () => {
     await loadCommands()
@@ -75,6 +81,18 @@
     }
   }
 
+  function openShareModal(command: BCFDCommand) {
+    commandToShare = command
+    shareDialog.showModal()
+  }
+
+  async function handleRepoImport(event: CustomEvent<BCFDCommand>) {
+    const importedCommand = event.detail
+    commands = [...commands, importedCommand]
+    await saveCommands()
+    showRepository = false
+  }
+
   $: filteredCommands = commands.filter(
     (cmd) =>
       cmd.command.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -83,7 +101,12 @@
 </script>
 
 <div class="">
-  {#if isEditing}
+  {#if showRepository}
+    <CommandRepository
+      on:import={handleRepoImport}
+      on:close={() => showRepository = false}
+    />
+  {:else if isEditing}
     <CommandEditor
       mode={editingCommand ? 'edit' : 'add'}
       command={editingCommand}
@@ -99,6 +122,11 @@
         <div class="flex justify-between items-center mb-4">
           <h2 class="text-2xl font-bold">{$t('commands')}</h2>
           <div class="flex gap-2">
+            <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('browse-repository') || 'Browse Repository'}>
+              <button class="btn btn-secondary" on:click={() => showRepository = true}>
+                <span class="material-symbols-outlined">explore</span>
+              </button>
+            </span>
             <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('export')}>
               <button class="btn btn-primary" on:click={exportCommands}>
                 <span class="material-symbols-outlined">download</span>
@@ -129,7 +157,12 @@
         <ul class="space-y-2">
           {#each filteredCommands as command}
             <div transition:fade={{ duration: 100 }}>
-              <CommandListItem {command} {editCommand} {deleteCommand} />
+              <CommandListItem
+                {command}
+                {editCommand}
+                {deleteCommand}
+                shareCommand={$apiAuthStore.authenticated ? openShareModal : undefined}
+              />
             </div>
           {/each}
         </ul>
@@ -137,3 +170,9 @@
     </div>
   {/if}
 </div>
+
+<ShareCommandModal
+  bind:dialog={shareDialog}
+  command={commandToShare}
+  on:shared={() => commandToShare = null}
+/>

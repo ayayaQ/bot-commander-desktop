@@ -13,6 +13,7 @@
   import StateViewer from './components/StateViewer.svelte'
   import TitleBar from './components/TitleBar.svelte'
   import { bottomNavVisible } from './stores/navigation'
+  import { apiAuthStore } from './stores/apiAuth'
 
   let selectedMenu:
     | 'commands'
@@ -30,6 +31,8 @@
     await loadBotStatus()
     // apply theme from the settings
     document.documentElement.setAttribute('data-theme', $settingsStore.theme)
+    // check API auth status
+    apiAuthStore.ipc.checkAuth()
   })
 </script>
 

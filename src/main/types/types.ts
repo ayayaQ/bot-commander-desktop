@@ -134,6 +134,7 @@ export type AppSettings = {
   developerPrompt: string
   useCustomApi: boolean
   useLegacyInterpreter: boolean // Use old string replacement instead of new interpreter
+  disableReasoningApi: boolean // Disable streaming reasoning API for thinking models
 }
 
 export type BotStatus = {
