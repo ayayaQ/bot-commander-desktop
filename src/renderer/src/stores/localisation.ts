@@ -264,7 +264,6 @@ const translations: Languages = {
     'signed-in-as': 'Signed in as',
     username: 'Username',
     password: 'Password',
-    register: 'Register',
     'need-account': "Don't have an account? Register",
     'have-account': 'Already have an account? Login',
     // Command Repository strings
