@@ -139,7 +139,7 @@
 <HeaderBar>
   <h2 class="text-2xl font-bold">{$t('send-webhook')}</h2>
   <div class="flex gap-2">
-    <button on:click={openSavePresetDialog} class="btn btn-accent btn-sm">
+    <button on:click={openSavePresetDialog} class="btn btn-primary">
       <span class="material-symbols-outlined">save</span>
       Save Preset
     </button>
