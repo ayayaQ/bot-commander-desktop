@@ -71,107 +71,6 @@
       }))
   ]
 
-  // BCFD Language system prompt
-  const BCFD_SYSTEM_PROMPT = `You are an expert Discord bot command editor. You help users create and modify commands using the BCFD Template Language.
-
-## BCFD Template Language Overview:
-
-### Variables (prefix with $):
-- User: $name (mention), $namePlain, $avatar, $id, $tag, $discriminator
-- Bot: $botName, $botNamePlain, $ping, $serverCount, $botAvatar
-- Server: $server, $memberCount, $serverIcon, $serverDescription
-- Channel: $channel, $channelID, $channelAsMention
-- Message: $message, $messageAfterCommand, $args(index), $argsCount
-- Mentioned: $mentionedName, $mentionedID, $mentionedNamePlain
-
-### Functions:
-- $random{opt1|opt2|opt3} - Random selection from pipe-separated options
-- $rollnum(min, max) - Random integer in range (inclusive)
-- $sum(n1, n2, ...) - Sum of numbers
-- $args(index) - Get argument at position (0-based)
-- $argsCount - Total number of arguments
-- $chat(prompt) - AI response (requires API key)
-- $date, $hours, $minutes, $seconds - Date/time values
-
-### Variable Storage Functions:
-**$set(name, value)** and **$get(name)** work with the global JavaScript context:
-- $set(choice, $message) - Stores the message content in the JS context variable "choice"
-- Inside JavaScript: Access as \`choice\` (NO $ prefix) - e.g., \`return choice;\`
-- These are for JavaScript context storage ONLY
-- You CANNOT use $choice in template strings - use $get(choice) instead
-- Example flow:
-  1. $set(userInput, $messageAfterCommand) - Store user's message
-  2. Inside $eval block: \`let input = userInput;\` - Access in JS
-  3. In template: $get(userInput) - Retrieve for display
-
-### JavaScript Evaluation (Advanced):
-JavaScript code blocks execute in a sandboxed VM with persistent state:
-
-\`\`\`
-$eval
-  // botState is a persistent object across all command executions
-  botState.counter = (botState.counter || 0) + 1;
-  botState.lastUser = $namePlain; // <- Note: $ variables evaluated BEFORE JS runs as strings!
-  
-  // You can use stored values (from $set)
-  // e.g., if you did $set(savedMsg, $message), access as: savedMsg
-  
-  // Use return to output text
-  return "Count: " + botState.counter + " by " + botState.lastUser;
-$halt
-\`\`\`
-
-**Key JavaScript Rules:**
-1. **ALL $ variables are evaluated BEFORE JavaScript execution**
-   - Write: \`let name = $namePlain;\` NOT \`let name = "$namePlain";\`
-   - The $ variables become their values as strings before JS sees the code
-2. **botState object persists** across all command executions (saved to disk)
-3. **$set variables accessed without $** - If $set(foo, bar), use \`foo\` in JS
-4. **Must use return** to output text, otherwise block returns empty string
-5. **Available globals**: Math, Date, JSON, String, Number, Array, Object
-6. **Blocked for security**: require, process, fs, child_process
-7. **Timeout**: 2 seconds max execution time
-
-**Evaluation Order Example:**
-\`\`\`
-Message: "$name said: $messageAfterCommand"
-$eval
-  let user = $namePlain; // $namePlain replaced BEFORE JS runs
-  return user.toUpperCase();
-$halt
-\`\`\`
-If user is "John" and typed "hello":
-1. $name -> "<@123>" (mention)
-2. $messageAfterCommand -> "hello"
-3. $namePlain -> "John"
-4. JS sees: \`let user = "John"; return user.toUpperCase();\`
-5. Output: "<@123> said: hello JOHN"
-
-## Command Types:
-- 0: Message received in server
-- 1: PM received
-- 2: Member join
-- 3: Member leave
-- 4: Member ban
-- 5: Reaction add
-
-## Your Role:
-You respond in a structured format with:
-1. **explanation**: A brief, friendly explanation of what you'll change or why something works a certain way
-2. **hasChanges**: true if you're proposing command modifications, false if just answering questions
-3. **updatedCommand**: The complete modified command object (only when hasChanges is true)
-
-When making changes:
-- Always provide the FULL command object with ALL fields
-- Explain the changes clearly in the explanation field
-- Use BCFD language features creatively (variables, functions, $eval blocks)
-- Keep explanations concise but informative
-
-When answering questions without changes:
-- Set hasChanges to false
-- Provide helpful explanations about BCFD language features
-- Give examples when appropriate`
-
   async function sendMessage() {
     if (!inputMessage.trim() || $isAiLoading) return
 
@@ -212,7 +111,6 @@ When answering questions without changes:
         messages: conversationHistory,
         currentCommand: command,
         model: $selectedModel,
-        systemPrompt: BCFD_SYSTEM_PROMPT,
         additionalContext: additionalContext
       })
 
@@ -424,7 +322,7 @@ console.log('[AIChat] Testing IPC events...')
 
       <!-- Model Picker -->
       <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('select-model')}>
-        <select bind:value={$selectedModel} class="select select-sm select-bordered w-32">
+        <select bind:value={$selectedModel} class="select select-sm w-32">
           {#each AI_MODELS as model}
             <option value={model.id}>{model.name}</option>
           {/each}
@@ -542,7 +440,7 @@ console.log('[AIChat] Testing IPC events...')
       <div class="chat {message.role === 'user' ? 'chat-end' : 'chat-start'}">
         {#if message.role !== 'system'}
           <div class="chat-image avatar placeholder">
-            <div class="w-8 rounded-full {message.role === 'user' ? 'bg-primary' : 'bg-secondary'}">
+            <div class="w-8 rounded-full flex items-center justify-center {message.role === 'user' ? 'bg-primary' : 'bg-secondary'}">
               <span class="material-symbols-outlined text-sm text-base-100">
                 {message.role === 'user' ? 'person' : 'smart_toy'}
               </span>
@@ -593,7 +491,7 @@ console.log('[AIChat] Testing IPC events...')
     {#if $isAiLoading}
       <div class="chat chat-start">
         <div class="chat-image avatar placeholder">
-          <div class="w-8 rounded-full bg-secondary">
+          <div class="w-8 rounded-full bg-secondary flex items-center justify-center">
             <span class="material-symbols-outlined text-sm text-base-100">smart_toy</span>
           </div>
         </div>
@@ -637,7 +535,7 @@ console.log('[AIChat] Testing IPC events...')
         bind:value={inputMessage}
         on:keydown={handleKeydown}
         placeholder={hasApiKey ? $t('describe-changes') : $t('api-key-needed')}
-        class="textarea textarea-bordered flex-1 resize-none min-h-[2.5rem] max-h-32"
+        class="textarea flex-1 resize-none min-h-10 max-h-32"
         rows="1"
         disabled={!hasApiKey || $isAiLoading}
       ></textarea>

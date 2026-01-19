@@ -409,7 +409,6 @@ export function addIPCHandlers() {
         messages: Array<{ role: string; content: string }>
         currentCommand: BCFDCommand
         model: string
-        systemPrompt: string
         additionalContext?: string
       }
     ) => {
@@ -427,7 +426,6 @@ export function addIPCHandlers() {
           {
             openaiApiKey: settings.openaiApiKey,
             openaiModel: settings.openaiModel,
-            developerPrompt: settings.developerPrompt,
             disableReasoningApi: settings.disableReasoningApi
           },
           {
