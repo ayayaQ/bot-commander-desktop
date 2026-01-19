@@ -47,14 +47,14 @@
       {#if avatar}
         <div class="avatar placeholder">
           <div
-            class={`rounded-full ${$botStatusStore.status === 'Online' ? 'outline outline-2 outline-green-500' : $botStatusStore.status === 'Do Not Disturb' ? 'outline outline-2 outline-red-500' : $botStatusStore.status === 'Invisible' ? 'outline outline-2 outline-gray-500' : 'outline outline-2 outline-yellow-500'}`}
+            class={`rounded-full ${$botStatusStore.status === 'Online' ? 'outline-2 outline-green-500' : $botStatusStore.status === 'Do Not Disturb' ? 'outline outline-red-500' : $botStatusStore.status === 'Invisible' ? 'outline outline-gray-500' : 'outline outline-yellow-500'}`}
           >
             <img src={avatar} alt="Avatar" />
           </div>
         </div>
       {:else}
         <div class="avatar placeholder mb-14">
-          <div class="bg-neutral text-neutral-content w-24 rounded-full">
+          <div class="bg-neutral text-neutral-content w-24 rounded-full flex items-center justify-center">
             <span class="text-3xl select-none">{$t('bot')}</span>
           </div>
         </div>
@@ -65,14 +65,14 @@
           <input
             type="text"
             placeholder={$t('token')}
-            class="input input-bordered w-full max-w-xs"
+            class="input w-full"
             bind:value={token}
           />
         {:else}
           <input
             type="password"
             placeholder={$t('token')}
-            class="input input-bordered w-full max-w-xs"
+            class="input w-full"
             bind:value={token}
           />
         {/if}
@@ -87,7 +87,7 @@
           type={$settingsStore.showToken ? 'text' : 'password'}
           placeholder={$t('token')}
           disabled
-          class="input input-bordered w-full max-w-xs"
+          class="input w-full"
           value={$connectionStore.token}
         />
       {/if}

@@ -62,8 +62,8 @@
         <input
           type="text"
           placeholder={$t('username')}
-          class="input input-bordered flex-1"
-          class:input-error={error}
+          class="input flex-1"
+          class:border-error={error}
           bind:value={username}
           on:keydown={handleKeydown}
           disabled={isLoading}
@@ -75,8 +75,8 @@
         <input
           type="password"
           placeholder={$t('password')}
-          class="input input-bordered flex-1"
-          class:input-error={error}
+          class="input flex-1"
+          class:border-error={error}
           bind:value={password}
           on:keydown={handleKeydown}
           disabled={isLoading}

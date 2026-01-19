@@ -95,7 +95,7 @@
           <input
             id="share-name"
             type="text"
-            class="input input-bordered"
+            class="input"
             bind:value={commandName}
             placeholder="Enter a name for your shared command"
           />
@@ -107,7 +107,7 @@
           </label>
           <textarea
             id="share-desc"
-            class="textarea textarea-bordered"
+            class="textarea"
             rows="3"
             bind:value={commandDescription}
             placeholder="Describe what this command does..."

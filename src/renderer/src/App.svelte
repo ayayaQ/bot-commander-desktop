@@ -22,9 +22,9 @@
     | 'settings'
     | 'webhooks'
     | 'stats'
-    | 'debugger' = 'commands'
+    | 'debugger' = $state('commands')
 
-  let leftPanelCollapsed = false
+  let leftPanelCollapsed = $state(false)
 
   onMount(async () => {
     await loadSettings()
@@ -42,7 +42,7 @@
   <div
     class={`${!leftPanelCollapsed ? 'basis-1/3 grow' : 'w-0'} h-full shrink-0 relative flex flex-col bg-base-200 transition-all duration-0 overflow-hidden`}
   >
-    <div class="flex-grow overflow-y-auto">
+    <div class="grow overflow-y-auto">
       <Login />
     </div>
     <div class="w-full">
@@ -51,7 +51,7 @@
   </div>
   <button
     class="h-full w-4 bg-base-300 hover:bg-primary transition-colors flex items-center justify-center group relative"
-    on:click={() => (leftPanelCollapsed = !leftPanelCollapsed)}
+    onclick={() => (leftPanelCollapsed = !leftPanelCollapsed)}
     title={leftPanelCollapsed ? 'Show sidebar' : 'Hide sidebar'}
   >
     <span
@@ -61,7 +61,7 @@
     </span>
   </button>
   <div class="basis-2/3 h-full overflow-y-auto flex flex-col shrink grow shadow-md">
-    <div class="flex-grow">
+    <div class="grow">
       {#if selectedMenu === 'commands'}
         <CommandList />
       {:else if selectedMenu === 'interactions'}
@@ -80,46 +80,46 @@
     </div>
     {#if $bottomNavVisible}
       <div class="sticky bottom-0 z-10">
-        <div class="btm-nav static bg-base-200">
+        <div class="dock dock-bottom static bg-base-200">
           <button
             class={selectedMenu === 'commands' ? 'active bg-base-200' : ''}
-            on:click={() => (selectedMenu = 'commands')}
+            onclick={() => (selectedMenu = 'commands')}
           >
             <span class="material-symbols-outlined">chat</span>
           </button>
           <button
             class={selectedMenu === 'interactions' ? 'active bg-base-200' : ''}
-            on:click={() => (selectedMenu = 'interactions')}
+            onclick={() => (selectedMenu = 'interactions')}
           >
             <span class="material-symbols-outlined">smart_button</span>
           </button>
           <button
             class={selectedMenu === 'webhooks' ? 'active bg-base-200' : ''}
-            on:click={() => (selectedMenu = 'webhooks')}
+            onclick={() => (selectedMenu = 'webhooks')}
           >
             <span class="material-symbols-outlined">webhook</span>
           </button>
           <button
             class={selectedMenu === 'stats' ? 'active bg-base-200' : ''}
-            on:click={() => (selectedMenu = 'stats')}
+            onclick={() => (selectedMenu = 'stats')}
           >
             <span class="material-symbols-outlined">bar_chart</span>
           </button>
           <button
             class={selectedMenu === 'debugger' ? 'active bg-base-200' : ''}
-            on:click={() => (selectedMenu = 'debugger')}
+            onclick={() => (selectedMenu = 'debugger')}
           >
             <span class="material-symbols-outlined">bug_report</span>
           </button>
           <button
             class={selectedMenu === 'help' ? 'active bg-base-200' : ''}
-            on:click={() => (selectedMenu = 'help')}
+            onclick={() => (selectedMenu = 'help')}
           >
             <span class="material-symbols-outlined">help</span>
           </button>
           <button
             class={selectedMenu === 'settings' ? 'active bg-base-200' : ''}
-            on:click={() => (selectedMenu = 'settings')}
+            onclick={() => (selectedMenu = 'settings')}
           >
             <span class="material-symbols-outlined">settings</span>
           </button>

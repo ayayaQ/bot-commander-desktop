@@ -63,7 +63,7 @@
   <label for="status" class="label">
     <span class="label-text">{$t('status')}:</span>
   </label>
-  <select id="status" class="select select-bordered" bind:value={status}>
+  <select id="status" class="select" bind:value={status}>
     {#each statusOptions as option}
       <option value={option.value}>{$t(option.label)}</option>
     {/each}
@@ -75,7 +75,7 @@
   </label>
   <select
     id="activity"
-    class="select select-bordered"
+    class="select"
     bind:value={activity}
     on:change={handleActivityChange}
   >
@@ -92,7 +92,7 @@
     <input
       type="text"
       id="activityDetails"
-      class="input input-bordered"
+      class="input"
       bind:value={activityDetails}
       placeholder={$t('status-details-placeholder')}
     />
@@ -105,7 +105,7 @@
       <input
         type="url"
         id="streamUrl"
-        class="input input-bordered"
+        class="input"
         bind:value={streamUrl}
         placeholder="https://www.twitch.tv/username"
       />

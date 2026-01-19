@@ -74,7 +74,7 @@
         <div class="flex items-start gap-2">
           <span class="badge badge-ghost badge-sm">{item.label}</span>
           <div
-            class="text-sm leading-snug text-base-content/80 font-mono whitespace-pre-wrap break-words"
+            class="text-sm leading-snug text-base-content/80 font-mono whitespace-pre-wrap wrap-break-word"
             aria-label="Output preview"
           >
             {@html highlightBCFD(item.value)}

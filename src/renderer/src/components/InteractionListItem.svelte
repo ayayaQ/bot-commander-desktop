@@ -64,7 +64,7 @@
             <div class="mt-2 flex flex-wrap gap-1">
               <span class="text-xs text-base-content/50">{$t('options')}:</span>
               {#each interaction.options as option}
-                <span class="badge badge-outline badge-sm">
+                <span class="badge badge-dash badge-sm">
                   {option.name}{option.required ? '*' : ''}
                 </span>
               {/each}

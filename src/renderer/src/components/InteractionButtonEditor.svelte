@@ -27,10 +27,13 @@
   style="margin-left: {nestingDepth * 16}px"
 >
   <!-- Button Header (always visible) -->
-  <button
-    class="w-full p-4 flex items-center justify-between hover:bg-base-300 transition-colors"
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="w-full p-4 flex items-center justify-between hover:bg-base-300 transition-colors cursor-pointer"
     on:click={() => (isExpanded = !isExpanded)}
-    type="button"
+    on:keydown={(e) => e.key === 'Enter' && (isExpanded = !isExpanded)}
+    role="button"
+    tabindex="0"
   >
     <div class="flex items-center gap-3">
       <span class="material-symbols-outlined text-base-content/70">
@@ -50,7 +53,7 @@
     >
       <span class="material-symbols-outlined">close</span>
     </button>
-  </button>
+  </div>
 
   <!-- Button Details (expandable) -->
   {#if isExpanded}
@@ -64,7 +67,7 @@
           </label>
           <input
             type="text"
-            class="input input-bordered input-sm"
+            class="input input-sm"
             bind:value={button.label}
             placeholder="Click me"
           />
@@ -76,7 +79,7 @@
           <label class="label">
             <span class="label-text">{$t('button-style')}</span>
           </label>
-          <select class="select select-bordered select-sm" bind:value={button.style}>
+          <select class="select select-sm" bind:value={button.style}>
             {#each buttonStyles as style}
               <option value={style.value}>{$t('style-' + style.label.toLowerCase())}</option>
             {/each}
@@ -91,7 +94,7 @@
           </label>
           <input
             type="text"
-            class="input input-bordered input-sm"
+            class="input input-sm"
             bind:value={button.customId}
             placeholder="unique-button-id"
           />
@@ -105,7 +108,7 @@
           </label>
           <input
             type="text"
-            class="input input-bordered input-sm"
+            class="input input-sm"
             bind:value={button.emoji}
             placeholder="Optional emoji"
           />
@@ -120,7 +123,7 @@
             </label>
             <input
               type="text"
-              class="input input-bordered input-sm"
+              class="input input-sm"
               bind:value={button.url}
               placeholder="https://example.com"
             />

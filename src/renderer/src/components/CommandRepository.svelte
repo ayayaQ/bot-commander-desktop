@@ -172,7 +172,7 @@
       </div>
       {#if activeTab === 'browse'}
         <div class="">
-          <label class="input input-bordered flex items-center gap-2">
+          <label class="input flex items-center gap-2">
             <input
               type="text"
               class="grow"

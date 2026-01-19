@@ -53,6 +53,12 @@
   let toastMessage = ''
   let codeToRun = ''
   let codeOutput = ''
+  let deleteConfirmKey: string | null = null
+
+  // JSON Editor modal state
+  let jsonEditorKey: string | null = null
+  let jsonEditorValue: string = ''
+  let jsonEditorError: string | null = null
 
   function updateBotState() {
     ;(window as any).electron.ipcRenderer.invoke('getBotState').then((state) => {
@@ -110,6 +116,69 @@
       .catch((error) => {
         codeOutput = `Error: ${error.message}`
       })
+  }
+
+  function promptDeleteStateKey(key: string) {
+    deleteConfirmKey = key
+  }
+
+  function confirmDeleteStateKey() {
+    if (deleteConfirmKey === null) return
+    const key = deleteConfirmKey
+    deleteConfirmKey = null
+    ;(window as any).electron.ipcRenderer
+      .invoke('runCodeInContext', `delete botState["${key.replace(/"/g, '\\"')}"];`)
+      .then(() => {
+        updateBotState()
+      })
+      .catch((error) => {
+        showErrorToast(`Error: ${error.message}`)
+      })
+  }
+
+  function cancelDelete() {
+    deleteConfirmKey = null
+  }
+
+  // JSON Editor functions
+  function openJsonEditor(key: string, value: any) {
+    jsonEditorKey = key
+    jsonEditorValue = JSON.stringify(value, null, 2)
+    jsonEditorError = null
+  }
+
+  function closeJsonEditor() {
+    jsonEditorKey = null
+    jsonEditorValue = ''
+    jsonEditorError = null
+  }
+
+  function saveJsonEditor() {
+    if (jsonEditorKey === null) return
+    try {
+      const parsedValue = JSON.parse(jsonEditorValue)
+      ;(window as any).electron.ipcRenderer
+        .invoke('updateBotState', jsonEditorKey, parsedValue)
+        .then((success: boolean) => {
+          if (success) {
+            updateBotState()
+            closeJsonEditor()
+          } else {
+            jsonEditorError = 'Failed to update value'
+          }
+        })
+        .catch((error: Error) => {
+          jsonEditorError = `Error: ${error.message}`
+        })
+    } catch (error) {
+      jsonEditorError = 'Invalid JSON'
+    }
+  }
+
+  function onJsonEditorChange(e: CustomEvent<string>) {
+    jsonEditorValue = e.detail
+    // Clear error when user types
+    jsonEditorError = null
   }
 
   function saveStateToDisk() {
@@ -226,11 +295,12 @@
   </div>
   <div class="bg-base-200 p-4 rounded-lg shadow-lg mb-4">
     <div class="overflow-x-auto">
-      <table class="table table-compact w-full">
+      <table class="table table-sm w-full">
         <thead>
           <tr>
             <th>{$t('name')}</th>
             <th>{$t('value')}</th>
+            <th class="w-16"></th>
           </tr>
         </thead>
         <tbody>
@@ -244,7 +314,7 @@
                     bind:value={editValue}
                     on:blur={saveEdit}
                     on:keydown={(e) => e.key === 'Enter' && saveEdit()}
-                    class="input input-bordered input-sm w-full"
+                    class="input input-sm w-full"
                     autofocus
                   />
                 {:else}
@@ -253,11 +323,29 @@
                   </span>
                 {/if}
               </td>
+              <td class="flex gap-1">
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  on:click={() => openJsonEditor(key, value)}
+                  title={$t('edit')}
+                >
+                  <span class="material-symbols-outlined">edit</span>
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm text-error"
+                  on:click={() => promptDeleteStateKey(key)}
+                  title={$t('delete')}
+                >
+                  <span class="material-symbols-outlined">delete</span>
+                </button>
+              </td>
             </tr>
           {/each}
           {#if Object.keys(botState).length === 0}
             <tr>
-              <td colspan="2" class="text-center">{$t('no-state-data')}</td>
+              <td colspan="3" class="text-center">{$t('no-state-data')}</td>
             </tr>
           {/if}
         </tbody>
@@ -304,5 +392,51 @@
         <span>{toastMessage}</span>
       </div>
     </div>
+  </div>
+{/if}
+
+{#if deleteConfirmKey !== null}
+  <div class="modal modal-open">
+    <div class="modal-box">
+      <h3 class="font-bold text-lg">{$t('confirm-delete')}</h3>
+      <p class="py-4">
+        {$t('confirm-delete-variable')} <code class="font-mono bg-base-300 px-1 rounded">{deleteConfirmKey}</code>?
+      </p>
+      <div class="modal-action">
+        <button class="btn" on:click={cancelDelete}>{$t('cancel')}</button>
+        <button class="btn btn-error" on:click={confirmDeleteStateKey}>{$t('delete')}</button>
+      </div>
+    </div>
+    <div class="modal-backdrop" on:click={cancelDelete} on:keydown={(e) => e.key === 'Escape' && cancelDelete()}></div>
+  </div>
+{/if}
+
+{#if jsonEditorKey !== null}
+  <div class="modal modal-open">
+    <div class="modal-box max-w-2xl">
+      <h3 class="font-bold text-lg mb-4">
+        {$t('edit-json-value')}: <code class="font-mono bg-base-300 px-2 py-1 rounded">{jsonEditorKey}</code>
+      </h3>
+      <div class="mb-4">
+        <CodeEditor
+          bind:value={jsonEditorValue}
+          on:change={onJsonEditorChange}
+          placeholder="Enter JSON value..."
+          mode="js"
+          minHeight="200px"
+        />
+      </div>
+      {#if jsonEditorError}
+        <div class="alert alert-error mb-4">
+          <span class="material-symbols-outlined">error</span>
+          <span>{jsonEditorError}</span>
+        </div>
+      {/if}
+      <div class="modal-action">
+        <button class="btn" on:click={closeJsonEditor}>{$t('cancel')}</button>
+        <button class="btn btn-primary" on:click={saveJsonEditor}>{$t('save')}</button>
+      </div>
+    </div>
+    <div class="modal-backdrop" on:click={closeJsonEditor} on:keydown={(e) => e.key === 'Escape' && closeJsonEditor()}></div>
   </div>
 {/if}

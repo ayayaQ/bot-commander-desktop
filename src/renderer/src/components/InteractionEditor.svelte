@@ -188,8 +188,8 @@
             >
             <input
               type="text"
-              class:input-error={commandNameError}
-              class="input input-bordered flex-1"
+              class:border-error={commandNameError}
+              class="input flex-1"
               bind:value={editedInteraction.commandName}
               placeholder="greet"
             />
@@ -216,8 +216,8 @@
           </label>
           <input
             type="text"
-            class:input-error={commandDescriptionError}
-            class="input input-bordered"
+            class:border-error={commandDescriptionError}
+            class="input w-full"
             bind:value={editedInteraction.commandDescription}
             placeholder="A friendly greeting command"
           />
@@ -267,8 +267,8 @@
                   </label>
                   <input
                     type="text"
-                    class:input-error={optionErrors[idx]?.nameError}
-                    class="input input-bordered input-sm"
+                    class:border-error={optionErrors[idx]?.nameError}
+                    class="input input-sm"
                     bind:value={option.name}
                     placeholder="username"
                   />
@@ -287,7 +287,7 @@
                   <label class="label py-1">
                     <span class="label-text text-sm">{$t('option-type')}</span>
                   </label>
-                  <select class="select select-bordered select-sm" bind:value={option.type}>
+                  <select class="select select-sm" bind:value={option.type}>
                     {#each optionTypes as type}
                       <option value={type.value}>{type.label}</option>
                     {/each}
@@ -316,8 +316,8 @@
                   </label>
                   <input
                     type="text"
-                    class:input-error={optionErrors[idx]?.descriptionError}
-                    class="input input-bordered input-sm"
+                    class:border-error={optionErrors[idx]?.descriptionError}
+                    class="input input-sm"
                     bind:value={option.description}
                     placeholder="The user to greet"
                   />

@@ -152,7 +152,7 @@
           </div>
         </div>
         <div class="">
-          <label class="input input-bordered flex items-center gap-2">
+          <label class="input input-bordered flex items-center gap-2 w-full">
             <input type="text" class="grow" placeholder={$t('search')} bind:value={searchQuery} />
             <span class="material-symbols-outlined">search</span>
           </label>

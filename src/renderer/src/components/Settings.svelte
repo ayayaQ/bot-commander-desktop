@@ -100,7 +100,7 @@
     <label class="label">
       <span class="label-text">{$t('theme')}</span>
     </label>
-    <select class="select select-bordered" value={selectedTheme} on:change={changeTheme}>
+    <select class="select" value={selectedTheme} on:change={changeTheme}>
       <option value="light">Light</option>
       <option value="dark">Dark</option>
       <option value="cupcake">Cupcake</option>
@@ -135,14 +135,20 @@
 
   <div class="form-control">
     <label class="label cursor-pointer">
-      <span class="label-text">{$t('show-token')}</span>
+      <div class="flex flex-col">
+        <span class="label-text">{$t('show-token')}</span>
+        <span class="label-text text-xs opacity-60">{$t('show-token-description')}</span>
+      </div>
       <input type="checkbox" class="toggle" bind:checked={showToken} on:change={toggleShowToken} />
     </label>
   </div>
 
   <div class="form-control">
     <label class="label cursor-pointer">
-      <span class="label-text">Hide output preview</span>
+      <div class="flex flex-col">
+        <span class="label-text">{$t('hide-output')}</span>
+        <span class="label-text text-xs opacity-60">{$t('hide-output-description')}</span>
+      </div>
       <input
         type="checkbox"
         class="toggle"
@@ -161,7 +167,7 @@
         <span class="material-symbols-outlined">info</span>
       </span>
     </label>
-    <select class="select select-bordered" value={selectedLanguage} on:change={changeLanguage}>
+    <select class="select" value={selectedLanguage} on:change={changeLanguage}>
       <option value="en">English</option>
       <option value="es">Español</option>
       <option value="ja">日本語</option>
@@ -181,7 +187,7 @@
     </label>
     <input
       type={showToken ? 'text' : 'password'}
-      class="input input-bordered"
+      class="input w-full"
       value={openaiApiKey}
       on:input={updateOpenAIKey}
       disabled={$settingsStore.useCustomApi}
@@ -195,7 +201,7 @@
       <span class="label-text">{$t('openai-model')}</span>
     </label>
     <select
-      class="select select-bordered"
+      class="select"
       value={openaiModel}
       on:change={updateOpenAIModel}
       disabled={$settingsStore.useCustomApi}
@@ -212,7 +218,7 @@
       <span class="label-text">{$t('developer-prompt')}</span>
     </label>
     <textarea
-      class="textarea textarea-bordered"
+      class="textarea w-full"
       value={developerPrompt}
       on:input={updateDeveloperPrompt}
       placeholder={$t('enter-your-custom-developer-prompt')}
@@ -259,7 +265,10 @@
 
   <div class="form-control">
     <label class="label cursor-pointer">
-      <span class="label-text">{$t('use-legacy-interpreter')}</span>
+      <div class="flex flex-col">
+        <span class="label-text">{$t('use-legacy-interpreter')}</span>
+        <span class="label-text text-xs opacity-60">{$t('use-legacy-interpreter-description')}</span>
+      </div>
       <input
         type="checkbox"
         class="toggle"

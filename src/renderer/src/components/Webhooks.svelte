@@ -160,7 +160,7 @@
             id="webhookUrl"
             bind:value={webhookUrl}
             on:input={() => (webhookUrlError = '')}
-            class="input input-bordered w-full {webhookUrlError ? 'input-error' : ''}"
+            class="input w-full {webhookUrlError ? 'border-error' : ''}"
             placeholder="https://discord.com/api/webhooks/..."
             required
           />
@@ -180,7 +180,7 @@
             type="text"
             id="name"
             bind:value={name}
-            class="input input-bordered w-full"
+            class="input w-full"
             placeholder={$t('bot')}
           />
         </div>
@@ -193,7 +193,7 @@
             type="url"
             id="avatarUrl"
             bind:value={avatarUrl}
-            class="input input-bordered w-full"
+            class="input w-full"
             placeholder="https://example.com/avatar.png"
           />
         </div>
@@ -235,7 +235,7 @@
             <textarea
               id="message"
               bind:value={message}
-              class="textarea textarea-bordered h-24 w-full"
+              class="textarea h-24 w-full"
               placeholder={$t('message-placeholder')}
               required
             ></textarea>
@@ -249,7 +249,7 @@
               type="text"
               id="embedTitle"
               bind:value={embedTitle}
-              class="input input-bordered w-full"
+              class="input w-full"
               placeholder="Embed title"
             />
           </div>
@@ -261,7 +261,7 @@
             <textarea
               id="embedDescription"
               bind:value={embedDescription}
-              class="textarea textarea-bordered h-24 w-full"
+              class="textarea h-24 w-full"
               placeholder="Embed description"
               required
             ></textarea>
@@ -275,7 +275,7 @@
               type="color"
               id="embedColor"
               bind:value={embedColor}
-              class="input input-bordered w-full h-12"
+              class="input w-full h-12"
             />
           </div>
 
@@ -287,7 +287,7 @@
               type="text"
               id="embedFooter"
               bind:value={embedFooter}
-              class="input input-bordered w-full"
+              class="input w-full"
               placeholder="Footer text"
             />
           </div>
@@ -300,7 +300,7 @@
               type="url"
               id="embedImageUrl"
               bind:value={embedImageUrl}
-              class="input input-bordered w-full"
+              class="input w-full"
               placeholder="https://example.com/image.png"
             />
           </div>
@@ -313,7 +313,7 @@
               type="url"
               id="embedThumbnailUrl"
               bind:value={embedThumbnailUrl}
-              class="input input-bordered w-full"
+              class="input w-full"
               placeholder="https://example.com/thumbnail.png"
             />
           </div>
@@ -385,7 +385,7 @@
         id="presetAlias"
         bind:value={presetAlias}
         on:input={() => (presetAliasError = '')}
-        class="input input-bordered w-full {presetAliasError ? 'input-error' : ''}"
+        class="input w-full {presetAliasError ? 'border-error' : ''}"
         placeholder="My Webhook Preset"
         required
         autofocus

@@ -571,12 +571,12 @@
   }
 
   .editor-scroll-area::-webkit-scrollbar-thumb {
-    background: oklch(var(--bc) / 0.3);
+    background: color-mix(in oklch, var(--color-base-content) 30%, transparent);
     border-radius: 4px;
   }
 
   .editor-scroll-area::-webkit-scrollbar-thumb:hover {
-    background: oklch(var(--bc) / 0.5);
+    background: color-mix(in oklch, var(--color-base-content) 50%, transparent);
   }
 
   .editor-content {
@@ -606,48 +606,48 @@
     z-index: 100;
   }
 
-  /* Syntax highlighting colors */
+  /* Syntax highlighting colors - DaisyUI v5 color variables */
   :global(.bcfd-variable) {
-    color: oklch(var(--p));
+    color: var(--color-primary);
   }
 
   :global(.bcfd-function) {
-    color: oklch(var(--s));
+    color: var(--color-secondary);
   }
 
   :global(.bcfd-args) {
-    color: oklch(var(--a));
+    color: var(--color-accent);
   }
 
   :global(.bcfd-keyword) {
-    color: oklch(var(--wa));
+    color: var(--color-warning);
     font-weight: 600;
   }
 
   :global(.bcfd-eval) {
-    color: oklch(var(--bc) / 0.8);
+    color: color-mix(in oklch, var(--color-base-content) 80%, transparent);
   }
 
   /* JavaScript syntax highlighting */
   :global(.js-keyword) {
-    color: oklch(var(--p));
+    color: var(--color-primary);
     font-weight: 500;
   }
 
   :global(.js-string) {
-    color: oklch(var(--su));
+    color: var(--color-success);
   }
 
   :global(.js-number) {
-    color: oklch(var(--in));
+    color: var(--color-info);
   }
 
   :global(.js-comment) {
-    color: oklch(var(--bc) / 0.5);
+    color: color-mix(in oklch, var(--color-base-content) 50%, transparent);
     font-style: italic;
   }
 
   :global(.js-builtin) {
-    color: oklch(var(--s));
+    color: var(--color-secondary);
   }
 </style>

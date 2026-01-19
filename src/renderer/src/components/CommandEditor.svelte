@@ -482,7 +482,7 @@
       type="text"
       bind:value={importText}
       placeholder="Paste JSON here"
-      class="input input-bordered w-full"
+      class="input w-full"
     />
     {#if showImportError}
       <p>Bad JSON provided. Does not match required structure for command.</p>
@@ -525,7 +525,7 @@
           ><span class="material-symbols-outlined">add</span>{$t('actions')}</summary
         >
         <ul
-          class="menu dropdown-content bg-base-100 rounded-box z-[1] w-52 p-2 shadow max-h-96 overflow-y-auto flex flex-col gap-1 flex-nowrap"
+          class="menu dropdown-content bg-base-100 rounded-box z-1 w-52 p-2 shadow max-h-96 overflow-y-auto flex flex-col gap-1 flex-nowrap"
         >
           {#each getAvailableActions(activeActions, isLimitedType) as action}
             <li>
@@ -597,7 +597,7 @@
                       <select
                         id="type"
                         bind:value={editedCommand.type}
-                        class="select select-bordered"
+                        class="select w-full"
                         required
                       >
                         <option value={0}>{$t('message-received')}</option>
@@ -616,8 +616,8 @@
                         type="text"
                         id="commandDescription"
                         bind:value={editedCommand.commandDescription}
-                        class="input input-bordered"
-                        class:input-error={descriptionError}
+                        class="input w-full"
+                        class:border-error={descriptionError}
                         placeholder="This is a command that does something"
                         required
                       />
@@ -637,8 +637,8 @@
                             type="text"
                             id="command"
                             bind:value={editedCommand.command}
-                            class="input input-bordered"
-                            class:input-error={commandError}
+                            class="input w-full"
+                            class:border-error={commandError}
                             placeholder="!command"
                             required
                           />
@@ -656,7 +656,7 @@
                             <select
                               id="type"
                               bind:value={triggerDropdown}
-                              class="select select-bordered"
+                              class="select w-full"
                               required
                               on:change={() => {
                                 editedCommand.phrase = triggerDropdown == 2
@@ -678,8 +678,8 @@
                             type="text"
                             id="reaction"
                             bind:value={editedCommand.command}
-                            class="input input-bordered"
-                            class:input-error={commandError}
+                            class="input"
+                            class:border-error={commandError}
                             placeholder={$t('reaction-placeholder')}
                             required
                           />
@@ -861,8 +861,8 @@
                           type="text"
                           id="deleteIfStrings"
                           bind:value={editedCommand.deleteIfStrings}
-                          class="input input-bordered"
-                          class:input-error={actionErrors['deleteIf']}
+                          class="input"
+                          class:border-error={actionErrors['deleteIf']}
                         />
                         {#if actionErrors['deleteIf']}
                           <label class="label" for="deleteIfStrings">
@@ -882,8 +882,8 @@
                         <input
                           type="number"
                           bind:value={editedCommand.deleteNum}
-                          class="input input-bordered"
-                          class:input-error={actionErrors['deleteX']}
+                          class="input"
+                          class:border-error={actionErrors['deleteX']}
                           min="1"
                           max="99"
                         />

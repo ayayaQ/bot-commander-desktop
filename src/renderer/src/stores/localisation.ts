@@ -37,6 +37,9 @@ const translations: Languages = {
     settings: 'Settings',
     theme: 'Theme',
     'show-token': 'Show Token',
+    'show-token-description': 'Display API keys and tokens in plain text instead of hidden',
+    'hide-output': 'Hide Output Preview',
+    'hide-output-description': 'Hide the command output preview panel in the editor',
     language: 'Language',
     about: 'About',
     'bot-state': 'Bot State',
@@ -157,6 +160,8 @@ const translations: Languages = {
       'Use standard API instead of streaming reasoning API for thinking models (GPT-5.1, GPT-5.2)',
     advanced: 'Advanced',
     'use-legacy-interpreter': 'Use Legacy Interpreter',
+    'use-legacy-interpreter-description':
+      'Use the old regex-based template interpreter instead of the new AST-based one',
     // AI Chat strings
     'ai-assistant': 'AI Assistant',
     'ai-chat-started': 'AI assistant ready to help edit command:',
@@ -196,7 +201,9 @@ const translations: Languages = {
     options: 'Options',
     buttons: 'Buttons',
     edit: 'Edit',
+    'edit-json-value': 'Edit JSON Value',
     'confirm-delete': 'Confirm Delete',
+    'confirm-delete-variable': 'Are you sure you want to delete the variable',
     'delete-interaction-confirm': 'Are you sure you want to delete interaction',
     'command-details': 'Command Details',
     'command-name': 'Command Name',
@@ -319,6 +326,9 @@ const translations: Languages = {
     settings: 'Configuración',
     theme: 'Tema',
     'show-token': 'Mostrar token',
+    'show-token-description': 'Mostrar claves API y tokens en texto plano en lugar de ocultos',
+    'hide-output': 'Ocultar vista previa de salida',
+    'hide-output-description': 'Ocultar el panel de vista previa de salida del comando en el editor',
     language: 'Idioma',
     about: 'Acerca de',
     'bot-state': 'Estado del bot',
@@ -440,6 +450,8 @@ const translations: Languages = {
       'Usar API estándar en lugar de API de razonamiento para modelos de pensamiento (GPT-5.1, GPT-5.2)',
     advanced: 'Avanzado',
     'use-legacy-interpreter': 'Usar Intérprete Antiguo',
+    'use-legacy-interpreter-description':
+      'Usar el antiguo intérprete de plantillas basado en regex en lugar del nuevo basado en AST',
     // AI Chat strings
     'ai-assistant': 'Asistente IA',
     'ai-chat-started': 'Asistente IA listo para editar comando:',
@@ -543,6 +555,9 @@ const translations: Languages = {
     settings: '設定',
     theme: 'テーマ',
     'show-token': 'トークンを表示',
+    'show-token-description': 'APIキーとトークンを非表示ではなくプレーンテキストで表示',
+    'hide-output': '出力プレビューを非表示',
+    'hide-output-description': 'エディターでコマンド出力プレビューパネルを非表示にする',
     language: '言語',
     about: '約',
     'bot-state': 'ボットの状態',
@@ -663,6 +678,8 @@ const translations: Languages = {
       '思考モデル（GPT-5.1、GPT-5.2）にストリーミング推論APIではなく標準APIを使用',
     advanced: '詳細設定',
     'use-legacy-interpreter': '旧インタープリターを使用',
+    'use-legacy-interpreter-description':
+      '新しいAST方式の代わりに古いregex方式のテンプレートインタープリターを使用',
     // AI Chat strings
     'ai-assistant': 'AIアシスタント',
     'ai-chat-started': 'AIアシスタントがコマンド編集の準備ができました:',
@@ -752,6 +769,9 @@ const translations: Languages = {
     settings: '设置',
     theme: '主题',
     'show-token': '显示令牌',
+    'show-token-description': '以明文显示API密钥和令牌，而非隐藏',
+    'hide-output': '隐藏输出预览',
+    'hide-output-description': '在编辑器中隐藏命令输出预览面板',
     language: '语言',
     about: '关于',
     'bot-state': '机器人状态',
@@ -871,6 +891,7 @@ const translations: Languages = {
     'disable-reasoning-api-description': '对思维模型（GPT-5.1、GPT-5.2）使用标准API而非流式推理API',
     advanced: '高级',
     'use-legacy-interpreter': '使用旧版解释器',
+    'use-legacy-interpreter-description': '使用旧的基于正则表达式的模板解释器，而非新的基于AST的解释器',
     // AI Chat strings
     'ai-assistant': 'AI助手',
     'ai-chat-started': 'AI助手已准备好帮助编辑命令:',
@@ -960,6 +981,9 @@ const translations: Languages = {
     settings: '설정',
     theme: '테마',
     'show-token': '토큰 표시',
+    'show-token-description': 'API 키와 토큰을 숨기지 않고 일반 텍스트로 표시',
+    'hide-output': '출력 미리보기 숨기기',
+    'hide-output-description': '에디터에서 명령 출력 미리보기 패널 숨기기',
     language: '언어',
     about: '정보',
     'bot-state': '봇 상태',
@@ -1080,6 +1104,8 @@ const translations: Languages = {
       '사고 모델(GPT-5.1, GPT-5.2)에 스트리밍 추론 API 대신 표준 API 사용',
     advanced: '고급',
     'use-legacy-interpreter': '레거시 인터프리터 사용',
+    'use-legacy-interpreter-description':
+      '새로운 AST 기반 대신 이전 정규식 기반 템플릿 인터프리터 사용',
     // AI Chat strings
     'ai-assistant': 'AI 어시스턴트',
     'ai-chat-started': 'AI 어시스턴트가 명령 편집 준비 완료:',
@@ -1169,6 +1195,9 @@ const translations: Languages = {
     settings: 'Настройки',
     theme: 'Тема',
     'show-token': 'Показать токен',
+    'show-token-description': 'Отображать API-ключи и токены открытым текстом вместо скрытых',
+    'hide-output': 'Скрыть предпросмотр вывода',
+    'hide-output-description': 'Скрыть панель предпросмотра вывода команды в редакторе',
     language: 'Язык',
     about: 'О программе',
     'bot-state': 'Состояние бота',
@@ -1289,6 +1318,8 @@ const translations: Languages = {
       'Использовать стандартный API вместо потокового API рассуждений для мыслящих моделей (GPT-5.1, GPT-5.2)',
     advanced: 'Дополнительно',
     'use-legacy-interpreter': 'Использовать старый интерпретатор',
+    'use-legacy-interpreter-description':
+      'Использовать старый интерпретатор шаблонов на основе regex вместо нового на основе AST',
     // AI Chat strings
     'ai-assistant': 'ИИ Ассистент',
     'ai-chat-started': 'ИИ ассистент готов помочь отредактировать команду:',
