@@ -82,43 +82,43 @@
       <div class="sticky bottom-0 z-10">
         <div class="dock dock-bottom static bg-base-200">
           <button
-            class={selectedMenu === 'commands' ? 'active bg-base-200' : ''}
+            class={selectedMenu === 'commands' ? 'dock-active' : ''}
             onclick={() => (selectedMenu = 'commands')}
           >
             <span class="material-symbols-outlined">chat</span>
           </button>
           <button
-            class={selectedMenu === 'interactions' ? 'active bg-base-200' : ''}
+            class={selectedMenu === 'interactions' ? 'dock-active' : ''}
             onclick={() => (selectedMenu = 'interactions')}
           >
             <span class="material-symbols-outlined">smart_button</span>
           </button>
           <button
-            class={selectedMenu === 'webhooks' ? 'active bg-base-200' : ''}
+            class={selectedMenu === 'webhooks' ? 'dock-active' : ''}
             onclick={() => (selectedMenu = 'webhooks')}
           >
             <span class="material-symbols-outlined">webhook</span>
           </button>
           <button
-            class={selectedMenu === 'stats' ? 'active bg-base-200' : ''}
+            class={selectedMenu === 'stats' ? 'dock-active' : ''}
             onclick={() => (selectedMenu = 'stats')}
           >
             <span class="material-symbols-outlined">bar_chart</span>
           </button>
           <button
-            class={selectedMenu === 'debugger' ? 'active bg-base-200' : ''}
+            class={selectedMenu === 'debugger' ? 'dock-active' : ''}
             onclick={() => (selectedMenu = 'debugger')}
           >
             <span class="material-symbols-outlined">bug_report</span>
           </button>
           <button
-            class={selectedMenu === 'help' ? 'active bg-base-200' : ''}
+            class={selectedMenu === 'help' ? 'dock-active' : ''}
             onclick={() => (selectedMenu = 'help')}
           >
             <span class="material-symbols-outlined">help</span>
           </button>
           <button
-            class={selectedMenu === 'settings' ? 'active bg-base-200' : ''}
+            class={selectedMenu === 'settings' ? 'dock-active' : ''}
             onclick={() => (selectedMenu = 'settings')}
           >
             <span class="material-symbols-outlined">settings</span>
