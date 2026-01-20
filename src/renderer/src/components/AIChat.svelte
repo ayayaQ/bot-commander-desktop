@@ -282,21 +282,6 @@
   function renderMarkdown(content: string): string {
     return marked.parse(content, { async: false }) as string
   }
-
-  async function test() {
-console.log('[AIChat] Testing IPC events...')
-            isAiLoading.set(true)
-            thinkingContent.set('')
-            thinkingExpanded.set(true)
-            isThinking.set(true)
-            try {
-              const result = await (window as any).electron.ipcRenderer.invoke('ai-chat-test-ipc')
-              console.log('[AIChat] IPC test result:', result)
-            } catch (err) {
-              console.error('[AIChat] IPC test error:', err)
-              isAiLoading.set(false)
-            }
-  }
 </script>
 
 <div class="ai-chat flex flex-col h-full bg-base-100 border-l border-base-300">
@@ -341,19 +326,6 @@ console.log('[AIChat] Testing IPC events...')
       <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('clear-chat')}>
         <button class="btn btn-ghost btn-sm btn-circle" on:click={handleClearChat}>
           <span class="material-symbols-outlined">delete_sweep</span>
-        </button>
-      </span>
-
-      <!-- Test IPC Button (Debug) -->
-      <span class="tooltip tooltip-primary tooltip-bottom" data-tip="Test IPC Events">
-        <button
-          class="btn btn-ghost btn-sm btn-circle text-warning"
-          on:click={async () => {
-            test()
-          }}
-          disabled={$isAiLoading}
-        >
-          <span class="material-symbols-outlined">bug_report</span>
         </button>
       </span>
 
