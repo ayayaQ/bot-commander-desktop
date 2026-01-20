@@ -223,7 +223,7 @@
       on:input={updateDeveloperPrompt}
       placeholder={$t('enter-your-custom-developer-prompt')}
       rows="4"
-    />
+    ></textarea>
   </div>
 
   <div class="form-control mt-4">

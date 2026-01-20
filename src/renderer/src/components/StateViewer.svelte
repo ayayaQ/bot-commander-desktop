@@ -407,6 +407,7 @@
         <button class="btn btn-error" on:click={confirmDeleteStateKey}>{$t('delete')}</button>
       </div>
     </div>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal-backdrop" on:click={cancelDelete} on:keydown={(e) => e.key === 'Escape' && cancelDelete()}></div>
   </div>
 {/if}
@@ -437,6 +438,7 @@
         <button class="btn btn-primary" on:click={saveJsonEditor}>{$t('save')}</button>
       </div>
     </div>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal-backdrop" on:click={closeJsonEditor} on:keydown={(e) => e.key === 'Escape' && closeJsonEditor()}></div>
   </div>
 {/if}

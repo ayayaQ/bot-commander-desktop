@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, onMount } from 'svelte'
   import { type BCFDInteractionCommand, createDefaultInteractionCommand } from '../types/types'
-  import { t } from '../stores/localisation'
+  import { t, type TranslationKey } from '../stores/localisation'
   import HeaderBar from './HeaderBar.svelte'
   import InteractionActionEditor from './InteractionActionEditor.svelte'
   import { bottomNavVisible } from '../stores/navigation'
@@ -32,27 +32,27 @@
 
   const nameRegex = /^[-_'\p{L}\p{N}\p{sc=Deva}\p{sc=Thai}]{1,32}$/u
 
-  let commandNameError = ''
-  let commandDescriptionError = ''
-  let optionErrors: Record<number, { nameError: string; descriptionError: string }> = {}
+  let commandNameError: TranslationKey | '' = ''
+  let commandDescriptionError: TranslationKey | '' = ''
+  let optionErrors: Record<number, { nameError: TranslationKey | ''; descriptionError: TranslationKey | '' }> = {}
   let actionErrors = false
 
-  function validateName(name: string): string {
+  function validateName(name: string): TranslationKey | '' {
     if (!name.trim()) {
-      return 'Name is required'
+      return 'name-is-required'
     }
     if (!nameRegex.test(name)) {
-      return 'Must be 1-32 characters with letters, numbers, hyphens, underscores, or apostrophes'
+      return 'name-invalid-format'
     }
     return ''
   }
 
-  function validateDescription(description: string): string {
+  function validateDescription(description: string): TranslationKey | '' {
     if (!description.trim()) {
-      return 'Description is required'
+      return 'description-required'
     }
     if (description.length > 100) {
-      return 'Description must be 1-100 characters'
+      return 'description-too-long'
     }
     return ''
   }
@@ -79,7 +79,7 @@
     editedInteraction.options.forEach((option, idx) => {
       const isDuplicate = duplicates.has(option.name)
       optionErrors[idx] = {
-        nameError: isDuplicate ? 'Duplicate option name' : validateName(option.name),
+        nameError: isDuplicate ? 'duplicate-option-name' : validateName(option.name),
         descriptionError: validateDescription(option.description)
       }
     })

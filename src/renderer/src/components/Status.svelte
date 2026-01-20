@@ -1,21 +1,21 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte'
   import { botStatusStore, saveBotStatus } from '../stores/status'
-  import { t } from '../stores/localisation'
+  import { t, type TranslationKey } from '../stores/localisation'
 
   let status = $botStatusStore.status
   let activity = $botStatusStore.activity
   let activityDetails = $botStatusStore.activityDetails
   let streamUrl = $botStatusStore.streamUrl
 
-  const statusOptions = [
+  const statusOptions: Array<{ value: string; label: TranslationKey }> = [
     { value: 'Online', label: 'status-online' },
     { value: 'Idle', label: 'status-idle' },
     { value: 'Do Not Disturb', label: 'status-dnd' },
     { value: 'Invisible', label: 'status-invisible' }
   ]
 
-  const activityOptions = [
+  const activityOptions: Array<{ value: string; label: TranslationKey }> = [
     { value: 'Playing', label: 'activity-playing' },
     { value: 'Streaming', label: 'activity-streaming' },
     { value: 'Listening', label: 'activity-listening' },

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t } from '../stores/localisation'
+  import { t, type TranslationKey } from '../stores/localisation'
   import { validateBCFDCommand, type BCFDCommand } from '../types/types'
   import { createEventDispatcher, onDestroy, onMount } from 'svelte'
   import HeaderBar from './HeaderBar.svelte'
@@ -252,9 +252,9 @@
   }
 
   // Validation
-  let descriptionError = ''
-  let commandError = ''
-  let actionErrors: Record<string, string> = {}
+  let descriptionError: TranslationKey | '' = ''
+  let commandError: TranslationKey | '' = ''
+  let actionErrors: Record<string, TranslationKey> = {}
 
   function isEmbedValid(embed: {
     title: string

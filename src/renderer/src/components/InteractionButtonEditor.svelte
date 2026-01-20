@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { BCFDInteractionButton } from '../types/types'
-  import { t } from '../stores/localisation'
+  import { t, type TranslationKey } from '../stores/localisation'
   import InteractionActionEditor from './InteractionActionEditor.svelte'
 
   export let button: BCFDInteractionButton
@@ -9,12 +9,12 @@
 
   let isExpanded = false
 
-  const buttonStyles = [
-    { value: 1, label: 'Primary', class: 'btn-primary' },
-    { value: 2, label: 'Secondary', class: 'btn-neutral' },
-    { value: 3, label: 'Success', class: 'btn-success' },
-    { value: 4, label: 'Danger', class: 'btn-error' },
-    { value: 5, label: 'Link', class: 'btn-info' }
+  const buttonStyles: Array<{ value: number; label: TranslationKey; class: string }> = [
+    { value: 1, label: 'style-primary', class: 'btn-primary' },
+    { value: 2, label: 'style-secondary', class: 'btn-neutral' },
+    { value: 3, label: 'style-success', class: 'btn-success' },
+    { value: 4, label: 'style-danger', class: 'btn-error' },
+    { value: 5, label: 'style-link', class: 'btn-info' }
   ]
 
   function getButtonStyleClass(style: number): string {
@@ -81,7 +81,7 @@
           </label>
           <select class="select select-sm" bind:value={button.style}>
             {#each buttonStyles as style}
-              <option value={style.value}>{$t('style-' + style.label.toLowerCase())}</option>
+              <option value={style.value}>{$t(style.label)}</option>
             {/each}
           </select>
         </div>

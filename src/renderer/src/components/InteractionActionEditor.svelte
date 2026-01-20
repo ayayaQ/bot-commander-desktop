@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { BCFDInteractionAction } from '../types/types'
   import { createDefaultInteractionButton } from '../types/types'
-  import { t } from '../stores/localisation'
+  import { t, type TranslationKey } from '../stores/localisation'
   import CodeEditor from './CodeEditor.svelte'
   import InteractionButtonEditor from './InteractionButtonEditor.svelte'
 
@@ -16,7 +16,7 @@
 
   type ActionType = {
     id: string
-    name: string
+    name: TranslationKey
     field: keyof BCFDInteractionAction
   }
 
@@ -79,11 +79,11 @@
     showButtons && nestingDepth < MAX_NESTING_DEPTH && (action.buttons?.length ?? 0) < 5
 
   // Validation errors
-  let channelMessageError = ''
-  let privateMessageError = ''
-  let channelEmbedError = ''
-  let privateEmbedError = ''
-  let roleToAssignError = ''
+  let channelMessageError: TranslationKey | '' = ''
+  let privateMessageError: TranslationKey | '' = ''
+  let channelEmbedError: TranslationKey | '' = ''
+  let privateEmbedError: TranslationKey | '' = ''
+  let roleToAssignError: TranslationKey | '' = ''
   let hasErrors = false
 
   function isEmbedValid(embed: any): boolean {
