@@ -1,11 +1,13 @@
-import { ipcMain, session } from 'electron'
+import { ipcMain, session, app } from 'electron'
 import type { BCFDCommand } from '../types/types'
 
-// API base URL - can be configured for dev/prod
-const API_BASE_URL = process.env.API_URL || 'http://localhost:8080'
+// API base URL - production when packaged, localhost for development
+const API_BASE_URL = app.isPackaged
+  ? 'https://bcfd.ayayaq.com'
+  : process.env.API_URL || 'http://localhost:8080'
 
 // Cookie configuration
-const COOKIE_URL = 'http://localhost'
+//const COOKIE_URL = 'http://localhost'
 const JWT_COOKIE_NAME = 'api-jwt'
 
 async function getStoredJwt(): Promise<string | null> {

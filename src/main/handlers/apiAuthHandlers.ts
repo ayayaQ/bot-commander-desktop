@@ -1,7 +1,9 @@
-import { ipcMain, session } from 'electron'
+import { ipcMain, session, app } from 'electron'
 
-// API base URL - can be configured for dev/prod
-const API_BASE_URL = process.env.API_URL || 'http://localhost:8080'
+// API base URL - production when packaged, localhost for development
+const API_BASE_URL = app.isPackaged
+  ? 'https://bcfd.ayayaq.com'
+  : process.env.API_URL || 'http://localhost:8080'
 
 // Cookie configuration
 const COOKIE_URL = 'http://localhost'
