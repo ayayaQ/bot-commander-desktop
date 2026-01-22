@@ -473,7 +473,7 @@
 
 <div
   bind:this={containerElement}
-  class="code-editor-container relative rounded-lg border border-base-300 bg-base-100 overflow-hidden"
+  class="code-editor-container relative rounded-lg border border-base-300 bg-base-100"
   style="min-height: {minHeight}; height: {computedHeight}px;"
 >
   <!-- Line Numbers -->
