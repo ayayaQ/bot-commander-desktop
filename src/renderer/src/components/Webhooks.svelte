@@ -11,26 +11,26 @@
   import HeaderBar from './HeaderBar.svelte'
   import Dialog from './Dialog.svelte'
 
-  let webhookUrl = ''
-  let name = ''
-  let avatarUrl = ''
-  let messageType: 'message' | 'embed' = 'message'
-  let message = ''
-  let embedTitle = ''
-  let embedDescription = ''
-  let embedColor = '#5865F2'
-  let embedFooter = ''
-  let embedImageUrl = ''
-  let embedThumbnailUrl = ''
-  let presetAlias = ''
-  let selectedPresetId: string | null = null
+  let webhookUrl = $state('')
+  let name = $state('')
+  let avatarUrl = $state('')
+  let messageType: 'message' | 'embed' = $state('message')
+  let message = $state('')
+  let embedTitle = $state('')
+  let embedDescription = $state('')
+  let embedColor = $state('#5865F2')
+  let embedFooter = $state('')
+  let embedImageUrl = $state('')
+  let embedThumbnailUrl = $state('')
+  let presetAlias = $state('')
+  let selectedPresetId: string | null = $state(null)
 
-  let webhookUrlError = ''
-  let presetAliasError = ''
-  let presetToDelete: WebhookPreset | null = null
+  let webhookUrlError = $state('')
+  let presetAliasError = $state('')
+  let presetToDelete: WebhookPreset | null = $state(null)
 
-  let savePresetDialog: HTMLDialogElement
-  let deleteConfirmDialog: HTMLDialogElement
+  let savePresetDialog: HTMLDialogElement = $state()
+  let deleteConfirmDialog: HTMLDialogElement = $state()
 
   const webhookUrlRegex = /^https:\/\/discord\.com\/api\/webhooks\/\d+\/[\w-]+$/
 
@@ -139,7 +139,7 @@
 <HeaderBar>
   <h2 class="text-2xl font-bold">{$t('send-webhook')}</h2>
   <div class="flex gap-2">
-    <button on:click={openSavePresetDialog} class="btn btn-primary">
+    <button onclick={openSavePresetDialog} class="btn btn-primary">
       <span class="material-symbols-outlined">save</span>
       Save Preset
     </button>
@@ -150,7 +150,7 @@
   <!-- Main Content Area -->
   <div class="flex-1 p-4 overflow-y-auto">
     <div class="p-4 bg-base-200 rounded-lg shadow-lg max-w-2xl mx-auto">
-      <form on:submit|preventDefault={send} class="space-y-4">
+      <form onsubmit={(e) => { e.preventDefault(); send() }} class="space-y-4">
         <div class="form-control">
           <label for="webhookUrl" class="label">
             <span class="label-text">{$t('webhook-url')}</span>
@@ -159,13 +159,13 @@
             type="text"
             id="webhookUrl"
             bind:value={webhookUrl}
-            on:input={() => (webhookUrlError = '')}
+            oninput={() => (webhookUrlError = '')}
             class="input w-full {webhookUrlError ? 'border-error' : ''}"
             placeholder="https://discord.com/api/webhooks/..."
             required
           />
           {#if webhookUrlError}
-            <!-- svelte-ignore a11y-label-has-associated-control -->
+            <!-- svelte-ignore a11y_label_has_associated_control -->
             <label class="label">
               <span class="label-text-alt text-error">{webhookUrlError}</span>
             </label>
@@ -199,7 +199,7 @@
         </div>
 
         <div class="form-control">
-          <!-- svelte-ignore a11y-label-has-associated-control -->
+          <!-- svelte-ignore a11y_label_has_associated_control -->
           <label class="label">
             <span class="label-text">Message Type</span>
           </label>
@@ -339,8 +339,8 @@
             preset.id
               ? 'ring-2 ring-primary'
               : ''}"
-            on:click={() => loadPreset(preset)}
-            on:keydown={(e) => e.key === 'Enter' && loadPreset(preset)}
+            onclick={() => loadPreset(preset)}
+            onkeydown={(e) => e.key === 'Enter' && loadPreset(preset)}
             role="button"
             tabindex="0"
           >
@@ -351,7 +351,7 @@
                   <p class="text-xs text-base-content/60 truncate">{preset.webhookUrl}</p>
                 </div>
                 <button
-                  on:click|stopPropagation={() => openDeleteConfirmDialog(preset)}
+                  onclick={(e) => { e.stopPropagation(); openDeleteConfirmDialog(preset) }}
                   class="btn btn-xs btn-ghost btn-square text-error"
                   title="Delete preset"
                 >
@@ -369,36 +369,36 @@
 <!-- Save Preset Dialog -->
 <Dialog bind:dialog={savePresetDialog}>
   <h3 class="font-bold text-lg mb-4">Save Webhook Preset</h3>
-  <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <form
-    on:submit|preventDefault={savePreset}
+    onsubmit={(e) => { e.preventDefault(); savePreset() }}
     class="space-y-4"
-    on:keydown={(e) => e.key === 'Escape' && savePresetDialog.close()}
+    onkeydown={(e) => e.key === 'Escape' && savePresetDialog.close()}
   >
     <div class="form-control">
       <label for="presetAlias" class="label">
         <span class="label-text">Preset Alias</span>
       </label>
-      <!-- svelte-ignore a11y-autofocus -->
+      <!-- svelte-ignore a11y_autofocus -->
       <input
         type="text"
         id="presetAlias"
         bind:value={presetAlias}
-        on:input={() => (presetAliasError = '')}
+        oninput={() => (presetAliasError = '')}
         class="input w-full {presetAliasError ? 'border-error' : ''}"
         placeholder="My Webhook Preset"
         required
         autofocus
       />
       {#if presetAliasError}
-        <!-- svelte-ignore a11y-label-has-associated-control -->
+        <!-- svelte-ignore a11y_label_has_associated_control -->
         <label class="label">
           <span class="label-text-alt text-error">{presetAliasError}</span>
         </label>
       {/if}
     </div>
     <div class="modal-action">
-      <button type="button" class="btn btn-ghost" on:click={() => savePresetDialog.close()}
+      <button type="button" class="btn btn-ghost" onclick={() => savePresetDialog.close()}
         >Cancel</button
       >
       <button type="submit" class="btn btn-primary">Save</button>
@@ -412,10 +412,10 @@
   <p class="mb-4">Are you sure you want to delete the preset "{presetToDelete?.alias}"?</p>
   <p class="text-sm text-base-content/60 mb-6">This action cannot be undone.</p>
   <div class="modal-action">
-    <button type="button" class="btn btn-ghost" on:click={() => deleteConfirmDialog.close()}>
+    <button type="button" class="btn btn-ghost" onclick={() => deleteConfirmDialog.close()}>
       Cancel
     </button>
-    <button type="button" class="btn btn-error" on:click={confirmDeletePreset}>
+    <button type="button" class="btn btn-error" onclick={confirmDeletePreset}>
       <span class="material-symbols-outlined">delete</span>
       Delete
     </button>

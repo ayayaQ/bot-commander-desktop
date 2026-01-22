@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte'
 
-  let isMaximized = false
-  let hasUpdate = false
-  let updateInfo: any = null
+  let isMaximized = $state(false)
+  let hasUpdate = $state(false)
+  let updateInfo: any = $state(null)
   let checkingUpdate = false
 
   onMount(async () => {
@@ -66,7 +66,7 @@
       <div class="update-notification flex items-center gap-2 mr-2">
         <button
           class="btn btn-primary btn-sm flex items-center gap-1"
-          on:click={openReleaseUrl}
+          onclick={openReleaseUrl}
           title="New version {updateInfo.latestVersion} available"
         >
           <span class="material-symbols-outlined icon-small">download</span>
@@ -75,15 +75,15 @@
       </div>
     {/if}
     <div class="titlebar-buttons flex">
-      <button class="btn btn-ghost btn-square btn-sm" on:click={minimize}>
+      <button class="btn btn-ghost btn-square btn-sm" onclick={minimize}>
         <span class="material-symbols-outlined icon-light">remove</span>
       </button>
-      <button class="btn btn-ghost btn-square btn-sm" on:click={maximize}>
+      <button class="btn btn-ghost btn-square btn-sm" onclick={maximize}>
         <span class="material-symbols-outlined icon-light">
           {isMaximized ? 'select_window_2' : 'crop_square'}
         </span>
       </button>
-      <button class="btn btn-ghost btn-square btn-sm" on:click={close}>
+      <button class="btn btn-ghost btn-square btn-sm" onclick={close}>
         <span class="material-symbols-outlined icon-light">close</span>
       </button>
     </div>

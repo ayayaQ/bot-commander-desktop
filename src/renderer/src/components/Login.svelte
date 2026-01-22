@@ -7,10 +7,10 @@
   import { settingsStore } from '../stores/settings'
   import { t } from '../stores/localisation'
 
-  $: username = $connectionStore.username
-  $: avatar = $connectionStore.avatar
+  let username = $derived($connectionStore.username)
+  let avatar = $derived($connectionStore.avatar)
 
-  let token = ''
+  let token = $state('')
   function handleLogin() {
     connectionStore.ipc.connect(token)
   }
@@ -92,17 +92,17 @@
         />
       {/if}
       {#if !$connectionStore.connected}
-        <button class="btn btn-primary w-full" on:click={handleLogin}
+        <button class="btn btn-primary w-full" onclick={handleLogin}
           ><span class="material-symbols-outlined">login</span>{$t('login')}
           {#if $connectionStore.isConnecting}
             <span class="loading loading-spinner"></span>
           {/if}
         </button>
       {:else}
-        <button class="btn btn-primary w-full" on:click={handleLogout}
+        <button class="btn btn-primary w-full" onclick={handleLogout}
           ><span class="material-symbols-outlined">logout</span>{$t('logout')}</button
         >
-        <button class="btn btn-primary w-full" on:click={generateInvite}
+        <button class="btn btn-primary w-full" onclick={generateInvite}
           ><span class="material-symbols-outlined">mail</span>{$t('invite')}</button
         >
       {/if}

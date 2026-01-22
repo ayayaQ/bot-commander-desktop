@@ -12,12 +12,12 @@
     close: void
   }>()
 
-  let searchInput = ''
+  let searchInput = $state('')
   let searchTimeout: ReturnType<typeof setTimeout> | null = null
-  let previewCommand: BCFDCommand | null = null
-  let activeTab: 'browse' | 'my-commands' = 'browse'
-  let myCommandsPage = 1
-  let myCommandsTotalPages = 1
+  let previewCommand: BCFDCommand | null = $state(null)
+  let activeTab: 'browse' | 'my-commands' = $state('browse')
+  let myCommandsPage = $state(1)
+  let myCommandsTotalPages = $state(1)
 
   onMount(async () => {
     await commandRepoStore.ipc.fetchCommands(1, $commandRepoStore.sortBy)
@@ -124,7 +124,7 @@
     <div class="basis-full">
       <div class="flex justify-between items-center mb-4">
         <div class="flex items-center gap-2">
-          <button class="btn btn-ghost btn-sm" on:click={() => dispatch('close')}>
+          <button class="btn btn-ghost btn-sm" onclick={() => dispatch('close')}>
             <span class="material-symbols-outlined">arrow_back</span>
           </button>
           <h2 class="text-2xl font-bold">{$t('command-repository') || 'Command Repository'}</h2>
@@ -134,14 +134,14 @@
             <div class="join">
               <button
                 class="btn btn-sm join-item {$commandRepoStore.sortBy === 'newest' ? 'btn-primary' : 'btn-ghost'}"
-                on:click={() => handleSortChange('newest')}
+                onclick={() => handleSortChange('newest')}
               >
                 <span class="material-symbols-outlined text-sm">schedule</span>
                 {$t('newest') || 'Newest'}
               </button>
               <button
                 class="btn btn-sm join-item {$commandRepoStore.sortBy === 'downloads' ? 'btn-primary' : 'btn-ghost'}"
-                on:click={() => handleSortChange('downloads')}
+                onclick={() => handleSortChange('downloads')}
               >
                 <span class="material-symbols-outlined text-sm">download</span>
                 {$t('most-downloaded') || 'Popular'}
@@ -155,7 +155,7 @@
           <button
             role="tab"
             class="tab {activeTab === 'browse' ? 'tab-active' : ''}"
-            on:click={() => switchTab('browse')}
+            onclick={() => switchTab('browse')}
           >
             <span class="material-symbols-outlined text-sm mr-1">explore</span>
             {$t('browse') || 'Browse'}
@@ -163,7 +163,7 @@
           <button
             role="tab"
             class="tab {activeTab === 'my-commands' ? 'tab-active' : ''}"
-            on:click={() => switchTab('my-commands')}
+            onclick={() => switchTab('my-commands')}
           >
             <span class="material-symbols-outlined text-sm mr-1">folder_shared</span>
             {$t('my-shared-commands') || 'My Commands'}
@@ -178,7 +178,7 @@
               class="grow"
               placeholder={$t('search-commands') || 'Search commands...'}
               bind:value={searchInput}
-              on:input={handleSearchInput}
+              oninput={handleSearchInput}
             />
             <span class="material-symbols-outlined">search</span>
           </label>
@@ -196,7 +196,7 @@
       <div class="alert alert-error">
         <span class="material-symbols-outlined">error</span>
         <span>{$commandRepoStore.error}</span>
-        <button class="btn btn-sm btn-ghost" on:click={() => commandRepoStore.clearError()}>
+        <button class="btn btn-sm btn-ghost" onclick={() => commandRepoStore.clearError()}>
           {$t('dismiss') || 'Dismiss'}
         </button>
       </div>
@@ -250,14 +250,14 @@
                   <div class="flex gap-2">
                     <button
                       class="btn btn-ghost btn-sm"
-                      on:click={() => previewCommand = command.command_data}
+                      onclick={() => previewCommand = command.command_data}
                     >
                       <span class="material-symbols-outlined text-sm">visibility</span>
                       {$t('preview') || 'Preview'}
                     </button>
                     <button
                       class="btn btn-primary btn-sm"
-                      on:click={() => handleImport(command)}
+                      onclick={() => handleImport(command)}
                     >
                       <span class="material-symbols-outlined text-sm">add</span>
                       {$t('import') || 'Import'}
@@ -276,7 +276,7 @@
               <button
                 class="join-item btn btn-sm"
                 disabled={$commandRepoStore.currentPage === 1}
-                on:click={() => handlePageChange($commandRepoStore.currentPage - 1)}
+                onclick={() => handlePageChange($commandRepoStore.currentPage - 1)}
               >
                 <span class="material-symbols-outlined text-sm">chevron_left</span>
               </button>
@@ -286,7 +286,7 @@
               <button
                 class="join-item btn btn-sm"
                 disabled={$commandRepoStore.currentPage === $commandRepoStore.totalPages}
-                on:click={() => handlePageChange($commandRepoStore.currentPage + 1)}
+                onclick={() => handlePageChange($commandRepoStore.currentPage + 1)}
               >
                 <span class="material-symbols-outlined text-sm">chevron_right</span>
               </button>
@@ -338,14 +338,14 @@
                   <div class="flex gap-2">
                     <button
                       class="btn btn-ghost btn-sm"
-                      on:click={() => previewCommand = command.command_data}
+                      onclick={() => previewCommand = command.command_data}
                     >
                       <span class="material-symbols-outlined text-sm">visibility</span>
                       {$t('preview') || 'Preview'}
                     </button>
                     <button
                       class="btn btn-error btn-sm"
-                      on:click={() => handleDeleteCommand(command)}
+                      onclick={() => handleDeleteCommand(command)}
                     >
                       <span class="material-symbols-outlined text-sm">delete</span>
                       {$t('delete') || 'Delete'}
@@ -364,7 +364,7 @@
               <button
                 class="join-item btn btn-sm"
                 disabled={myCommandsPage === 1}
-                on:click={() => handleMyCommandsPageChange(myCommandsPage - 1)}
+                onclick={() => handleMyCommandsPageChange(myCommandsPage - 1)}
               >
                 <span class="material-symbols-outlined text-sm">chevron_left</span>
               </button>
@@ -374,7 +374,7 @@
               <button
                 class="join-item btn btn-sm"
                 disabled={myCommandsPage === myCommandsTotalPages}
-                on:click={() => handleMyCommandsPageChange(myCommandsPage + 1)}
+                onclick={() => handleMyCommandsPageChange(myCommandsPage + 1)}
               >
                 <span class="material-symbols-outlined text-sm">chevron_right</span>
               </button>

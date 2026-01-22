@@ -5,16 +5,16 @@
   import HeaderBar from './HeaderBar.svelte'
   import ApiAuth from './ApiAuth.svelte'
 
-  let selectedTheme: string
-  let showToken: boolean
-  let selectedLanguage: string
-  let openaiApiKey: string
-  let openaiModel: 'gpt-4.1' | 'gpt-4.1-mini' | 'gpt-4.1-nano'
-  let developerPrompt: string
-  let useCustomApi: boolean
-  let useLegacyInterpreter: boolean
-  let hideOutput: boolean
-  let disableReasoningApi: boolean
+  let selectedTheme: string = $state()
+  let showToken: boolean = $state()
+  let selectedLanguage: string = $state()
+  let openaiApiKey: string = $state()
+  let openaiModel: 'gpt-4.1' | 'gpt-4.1-mini' | 'gpt-4.1-nano' = $state()
+  let developerPrompt: string = $state()
+  let useCustomApi: boolean = $state()
+  let useLegacyInterpreter: boolean = $state()
+  let hideOutput: boolean = $state()
+  let disableReasoningApi: boolean = $state()
 
   function changeTheme(event) {
     let theme = event.target.value
@@ -96,11 +96,11 @@
   <div class="divider"></div>
   <h2 class="text-2xl font-bold mb-4">{$t('general')}</h2>
   <div class="form-control">
-    <!-- svelte-ignore a11y-label-has-associated-control -->
+    <!-- svelte-ignore a11y_label_has_associated_control -->
     <label class="label">
       <span class="label-text">{$t('theme')}</span>
     </label>
-    <select class="select" value={selectedTheme} on:change={changeTheme}>
+    <select class="select" value={selectedTheme} onchange={changeTheme}>
       <option value="light">Light</option>
       <option value="dark">Dark</option>
       <option value="cupcake">Cupcake</option>
@@ -139,7 +139,7 @@
         <span class="label-text">{$t('show-token')}</span>
         <span class="label-text text-xs opacity-60">{$t('show-token-description')}</span>
       </div>
-      <input type="checkbox" class="toggle" bind:checked={showToken} on:change={toggleShowToken} />
+      <input type="checkbox" class="toggle" bind:checked={showToken} onchange={toggleShowToken} />
     </label>
   </div>
 
@@ -153,13 +153,13 @@
         type="checkbox"
         class="toggle"
         bind:checked={hideOutput}
-        on:change={toggleHideOutput}
+        onchange={toggleHideOutput}
       />
     </label>
   </div>
 
   <div class="form-control">
-    <!-- svelte-ignore a11y-label-has-associated-control -->
+    <!-- svelte-ignore a11y_label_has_associated_control -->
     <label class="label">
       <span class="label-text">{$t('language')}</span>
       <!-- tooltip that notes that the language may be machine translated -->
@@ -167,7 +167,7 @@
         <span class="material-symbols-outlined">info</span>
       </span>
     </label>
-    <select class="select" value={selectedLanguage} on:change={changeLanguage}>
+    <select class="select" value={selectedLanguage} onchange={changeLanguage}>
       <option value="en">English</option>
       <option value="es">Español</option>
       <option value="ja">日本語</option>
@@ -181,7 +181,7 @@
   <h2 class="text-2xl font-bold mb-4">{$t('openai')}</h2>
 
   <div class="form-control">
-    <!-- svelte-ignore a11y-label-has-associated-control -->
+    <!-- svelte-ignore a11y_label_has_associated_control -->
     <label class="label">
       <span class="label-text">{$t('openai-api-key')}</span>
     </label>
@@ -189,21 +189,21 @@
       type={showToken ? 'text' : 'password'}
       class="input w-full"
       value={openaiApiKey}
-      on:input={updateOpenAIKey}
+      oninput={updateOpenAIKey}
       disabled={$settingsStore.useCustomApi}
       placeholder={$t('enter-your-openai-api-key')}
     />
   </div>
 
   <div class="form-control">
-    <!-- svelte-ignore a11y-label-has-associated-control -->
+    <!-- svelte-ignore a11y_label_has_associated_control -->
     <label class="label">
       <span class="label-text">{$t('openai-model')}</span>
     </label>
     <select
       class="select"
       value={openaiModel}
-      on:change={updateOpenAIModel}
+      onchange={updateOpenAIModel}
       disabled={$settingsStore.useCustomApi}
     >
       <option value="gpt-4.1">GPT-4.1</option>
@@ -213,14 +213,14 @@
   </div>
 
   <div class="form-control">
-    <!-- svelte-ignore a11y-label-has-associated-control -->
+    <!-- svelte-ignore a11y_label_has_associated_control -->
     <label class="label">
       <span class="label-text">{$t('developer-prompt')}</span>
     </label>
     <textarea
       class="textarea w-full"
       value={developerPrompt}
-      on:input={updateDeveloperPrompt}
+      oninput={updateDeveloperPrompt}
       placeholder={$t('enter-your-custom-developer-prompt')}
       rows="4"
     ></textarea>
@@ -238,7 +238,7 @@
         type="checkbox"
         class="toggle"
         bind:checked={disableReasoningApi}
-        on:change={toggleDisableReasoningApi}
+        onchange={toggleDisableReasoningApi}
       />
     </label>
   </div>
@@ -254,7 +254,7 @@
           type="checkbox"
           class="toggle toggle-primary"
           bind:checked={useCustomApi}
-          on:change={toggleCustomApi}
+          onchange={toggleCustomApi}
         />
       </label>
     </div>
@@ -273,7 +273,7 @@
         type="checkbox"
         class="toggle"
         bind:checked={useLegacyInterpreter}
-        on:change={toggleLegacyInterpreter}
+        onchange={toggleLegacyInterpreter}
       />
     </label>
   </div>
@@ -285,14 +285,14 @@
     Author: <a
       href="https://github.com/ayayaQ"
       class="link link-primary"
-      on:click={openExternalLink}>ayayaQ</a
+      onclick={openExternalLink}>ayayaQ</a
     >
   </p>
   <p>
     Discord: <a
       href="https://discord.com/invite/mZp54sZ"
       class="link link-primary"
-      on:click={openExternalLink}>Bot Commander for Discord Official Server</a
+      onclick={openExternalLink}>Bot Commander for Discord Official Server</a
     >
   </p>
 </div>

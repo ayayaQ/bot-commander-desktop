@@ -1,14 +1,18 @@
 <script lang="ts">
-  import { createEventDispatcher, onDestroy, onMount } from 'svelte'
+  import { createEventDispatcher, onDestroy, onMount, untrack } from 'svelte'
   import { type BCFDInteractionCommand, createDefaultInteractionCommand } from '../types/types'
   import { t, type TranslationKey } from '../stores/localisation'
   import HeaderBar from './HeaderBar.svelte'
   import InteractionActionEditor from './InteractionActionEditor.svelte'
   import { bottomNavVisible } from '../stores/navigation'
 
-  export let mode: 'edit' | 'add' = 'add'
-  export let interaction: BCFDInteractionCommand | null = null
-  export let index: number | null = null
+  interface Props {
+    mode?: 'edit' | 'add';
+    interaction?: BCFDInteractionCommand | null;
+    index?: number | null;
+  }
+
+  let { mode = 'add', interaction = null, index = null }: Props = $props();
 
   const dispatch = createEventDispatcher()
 
@@ -20,22 +24,21 @@
     bottomNavVisible.show()
   })
 
-  // Create a working copy of the interaction
-  let editedInteraction: BCFDInteractionCommand = interaction
-    ? JSON.parse(JSON.stringify(interaction))
-    : createDefaultInteractionCommand()
+  // Create a working copy of the interaction (intentionally captures initial value)
+  let editedInteraction: BCFDInteractionCommand = $state(untrack(() =>
+    interaction
+      ? JSON.parse(JSON.stringify(interaction))
+      : createDefaultInteractionCommand()
+  ))
 
-  // Store original values for registration comparison
-  const originalName = interaction?.commandName
-  const originalDescription = interaction?.commandDescription
-  const originalOptions = interaction?.options ? JSON.stringify(interaction.options) : ''
+  // Store original values for registration comparison (intentionally captures initial values)
+  const originalName = untrack(() => interaction?.commandName)
+  const originalDescription = untrack(() => interaction?.commandDescription)
+  const originalOptions = untrack(() => interaction?.options ? JSON.stringify(interaction.options) : '')
 
   const nameRegex = /^[-_'\p{L}\p{N}\p{sc=Deva}\p{sc=Thai}]{1,32}$/u
 
-  let commandNameError: TranslationKey | '' = ''
-  let commandDescriptionError: TranslationKey | '' = ''
-  let optionErrors: Record<number, { nameError: TranslationKey | ''; descriptionError: TranslationKey | '' }> = {}
-  let actionErrors = false
+  let actionErrors = $state(false)
 
   function validateName(name: string): TranslationKey | '' {
     if (!name.trim()) {
@@ -71,25 +74,26 @@
     return duplicates
   }
 
-  $: commandNameError = validateName(editedInteraction.commandName)
-  $: commandDescriptionError = validateDescription(editedInteraction.commandDescription)
-  $: {
+  let commandNameError = $derived(validateName(editedInteraction.commandName))
+  let commandDescriptionError = $derived(validateDescription(editedInteraction.commandDescription))
+  let optionErrors = $derived.by(() => {
     const duplicates = getDuplicateOptionNames()
-    optionErrors = {}
+    const errors: Record<number, { nameError: TranslationKey | ''; descriptionError: TranslationKey | '' }> = {}
     editedInteraction.options.forEach((option, idx) => {
       const isDuplicate = duplicates.has(option.name)
-      optionErrors[idx] = {
+      errors[idx] = {
         nameError: isDuplicate ? 'duplicate-option-name' : validateName(option.name),
         descriptionError: validateDescription(option.description)
       }
     })
-  }
+    return errors
+  })
 
-  $: hasErrors =
-    commandNameError !== '' ||
+  let hasErrors =
+    $derived(commandNameError !== '' ||
     commandDescriptionError !== '' ||
     Object.values(optionErrors).some((e) => e.nameError !== '' || e.descriptionError !== '') ||
-    actionErrors
+    actionErrors)
 
   const optionTypes = [
     { value: 3, label: 'String' },
@@ -157,11 +161,11 @@
             ? $t('fix-errors-to-save')
             : $t(mode === 'edit' ? 'update-command' : 'add-command')}
         >
-          <button type="submit" disabled={hasErrors} class="btn btn-primary" on:click={handleSave}
+          <button type="submit" disabled={hasErrors} class="btn btn-primary" onclick={handleSave}
             ><span class="material-symbols-outlined">save</span></button
           >
         </span>
-        <button type="button" class="btn btn-secondary" on:click={handleCancel}
+        <button type="button" class="btn btn-secondary" onclick={handleCancel}
           ><span class="material-symbols-outlined">close</span></button
         >
       </div>
@@ -177,7 +181,7 @@
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="form-control">
-          <!-- svelte-ignore a11y-label-has-associated-control -->
+          <!-- svelte-ignore a11y_label_has_associated_control -->
           <label class="label">
             <span class="label-text">{$t('command-name')}</span>
           </label>
@@ -195,12 +199,12 @@
             />
           </div>
           {#if commandNameError}
-            <!-- svelte-ignore a11y-label-has-associated-control -->
+            <!-- svelte-ignore a11y_label_has_associated_control -->
             <label class="label">
               <span class="label-text-alt text-error">{commandNameError}</span>
             </label>
           {:else}
-            <!-- svelte-ignore a11y-label-has-associated-control -->
+            <!-- svelte-ignore a11y_label_has_associated_control -->
             <label class="label">
               <span class="label-text-alt text-base-content/50">
                 {$t('command-name-hint')}
@@ -210,7 +214,7 @@
         </div>
 
         <div class="form-control">
-          <!-- svelte-ignore a11y-label-has-associated-control -->
+          <!-- svelte-ignore a11y_label_has_associated_control -->
           <label class="label">
             <span class="label-text">{$t('command-description')}</span>
           </label>
@@ -222,7 +226,7 @@
             placeholder="A friendly greeting command"
           />
           {#if commandDescriptionError}
-            <!-- svelte-ignore a11y-label-has-associated-control -->
+            <!-- svelte-ignore a11y_label_has_associated_control -->
             <label class="label">
               <span class="label-text-alt text-error">{commandDescriptionError}</span>
             </label>
@@ -237,7 +241,7 @@
     <div class="card-body">
       <div class="flex justify-between items-center">
         <h3 class="card-title text-lg">{$t('command-options')}</h3>
-        <button class="btn btn-sm btn-outline" on:click={addOption} type="button">
+        <button class="btn btn-sm btn-outline" onclick={addOption} type="button">
           <span class="material-symbols-outlined text-sm">add</span>
           {$t('add-option')}
         </button>
@@ -253,7 +257,7 @@
                 <span class="badge badge-neutral">Option {idx + 1}</span>
                 <button
                   class="btn btn-sm btn-circle btn-primary"
-                  on:click={() => removeOption(idx)}
+                  onclick={() => removeOption(idx)}
                 >
                   <span class="material-symbols-outlined">close</span>
                 </button>
@@ -261,7 +265,7 @@
 
               <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div class="form-control">
-                  <!-- svelte-ignore a11y-label-has-associated-control -->
+                  <!-- svelte-ignore a11y_label_has_associated_control -->
                   <label class="label py-1">
                     <span class="label-text text-sm">{$t('option-name')}</span>
                   </label>
@@ -273,7 +277,7 @@
                     placeholder="username"
                   />
                   {#if optionErrors[idx]?.nameError}
-                    <!-- svelte-ignore a11y-label-has-associated-control -->
+                    <!-- svelte-ignore a11y_label_has_associated_control -->
                     <label class="label py-0">
                       <span class="label-text-alt text-error text-xs"
                         >{optionErrors[idx]?.nameError}</span
@@ -283,7 +287,7 @@
                 </div>
 
                 <div class="form-control">
-                  <!-- svelte-ignore a11y-label-has-associated-control -->
+                  <!-- svelte-ignore a11y_label_has_associated_control -->
                   <label class="label py-1">
                     <span class="label-text text-sm">{$t('option-type')}</span>
                   </label>
@@ -295,7 +299,7 @@
                 </div>
 
                 <div class="form-control">
-                  <!-- svelte-ignore a11y-label-has-associated-control -->
+                  <!-- svelte-ignore a11y_label_has_associated_control -->
                   <label class="label py-1">
                     <span class="label-text text-sm">{$t('option-required')}</span>
                   </label>
@@ -310,7 +314,7 @@
                 </div>
 
                 <div class="form-control md:col-span-3">
-                  <!-- svelte-ignore a11y-label-has-associated-control -->
+                  <!-- svelte-ignore a11y_label_has_associated_control -->
                   <label class="label py-1">
                     <span class="label-text text-sm">{$t('option-description')}</span>
                   </label>
@@ -322,7 +326,7 @@
                     placeholder="The user to greet"
                   />
                   {#if optionErrors[idx]?.descriptionError}
-                    <!-- svelte-ignore a11y-label-has-associated-control -->
+                    <!-- svelte-ignore a11y_label_has_associated_control -->
                     <label class="label py-0">
                       <span class="label-text-alt text-error text-xs"
                         >{optionErrors[idx]?.descriptionError}</span
@@ -345,7 +349,7 @@
       <p class="text-base-content/50 text-sm mb-4">{$t('root-action-hint')}</p>
 
       <InteractionActionEditor
-        action={editedInteraction.rootAction}
+        bind:action={editedInteraction.rootAction}
         showEphemeral={true}
         showDefer={true}
         bind:errors={actionErrors}

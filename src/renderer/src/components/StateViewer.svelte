@@ -5,9 +5,9 @@
   import CodeEditor from './CodeEditor.svelte'
 
   // Startup JS logic
-  let startupJs = ''
-  let startupJsSaved = true
-  let startupJsLoading = false
+  let startupJs = $state('')
+  let startupJsSaved = $state(true)
+  let startupJsLoading = $state(false)
 
   async function loadStartupJs() {
     startupJsLoading = true
@@ -46,19 +46,19 @@
     }
   }
 
-  let botState: Record<string, any> = {}
-  let editingKey: string | null = null
-  let editValue: string = ''
-  let showToast = false
-  let toastMessage = ''
-  let codeToRun = ''
-  let codeOutput = ''
-  let deleteConfirmKey: string | null = null
+  let botState: Record<string, any> = $state({})
+  let editingKey: string | null = $state(null)
+  let editValue: string = $state('')
+  let showToast = $state(false)
+  let toastMessage = $state('')
+  let codeToRun = $state('')
+  let codeOutput = $state('')
+  let deleteConfirmKey: string | null = $state(null)
 
   // JSON Editor modal state
-  let jsonEditorKey: string | null = null
-  let jsonEditorValue: string = ''
-  let jsonEditorError: string | null = null
+  let jsonEditorKey: string | null = $state(null)
+  let jsonEditorValue: string = $state('')
+  let jsonEditorError: string | null = $state(null)
 
   function updateBotState() {
     ;(window as any).electron.ipcRenderer.invoke('getBotState').then((state) => {
@@ -245,7 +245,7 @@
       <button
         type="button"
         class="btn btn-primary"
-        on:click={() => {
+        onclick={() => {
           saveStateToDisk()
         }}><span class="material-symbols-outlined">download</span></button
       >
@@ -254,7 +254,7 @@
       <button
         type="button"
         class="btn btn-primary"
-        on:click={() => {
+        onclick={() => {
           loadStateFromDisk()
         }}><span class="material-symbols-outlined">upload</span></button
       >
@@ -270,7 +270,7 @@
       <div class="flex gap-2">
         <button
           class="btn btn-primary"
-          on:click={saveStartupJs}
+          onclick={saveStartupJs}
           disabled={startupJsSaved || startupJsLoading}
         >
           <span class="material-symbols-outlined">save</span>{$t('save')}
@@ -309,16 +309,16 @@
               <td class="font-mono">{key}</td>
               <td class="font-mono">
                 {#if editingKey === key}
-                  <!-- svelte-ignore a11y-autofocus -->
+                  <!-- svelte-ignore a11y_autofocus -->
                   <input
                     bind:value={editValue}
-                    on:blur={saveEdit}
-                    on:keydown={(e) => e.key === 'Enter' && saveEdit()}
+                    onblur={saveEdit}
+                    onkeydown={(e) => e.key === 'Enter' && saveEdit()}
                     class="input input-sm w-full"
                     autofocus
                   />
                 {:else}
-                  <span role="button" tabindex="0" on:dblclick={() => startEditing(key, value)}>
+                  <span role="button" tabindex="0" ondblclick={() => startEditing(key, value)}>
                     {JSON.stringify(value)}
                   </span>
                 {/if}
@@ -327,7 +327,7 @@
                 <button
                   type="button"
                   class="btn btn-ghost btn-sm"
-                  on:click={() => openJsonEditor(key, value)}
+                  onclick={() => openJsonEditor(key, value)}
                   title={$t('edit')}
                 >
                   <span class="material-symbols-outlined">edit</span>
@@ -335,7 +335,7 @@
                 <button
                   type="button"
                   class="btn btn-ghost btn-sm text-error"
-                  on:click={() => promptDeleteStateKey(key)}
+                  onclick={() => promptDeleteStateKey(key)}
                   title={$t('delete')}
                 >
                   <span class="material-symbols-outlined">delete</span>
@@ -357,10 +357,10 @@
     <div class="flex flex-row justify-between items-center">
       <h3 class="text-xl font-bold mb-2">{$t('run-code')}</h3>
       <div class="flex gap-2">
-        <button class="btn btn-primary mb-2 grow-0" on:click={runCode}
+        <button class="btn btn-primary mb-2 grow-0" onclick={runCode}
           ><span class="material-symbols-outlined">play_arrow</span>{$t('run')}</button
         >
-        <button class="btn btn-secondary" on:click={restartJsEngine}>
+        <button class="btn btn-secondary" onclick={restartJsEngine}>
           <span class="material-symbols-outlined">restart_alt</span>{$t('restart-js-engine')}
         </button>
       </div>
@@ -403,12 +403,12 @@
         {$t('confirm-delete-variable')} <code class="font-mono bg-base-300 px-1 rounded">{deleteConfirmKey}</code>?
       </p>
       <div class="modal-action">
-        <button class="btn" on:click={cancelDelete}>{$t('cancel')}</button>
-        <button class="btn btn-error" on:click={confirmDeleteStateKey}>{$t('delete')}</button>
+        <button class="btn" onclick={cancelDelete}>{$t('cancel')}</button>
+        <button class="btn btn-error" onclick={confirmDeleteStateKey}>{$t('delete')}</button>
       </div>
     </div>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal-backdrop" on:click={cancelDelete} on:keydown={(e) => e.key === 'Escape' && cancelDelete()}></div>
+    <div class="modal-backdrop" onclick={cancelDelete} onkeydown={(e) => e.key === 'Escape' && cancelDelete()}></div>
   </div>
 {/if}
 
@@ -434,11 +434,11 @@
         </div>
       {/if}
       <div class="modal-action">
-        <button class="btn" on:click={closeJsonEditor}>{$t('cancel')}</button>
-        <button class="btn btn-primary" on:click={saveJsonEditor}>{$t('save')}</button>
+        <button class="btn" onclick={closeJsonEditor}>{$t('cancel')}</button>
+        <button class="btn btn-primary" onclick={saveJsonEditor}>{$t('save')}</button>
       </div>
     </div>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal-backdrop" on:click={closeJsonEditor} on:keydown={(e) => e.key === 'Escape' && closeJsonEditor()}></div>
+    <div class="modal-backdrop" onclick={closeJsonEditor} onkeydown={(e) => e.key === 'Escape' && closeJsonEditor()}></div>
   </div>
 {/if}

@@ -3,11 +3,15 @@
   import { t, type TranslationKey } from '../stores/localisation'
   import InteractionActionEditor from './InteractionActionEditor.svelte'
 
-  export let button: BCFDInteractionButton
-  export let onDelete: () => void
-  export let nestingDepth = 0 // Track nesting level for nested buttons
+  interface Props {
+    button: BCFDInteractionButton;
+    onDelete: () => void;
+    nestingDepth?: number; // Track nesting level for nested buttons
+  }
 
-  let isExpanded = false
+  let { button = $bindable(), onDelete, nestingDepth = 0 }: Props = $props();
+
+  let isExpanded = $state(false)
 
   const buttonStyles: Array<{ value: number; label: TranslationKey; class: string }> = [
     { value: 1, label: 'style-primary', class: 'btn-primary' },
@@ -23,15 +27,15 @@
 </script>
 
 <div
-  class="card bg-base-200 outline outline-primary outline-1"
+  class="card bg-base-200 outline-primary outline-1"
   style="margin-left: {nestingDepth * 16}px"
 >
   <!-- Button Header (always visible) -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="w-full p-4 flex items-center justify-between hover:bg-base-300 transition-colors cursor-pointer"
-    on:click={() => (isExpanded = !isExpanded)}
-    on:keydown={(e) => e.key === 'Enter' && (isExpanded = !isExpanded)}
+    onclick={() => (isExpanded = !isExpanded)}
+    onkeydown={(e) => e.key === 'Enter' && (isExpanded = !isExpanded)}
     role="button"
     tabindex="0"
   >
@@ -48,7 +52,7 @@
     </div>
     <button
       class="btn btn-sm btn-circle btn-primary"
-      on:click|stopPropagation={onDelete}
+      onclick={(e) => { e.stopPropagation(); onDelete() }}
       type="button"
     >
       <span class="material-symbols-outlined">close</span>
@@ -61,7 +65,7 @@
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
         <!-- Label -->
         <div class="form-control">
-          <!-- svelte-ignore a11y-label-has-associated-control -->
+          <!-- svelte-ignore a11y_label_has_associated_control -->
           <label class="label">
             <span class="label-text">{$t('button-label')}</span>
           </label>
@@ -75,7 +79,7 @@
 
         <!-- Style -->
         <div class="form-control">
-          <!-- svelte-ignore a11y-label-has-associated-control -->
+          <!-- svelte-ignore a11y_label_has_associated_control -->
           <label class="label">
             <span class="label-text">{$t('button-style')}</span>
           </label>
@@ -88,7 +92,7 @@
 
         <!-- Custom ID -->
         <div class="form-control">
-          <!-- svelte-ignore a11y-label-has-associated-control -->
+          <!-- svelte-ignore a11y_label_has_associated_control -->
           <label class="label">
             <span class="label-text">{$t('button-custom-id')}</span>
           </label>
@@ -102,7 +106,7 @@
 
         <!-- Emoji -->
         <div class="form-control">
-          <!-- svelte-ignore a11y-label-has-associated-control -->
+          <!-- svelte-ignore a11y_label_has_associated_control -->
           <label class="label">
             <span class="label-text">{$t('button-emoji')}</span>
           </label>
@@ -117,7 +121,7 @@
         <!-- URL (only for Link style) -->
         {#if button.style === 5}
           <div class="form-control md:col-span-2">
-            <!-- svelte-ignore a11y-label-has-associated-control -->
+            <!-- svelte-ignore a11y_label_has_associated_control -->
             <label class="label">
               <span class="label-text">{$t('button-url')}</span>
             </label>
@@ -143,7 +147,7 @@
       {#if button.style !== 5}
         <div class="divider">{$t('button-action')}</div>
         <InteractionActionEditor
-          action={button.action}
+          bind:action={button.action}
           showEphemeral={true}
           showDefer={true}
           showButtons={true}

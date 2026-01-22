@@ -10,14 +10,14 @@
   import { t } from '../stores/localisation'
   import { apiAuthStore } from '../stores/apiAuth'
 
-  let commands: BCFDCommand[] = []
-  let isEditing = false
-  let editingCommand: BCFDCommand | null = null
-  let editingIndex: number | null = null
-  let searchQuery = ''
-  let showRepository = false
-  let shareDialog: HTMLDialogElement
-  let commandToShare: BCFDCommand | null = null
+  let commands: BCFDCommand[] = $state([])
+  let isEditing = $state(false)
+  let editingCommand: BCFDCommand | null = $state(null)
+  let editingIndex: number | null = $state(null)
+  let searchQuery = $state('')
+  let showRepository = $state(false)
+  let shareDialog: HTMLDialogElement = $state()
+  let commandToShare: BCFDCommand | null = $state(null)
 
   onMount(async () => {
     await loadCommands()
@@ -29,7 +29,7 @@
   }
 
   async function saveCommands() {
-    await (window as any).electron.ipcRenderer.invoke('save-commands', { bcfdCommands: commands })
+    await (window as any).electron.ipcRenderer.invoke('save-commands', { bcfdCommands: $state.snapshot(commands) })
   }
 
   function addCommand() {
@@ -93,11 +93,11 @@
     showRepository = false
   }
 
-  $: filteredCommands = commands.filter(
+  let filteredCommands = $derived(commands.filter(
     (cmd) =>
       cmd.command.toLowerCase().includes(searchQuery.toLowerCase()) ||
       cmd.commandDescription.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  ))
 </script>
 
 <div class="">
@@ -123,21 +123,21 @@
           <h2 class="text-2xl font-bold">{$t('commands')}</h2>
           <div class="flex gap-2">
             <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('browse-repository') || 'Browse Repository'}>
-              <button class="btn btn-secondary" on:click={() => showRepository = true}>
+              <button class="btn btn-secondary" onclick={() => showRepository = true}>
                 <span class="material-symbols-outlined">explore</span>
               </button>
             </span>
             <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('export')}>
-              <button class="btn btn-primary" on:click={exportCommands}>
+              <button class="btn btn-primary" onclick={exportCommands}>
                 <span class="material-symbols-outlined">download</span>
               </button>
             </span>
             <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('import')}>
-              <button class="btn btn-primary" on:click={importCommands}>
+              <button class="btn btn-primary" onclick={importCommands}>
                 <span class="material-symbols-outlined">upload</span>
               </button>
             </span>
-            <button class="btn btn-primary" on:click={addCommand}>
+            <button class="btn btn-primary" onclick={addCommand}>
               <span class="material-symbols-outlined">add</span>{$t('add-command')}
             </button>
           </div>

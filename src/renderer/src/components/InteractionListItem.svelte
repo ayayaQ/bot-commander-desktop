@@ -3,14 +3,24 @@
   import { t } from '../stores/localisation'
   import { connectionStore } from '../stores/connection'
 
-  export let interaction: BCFDInteractionCommand
-  export let editInteraction: (interaction: BCFDInteractionCommand) => void
-  export let deleteInteraction: (interaction: BCFDInteractionCommand) => void
-  export let registerCommand: (interaction: BCFDInteractionCommand) => void
-  export let unregisterCommand: (interaction: BCFDInteractionCommand) => void
+  interface Props {
+    interaction: BCFDInteractionCommand;
+    editInteraction: (interaction: BCFDInteractionCommand) => void;
+    deleteInteraction: (interaction: BCFDInteractionCommand) => void;
+    registerCommand: (interaction: BCFDInteractionCommand) => void;
+    unregisterCommand: (interaction: BCFDInteractionCommand) => void;
+  }
 
-  let showDeleteDialog = false
-  let isRegistering = false
+  let {
+    interaction,
+    editInteraction,
+    deleteInteraction,
+    registerCommand,
+    unregisterCommand
+  }: Props = $props();
+
+  let showDeleteDialog = $state(false)
+  let isRegistering = $state(false)
 
   function handleDelete(event: MouseEvent) {
     if (event.shiftKey) {
@@ -75,7 +85,7 @@
 
       <div class="flex gap-2">
         <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('edit')}>
-          <button class="btn btn-sm btn-ghost" on:click={() => editInteraction(interaction)}>
+          <button class="btn btn-sm btn-ghost" onclick={() => editInteraction(interaction)}>
             <span class="material-symbols-outlined">edit</span>
           </button>
         </span>
@@ -85,7 +95,7 @@
         >
           <button
             class="btn btn-sm btn-ghost"
-            on:click={handleRegister}
+            onclick={handleRegister}
             disabled={isRegistering || !$connectionStore.connected}
           >
             {#if isRegistering}
@@ -98,7 +108,7 @@
           </button>
         </span>
         <span class="tooltip tooltip-error tooltip-bottom" data-tip={$t('delete')}>
-          <button class="btn btn-sm btn-ghost text-error" on:click={handleDelete}>
+          <button class="btn btn-sm btn-ghost text-error" onclick={handleDelete}>
             <span class="material-symbols-outlined">delete</span>
           </button>
         </span>
@@ -116,12 +126,12 @@
         {$t('delete-interaction-confirm')} "/{interaction.commandName}"?
       </p>
       <div class="modal-action">
-        <button class="btn" on:click={() => (showDeleteDialog = false)}>{$t('cancel')}</button>
-        <button class="btn btn-error" on:click={confirmDelete}>{$t('delete')}</button>
+        <button class="btn" onclick={() => (showDeleteDialog = false)}>{$t('cancel')}</button>
+        <button class="btn btn-error" onclick={confirmDelete}>{$t('delete')}</button>
       </div>
     </div>
     <form method="dialog" class="modal-backdrop">
-      <button on:click={() => (showDeleteDialog = false)}>close</button>
+      <button onclick={() => (showDeleteDialog = false)}>close</button>
     </form>
   </dialog>
 {/if}

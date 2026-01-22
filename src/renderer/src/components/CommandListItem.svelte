@@ -5,15 +5,25 @@
   import Dialog from './Dialog.svelte'
   import CommandOutputPreview from './CommandOutputPreview.svelte'
 
-  export let command: BCFDCommand
-  export let editCommand: (command: BCFDCommand) => void
-  export let deleteCommand: (command: BCFDCommand) => void
-  export let shareCommand: ((command: BCFDCommand) => void) | undefined = undefined
+  interface Props {
+    command: BCFDCommand;
+    editCommand: (command: BCFDCommand) => void;
+    deleteCommand: (command: BCFDCommand) => void;
+    shareCommand?: ((command: BCFDCommand) => void) | undefined;
+  }
 
-  let dialog: HTMLDialogElement
+  let {
+    command,
+    editCommand,
+    deleteCommand,
+    shareCommand = undefined
+  }: Props = $props();
+
+  let dialog: HTMLDialogElement = $state()
 
   function exportCommand() {
-    const jsonCommand = JSON.stringify(command, null, 2)
+    let { id, ...commandWithoutId } = command
+    const jsonCommand = JSON.stringify(commandWithoutId, null, 2)
     navigator.clipboard
       .writeText(jsonCommand)
       .then(() => {
@@ -89,26 +99,26 @@
       </div>
       <div class="space-x-2 shrink-0">
         <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('edit')}>
-          <button class="btn btn-square btn-ghost" on:click={() => editCommand(command)}
+          <button class="btn btn-square btn-ghost" onclick={() => editCommand(command)}
             ><span class="material-symbols-outlined">edit</span></button
           >
         </span>
         {#if shareCommand}
           <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('share') || 'Share'}>
-            <button class="btn btn-square btn-ghost" on:click={() => shareCommand(command)}
+            <button class="btn btn-square btn-ghost" onclick={() => shareCommand(command)}
               ><span class="material-symbols-outlined">share</span></button
             >
           </span>
         {/if}
         <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('export')}>
-          <button class="btn btn-square btn-ghost" on:click={exportCommand}
+          <button class="btn btn-square btn-ghost" onclick={exportCommand}
             ><span class="material-symbols-outlined">download</span></button
           >
         </span>
         <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('delete')}>
           <button
             class="btn btn-square btn-ghost"
-            on:click={(e) => {
+            onclick={(e) => {
               if (e.shiftKey) {
                 deleteCommand(command)
               } else {
@@ -118,14 +128,17 @@
           >
         </span>
 
-        <Dialog bind:dialog on:close={() => console.log('closed')}>
+        <Dialog bind:dialog onclose={() => console.log('closed')}>
           <p>
             {$t('are-you-sure-you-want-to-delete-the-command')}
             {$t('open-quote')}{command.command}{$t('close-quote')}
           </p>
+          <p class="text-xs text-base-content/60 mt-2">
+            {$t('tip-shift-click-delete')}
+          </p>
           <div class="modal-action">
             <form method="dialog">
-              <button class="btn btn-sm btn-error" on:click={() => deleteCommand(command)}
+              <button class="btn btn-sm btn-error" onclick={() => deleteCommand(command)}
                 >{$t('delete')}</button
               >
               <button class="btn btn-sm btn-ghost">{$t('cancel')}</button>

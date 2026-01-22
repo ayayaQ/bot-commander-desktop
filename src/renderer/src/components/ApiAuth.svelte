@@ -2,14 +2,14 @@
   import { apiAuthStore } from '../stores/apiAuth'
   import { t } from '../stores/localisation'
 
-  let username = ''
-  let password = ''
-  let mode: 'login' | 'register' = 'login'
+  let username = $state('')
+  let password = $state('')
+  let mode: 'login' | 'register' = $state('login')
 
-  $: isAuthenticated = $apiAuthStore.authenticated
-  $: isLoading = $apiAuthStore.isLoading
-  $: error = $apiAuthStore.error
-  $: storedUsername = $apiAuthStore.username
+  let isAuthenticated = $derived($apiAuthStore.authenticated)
+  let isLoading = $derived($apiAuthStore.isLoading)
+  let error = $derived($apiAuthStore.error)
+  let storedUsername = $derived($apiAuthStore.username)
 
   async function handleSubmit() {
     if (!username.trim() || !password.trim()) return
@@ -50,7 +50,7 @@
           <span class="font-medium">{storedUsername}</span>
         </div>
       </div>
-      <button class="btn btn-ghost btn-sm" on:click={handleLogout}>
+      <button class="btn btn-ghost btn-sm" onclick={handleLogout}>
         <span class="material-symbols-outlined">logout</span>
         {$t('sign-out')}
       </button>
@@ -65,7 +65,7 @@
           class="input flex-1"
           class:border-error={error}
           bind:value={username}
-          on:keydown={handleKeydown}
+          onkeydown={handleKeydown}
           disabled={isLoading}
           autocomplete="username"
         />
@@ -78,13 +78,13 @@
           class="input flex-1"
           class:border-error={error}
           bind:value={password}
-          on:keydown={handleKeydown}
+          onkeydown={handleKeydown}
           disabled={isLoading}
           autocomplete={mode === 'register' ? 'new-password' : 'current-password'}
         />
         <button
           class="btn btn-primary"
-          on:click={handleSubmit}
+          onclick={handleSubmit}
           disabled={isLoading || !username.trim() || !password.trim()}
         >
           {#if isLoading}
@@ -103,7 +103,7 @@
       {/if}
 
       <div class="text-sm">
-        <button class="link link-primary" on:click={toggleMode} disabled={isLoading}>
+        <button class="link link-primary" onclick={toggleMode} disabled={isLoading}>
           {mode === 'login' ? $t('need-account') : $t('have-account')}
         </button>
       </div>

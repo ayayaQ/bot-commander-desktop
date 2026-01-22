@@ -3,7 +3,11 @@
   import type { CommandDiff, DiffChange } from '../stores/aiChat'
   import { t } from '../stores/localisation'
 
-  export let diff: CommandDiff
+  interface Props {
+    diff: CommandDiff;
+  }
+
+  let { diff }: Props = $props();
 
   const dispatch = createEventDispatcher<{
     accept: CommandDiff
@@ -96,11 +100,11 @@
     </div>
 
     <div class="card-actions justify-end mt-4 pt-3 border-t border-base-content/10">
-      <button class="btn btn-ghost btn-sm" on:click={() => dispatch('reject')}>
+      <button class="btn btn-ghost btn-sm" onclick={() => dispatch('reject')}>
         <span class="material-symbols-outlined">close</span>
         {$t('reject')}
       </button>
-      <button class="btn btn-success btn-sm" on:click={() => dispatch('accept', diff)}>
+      <button class="btn btn-success btn-sm" onclick={() => dispatch('accept', diff)}>
         <span class="material-symbols-outlined">check</span>
         {$t('accept-changes')}
       </button>

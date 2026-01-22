@@ -2,7 +2,11 @@
   import type { BCFDCommand } from '../types/types'
   import { highlightBCFD } from '../utils/highlight'
 
-  export let command: BCFDCommand
+  interface Props {
+    command: BCFDCommand;
+  }
+
+  let { command }: Props = $props();
 
   const PREVIEW_LIMIT = 140
 
@@ -61,7 +65,7 @@
     return previews
   }
 
-  $: previewItems = buildPreview(command)
+  let previewItems = $derived(buildPreview(command))
 </script>
 
 <div class="border-t border-base-300 pt-2">

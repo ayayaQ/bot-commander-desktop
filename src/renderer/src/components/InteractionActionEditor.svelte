@@ -5,12 +5,6 @@
   import CodeEditor from './CodeEditor.svelte'
   import InteractionButtonEditor from './InteractionButtonEditor.svelte'
 
-  export let action: BCFDInteractionAction
-  export let showEphemeral = true
-  export let showDefer = true
-  export let showButtons = true
-  export let nestingDepth = 0 // Track nesting level to prevent infinite nesting
-  export let title = ''
 
   const MAX_NESTING_DEPTH = 3 // Maximum levels of nested buttons
 
@@ -28,18 +22,8 @@
     { id: 'roleAssigner', name: 'role-assigner', field: 'isRoleAssigner' }
   ]
 
-  let activeActions: string[] = []
-  let dropdownOpen = false
+  let dropdownOpen = $state(false)
 
-  // Initialize active actions based on the action object
-  $: {
-    activeActions = []
-    if (action.sendChannelMessage) activeActions.push('sendMessage')
-    if (action.sendPrivateMessage) activeActions.push('sendPrivateMessage')
-    if (action.sendChannelEmbed) activeActions.push('sendChannelEmbed')
-    if (action.sendPrivateEmbed) activeActions.push('sendPrivateEmbed')
-    if (action.isRoleAssigner) activeActions.push('roleAssigner')
-  }
 
   function toggleAction(actionId: string) {
     const actionType = actionTypes.find((a) => a.id === actionId)
@@ -74,17 +58,6 @@
     action.buttons = action.buttons.filter((_, i) => i !== idx)
   }
 
-  // Check if we can add more nested buttons
-  $: canAddNestedButtons =
-    showButtons && nestingDepth < MAX_NESTING_DEPTH && (action.buttons?.length ?? 0) < 5
-
-  // Validation errors
-  let channelMessageError: TranslationKey | '' = ''
-  let privateMessageError: TranslationKey | '' = ''
-  let channelEmbedError: TranslationKey | '' = ''
-  let privateEmbedError: TranslationKey | '' = ''
-  let roleToAssignError: TranslationKey | '' = ''
-  let hasErrors = false
 
   function isEmbedValid(embed: any): boolean {
     if (!embed) return false
@@ -98,18 +71,59 @@
     )
   }
 
-  $: channelMessageError =
-    action.sendChannelMessage && !action.channelMessage?.trim() ? 'message-is-required' : ''
-  $: privateMessageError =
-    action.sendPrivateMessage && !action.privateMessage?.trim() ? 'message-is-required' : ''
-  $: channelEmbedError =
-    action.sendChannelEmbed && !isEmbedValid(action.channelEmbed) ? 'embed-field-required' : ''
-  $: privateEmbedError =
-    action.sendPrivateEmbed && !isEmbedValid(action.privateEmbed) ? 'embed-field-required' : ''
-  $: roleToAssignError =
-    action.isRoleAssigner && !action.roleToAssign?.trim() ? 'role-id-is-required' : ''
 
-  $: hasErrors =
+
+  interface Props {
+    action: BCFDInteractionAction;
+    showEphemeral?: boolean;
+    showDefer?: boolean;
+    showButtons?: boolean;
+    nestingDepth?: number; // Track nesting level to prevent infinite nesting
+    title?: string;
+    errors?: boolean;
+  }
+
+  let {
+    action = $bindable(),
+    showEphemeral = true,
+    showDefer = true,
+    showButtons = true,
+    nestingDepth = 0,
+    title = '',
+    errors = $bindable(false)
+  }: Props = $props();
+  // Derive active actions from the action object
+  let activeActions = $derived.by(() => {
+    const actions: string[] = []
+    if (action.sendChannelMessage) actions.push('sendMessage')
+    if (action.sendPrivateMessage) actions.push('sendPrivateMessage')
+    if (action.sendChannelEmbed) actions.push('sendChannelEmbed')
+    if (action.sendPrivateEmbed) actions.push('sendPrivateEmbed')
+    if (action.isRoleAssigner) actions.push('roleAssigner')
+    return actions
+  })
+
+  // Check if we can add more nested buttons
+  let canAddNestedButtons =
+    $derived(showButtons && nestingDepth < MAX_NESTING_DEPTH && (action.buttons?.length ?? 0) < 5)
+
+  // Validation errors (derived from action state)
+  let channelMessageError: TranslationKey | '' = $derived(
+    action.sendChannelMessage && !action.channelMessage?.trim() ? 'message-is-required' : ''
+  )
+  let privateMessageError: TranslationKey | '' = $derived(
+    action.sendPrivateMessage && !action.privateMessage?.trim() ? 'message-is-required' : ''
+  )
+  let channelEmbedError: TranslationKey | '' = $derived(
+    action.sendChannelEmbed && !isEmbedValid(action.channelEmbed) ? 'embed-field-required' : ''
+  )
+  let privateEmbedError: TranslationKey | '' = $derived(
+    action.sendPrivateEmbed && !isEmbedValid(action.privateEmbed) ? 'embed-field-required' : ''
+  )
+  let roleToAssignError: TranslationKey | '' = $derived(
+    action.isRoleAssigner && !action.roleToAssign?.trim() ? 'role-id-is-required' : ''
+  )
+  let hasErrors = $derived(
     channelMessageError !== '' ||
     privateMessageError !== '' ||
     channelEmbedError !== '' ||
@@ -120,11 +134,14 @@
       !action.sendChannelEmbed &&
       !action.sendPrivateEmbed &&
       !action.isRoleAssigner)
+  )
 
-  export let errors = false
-  $: if (errors !== hasErrors) {
-    errors = hasErrors
-  }
+  // Sync errors to parent via bindable prop
+  $effect(() => {
+    if (errors !== hasErrors) {
+      errors = hasErrors
+    }
+  })
 </script>
 
 <div class="space-y-4">
@@ -154,7 +171,7 @@
   <div class="dropdown" class:dropdown-open={dropdownOpen}>
     <button
       class="btn btn-sm btn-outline"
-      on:click={() => (dropdownOpen = !dropdownOpen)}
+      onclick={() => (dropdownOpen = !dropdownOpen)}
       type="button"
     >
       <span class="material-symbols-outlined text-sm">add</span>
@@ -164,7 +181,7 @@
       <ul class="dropdown-content z-10 menu p-2 shadow bg-base-200 rounded-box w-52">
         {#each getAvailableActions() as actionType}
           <li>
-            <button on:click={() => toggleAction(actionType.id)} type="button">
+            <button onclick={() => toggleAction(actionType.id)} type="button">
               {$t(actionType.name)}
             </button>
           </li>
@@ -188,7 +205,7 @@
           <span class="font-medium">{$t('send-channel-message')}</span>
           <button
             class="btn btn-sm btn-circle btn-primary"
-            on:click={() => removeAction('sendMessage')}
+            onclick={() => removeAction('sendMessage')}
           >
             <span class="material-symbols-outlined">close</span>
           </button>
@@ -208,7 +225,7 @@
           <span class="font-medium">{$t('send-private-message')}</span>
           <button
             class="btn btn-sm btn-circle btn-primary"
-            on:click={() => removeAction('sendPrivateMessage')}
+            onclick={() => removeAction('sendPrivateMessage')}
           >
             <span class="material-symbols-outlined">close</span>
           </button>
@@ -228,7 +245,7 @@
           <span class="font-medium">{$t('send-channel-embed')}</span>
           <button
             class="btn btn-sm btn-circle btn-primary"
-            on:click={() => removeAction('sendChannelEmbed')}
+            onclick={() => removeAction('sendChannelEmbed')}
           >
             <span class="material-symbols-outlined">close</span>
           </button>
@@ -236,17 +253,17 @@
         <div class={channelEmbedError ? 'ring-2 ring-error rounded p-4 -m-4' : ''}>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <!-- svelte-ignore a11y_label_has_associated_control -->
               <label class="label"><span class="label-text">{$t('embed-title')}</span></label>
               <CodeEditor bind:value={action.channelEmbed.title} minHeight="40px" mode="bcfd" />
             </div>
             <div>
-              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <!-- svelte-ignore a11y_label_has_associated_control -->
               <label class="label"><span class="label-text">{$t('embed-color')}</span></label>
               <CodeEditor bind:value={action.channelEmbed.hexColor} minHeight="40px" mode="bcfd" />
             </div>
             <div class="md:col-span-2">
-              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <!-- svelte-ignore a11y_label_has_associated_control -->
               <label class="label"><span class="label-text">{$t('embed-description')}</span></label>
               <CodeEditor
                 bind:value={action.channelEmbed.description}
@@ -255,12 +272,12 @@
               />
             </div>
             <div>
-              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <!-- svelte-ignore a11y_label_has_associated_control -->
               <label class="label"><span class="label-text">{$t('embed-image')}</span></label>
               <CodeEditor bind:value={action.channelEmbed.imageURL} minHeight="40px" mode="bcfd" />
             </div>
             <div>
-              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <!-- svelte-ignore a11y_label_has_associated_control -->
               <label class="label"><span class="label-text">{$t('embed-thumbnail')}</span></label>
               <CodeEditor
                 bind:value={action.channelEmbed.thumbnailURL}
@@ -269,7 +286,7 @@
               />
             </div>
             <div class="md:col-span-2">
-              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <!-- svelte-ignore a11y_label_has_associated_control -->
               <label class="label"><span class="label-text">{$t('embed-footer')}</span></label>
               <CodeEditor bind:value={action.channelEmbed.footer} minHeight="40px" mode="bcfd" />
             </div>
@@ -287,7 +304,7 @@
           <span class="font-medium">{$t('send-private-embed')}</span>
           <button
             class="btn btn-sm btn-circle btn-primary"
-            on:click={() => removeAction('sendPrivateEmbed')}
+            onclick={() => removeAction('sendPrivateEmbed')}
           >
             <span class="material-symbols-outlined">close</span>
           </button>
@@ -295,17 +312,17 @@
         <div class={privateEmbedError ? 'ring-2 ring-error rounded p-4 -m-4' : ''}>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <!-- svelte-ignore a11y_label_has_associated_control -->
               <label class="label"><span class="label-text">{$t('embed-title')}</span></label>
               <CodeEditor bind:value={action.privateEmbed.title} minHeight="40px" mode="bcfd" />
             </div>
             <div>
-              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <!-- svelte-ignore a11y_label_has_associated_control -->
               <label class="label"><span class="label-text">{$t('embed-color')}</span></label>
               <CodeEditor bind:value={action.privateEmbed.hexColor} minHeight="40px" mode="bcfd" />
             </div>
             <div class="md:col-span-2">
-              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <!-- svelte-ignore a11y_label_has_associated_control -->
               <label class="label"><span class="label-text">{$t('embed-description')}</span></label>
               <CodeEditor
                 bind:value={action.privateEmbed.description}
@@ -314,12 +331,12 @@
               />
             </div>
             <div>
-              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <!-- svelte-ignore a11y_label_has_associated_control -->
               <label class="label"><span class="label-text">{$t('embed-image')}</span></label>
               <CodeEditor bind:value={action.privateEmbed.imageURL} minHeight="40px" mode="bcfd" />
             </div>
             <div>
-              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <!-- svelte-ignore a11y_label_has_associated_control -->
               <label class="label"><span class="label-text">{$t('embed-thumbnail')}</span></label>
               <CodeEditor
                 bind:value={action.privateEmbed.thumbnailURL}
@@ -328,7 +345,7 @@
               />
             </div>
             <div class="md:col-span-2">
-              <!-- svelte-ignore a11y-label-has-associated-control -->
+              <!-- svelte-ignore a11y_label_has_associated_control -->
               <label class="label"><span class="label-text">{$t('embed-footer')}</span></label>
               <CodeEditor bind:value={action.privateEmbed.footer} minHeight="40px" mode="bcfd" />
             </div>
@@ -346,13 +363,13 @@
           <span class="font-medium">{$t('role-assigner')}</span>
           <button
             class="btn btn-sm btn-circle btn-primary"
-            on:click={() => removeAction('roleAssigner')}
+            onclick={() => removeAction('roleAssigner')}
           >
             <span class="material-symbols-outlined">close</span>
           </button>
         </div>
         <div class={roleToAssignError ? 'ring-2 ring-error rounded' : ''}>
-          <!-- svelte-ignore a11y-label-has-associated-control -->
+          <!-- svelte-ignore a11y_label_has_associated_control -->
           <label class="label"><span class="label-text">{$t('role-id')}</span></label>
           <CodeEditor bind:value={action.roleToAssign} minHeight="40px" mode="bcfd" />
         </div>
@@ -376,7 +393,7 @@
         </span>
         <button
           class="btn btn-xs btn-outline"
-          on:click={addNestedButton}
+          onclick={addNestedButton}
           type="button"
           disabled={!canAddNestedButtons}
         >
@@ -389,7 +406,7 @@
         <div class="space-y-2">
           {#each action.buttons as button, idx}
             <InteractionButtonEditor
-              {button}
+              bind:button={action.buttons[idx]}
               onDelete={() => removeNestedButton(idx)}
               {nestingDepth}
             />

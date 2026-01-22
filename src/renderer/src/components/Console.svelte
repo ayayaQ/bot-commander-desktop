@@ -1,13 +1,21 @@
 <script lang="ts">
-  import { onMount, afterUpdate } from 'svelte'
+  import { onMount } from 'svelte'
   import { consoleStore, initConsoleListeners, type ConsoleMessage } from '../stores/console'
 
-  let consoleElement: HTMLDivElement
-  let autoScroll = true
-  let collapsed = true
-  let copiedId: number | null = null
+  let consoleElement: HTMLDivElement = $state()
+  let autoScroll = $state(true)
+  let collapsed = $state(true)
+  let copiedId: number | null = $state(null)
 
-  $: messages = $consoleStore
+  let messages = $derived($consoleStore)
+
+  // Auto-scroll when messages change (replaces afterUpdate)
+  $effect(() => {
+    // Track messages array to trigger effect on changes
+    if (messages.length && autoScroll && consoleElement) {
+      consoleElement.scrollTop = consoleElement.scrollHeight
+    }
+  })
 
   function getIconForType(type: ConsoleMessage['type']): string {
     switch (type) {
@@ -78,12 +86,6 @@
   onMount(() => {
     initConsoleListeners()
   })
-
-  afterUpdate(() => {
-    if (autoScroll && consoleElement) {
-      consoleElement.scrollTop = consoleElement.scrollHeight
-    }
-  })
 </script>
 
 <div class="flex flex-col bg-base-300 border-t border-base-content/10" class:h-48={!collapsed}>
@@ -92,7 +94,7 @@
   >
     <button
       class="flex items-center gap-2 hover:bg-base-300 transition-colors cursor-pointer rounded px-1 -ml-1"
-      on:click={() => (collapsed = !collapsed)}
+      onclick={() => (collapsed = !collapsed)}
     >
       <span
         class="material-symbols-outlined text-sm transition-transform"
@@ -108,7 +110,7 @@
           <input type="checkbox" class="checkbox checkbox-xs" bind:checked={autoScroll} />
           <span class="text-xs">Auto-scroll</span>
         </label>
-        <button class="btn btn-ghost btn-xs" on:click={handleClear} title="Clear console">
+        <button class="btn btn-ghost btn-xs" onclick={handleClear} title="Clear console">
           <span class="material-symbols-outlined text-sm">delete</span>
         </button>
       {/if}
@@ -124,10 +126,10 @@
             class="flex items-start gap-2 hover:bg-base-content/5 rounded px-1 cursor-pointer"
             role="button"
             tabindex="0"
-            on:keydown={(e) => {
+            onkeydown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') copyMessage(message.message, message.id)
             }}
-            on:click={() => copyMessage(message.message, message.id)}
+            onclick={() => copyMessage(message.message, message.id)}
           >
             <span
               class="material-symbols-outlined text-sm {getColorForType(message.type)}"

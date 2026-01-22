@@ -8,12 +8,12 @@
   import { t } from '../stores/localisation'
   import { connectionStore } from '../stores/connection'
 
-  let interactions: BCFDInteractionCommand[] = []
-  let isEditing = false
-  let editingInteraction: BCFDInteractionCommand | null = null
-  let editingIndex: number | null = null
-  let searchQuery = ''
-  let isSyncing = false
+  let interactions: BCFDInteractionCommand[] = $state([])
+  let isEditing = $state(false)
+  let editingInteraction: BCFDInteractionCommand | null = $state(null)
+  let editingIndex: number | null = $state(null)
+  let searchQuery = $state('')
+  let isSyncing = $state(false)
 
   onMount(async () => {
     await loadInteractions()
@@ -24,7 +24,7 @@
   }
 
   async function saveInteractions() {
-    await (window as any).electron.ipcRenderer.invoke('save-interactions', interactions)
+    await (window as any).electron.ipcRenderer.invoke('save-interactions', $state.snapshot(interactions))
   }
 
   function addInteraction() {
@@ -99,11 +99,11 @@
     }
   }
 
-  $: filteredInteractions = interactions.filter(
+  let filteredInteractions = $derived(interactions.filter(
     (i) =>
       i.commandName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       i.commandDescription.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  ))
 </script>
 
 <div class="">
@@ -135,7 +135,7 @@
             <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('sync-all')}>
               <button
                 class="btn btn-secondary"
-                on:click={syncAllCommands}
+                onclick={syncAllCommands}
                 disabled={isSyncing || !$connectionStore.connected}
               >
                 {#if isSyncing}
@@ -146,7 +146,7 @@
                 {$t('sync-all')}
               </button>
             </span>
-            <button class="btn btn-primary" on:click={addInteraction}>
+            <button class="btn btn-primary" onclick={addInteraction}>
               <span class="material-symbols-outlined">add</span>{$t('add-interaction')}
             </button>
           </div>

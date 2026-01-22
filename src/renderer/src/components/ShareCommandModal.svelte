@@ -5,25 +5,31 @@
   import type { BCFDCommand } from '../types/types'
   import Dialog from './Dialog.svelte'
 
-  export let command: BCFDCommand | null = null
-  export let dialog: HTMLDialogElement
+  interface Props {
+    command?: BCFDCommand | null;
+    dialog: HTMLDialogElement;
+  }
+
+  let { command = null, dialog = $bindable() }: Props = $props();
 
   const dispatch = createEventDispatcher<{
     shared: void
   }>()
 
-  let isSharing = false
-  let shareError: string | null = null
-  let shareSuccess = false
+  let isSharing = $state(false)
+  let shareError: string | null = $state(null)
+  let shareSuccess = $state(false)
 
   // Form fields - pre-filled from command
-  let commandName = ''
-  let commandDescription = ''
+  let commandName = $state('')
+  let commandDescription = $state('')
 
-  $: if (command) {
-    commandName = command.command || 'Untitled Command'
-    commandDescription = command.commandDescription || ''
-  }
+  $effect(() => {
+    if (command) {
+      commandName = command.command || 'Untitled Command'
+      commandDescription = command.commandDescription || ''
+    }
+  })
 
   async function handleShare() {
     if (!command) return
@@ -36,7 +42,7 @@
       const result = await commandRepoStore.ipc.shareCommand(
         commandName,
         commandDescription,
-        command
+        $state.snapshot(command)
       )
 
       if (result.success) {
@@ -74,7 +80,7 @@
   }
 </script>
 
-<Dialog bind:dialog on:close={handleClose}>
+<Dialog bind:dialog onclose={handleClose}>
   <h3 class="font-bold text-lg mb-4">
     <span class="material-symbols-outlined align-middle mr-2">share</span>
     {$t('share-command') || 'Share Command'}
@@ -145,7 +151,7 @@
         </form>
         <button
           class="btn btn-primary"
-          on:click={handleShare}
+          onclick={handleShare}
           disabled={isSharing || !commandName.trim()}
         >
           {#if isSharing}

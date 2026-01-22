@@ -2,25 +2,35 @@
   import { createEventDispatcher, onMount, tick } from 'svelte'
   import { highlightBCFD, highlightJavaScript } from '../utils/highlight'
 
-  export let value: string = ''
-  export let placeholder: string = ''
-  export let minHeight: string = '200px'
-  export let mode: 'bcfd' | 'js' = 'bcfd' // 'bcfd' for template language, 'js' for pure JavaScript
-  export let readonly: boolean = false
+  interface Props {
+    value?: string;
+    placeholder?: string;
+    minHeight?: string;
+    mode?: 'bcfd' | 'js'; // 'bcfd' for template language, 'js' for pure JavaScript
+    readonly?: boolean;
+  }
+
+  let {
+    value = $bindable(''),
+    placeholder = '',
+    minHeight = '200px',
+    mode = 'bcfd',
+    readonly = false
+  }: Props = $props();
 
   const dispatch = createEventDispatcher<{ change: string }>()
 
-  let textareaElement: HTMLTextAreaElement
-  let highlightElement: HTMLDivElement
-  let lineNumbersElement: HTMLDivElement
-  let containerElement: HTMLDivElement
-  let autocompleteVisible = false
-  let autocompleteItems: AutocompleteItem[] = []
-  let autocompleteIndex = 0
-  let autocompletePosition = { top: 0, left: 0 }
+  let textareaElement: HTMLTextAreaElement = $state()
+  let highlightElement: HTMLDivElement = $state()
+  let lineNumbersElement: HTMLDivElement = $state()
+  let containerElement: HTMLDivElement = $state()
+  let autocompleteVisible = $state(false)
+  let autocompleteItems: AutocompleteItem[] = $state([])
+  let autocompleteIndex = $state(0)
+  let autocompletePosition = $state({ top: 0, left: 0 })
   let currentWord = ''
   let wordStartIndex = 0
-  let isJsAutocomplete = false // Track if we're showing JS keywords (no $ prefix)
+  let isJsAutocomplete = $state(false) // Track if we're showing JS keywords (no $ prefix)
 
   interface AutocompleteItem {
     name: string
@@ -433,7 +443,7 @@
     checkAutocomplete()
   }
 
-  let scrollAreaElement: HTMLDivElement
+  let scrollAreaElement: HTMLDivElement = $state()
 
   function syncScroll() {
     if (lineNumbersElement && scrollAreaElement) {
@@ -447,16 +457,18 @@
   })
 
   // React to external value changes
-  $: if (textareaElement && value !== undefined) {
-    tick().then(() => {
-      updateHighlighting()
-      updateLineNumbers()
-    })
-  }
+  $effect(() => {
+    if (textareaElement && value !== undefined) {
+      tick().then(() => {
+        updateHighlighting()
+        updateLineNumbers()
+      })
+    }
+  })
 
   // Calculate dynamic height based on content
-  $: lineCount = value.split('\n').length
-  $: computedHeight = Math.max(parseInt(minHeight), lineCount * 24 + 16) // 24px per line + padding
+  let lineCount = $derived(value.split('\n').length)
+  let computedHeight = $derived(Math.max(parseInt(minHeight), lineCount * 24 + 16)) // 24px per line + padding
 </script>
 
 <div
@@ -476,7 +488,7 @@
   <div
     bind:this={scrollAreaElement}
     class="editor-scroll-area absolute left-12 top-0 right-0 bottom-0 overflow-x-auto overflow-y-hidden"
-    on:scroll={syncScroll}
+    onscroll={syncScroll}
   >
     <!-- Inner container that sizes to content -->
     <div class="editor-content relative">
@@ -495,9 +507,9 @@
       <textarea
         bind:this={textareaElement}
         bind:value
-        on:input={handleInput}
-        on:keydown={handleKeydown}
-        on:click={handleClick}
+        oninput={handleInput}
+        onkeydown={handleKeydown}
+        onclick={handleClick}
         {placeholder}
         readonly={readonly}
         class="textarea-input absolute top-0 left-0 w-full h-full p-2 pb-4 font-mono text-sm leading-6 bg-transparent text-transparent caret-base-content resize-none outline-none border-none whitespace-pre overflow-hidden"
@@ -520,8 +532,8 @@
           type="button"
           class="autocomplete-item w-full text-left px-3 py-2 hover:bg-base-300 flex items-center gap-2 cursor-pointer"
           class:bg-base-300={i === autocompleteIndex}
-          on:click={() => insertAutocomplete(item)}
-          on:mouseenter={() => (autocompleteIndex = i)}
+          onclick={() => insertAutocomplete(item)}
+          onmouseenter={() => (autocompleteIndex = i)}
         >
           <span
             class="badge badge-sm"

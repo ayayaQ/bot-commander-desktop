@@ -3,10 +3,10 @@
   import { botStatusStore, saveBotStatus } from '../stores/status'
   import { t, type TranslationKey } from '../stores/localisation'
 
-  let status = $botStatusStore.status
-  let activity = $botStatusStore.activity
-  let activityDetails = $botStatusStore.activityDetails
-  let streamUrl = $botStatusStore.streamUrl
+  let status = $state($botStatusStore.status)
+  let activity = $state($botStatusStore.activity)
+  let activityDetails = $state($botStatusStore.activityDetails)
+  let streamUrl = $state($botStatusStore.streamUrl)
 
   const statusOptions: Array<{ value: string; label: TranslationKey }> = [
     { value: 'Online', label: 'status-online' },
@@ -77,7 +77,7 @@
     id="activity"
     class="select"
     bind:value={activity}
-    on:change={handleActivityChange}
+    onchange={handleActivityChange}
   >
     {#each activityOptions as option}
       <option value={option.value}>{$t(option.label)}</option>
@@ -113,5 +113,5 @@
   {/if}
 {/if}
 <div class="card-actions justify-end mt-4">
-  <button class="btn btn-primary" on:click={handleSubmit}>{$t('update-status')}</button>
+  <button class="btn btn-primary" onclick={handleSubmit}>{$t('update-status')}</button>
 </div>

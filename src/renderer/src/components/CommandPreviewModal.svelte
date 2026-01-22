@@ -4,8 +4,12 @@
   import { t } from '../stores/localisation'
   import CodeEditor from './CodeEditor.svelte'
 
-  export let command: BCFDCommand
-  export let open = false
+  interface Props {
+    command: BCFDCommand;
+    open?: boolean;
+  }
+
+  let { command, open = false }: Props = $props();
 
   const dispatch = createEventDispatcher<{ close: void }>()
 
@@ -74,11 +78,11 @@
     )
   }
 
-  $: activeActions = getActiveActions(command)
-  $: showCommand =
-    command.type !== TYPE_MEMBER_JOIN &&
+  let activeActions = $derived(getActiveActions(command))
+  let showCommand =
+    $derived(command.type !== TYPE_MEMBER_JOIN &&
     command.type !== TYPE_MEMBER_LEAVE &&
-    command.type !== TYPE_MEMBER_BAN
+    command.type !== TYPE_MEMBER_BAN)
 
   function handleClose() {
     dispatch('close')
@@ -92,17 +96,17 @@
 </script>
 
 {#if open}
-  <!-- svelte-ignore a11y-click-events-have-key-events -->
-  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-    on:click={handleBackdropClick}
+    onclick={handleBackdropClick}
   >
     <div class="bg-base-100 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col m-4">
       <!-- Header -->
       <div class="flex items-center justify-between p-4 border-b border-base-300">
         <h2 class="text-xl font-bold">{$t('command-preview') || 'Command Preview'}</h2>
-        <button class="btn btn-sm btn-ghost btn-circle" on:click={handleClose}>
+        <button class="btn btn-sm btn-ghost btn-circle" onclick={handleClose}>
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
@@ -304,7 +308,7 @@
 
       <!-- Footer -->
       <div class="flex justify-end p-4 border-t border-base-300">
-        <button class="btn btn-ghost" on:click={handleClose}>
+        <button class="btn btn-ghost" onclick={handleClose}>
           {$t('close') || 'Close'}
         </button>
       </div>

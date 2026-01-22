@@ -9,10 +9,19 @@
   import { aiPanelOpen, clearChat } from '../stores/aiChat'
   import { bottomNavVisible } from '../stores/navigation'
 
-  export let mode: 'edit' | 'add' = 'add'
-  export let command: BCFDCommand | null = null
-  export let index: number | null = null
-  export let allCommands: BCFDCommand[] = []
+  interface Props {
+    mode?: 'edit' | 'add';
+    command?: BCFDCommand | null;
+    index?: number | null;
+    allCommands?: BCFDCommand[];
+  }
+
+  let {
+    mode = 'add',
+    command = null,
+    index = null,
+    allCommands = []
+  }: Props = $props();
 
   const TYPE_MESSAGE_RECEIVED = 0
   const TYPE_PM_RECEIVED = 1
@@ -30,14 +39,14 @@
   })
 
   const dispatch = createEventDispatcher()
-  let dialog: HTMLDialogElement
-  let importText: string = ''
-  let showImportError = false
+  let dialog: HTMLDialogElement = $state()
+  let importText: string = $state('')
+  let showImportError = $state(false)
 
-  let dropdownOpen = false
+  let dropdownOpen = $state(false)
 
-  let activeActions: Array<{ type: string; name: string }> = []
-  let triggerDropdown = 0
+  let activeActions: Array<{ type: string; name: string }> = $state([])
+  let triggerDropdown = $state(0)
 
   function toggleAiPanel() {
     aiPanelOpen.update((v) => !v)
@@ -223,7 +232,7 @@
     }
   }
 
-  let editedCommand: BCFDCommand
+  let editedCommand: BCFDCommand = $state()
 
   const typeLimited = [
     'requiredRole',
@@ -239,22 +248,23 @@
     'voiceMute'
   ]
 
-  $: isLimitedType =
-    editedCommand?.type == TYPE_MEMBER_JOIN ||
+  let isLimitedType =
+    $derived(editedCommand?.type == TYPE_MEMBER_JOIN ||
     editedCommand?.type == TYPE_MEMBER_LEAVE ||
-    editedCommand?.type == TYPE_MEMBER_BAN
+    editedCommand?.type == TYPE_MEMBER_BAN)
 
-  $: if (isLimitedType) {
-    for (let i of typeLimited) {
-      removeAction(i)
+  $effect(() => {
+    if (isLimitedType) {
+      for (let i of typeLimited) {
+        removeAction(i)
+      }
+      // reset the fields that are not needed for these types
     }
-    // reset the fields that are not needed for these types
-  }
+  })
 
   // Validation
-  let descriptionError: TranslationKey | '' = ''
-  let commandError: TranslationKey | '' = ''
-  let actionErrors: Record<string, TranslationKey> = {}
+  let descriptionError: TranslationKey | '' = $state('')
+  let commandError: TranslationKey | '' = $state('')
 
   function isEmbedValid(embed: {
     title: string
@@ -276,81 +286,84 @@
   }
 
   // Reactive validation for description
-  $: descriptionError = editedCommand?.commandDescription?.trim() ? '' : 'description-required'
+  $effect(() => {
+    descriptionError = editedCommand?.commandDescription?.trim() ? '' : 'description-required'
+  })
 
   // Reactive validation for command field (only for types that need it)
-  $: {
+  $effect(() => {
     const needsCommand =
       editedCommand?.type === TYPE_MESSAGE_RECEIVED ||
       editedCommand?.type === TYPE_PM_RECEIVED ||
       editedCommand?.type === TYPE_REACTION
     commandError = needsCommand && !editedCommand?.command?.trim() ? 'command-required' : ''
-  }
+  })
 
-  // Reactive validation for action fields
-  $: {
-    actionErrors = {}
+  // Reactive validation for action fields - use $derived to avoid effect read/write cycles
+  let actionErrors: Record<string, TranslationKey> = $derived.by(() => {
+    const errors: Record<string, TranslationKey> = {}
     for (const action of activeActions) {
       switch (action.type) {
         case 'sendMessage':
           if (!editedCommand?.channelMessage?.trim()) {
-            actionErrors['sendMessage'] = 'message-is-required'
+            errors['sendMessage'] = 'message-is-required'
           }
           break
         case 'sendPrivateMessage':
           if (!editedCommand?.privateMessage?.trim()) {
-            actionErrors['sendPrivateMessage'] = 'message-is-required'
+            errors['sendPrivateMessage'] = 'message-is-required'
           }
           break
         case 'sendChannelEmbed':
           if (!isEmbedValid(editedCommand?.channelEmbed)) {
-            actionErrors['sendChannelEmbed'] = 'embed-field-required'
+            errors['sendChannelEmbed'] = 'embed-field-required'
           }
           break
         case 'sendPrivateEmbed':
           if (!isEmbedValid(editedCommand?.privateEmbed)) {
-            actionErrors['sendPrivateEmbed'] = 'embed-field-required'
+            errors['sendPrivateEmbed'] = 'embed-field-required'
           }
           break
         case 'specificChannel':
           if (!editedCommand?.specificChannel?.trim()) {
-            actionErrors['specificChannel'] = 'channel-id-required'
+            errors['specificChannel'] = 'channel-id-required'
           }
           break
         case 'reaction':
           if (!editedCommand?.reaction?.trim()) {
-            actionErrors['reaction'] = 'reaction-required'
+            errors['reaction'] = 'reaction-required'
           }
           break
         case 'deleteIf':
           if (!editedCommand?.deleteIfStrings?.trim()) {
-            actionErrors['deleteIf'] = 'delete-strings-required'
+            errors['deleteIf'] = 'delete-strings-required'
           }
           break
         case 'deleteX':
           if (!editedCommand?.deleteNum || editedCommand.deleteNum < 1) {
-            actionErrors['deleteX'] = 'delete-number-required'
+            errors['deleteX'] = 'delete-number-required'
           }
           break
         case 'roleAssigner':
           if (!editedCommand?.roleToAssign?.trim()) {
-            actionErrors['roleAssigner'] = 'role-id-is-required'
+            errors['roleAssigner'] = 'role-id-is-required'
           }
           break
         case 'requiredRole':
           if (!editedCommand?.requiredRole?.trim()) {
-            actionErrors['requiredRole'] = 'role-id-is-required'
+            errors['requiredRole'] = 'role-id-is-required'
           }
           break
       }
     }
-  }
+    return errors
+  })
 
-  $: hasErrors =
-    descriptionError !== '' ||
+  let hasErrors =
+    $derived(descriptionError !== '' ||
     commandError !== '' ||
     Object.keys(actionErrors).length > 0 ||
-    activeActions.length === 0
+    activeActions.length === 0)
 
   function handleSubmit() {
     if (
@@ -467,14 +480,13 @@
         }
 
     if (mode === 'edit' && command) {
-      console.log(command)
       initializeActiveActions(command)
     }
   })
 </script>
 
 {#if editedCommand}
-  <Dialog bind:dialog on:close={() => console.log('closed')}>
+  <Dialog bind:dialog onclose={() => console.log('closed')}>
     <p>
       {$t('import-json-command')}:
     </p>
@@ -492,7 +504,7 @@
         <button
           disabled={!importText}
           class="btn btn-sm btn-error"
-          on:click={(e) => {
+          onclick={(e) => {
             const newCommand = validateBCFDCommand(importText)
             if (newCommand) {
               editedCommand = newCommand
@@ -508,7 +520,7 @@
         >
         <button
           class="btn btn-sm btn-ghost"
-          on:click={() => {
+          onclick={() => {
             importText = ''
             showImportError = false
           }}>{$t('cancel')}</button
@@ -529,7 +541,7 @@
         >
           {#each getAvailableActions(activeActions, isLimitedType) as action}
             <li>
-              <button class="dropdown-item" on:click={() => addAction(action.type)}>
+              <button class="dropdown-item" onclick={() => addAction(action.type)}>
                 {action.name}
               </button>
             </li>
@@ -541,7 +553,7 @@
         <button
           type="button"
           class="btn {$aiPanelOpen ? 'btn-secondary' : 'btn-primary'}"
-          on:click={toggleAiPanel}
+          onclick={toggleAiPanel}
           class:btn-active={$aiPanelOpen}
         >
           <span class="material-symbols-outlined">smart_toy</span>
@@ -549,7 +561,7 @@
       </span>
       <!-- import button -->
       <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('import')}>
-        <button type="button" class="btn btn-primary" on:click={() => dialog.showModal()}>
+        <button type="button" class="btn btn-primary" onclick={() => dialog.showModal()}>
           <span class="material-symbols-outlined">upload</span>
         </button>
       </span>
@@ -560,12 +572,12 @@
           ? $t('fix-errors-to-save')
           : $t(mode === 'edit' ? 'update-command' : 'add-command')}
       >
-        <button type="submit" disabled={hasErrors} class="btn btn-primary" on:click={handleSubmit}
+        <button type="submit" disabled={hasErrors} class="btn btn-primary" onclick={handleSubmit}
           ><span class="material-symbols-outlined">save</span></button
         >
       </span>
       <!-- cancel button-->
-      <button type="button" class="btn btn-secondary" on:click={() => dispatch('cancel')}
+      <button type="button" class="btn btn-secondary" onclick={() => dispatch('cancel')}
         ><span class="material-symbols-outlined">close</span></button
       >
     </div>
@@ -580,7 +592,7 @@
       <div class="p-4">
         <div class="">
           <!-- <div class="break-words">{JSON.stringify(editedCommand)}</div> -->
-          <form on:submit|preventDefault={() => {}} class="space-y-4">
+          <form onsubmit={(e) => e.preventDefault()} class="space-y-4">
             <!-- Replace checkbox sections with action cards -->
             <div class="space-y-4">
               <div class="card bg-base-200">
@@ -658,7 +670,7 @@
                               bind:value={triggerDropdown}
                               class="select w-full"
                               required
-                              on:change={() => {
+                              onchange={() => {
                                 editedCommand.phrase = triggerDropdown == 2
                                 editedCommand.startsWith = triggerDropdown == 1
                               }}
@@ -703,7 +715,7 @@
                     <h3 class="text-lg font-bold">{action.name}</h3>
                     <button
                       class="btn btn-sm btn-circle btn-primary"
-                      on:click={() => removeAction(action.type)}
+                      onclick={() => removeAction(action.type)}
                     >
                       <span class="material-symbols-outlined">close</span>
                     </button>

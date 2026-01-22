@@ -37,21 +37,25 @@
   } from '../stores/aiChat'
   import { consoleStore } from '../stores/console'
 
-  export let command: BCFDCommand
-  export let onCommandUpdate: (updated: BCFDCommand) => void
-  export let allCommands: BCFDCommand[] = []
+  interface Props {
+    command: BCFDCommand;
+    onCommandUpdate: (updated: BCFDCommand) => void;
+    allCommands?: BCFDCommand[];
+  }
+
+  let { command, onCommandUpdate, allCommands = [] }: Props = $props();
 
   const dispatch = createEventDispatcher<{
     close: void
   }>()
 
-  let inputMessage = ''
-  let messagesContainer: HTMLDivElement
-  let inputElement: HTMLTextAreaElement
+  let inputMessage = $state('')
+  let messagesContainer: HTMLDivElement = $state()
+  let inputElement: HTMLTextAreaElement = $state()
   let cleanupStreamListeners: (() => void) | null = null
 
   // Available context options
-  $: availableContexts = [
+  let availableContexts = $derived([
     {
       type: 'command' as const,
       id: command.id,
@@ -69,7 +73,7 @@
         label: cmd.commandDescription || cmd.command,
         content: JSON.stringify(cmd, null, 2)
       }))
-  ]
+  ])
 
   async function sendMessage() {
     if (!inputMessage.trim() || $isAiLoading) return
@@ -109,7 +113,7 @@
       // Call AI API with context
       const response = await (window as any).electron.ipcRenderer.invoke('ai-command-chat', {
         messages: conversationHistory,
-        currentCommand: command,
+        currentCommand: $state.snapshot(command),
         model: $selectedModel,
         additionalContext: additionalContext
       })
@@ -252,7 +256,7 @@
         await tick()
         scrollToBottom()
       },
-      () => command // Provide current command for diff generation
+      () => $state.snapshot(command) // Provide current command for diff generation (snapshot to avoid proxy issues)
     )
 
     await tick()
@@ -276,7 +280,7 @@
     isThinking.set(false)
   })
 
-  $: hasApiKey = $settingsStore.openaiApiKey && $settingsStore.openaiApiKey.length > 0
+  let hasApiKey = $derived($settingsStore.openaiApiKey && $settingsStore.openaiApiKey.length > 0)
 
   // Render markdown to HTML
   function renderMarkdown(content: string): string {
@@ -299,7 +303,7 @@
         <button
           class="btn btn-ghost btn-sm btn-circle"
           class:btn-active={$contextPickerOpen}
-          on:click={() => contextPickerOpen.update((v) => !v)}
+          onclick={() => contextPickerOpen.update((v) => !v)}
         >
           <span class="material-symbols-outlined">attach_file</span>
         </button>
@@ -324,14 +328,14 @@
 
       <!-- Clear Chat -->
       <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('clear-chat')}>
-        <button class="btn btn-ghost btn-sm btn-circle" on:click={handleClearChat}>
+        <button class="btn btn-ghost btn-sm btn-circle" onclick={handleClearChat}>
           <span class="material-symbols-outlined">delete_sweep</span>
         </button>
       </span>
 
       <!-- Close -->
       <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('close')}>
-        <button class="btn btn-ghost btn-sm btn-circle" on:click={() => dispatch('close')}>
+        <button class="btn btn-ghost btn-sm btn-circle" onclick={() => dispatch('close')}>
           <span class="material-symbols-outlined">close</span>
         </button>
       </span>
@@ -352,7 +356,7 @@
           {/if}
           <span class="text-xs truncate max-w-24">{ctx.label}</span>
           {#if !isCurrentCommandContext(ctx)}
-            <button class="hover:text-error" on:click={() => removeContext(ctx)}>
+            <button class="hover:text-error" onclick={() => removeContext(ctx)}>
               <span class="material-symbols-outlined text-xs">close</span>
             </button>
           {/if}
@@ -378,7 +382,7 @@
               class="checkbox checkbox-xs checkbox-primary"
               checked={isContextSelected(ctx)}
               disabled={isCurrentCommandContext(ctx)}
-              on:change={() => toggleContext(ctx)}
+              onchange={() => toggleContext(ctx)}
             />
             <span class="text-sm truncate">{ctx.label}</span>
             {#if isCurrentCommandContext(ctx)}
@@ -473,7 +477,7 @@
             <div class="thinking-section mb-2">
               <button
                 class="flex items-center gap-1 text-xs opacity-70 hover:opacity-100 transition-opacity"
-                on:click={() => thinkingExpanded.update((v) => !v)}
+                onclick={() => thinkingExpanded.update((v) => !v)}
               >
                 <span
                   class="material-symbols-outlined text-xs transition-transform"
@@ -505,7 +509,7 @@
       <textarea
         bind:this={inputElement}
         bind:value={inputMessage}
-        on:keydown={handleKeydown}
+        onkeydown={handleKeydown}
         placeholder={hasApiKey ? $t('describe-changes') : $t('api-key-needed')}
         class="textarea flex-1 resize-none min-h-10 max-h-32"
         rows="1"
@@ -513,7 +517,7 @@
       ></textarea>
       <button
         class="btn btn-primary"
-        on:click={sendMessage}
+        onclick={sendMessage}
         disabled={!inputMessage.trim() || !hasApiKey || $isAiLoading}
       >
         {#if $isAiLoading}
@@ -528,7 +532,7 @@
     <div class="flex flex-wrap gap-1 mt-2">
       <button
         class="btn btn-xs btn-ghost"
-        on:click={() => {
+        onclick={() => {
           inputMessage = $t('quick-make-funnier')
           sendMessage()
         }}
@@ -538,7 +542,7 @@
       </button>
       <button
         class="btn btn-xs btn-ghost"
-        on:click={() => {
+        onclick={() => {
           inputMessage = $t('quick-add-random')
           sendMessage()
         }}
@@ -548,7 +552,7 @@
       </button>
       <button
         class="btn btn-xs btn-ghost"
-        on:click={() => {
+        onclick={() => {
           inputMessage = $t('quick-add-mentions')
           sendMessage()
         }}
@@ -558,7 +562,7 @@
       </button>
       <button
         class="btn btn-xs btn-ghost"
-        on:click={() => {
+        onclick={() => {
           inputMessage = $t('quick-add-counter')
           sendMessage()
         }}

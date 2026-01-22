@@ -39,6 +39,8 @@ export function validateBCFDCommand(jsonString: string): BCFDCommand | null {
   try {
     const parsed = JSON.parse(jsonString)
 
+    console.log('Parsed command:', parsed)
+
     const requiredFields = [
       'actionArr',
       'channelMessage',
@@ -71,7 +73,8 @@ export function validateBCFDCommand(jsonString: string): BCFDCommand | null {
       'specificMessage',
       'type',
       'channelEmbed',
-      'privateEmbed'
+      'privateEmbed',
+      'startsWith'
     ]
 
     // id is optional (added at runtime, stripped on export)
