@@ -533,6 +533,16 @@
       <button
         class="btn btn-xs btn-ghost"
         onclick={() => {
+          inputMessage = $t('quick-suggest-improvements')
+          sendMessage()
+        }}
+        disabled={!hasApiKey || $isAiLoading}
+      >
+        {$t('suggest-improvements')}
+      </button>
+      <button
+        class="btn btn-xs btn-ghost"
+        onclick={() => {
           inputMessage = $t('quick-make-funnier')
           sendMessage()
         }}
@@ -549,16 +559,6 @@
         disabled={!hasApiKey || $isAiLoading}
       >
         🎲 {$t('add-randomness')}
-      </button>
-      <button
-        class="btn btn-xs btn-ghost"
-        onclick={() => {
-          inputMessage = $t('quick-add-mentions')
-          sendMessage()
-        }}
-        disabled={!hasApiKey || $isAiLoading}
-      >
-        @️ {$t('use-mentions')}
       </button>
       <button
         class="btn btn-xs btn-ghost"
