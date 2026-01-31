@@ -38,10 +38,21 @@ function createSafeContext(initialContext: Record<string, any>): vm.Context {
   return context
 }
 
-function debug(msg: any) {
+function debug(msg: any, level: 'info' | 'error' | 'warning' | 'success' = 'info') {
   // convert msg to string if it's not and then render to client console via rendererConsole.info
   const message = typeof msg === 'string' ? msg : JSON.stringify(msg, null, 2)
-  rendererConsole.info(message)
+  if (level === 'error') {
+    rendererConsole.error(message)
+  }
+  else if (level === 'warning') {
+    rendererConsole.warning(message)
+  }
+  else if (level === 'success') {
+    rendererConsole.success(message)
+  }
+  else {
+    rendererConsole.info(message)
+  }
 }
 
 // Get the path to the startup JS file

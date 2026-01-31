@@ -3,11 +3,11 @@
   import { highlightBCFD, highlightJavaScript } from '../utils/highlight'
 
   interface Props {
-    value?: string;
-    placeholder?: string;
-    minHeight?: string;
-    mode?: 'bcfd' | 'js'; // 'bcfd' for template language, 'js' for pure JavaScript
-    readonly?: boolean;
+    value?: string
+    placeholder?: string
+    minHeight?: string
+    mode?: 'bcfd' | 'js' // 'bcfd' for template language, 'js' for pure JavaScript
+    readonly?: boolean
   }
 
   let {
@@ -16,7 +16,7 @@
     minHeight = '200px',
     mode = 'bcfd',
     readonly = false
-  }: Props = $props();
+  }: Props = $props()
 
   const dispatch = createEventDispatcher<{ change: string }>()
 
@@ -194,6 +194,12 @@
       syntax: 'function-paren',
       description: 'AI chat response',
       insertText: 'chat(prompt)'
+    },
+    {
+      name: 'option',
+      syntax: 'function-paren',
+      description: 'Get option value (interaction commands)',
+      insertText: 'option(name)'
     }
   ]
 
@@ -259,7 +265,14 @@
     { name: 'Object', syntax: 'variable', description: 'Object constructor' },
     { name: 'String', syntax: 'variable', description: 'String constructor' },
     { name: 'Number', syntax: 'variable', description: 'Number constructor' },
-    { name: 'Date', syntax: 'variable', description: 'Date constructor' }
+    { name: 'Date', syntax: 'variable', description: 'Date constructor' },
+    {
+      name: 'debug',
+      syntax: 'function-paren',
+      description:
+        'Log debug message to console. Can take a second argument for log level ("info", "error", "warning", "success")',
+      insertText: 'debug(message)'
+    }
   ]
 
   // Check if cursor is inside an eval block
@@ -511,7 +524,7 @@
         onkeydown={handleKeydown}
         onclick={handleClick}
         {placeholder}
-        readonly={readonly}
+        {readonly}
         class="textarea-input absolute top-0 left-0 w-full h-full p-2 pb-4 font-mono text-sm leading-6 bg-transparent text-transparent caret-base-content resize-none outline-none border-none whitespace-pre overflow-hidden"
         class:cursor-default={readonly}
         spellcheck="false"
