@@ -3,14 +3,18 @@
   import { saveSettings, settingsStore } from '../stores/settings'
   import { currentLanguage, t } from '../stores/localisation'
   import HeaderBar from './HeaderBar.svelte'
+  import ApiAuth from './ApiAuth.svelte'
 
-  let selectedTheme: string
-  let showToken: boolean
-  let selectedLanguage: string
-  let openaiApiKey: string
-  let openaiModel: 'gpt-4.1' | 'gpt-4.1-mini' | 'gpt-4.1-nano'
-  let developerPrompt: string
-  let useCustomApi: boolean
+  let selectedTheme: string = $state()
+  let showToken: boolean = $state()
+  let selectedLanguage: string = $state()
+  let openaiApiKey: string = $state()
+  let openaiModel: 'gpt-4.1' | 'gpt-4.1-mini' | 'gpt-4.1-nano' = $state()
+  let developerPrompt: string = $state()
+  let useCustomApi: boolean = $state()
+  let useLegacyInterpreter: boolean = $state()
+  let hideOutput: boolean = $state()
+  let disableReasoningApi: boolean = $state()
 
   function changeTheme(event) {
     let theme = event.target.value
@@ -28,6 +32,10 @@
 
   function toggleShowToken() {
     saveSettings({ ...$settingsStore, showToken: showToken })
+  }
+
+  function toggleHideOutput() {
+    saveSettings({ ...$settingsStore, hideOutput })
   }
 
   function updateOpenAIKey(event) {
@@ -49,6 +57,14 @@
     saveSettings({ ...$settingsStore, useCustomApi })
   }
 
+  function toggleLegacyInterpreter() {
+    saveSettings({ ...$settingsStore, useLegacyInterpreter })
+  }
+
+  function toggleDisableReasoningApi() {
+    saveSettings({ ...$settingsStore, disableReasoningApi })
+  }
+
   function openExternalLink(event) {
     event.preventDefault()
     const url = event.target.href
@@ -63,6 +79,9 @@
     openaiModel = $settingsStore.openaiModel
     developerPrompt = $settingsStore.developerPrompt
     useCustomApi = $settingsStore.useCustomApi
+    useLegacyInterpreter = $settingsStore.useLegacyInterpreter
+    hideOutput = $settingsStore.hideOutput
+    disableReasoningApi = $settingsStore.disableReasoningApi
   })
 </script>
 
@@ -71,13 +90,17 @@
 </HeaderBar>
 
 <div class="p-4">
+  <h2 class="text-2xl font-bold mb-4">{$t('account')}</h2>
+  <ApiAuth />
+
+  <div class="divider"></div>
   <h2 class="text-2xl font-bold mb-4">{$t('general')}</h2>
   <div class="form-control">
-    <!-- svelte-ignore a11y-label-has-associated-control -->
+    <!-- svelte-ignore a11y_label_has_associated_control -->
     <label class="label">
       <span class="label-text">{$t('theme')}</span>
     </label>
-    <select class="select select-bordered" value={selectedTheme} on:change={changeTheme}>
+    <select class="select" value={selectedTheme} onchange={changeTheme}>
       <option value="light">Light</option>
       <option value="dark">Dark</option>
       <option value="cupcake">Cupcake</option>
@@ -112,13 +135,31 @@
 
   <div class="form-control">
     <label class="label cursor-pointer">
-      <span class="label-text">{$t('show-token')}</span>
-      <input type="checkbox" class="toggle" bind:checked={showToken} on:change={toggleShowToken} />
+      <div class="flex flex-col">
+        <span class="label-text">{$t('show-token')}</span>
+        <span class="label-text text-xs opacity-60">{$t('show-token-description')}</span>
+      </div>
+      <input type="checkbox" class="toggle" bind:checked={showToken} onchange={toggleShowToken} />
     </label>
   </div>
 
   <div class="form-control">
-    <!-- svelte-ignore a11y-label-has-associated-control -->
+    <label class="label cursor-pointer">
+      <div class="flex flex-col">
+        <span class="label-text">{$t('hide-output')}</span>
+        <span class="label-text text-xs opacity-60">{$t('hide-output-description')}</span>
+      </div>
+      <input
+        type="checkbox"
+        class="toggle"
+        bind:checked={hideOutput}
+        onchange={toggleHideOutput}
+      />
+    </label>
+  </div>
+
+  <div class="form-control">
+    <!-- svelte-ignore a11y_label_has_associated_control -->
     <label class="label">
       <span class="label-text">{$t('language')}</span>
       <!-- tooltip that notes that the language may be machine translated -->
@@ -126,7 +167,7 @@
         <span class="material-symbols-outlined">info</span>
       </span>
     </label>
-    <select class="select select-bordered" value={selectedLanguage} on:change={changeLanguage}>
+    <select class="select" value={selectedLanguage} onchange={changeLanguage}>
       <option value="en">English</option>
       <option value="es">Español</option>
       <option value="ja">日本語</option>
@@ -140,27 +181,29 @@
   <h2 class="text-2xl font-bold mb-4">{$t('openai')}</h2>
 
   <div class="form-control">
+    <!-- svelte-ignore a11y_label_has_associated_control -->
     <label class="label">
       <span class="label-text">{$t('openai-api-key')}</span>
     </label>
     <input
       type={showToken ? 'text' : 'password'}
-      class="input input-bordered"
+      class="input w-full"
       value={openaiApiKey}
-      on:input={updateOpenAIKey}
+      oninput={updateOpenAIKey}
       disabled={$settingsStore.useCustomApi}
       placeholder={$t('enter-your-openai-api-key')}
     />
   </div>
 
   <div class="form-control">
+    <!-- svelte-ignore a11y_label_has_associated_control -->
     <label class="label">
       <span class="label-text">{$t('openai-model')}</span>
     </label>
     <select
-      class="select select-bordered"
+      class="select"
       value={openaiModel}
-      on:change={updateOpenAIModel}
+      onchange={updateOpenAIModel}
       disabled={$settingsStore.useCustomApi}
     >
       <option value="gpt-4.1">GPT-4.1</option>
@@ -170,16 +213,34 @@
   </div>
 
   <div class="form-control">
+    <!-- svelte-ignore a11y_label_has_associated_control -->
     <label class="label">
       <span class="label-text">{$t('developer-prompt')}</span>
     </label>
     <textarea
-      class="textarea textarea-bordered"
+      class="textarea w-full"
       value={developerPrompt}
-      on:input={updateDeveloperPrompt}
+      oninput={updateDeveloperPrompt}
       placeholder={$t('enter-your-custom-developer-prompt')}
       rows="4"
-    />
+    ></textarea>
+  </div>
+
+  <div class="form-control mt-4">
+    <label class="label cursor-pointer">
+      <div class="flex flex-col">
+        <span class="label-text">{$t('disable-reasoning-api')}</span>
+        <span class="label-text text-xs opacity-60"
+          >{$t('disable-reasoning-api-description')}</span
+        >
+      </div>
+      <input
+        type="checkbox"
+        class="toggle"
+        bind:checked={disableReasoningApi}
+        onchange={toggleDisableReasoningApi}
+      />
+    </label>
   </div>
 
   {#if false}
@@ -193,11 +254,29 @@
           type="checkbox"
           class="toggle toggle-primary"
           bind:checked={useCustomApi}
-          on:change={toggleCustomApi}
+          onchange={toggleCustomApi}
         />
       </label>
     </div>
   {/if}
+
+  <div class="divider"></div>
+  <h2 class="text-2xl font-bold mb-4">{$t('advanced')}</h2>
+
+  <div class="form-control">
+    <label class="label cursor-pointer">
+      <div class="flex flex-col">
+        <span class="label-text">{$t('use-legacy-interpreter')}</span>
+        <span class="label-text text-xs opacity-60">{$t('use-legacy-interpreter-description')}</span>
+      </div>
+      <input
+        type="checkbox"
+        class="toggle"
+        bind:checked={useLegacyInterpreter}
+        onchange={toggleLegacyInterpreter}
+      />
+    </label>
+  </div>
 
   <div class="divider"></div>
   <h2 class="text-2xl font-bold mb-4">{$t('about')}</h2>
@@ -206,14 +285,14 @@
     Author: <a
       href="https://github.com/ayayaQ"
       class="link link-primary"
-      on:click={openExternalLink}>ayayaQ</a
+      onclick={openExternalLink}>ayayaQ</a
     >
   </p>
   <p>
     Discord: <a
       href="https://discord.com/invite/mZp54sZ"
       class="link link-primary"
-      on:click={openExternalLink}>Bot Commander for Discord Official Server</a
+      onclick={openExternalLink}>Bot Commander for Discord Official Server</a
     >
   </p>
 </div>

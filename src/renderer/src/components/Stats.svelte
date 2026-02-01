@@ -3,7 +3,7 @@
   import { t } from '../stores/localisation'
   import HeaderBar from './HeaderBar.svelte'
 
-  let stats = {
+  let stats = $state({
     userCount: 0,
     messagesSent: 0,
     messagesReceived: 0,
@@ -15,9 +15,9 @@
     commandCount: 0,
     webhooksSent: 0,
     timeSpentInApp: 0
-  }
+  })
 
-  let displayTimeSpentInApp = 0
+  let displayTimeSpentInApp = $state(0)
   let updateInterval: NodeJS.Timeout
   let timeUpdateInterval: NodeJS.Timeout
 

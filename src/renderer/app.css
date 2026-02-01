@@ -1,11 +1,86 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+@plugin "daisyui" {
+  themes: light, dark, cupcake, bumblebee, emerald, corporate, synthwave, retro,
+    cyberpunk, valentine, halloween, garden, forest, aqua, lofi, pastel, fantasy,
+    wireframe, black, luxury, dracula, cmyk, autumn, business, acid, lemonade,
+    night, coffee, winter;
+}
+@source "../src/**/*.{html,js,svelte,ts}";
 
 .material-symbols-outlined {
-    font-variation-settings:
+  font-variation-settings:
     'FILL' 0,
     'wght' 400,
     'GRAD' 0,
-    'opsz' 24
+    'opsz' 24;
+}
+
+/* DaisyUI v5 compatibility: restore v4 label/form-control behavior */
+.form-control {
+  display: flex;
+  flex-direction: column;
+}
+
+.form-control .label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.25rem;
+}
+
+.label-text {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  color: var(--color-base-content);
+}
+
+.label-text-alt {
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+/* BCFD Syntax Highlighting - DaisyUI v5 color variables */
+.bcfd-variable {
+  color: var(--color-primary);
+}
+
+.bcfd-function {
+  color: var(--color-secondary);
+}
+
+.bcfd-args {
+  color: var(--color-accent);
+}
+
+.bcfd-keyword {
+  color: var(--color-warning);
+  font-weight: 600;
+}
+
+.bcfd-eval {
+  color: color-mix(in oklch, var(--color-base-content) 80%, transparent);
+}
+
+/* JavaScript Syntax Highlighting */
+.js-keyword {
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+.js-string {
+  color: var(--color-success);
+}
+
+.js-number {
+  color: var(--color-info);
+}
+
+.js-comment {
+  color: color-mix(in oklch, var(--color-base-content) 50%, transparent);
+  font-style: italic;
+}
+
+.js-builtin {
+  color: var(--color-secondary);
 }

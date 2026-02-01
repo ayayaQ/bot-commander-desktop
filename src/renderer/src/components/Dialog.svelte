@@ -1,8 +1,15 @@
 <script lang="ts">
-	export let dialog: HTMLDialogElement;
+  interface Props {
+    dialog: HTMLDialogElement;
+    onclose?: () => void;
+    children?: import('svelte').Snippet;
+  }
+
+  let { dialog = $bindable(), onclose, children }: Props = $props();
 </script>
-<dialog bind:this={dialog} on:close class="modal">
-    <div class="modal-box">
-        <slot/>
-    </div>
+
+<dialog bind:this={dialog} onclose={onclose} class="modal">
+  <div class="modal-box">
+    {@render children?.()}
+  </div>
 </dialog>

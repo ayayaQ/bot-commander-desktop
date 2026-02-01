@@ -1,5 +1,5 @@
 appId: com.electron.app
-productName: "Bot Commander for Discord"
+productName: 'Bot Commander for Discord'
 directories:
   buildResources: build
 files:
@@ -12,7 +12,7 @@ files:
 asarUnpack:
   - resources/**
 win:
-  executableName: "Bot Commander for Discord"
+  executableName: 'Bot Commander for Discord'
   icon: resources/icon.ico
 nsis:
   artifactName: ${name}-${version}-setup.${ext}

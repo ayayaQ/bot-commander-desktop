@@ -6,18 +6,17 @@ import iconIco from '../../resources/icon.ico?asset'
 import { getStatsInstance, Stats } from './utils/stats'
 import { initializeBotState, saveBotState } from './utils/virtual'
 import { addIPCHandlers, addWindowIPCHandlers } from './handlers/ipcHandlers'
-import { loadBotStatus, loadCommands, loadSettings } from './services/fileService'
+import { loadBotStatus, loadCommands, loadSettings, loadInteractions } from './services/fileService'
+import { loadChats } from './services/chatService'
 
 // Extend the Electron.App interface to include our custom property
 declare global {
   namespace Electron {
     interface App {
-      isQuitting: boolean;
+      isQuitting: boolean
     }
   }
 }
-
-
 
 let stats: Stats
 const statsFilePath = join(app.getPath('userData'), 'stats.json')
@@ -35,8 +34,8 @@ async function saveStats() {
 }
 
 function createWindow(): void {
-
-  const windowIcon = process.platform === 'win32' ? iconIco : process.platform === 'darwin' ? iconPng : undefined;
+  const windowIcon =
+    process.platform === 'win32' ? iconIco : process.platform === 'darwin' ? iconPng : undefined
 
   // Create the browser window.
   mainWindow = new BrowserWindow({
@@ -90,10 +89,13 @@ function createTray() {
   tray = new Tray(iconPng)
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Open', click: () => mainWindow?.show() },
-    { label: 'Quit', click: () => {
-      app.isQuitting = true
-      app.quit()
-    }}
+    {
+      label: 'Quit',
+      click: () => {
+        app.isQuitting = true
+        app.quit()
+      }
+    }
   ])
   tray.setToolTip('BCFD')
   tray.setContextMenu(contextMenu)
@@ -120,6 +122,8 @@ app.whenReady().then(async () => {
   await loadCommands()
   await loadSettings()
   await loadBotStatus()
+  await loadChats()
+  await loadInteractions()
 
   stats = getStatsInstance()
   await stats.loadFromFile(statsFilePath)

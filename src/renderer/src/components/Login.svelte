@@ -7,10 +7,10 @@
   import { settingsStore } from '../stores/settings'
   import { t } from '../stores/localisation'
 
-  $: username = $connectionStore.username
-  $: avatar = $connectionStore.avatar
+  let username = $derived($connectionStore.username)
+  let avatar = $derived($connectionStore.avatar)
 
-  let token = ''
+  let token = $state('')
   function handleLogin() {
     connectionStore.ipc.connect(token)
   }
@@ -41,20 +41,20 @@
   })
 </script>
 
-<div class="flex flex-col items-center justify-center min-h-[calc(100vh-40px)] bg-base-200 p-4">
+<div class="flex flex-col items-center justify-center bg-base-200 p-4 h-full">
   <div class="card w-96 bg-base-100 shadow-xl">
     <div class="card-body items-center text-center">
       {#if avatar}
         <div class="avatar placeholder">
           <div
-            class={`rounded-full ${$botStatusStore.status === 'Online' ? 'outline outline-2 outline-green-500' : $botStatusStore.status === 'Do Not Disturb' ? 'outline outline-2 outline-red-500' : $botStatusStore.status === 'Invisible' ? 'outline outline-2 outline-gray-500' : 'outline outline-2 outline-yellow-500'}`}
+            class={`rounded-full ${$botStatusStore.status === 'Online' ? 'outline-2 outline-green-500' : $botStatusStore.status === 'Do Not Disturb' ? 'outline outline-red-500' : $botStatusStore.status === 'Invisible' ? 'outline outline-gray-500' : 'outline outline-yellow-500'}`}
           >
             <img src={avatar} alt="Avatar" />
           </div>
         </div>
       {:else}
         <div class="avatar placeholder mb-14">
-          <div class="bg-neutral text-neutral-content w-24 rounded-full">
+          <div class="bg-neutral text-neutral-content w-24 rounded-full flex items-center justify-center">
             <span class="text-3xl select-none">{$t('bot')}</span>
           </div>
         </div>
@@ -65,14 +65,14 @@
           <input
             type="text"
             placeholder={$t('token')}
-            class="input input-bordered w-full max-w-xs"
+            class="input w-full"
             bind:value={token}
           />
         {:else}
           <input
             type="password"
             placeholder={$t('token')}
-            class="input input-bordered w-full max-w-xs"
+            class="input w-full"
             bind:value={token}
           />
         {/if}
@@ -87,22 +87,22 @@
           type={$settingsStore.showToken ? 'text' : 'password'}
           placeholder={$t('token')}
           disabled
-          class="input input-bordered w-full max-w-xs"
+          class="input w-full"
           value={$connectionStore.token}
         />
       {/if}
       {#if !$connectionStore.connected}
-        <button class="btn btn-primary w-full" on:click={handleLogin}
+        <button class="btn btn-primary w-full" onclick={handleLogin}
           ><span class="material-symbols-outlined">login</span>{$t('login')}
           {#if $connectionStore.isConnecting}
             <span class="loading loading-spinner"></span>
           {/if}
         </button>
       {:else}
-        <button class="btn btn-primary w-full" on:click={handleLogout}
+        <button class="btn btn-primary w-full" onclick={handleLogout}
           ><span class="material-symbols-outlined">logout</span>{$t('logout')}</button
         >
-        <button class="btn btn-primary w-full" on:click={generateInvite}
+        <button class="btn btn-primary w-full" onclick={generateInvite}
           ><span class="material-symbols-outlined">mail</span>{$t('invite')}</button
         >
       {/if}

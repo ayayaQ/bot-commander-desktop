@@ -4,14 +4,20 @@
   import CommandEditor from './CommandEditor.svelte'
   import CommandListItem from './CommandListItem.svelte'
   import HeaderBar from './HeaderBar.svelte'
+  import CommandRepository from './CommandRepository.svelte'
+  import ShareCommandModal from './ShareCommandModal.svelte'
   import { fade } from 'svelte/transition'
   import { t } from '../stores/localisation'
+  import { apiAuthStore } from '../stores/apiAuth'
 
-  let commands: BCFDCommand[] = []
-  let isEditing = false
-  let editingCommand: BCFDCommand | null = null
-  let editingIndex: number | null = null
-  let searchQuery = ''
+  let commands: BCFDCommand[] = $state([])
+  let isEditing = $state(false)
+  let editingCommand: BCFDCommand | null = $state(null)
+  let editingIndex: number | null = $state(null)
+  let searchQuery = $state('')
+  let showRepository = $state(false)
+  let shareDialog: HTMLDialogElement = $state()
+  let commandToShare: BCFDCommand | null = $state(null)
 
   onMount(async () => {
     await loadCommands()
@@ -23,7 +29,7 @@
   }
 
   async function saveCommands() {
-    await (window as any).electron.ipcRenderer.invoke('save-commands', { bcfdCommands: commands })
+    await (window as any).electron.ipcRenderer.invoke('save-commands', { bcfdCommands: $state.snapshot(commands) })
   }
 
   function addCommand() {
@@ -75,19 +81,37 @@
     }
   }
 
-  $: filteredCommands = commands.filter(
+  function openShareModal(command: BCFDCommand) {
+    commandToShare = command
+    shareDialog.showModal()
+  }
+
+  async function handleRepoImport(event: CustomEvent<BCFDCommand>) {
+    const importedCommand = event.detail
+    commands = [...commands, importedCommand]
+    await saveCommands()
+    showRepository = false
+  }
+
+  let filteredCommands = $derived(commands.filter(
     (cmd) =>
       cmd.command.toLowerCase().includes(searchQuery.toLowerCase()) ||
       cmd.commandDescription.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  ))
 </script>
 
 <div class="">
-  {#if isEditing}
+  {#if showRepository}
+    <CommandRepository
+      on:import={handleRepoImport}
+      on:close={() => showRepository = false}
+    />
+  {:else if isEditing}
     <CommandEditor
       mode={editingCommand ? 'edit' : 'add'}
       command={editingCommand}
       index={editingIndex}
+      allCommands={commands}
       on:add={handleAdd}
       on:update={handleUpdate}
       on:cancel={() => (isEditing = false)}
@@ -98,23 +122,28 @@
         <div class="flex justify-between items-center mb-4">
           <h2 class="text-2xl font-bold">{$t('commands')}</h2>
           <div class="flex gap-2">
+            <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('browse-repository') || 'Browse Repository'}>
+              <button class="btn btn-secondary" onclick={() => showRepository = true}>
+                <span class="material-symbols-outlined">explore</span>
+              </button>
+            </span>
             <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('export')}>
-              <button class="btn btn-primary" on:click={exportCommands}>
+              <button class="btn btn-primary" onclick={exportCommands}>
                 <span class="material-symbols-outlined">download</span>
               </button>
             </span>
             <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('import')}>
-              <button class="btn btn-primary" on:click={importCommands}>
+              <button class="btn btn-primary" onclick={importCommands}>
                 <span class="material-symbols-outlined">upload</span>
               </button>
             </span>
-            <button class="btn btn-primary" on:click={addCommand}>
+            <button class="btn btn-primary" onclick={addCommand}>
               <span class="material-symbols-outlined">add</span>{$t('add-command')}
             </button>
           </div>
         </div>
         <div class="">
-          <label class="input input-bordered flex items-center gap-2">
+          <label class="input flex items-center gap-2 w-full">
             <input type="text" class="grow" placeholder={$t('search')} bind:value={searchQuery} />
             <span class="material-symbols-outlined">search</span>
           </label>
@@ -128,7 +157,12 @@
         <ul class="space-y-2">
           {#each filteredCommands as command}
             <div transition:fade={{ duration: 100 }}>
-              <CommandListItem {command} {editCommand} {deleteCommand} />
+              <CommandListItem
+                {command}
+                {editCommand}
+                {deleteCommand}
+                shareCommand={$apiAuthStore.authenticated ? openShareModal : undefined}
+              />
             </div>
           {/each}
         </ul>
@@ -136,3 +170,9 @@
     </div>
   {/if}
 </div>
+
+<ShareCommandModal
+  bind:dialog={shareDialog}
+  command={commandToShare}
+  on:shared={() => commandToShare = null}
+/>

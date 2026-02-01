@@ -3,11 +3,14 @@ import { AppSettings } from '../types/types'
 let settings: AppSettings = {
   theme: 'light',
   showToken: false,
+  hideOutput: false,
   language: 'en',
   openaiApiKey: '',
   openaiModel: 'gpt-4.1-nano',
   developerPrompt: '',
-  useCustomApi: false
+  useCustomApi: false,
+  useLegacyInterpreter: false, // Default to new interpreter
+  disableReasoningApi: false // Default to using reasoning API for thinking models
 } // Default settings
 
 export function getSettings() {
@@ -28,6 +31,10 @@ export function setSettings(newSettings: AppSettings) {
     newSettings.showToken = false
   }
 
+  if (newSettings.hideOutput === undefined) {
+    newSettings.hideOutput = false
+  }
+
   if (!newSettings.openaiApiKey) {
     newSettings.openaiApiKey = ''
   }
@@ -42,6 +49,14 @@ export function setSettings(newSettings: AppSettings) {
 
   if (newSettings.useCustomApi === undefined) {
     newSettings.useCustomApi = false
+  }
+
+  if (newSettings.useLegacyInterpreter === undefined) {
+    newSettings.useLegacyInterpreter = false
+  }
+
+  if (newSettings.disableReasoningApi === undefined) {
+    newSettings.disableReasoningApi = false
   }
 
   settings = newSettings

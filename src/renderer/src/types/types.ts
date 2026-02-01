@@ -1,4 +1,5 @@
 export type BCFDCommand = {
+  id: string
   actionArr: boolean[]
   channelMessage: string
   command: string
@@ -38,6 +39,8 @@ export function validateBCFDCommand(jsonString: string): BCFDCommand | null {
   try {
     const parsed = JSON.parse(jsonString)
 
+    console.log('Parsed command:', parsed)
+
     const requiredFields = [
       'actionArr',
       'channelMessage',
@@ -70,14 +73,18 @@ export function validateBCFDCommand(jsonString: string): BCFDCommand | null {
       'specificMessage',
       'type',
       'channelEmbed',
-      'privateEmbed'
+      'privateEmbed',
+      'startsWith'
     ]
+
+    // id is optional (added at runtime, stripped on export)
+    const allowedFields = [...requiredFields, 'id']
 
     // Check if all required fields exist
     const hasAllFields = requiredFields.every((field) => field in parsed)
 
-    // Check if there are no extra fields
-    const hasNoExtraFields = Object.keys(parsed).every((key) => requiredFields.includes(key))
+    // Check if there are no extra fields (allowing optional id field)
+    const hasNoExtraFields = Object.keys(parsed).every((key) => allowedFields.includes(key))
 
     // Validate embed templates
     const embedFields = ['title', 'description', 'hexColor', 'imageURL', 'thumbnailURL', 'footer']
@@ -86,6 +93,10 @@ export function validateBCFDCommand(jsonString: string): BCFDCommand | null {
     )
 
     if (hasAllFields && hasNoExtraFields && hasValidEmbeds) {
+      // Add id if missing
+      if (!parsed.id) {
+        parsed.id = crypto.randomUUID()
+      }
       return parsed as BCFDCommand
     }
 
@@ -118,14 +129,133 @@ export type TYPE_MEMBER_LEAVE = 3
 export type TYPE_MEMBER_BAN = 4
 export type TYPE_MEMBER_ADD = 5
 
+// =============================================================================
+// Interaction Command Types (Slash Commands with Buttons)
+// =============================================================================
+
+// Button styles (mirrors discord.js ButtonStyle)
+export type BCFDButtonStyle = 1 | 2 | 3 | 4 | 5 // Primary, Secondary, Success, Danger, Link
+
+// Forward declaration for recursive type
+export type BCFDInteractionButton = {
+  customId: string
+  label: string
+  style: BCFDButtonStyle
+  emoji?: string
+  url?: string // Only for Link style
+  disabled: boolean
+  action: BCFDInteractionAction
+}
+
+// Reusable action definition for slash commands and buttons
+export type BCFDInteractionAction = {
+  sendChannelMessage: boolean
+  channelMessage: string
+  sendPrivateMessage: boolean
+  privateMessage: string
+  sendChannelEmbed: boolean
+  channelEmbed: BCFDEmbedMessageTemplate
+  sendPrivateEmbed: boolean
+  privateEmbed: BCFDEmbedMessageTemplate
+  isRoleAssigner: boolean
+  roleToAssign: string
+  ephemeral: boolean // Response only visible to user
+  deferReply: boolean // For long-running actions
+  buttons: BCFDInteractionButton[] // Nested buttons for this action's response
+}
+
+// BCFDInteractionButton is defined above with BCFDInteractionAction for recursive typing
+
+// Slash command option types (mirrors discord.js ApplicationCommandOptionType)
+export type BCFDSlashCommandOptionType = 3 | 4 | 5 | 6 | 7 | 8 | 10 // String, Integer, Boolean, User, Channel, Role, Number
+
+// Slash command option
+export type BCFDSlashCommandOption = {
+  name: string
+  description: string
+  type: BCFDSlashCommandOptionType
+  required: boolean
+  choices?: { name: string; value: string | number }[]
+}
+
+// Main interaction command type
+export type BCFDInteractionCommand = {
+  id: string
+  commandName: string
+  commandDescription: string
+  options: BCFDSlashCommandOption[]
+  rootAction: BCFDInteractionAction
+  isRegistered: boolean
+  guildId?: string
+}
+
+// Factory function to create default interaction action
+export function createDefaultInteractionAction(): BCFDInteractionAction {
+  return {
+    sendChannelMessage: false,
+    channelMessage: '',
+    sendPrivateMessage: false,
+    privateMessage: '',
+    sendChannelEmbed: false,
+    channelEmbed: {
+      title: '',
+      description: '',
+      hexColor: '',
+      imageURL: '',
+      thumbnailURL: '',
+      footer: ''
+    },
+    sendPrivateEmbed: false,
+    privateEmbed: {
+      title: '',
+      description: '',
+      hexColor: '',
+      imageURL: '',
+      thumbnailURL: '',
+      footer: ''
+    },
+    isRoleAssigner: false,
+    roleToAssign: '',
+    ephemeral: false,
+    deferReply: false,
+    buttons: []
+  }
+}
+
+// Factory function to create default interaction command
+export function createDefaultInteractionCommand(): BCFDInteractionCommand {
+  return {
+    id: crypto.randomUUID(),
+    commandName: '',
+    commandDescription: '',
+    options: [],
+    rootAction: createDefaultInteractionAction(),
+    isRegistered: false
+  }
+}
+
+// Factory function to create default button
+export function createDefaultInteractionButton(): BCFDInteractionButton {
+  return {
+    customId: crypto.randomUUID(),
+    label: '',
+    style: 1, // Primary
+    disabled: false,
+    action: createDefaultInteractionAction()
+  }
+}
+
 export type AppSettings = {
   theme: string
   showToken: boolean
+  hideOutput: boolean
   language: string
   openaiApiKey: string
   openaiModel: 'gpt-4.1' | 'gpt-4.1-mini' | 'gpt-4.1-nano'
   developerPrompt: string
   useCustomApi: boolean
+  useLegacyInterpreter: boolean
+  disableReasoningApi: boolean
 }
 
 export type BotStatus = {
@@ -133,4 +263,51 @@ export type BotStatus = {
   activity: string
   activityDetails: string
   streamUrl: string
+}
+
+// AI Chat Context Types
+export interface ChatContext {
+  type: 'command' | 'startup-js' | 'bot-state' | 'all-commands'
+  id?: string // For command context, the command identifier
+  label: string
+  content?: string // The actual content to include
+}
+
+export interface SavedChat {
+  id: string
+  title: string
+  createdAt: string
+  updatedAt: string
+  messages: ChatMessageData[]
+  contexts: ChatContext[]
+  commandId?: string // The command this chat was opened with (if any)
+}
+
+export interface ChatMessageData {
+  id: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  timestamp: string
+  pendingChanges?: any | null
+  thinkingContent?: string
+}
+
+export interface ChatsData {
+  chats: SavedChat[]
+  activeChat: string | null
+}
+export interface WebhookPreset {
+  id: string
+  alias: string
+  webhookUrl: string
+  name: string
+  avatarUrl: string
+  messageType: 'message' | 'embed'
+  message: string
+  embedTitle?: string
+  embedDescription?: string
+  embedColor?: string
+  embedFooter?: string
+  embedImageUrl?: string
+  embedThumbnailUrl?: string
 }

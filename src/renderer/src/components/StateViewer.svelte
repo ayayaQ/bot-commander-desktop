@@ -2,12 +2,12 @@
   import { onMount, onDestroy } from 'svelte'
   import { t } from '../stores/localisation'
   import HeaderBar from './HeaderBar.svelte'
-  import AutoResizingTextarea from './AutoResizingTextarea.svelte'
+  import CodeEditor from './CodeEditor.svelte'
 
   // Startup JS logic
-  let startupJs = ''
-  let startupJsSaved = true
-  let startupJsLoading = false
+  let startupJs = $state('')
+  let startupJsSaved = $state(true)
+  let startupJsLoading = $state(false)
 
   async function loadStartupJs() {
     startupJsLoading = true
@@ -30,8 +30,8 @@
     }
   }
 
-  function onStartupJsInput(e: Event) {
-    startupJs = (e.target as HTMLTextAreaElement).value
+  function onStartupJsChange(e: CustomEvent<string>) {
+    startupJs = e.detail
     startupJsSaved = false
   }
 
@@ -46,13 +46,19 @@
     }
   }
 
-  let botState: Record<string, any> = {}
-  let editingKey: string | null = null
-  let editValue: string = ''
-  let showToast = false
-  let toastMessage = ''
-  let codeToRun = ''
-  let codeOutput = ''
+  let botState: Record<string, any> = $state({})
+  let editingKey: string | null = $state(null)
+  let editValue: string = $state('')
+  let showToast = $state(false)
+  let toastMessage = $state('')
+  let codeToRun = $state('')
+  let codeOutput = $state('')
+  let deleteConfirmKey: string | null = $state(null)
+
+  // JSON Editor modal state
+  let jsonEditorKey: string | null = $state(null)
+  let jsonEditorValue: string = $state('')
+  let jsonEditorError: string | null = $state(null)
 
   function updateBotState() {
     ;(window as any).electron.ipcRenderer.invoke('getBotState').then((state) => {
@@ -110,6 +116,69 @@
       .catch((error) => {
         codeOutput = `Error: ${error.message}`
       })
+  }
+
+  function promptDeleteStateKey(key: string) {
+    deleteConfirmKey = key
+  }
+
+  function confirmDeleteStateKey() {
+    if (deleteConfirmKey === null) return
+    const key = deleteConfirmKey
+    deleteConfirmKey = null
+    ;(window as any).electron.ipcRenderer
+      .invoke('runCodeInContext', `delete botState["${key.replace(/"/g, '\\"')}"];`)
+      .then(() => {
+        updateBotState()
+      })
+      .catch((error) => {
+        showErrorToast(`Error: ${error.message}`)
+      })
+  }
+
+  function cancelDelete() {
+    deleteConfirmKey = null
+  }
+
+  // JSON Editor functions
+  function openJsonEditor(key: string, value: any) {
+    jsonEditorKey = key
+    jsonEditorValue = JSON.stringify(value, null, 2)
+    jsonEditorError = null
+  }
+
+  function closeJsonEditor() {
+    jsonEditorKey = null
+    jsonEditorValue = ''
+    jsonEditorError = null
+  }
+
+  function saveJsonEditor() {
+    if (jsonEditorKey === null) return
+    try {
+      const parsedValue = JSON.parse(jsonEditorValue)
+      ;(window as any).electron.ipcRenderer
+        .invoke('updateBotState', jsonEditorKey, parsedValue)
+        .then((success: boolean) => {
+          if (success) {
+            updateBotState()
+            closeJsonEditor()
+          } else {
+            jsonEditorError = 'Failed to update value'
+          }
+        })
+        .catch((error: Error) => {
+          jsonEditorError = `Error: ${error.message}`
+        })
+    } catch (error) {
+      jsonEditorError = 'Invalid JSON'
+    }
+  }
+
+  function onJsonEditorChange(e: CustomEvent<string>) {
+    jsonEditorValue = e.detail
+    // Clear error when user types
+    jsonEditorError = null
   }
 
   function saveStateToDisk() {
@@ -176,7 +245,7 @@
       <button
         type="button"
         class="btn btn-primary"
-        on:click={() => {
+        onclick={() => {
           saveStateToDisk()
         }}><span class="material-symbols-outlined">download</span></button
       >
@@ -185,7 +254,7 @@
       <button
         type="button"
         class="btn btn-primary"
-        on:click={() => {
+        onclick={() => {
           loadStateFromDisk()
         }}><span class="material-symbols-outlined">upload</span></button
       >
@@ -201,23 +270,22 @@
       <div class="flex gap-2">
         <button
           class="btn btn-primary"
-          on:click={saveStartupJs}
+          onclick={saveStartupJs}
           disabled={startupJsSaved || startupJsLoading}
         >
           <span class="material-symbols-outlined">save</span>{$t('save')}
         </button>
       </div>
     </div>
-    <AutoResizingTextarea
-      bind:value={startupJs}
-      onInput={onStartupJsInput}
-      placeholder="// JS to run at context startup"
-      className="textarea textarea-bordered w-full min-h-[2.5rem] resize-none overflow-hidden font-mono"
-      spellcheck={false}
-      disabled={startupJsLoading}
-      minHeight="2.5rem"
-      resize="none"
-    />
+    {#if !startupJsLoading}
+      <CodeEditor
+        bind:value={startupJs}
+        on:change={onStartupJsChange}
+        placeholder="// JS to run at context startup"
+        mode="js"
+        minHeight="100px"
+      />
+    {/if}
     {#if startupJsLoading}
       <div class="text-sm text-gray-500 mt-1">Loading...</div>
     {/if}
@@ -227,11 +295,12 @@
   </div>
   <div class="bg-base-200 p-4 rounded-lg shadow-lg mb-4">
     <div class="overflow-x-auto">
-      <table class="table table-compact w-full">
+      <table class="table table-sm w-full">
         <thead>
           <tr>
             <th>{$t('name')}</th>
             <th>{$t('value')}</th>
+            <th class="w-16"></th>
           </tr>
         </thead>
         <tbody>
@@ -240,25 +309,43 @@
               <td class="font-mono">{key}</td>
               <td class="font-mono">
                 {#if editingKey === key}
-                  <!-- svelte-ignore a11y-autofocus -->
+                  <!-- svelte-ignore a11y_autofocus -->
                   <input
                     bind:value={editValue}
-                    on:blur={saveEdit}
-                    on:keydown={(e) => e.key === 'Enter' && saveEdit()}
-                    class="input input-bordered input-sm w-full"
+                    onblur={saveEdit}
+                    onkeydown={(e) => e.key === 'Enter' && saveEdit()}
+                    class="input input-sm w-full"
                     autofocus
                   />
                 {:else}
-                  <span role="button" tabindex="0" on:dblclick={() => startEditing(key, value)}>
+                  <span role="button" tabindex="0" ondblclick={() => startEditing(key, value)}>
                     {JSON.stringify(value)}
                   </span>
                 {/if}
+              </td>
+              <td class="flex gap-1">
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  onclick={() => openJsonEditor(key, value)}
+                  title={$t('edit')}
+                >
+                  <span class="material-symbols-outlined">edit</span>
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm text-error"
+                  onclick={() => promptDeleteStateKey(key)}
+                  title={$t('delete')}
+                >
+                  <span class="material-symbols-outlined">delete</span>
+                </button>
               </td>
             </tr>
           {/each}
           {#if Object.keys(botState).length === 0}
             <tr>
-              <td colspan="2" class="text-center">{$t('no-state-data')}</td>
+              <td colspan="3" class="text-center">{$t('no-state-data')}</td>
             </tr>
           {/if}
         </tbody>
@@ -270,24 +357,21 @@
     <div class="flex flex-row justify-between items-center">
       <h3 class="text-xl font-bold mb-2">{$t('run-code')}</h3>
       <div class="flex gap-2">
-        <button class="btn btn-primary mb-2 grow-0" on:click={runCode}
+        <button class="btn btn-primary mb-2 grow-0" onclick={runCode}
           ><span class="material-symbols-outlined">play_arrow</span>{$t('run')}</button
         >
-        <button class="btn btn-secondary" on:click={restartJsEngine}>
+        <button class="btn btn-secondary" onclick={restartJsEngine}>
           <span class="material-symbols-outlined">restart_alt</span>{$t('restart-js-engine')}
         </button>
       </div>
     </div>
 
     <div class="mb-2">
-      <AutoResizingTextarea
+      <CodeEditor
         bind:value={codeToRun}
-        onInput={undefined}
         placeholder={$t('run-code-placeholder')}
-        className="textarea textarea-bordered w-full min-h-[2.5rem] resize-none overflow-hidden"
-        spellcheck={false}
-        minHeight="2.5rem"
-        resize="none"
+        mode="js"
+        minHeight="100px"
       />
     </div>
     {#if codeOutput}
@@ -308,5 +392,53 @@
         <span>{toastMessage}</span>
       </div>
     </div>
+  </div>
+{/if}
+
+{#if deleteConfirmKey !== null}
+  <div class="modal modal-open">
+    <div class="modal-box">
+      <h3 class="font-bold text-lg">{$t('confirm-delete')}</h3>
+      <p class="py-4">
+        {$t('confirm-delete-variable')} <code class="font-mono bg-base-300 px-1 rounded">{deleteConfirmKey}</code>?
+      </p>
+      <div class="modal-action">
+        <button class="btn" onclick={cancelDelete}>{$t('cancel')}</button>
+        <button class="btn btn-error" onclick={confirmDeleteStateKey}>{$t('delete')}</button>
+      </div>
+    </div>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="modal-backdrop" onclick={cancelDelete} onkeydown={(e) => e.key === 'Escape' && cancelDelete()}></div>
+  </div>
+{/if}
+
+{#if jsonEditorKey !== null}
+  <div class="modal modal-open">
+    <div class="modal-box max-w-2xl">
+      <h3 class="font-bold text-lg mb-4">
+        {$t('edit-json-value')}: <code class="font-mono bg-base-300 px-2 py-1 rounded">{jsonEditorKey}</code>
+      </h3>
+      <div class="mb-4">
+        <CodeEditor
+          bind:value={jsonEditorValue}
+          on:change={onJsonEditorChange}
+          placeholder="Enter JSON value..."
+          mode="js"
+          minHeight="200px"
+        />
+      </div>
+      {#if jsonEditorError}
+        <div class="alert alert-error mb-4">
+          <span class="material-symbols-outlined">error</span>
+          <span>{jsonEditorError}</span>
+        </div>
+      {/if}
+      <div class="modal-action">
+        <button class="btn" onclick={closeJsonEditor}>{$t('cancel')}</button>
+        <button class="btn btn-primary" onclick={saveJsonEditor}>{$t('save')}</button>
+      </div>
+    </div>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="modal-backdrop" onclick={closeJsonEditor} onkeydown={(e) => e.key === 'Escape' && closeJsonEditor()}></div>
   </div>
 {/if}

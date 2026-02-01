@@ -1,82 +1,155 @@
-import { app } from "electron"
-import { join } from "path"
+import { app } from 'electron'
+import { join } from 'path'
 import fs from 'fs/promises'
-import { AppSettings, BCFDCommand, BCFDSlashCommand, BotStatus } from "../types/types"
-import { getCommands, setCommands } from "./botService";
-import { getSettings, setSettings } from "./settingsService";
-import { getBotStatus, setBotStatus } from "./statusService";
+import crypto from 'crypto'
+import {
+  AppSettings,
+  BCFDCommand,
+  BCFDSlashCommand,
+  BotStatus,
+  BCFDInteractionCommand,
+  WebhookPreset
+} from '../types/types'
+import { getCommands, setCommands } from './botService'
+import { getSettings, setSettings } from './settingsService'
+import { getBotStatus, setBotStatus } from './statusService'
+import { getInteractions, setInteractions } from './interactionService'
 
 export async function loadCommands(): Promise<void> {
-    const commandsPath = join(app.getPath('userData'), 'commands.json')
-    try {
-      const data = await fs.readFile(commandsPath, 'utf-8')
-      let commands : { bcfdCommands: BCFDCommand[]; bcfdSlashCommands: BCFDSlashCommand[] } = JSON.parse(data)
-        setCommands(commands);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        // File doesn't exist, create it with empty commands
-        await fs.writeFile(commandsPath, JSON.stringify({ bcfdCommands: [] }))
-      } else {
-        console.error('Error loading commands:', error)
+  const commandsPath = join(app.getPath('userData'), 'commands.json')
+  try {
+    const data = await fs.readFile(commandsPath, 'utf-8')
+    let commands: { bcfdCommands: BCFDCommand[]; bcfdSlashCommands: BCFDSlashCommand[] } =
+      JSON.parse(data)
+
+    // Migration: Add IDs to commands that don't have them
+    let needsSave = false
+    for (const cmd of commands.bcfdCommands) {
+      if (!cmd.id) {
+        cmd.id = crypto.randomUUID()
+        needsSave = true
       }
     }
+
+    setCommands(commands)
+
+    // Save if we migrated any commands
+    if (needsSave) {
+      await saveCommands()
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      // File doesn't exist, create it with empty commands
+      await fs.writeFile(commandsPath, JSON.stringify({ bcfdCommands: [] }))
+    } else {
+      console.error('Error loading commands:', error)
+    }
   }
+}
 
 export async function saveCommands(): Promise<void> {
-    const commandsPath = join(app.getPath('userData'), 'commands.json')
-    try {
-      await fs.writeFile(commandsPath, JSON.stringify(getCommands(), null, 2))
-    } catch (error) {
-      console.error('Error saving commands:', error)
-    }
+  const commandsPath = join(app.getPath('userData'), 'commands.json')
+  try {
+    await fs.writeFile(commandsPath, JSON.stringify(getCommands(), null, 2))
+  } catch (error) {
+    console.error('Error saving commands:', error)
   }
+}
 
 export async function saveSettings(): Promise<void> {
-    const settingsPath = join(app.getPath('userData'), 'settings.json')
-    try {
-      await fs.writeFile(settingsPath, JSON.stringify(getSettings(), null, 2))
-    } catch (error) {
-      console.error('Error saving settings:', error)
-    }
+  const settingsPath = join(app.getPath('userData'), 'settings.json')
+  try {
+    await fs.writeFile(settingsPath, JSON.stringify(getSettings(), null, 2))
+  } catch (error) {
+    console.error('Error saving settings:', error)
   }
-  
+}
+
 export async function loadBotStatus(): Promise<void> {
-    const botStatusPath = join(app.getPath('userData'), 'botStatus.json')
-    try {
-      const data = await fs.readFile(botStatusPath, 'utf-8')
-      let botStatus = JSON.parse(data) as BotStatus;
-      setBotStatus(botStatus);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        // File doesn't exist, create it with default bot status
-        await fs.writeFile(botStatusPath, JSON.stringify(getBotStatus(), null, 2))
-      } else {
-        console.error('Error loading bot status:', error)
-      }
-    }
-  }
-  
-export async function saveBotStatus(): Promise<void> {
-    const botStatusPath = join(app.getPath('userData'), 'botStatus.json')
-    try {
+  const botStatusPath = join(app.getPath('userData'), 'botStatus.json')
+  try {
+    const data = await fs.readFile(botStatusPath, 'utf-8')
+    let botStatus = JSON.parse(data) as BotStatus
+    setBotStatus(botStatus)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      // File doesn't exist, create it with default bot status
       await fs.writeFile(botStatusPath, JSON.stringify(getBotStatus(), null, 2))
-    } catch (error) {
-      console.error('Error saving bot status:', error)
+    } else {
+      console.error('Error loading bot status:', error)
     }
   }
-  
+}
+
+export async function saveBotStatus(): Promise<void> {
+  const botStatusPath = join(app.getPath('userData'), 'botStatus.json')
+  try {
+    await fs.writeFile(botStatusPath, JSON.stringify(getBotStatus(), null, 2))
+  } catch (error) {
+    console.error('Error saving bot status:', error)
+  }
+}
+
 export async function loadSettings(): Promise<void> {
-    const settingsPath = join(app.getPath('userData'), 'settings.json')
-    try {
-      const data = await fs.readFile(settingsPath, 'utf-8')
-      let settings = JSON.parse(data) as AppSettings;
-      setSettings(settings);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        // File doesn't exist, create it with default settings
-        await fs.writeFile(settingsPath, JSON.stringify(getSettings(), null, 2))
-      } else {
-        console.error('Error loading settings:', error)
-      }
+  const settingsPath = join(app.getPath('userData'), 'settings.json')
+  try {
+    const data = await fs.readFile(settingsPath, 'utf-8')
+    let settings = JSON.parse(data) as AppSettings
+    setSettings(settings)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      // File doesn't exist, create it with default settings
+      await fs.writeFile(settingsPath, JSON.stringify(getSettings(), null, 2))
+    } else {
+      console.error('Error loading settings:', error)
     }
   }
+}
+
+export async function loadInteractions(): Promise<void> {
+  const interactionsPath = join(app.getPath('userData'), 'interactions.json')
+  try {
+    const data = await fs.readFile(interactionsPath, 'utf-8')
+    const interactions = JSON.parse(data) as BCFDInteractionCommand[]
+    setInteractions(interactions)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      // File doesn't exist, create it with empty array
+      await fs.writeFile(interactionsPath, JSON.stringify([]))
+    } else {
+      console.error('Error loading interactions:', error)
+    }
+  }
+}
+
+export async function saveInteractions(): Promise<void> {
+  const interactionsPath = join(app.getPath('userData'), 'interactions.json')
+  try {
+    await fs.writeFile(interactionsPath, JSON.stringify(getInteractions(), null, 2))
+  } catch (error) {
+    console.error('Error saving interactions:', error)
+  }
+}
+
+export async function getWebhookPresets(): Promise<WebhookPreset[]> {
+  const presetsPath = join(app.getPath('userData'), 'webhook_presets.json')
+  try {
+    const data = await fs.readFile(presetsPath, 'utf-8')
+    return JSON.parse(data)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return []
+    }
+    console.error('Error loading webhook presets:', error)
+    return []
+  }
+}
+
+export async function saveWebhookPresets(presets: WebhookPreset[]): Promise<void> {
+  const presetsPath = join(app.getPath('userData'), 'webhook_presets.json')
+  try {
+    await fs.writeFile(presetsPath, JSON.stringify(presets, null, 2))
+  } catch (error) {
+    console.error('Error saving webhook presets:', error)
+  }
+}

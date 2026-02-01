@@ -1,5 +1,8 @@
 import {
+  ButtonInteraction,
+  ChatInputCommandInteraction,
   Client,
+  CommandInteractionOptionResolver,
   Guild,
   GuildMember,
   Message,
@@ -10,11 +13,13 @@ import {
   TextChannel,
   User
 } from 'discord.js'
-import { BCFDCommand } from '../types/types'
+import { BCFDCommand, BCFDInteractionCommand } from '../types/types'
 import { getCommands, getContext } from './botService'
 import { stringInfoAddEval } from '../utils/virtual'
 import OpenAI from 'openai'
 import { getSettings } from './settingsService'
+import { interpret, BCFDContext as InterpreterContext } from './bcfdLang'
+import { rendererConsole } from '../utils/rendererConsole'
 
 export type StringInfoContext = {
   message: string
@@ -26,6 +31,9 @@ export type StringInfoContext = {
   mentionedUser?: User
   messageEvent?: OmitPartialGroupDMChannel<Message<boolean>> | Message<boolean>
   command?: BCFDCommand
+  // Interaction-specific fields
+  interactionCommand?: BCFDInteractionCommand
+  interactionOptions?: CommandInteractionOptionResolver
 }
 
 const searchRegex = /\$(\w+)(?:\{([^}]*)\})?/g
@@ -48,7 +56,60 @@ export function contextForMessageEvent(
   }
 }
 
+/**
+ * Process a template string with the given context.
+ * Uses the new interpreter by default, falls back to legacy mode if enabled in settings.
+ */
 export async function stringInfoAdd(ctx: StringInfoContext): Promise<string> {
+  const settings = getSettings()
+
+  // Use new interpreter unless legacy mode is enabled
+  if (!settings.useLegacyInterpreter) {
+    return stringInfoAddNew(ctx)
+  }
+
+  // Legacy mode: use the old string replacement logic
+  return stringInfoAddLegacy(ctx)
+}
+
+/**
+ * New interpreter-based string processing.
+ * Supports nested expressions and proper evaluation order.
+ */
+async function stringInfoAddNew(ctx: StringInfoContext): Promise<string> {
+  // Convert StringInfoContext to BCFDContext for the interpreter
+  const interpreterCtx: InterpreterContext = {
+    user: ctx.user,
+    member: ctx.member,
+    client: ctx.client,
+    guild: ctx.guild,
+    textChannel: ctx.textChannel,
+    mentionedUser: ctx.mentionedUser,
+    messageEvent: ctx.messageEvent,
+    command: ctx.command,
+    interactionCommand: ctx.interactionCommand,
+    interactionOptions: ctx.interactionOptions,
+    vmContext: getContext()
+  }
+
+  const result = await interpret(ctx.message, interpreterCtx)
+
+  // Log any errors to the renderer console
+  if (result.errors.length > 0) {
+    console.warn('BCFD Interpreter errors:', result.errors)
+    for (const error of result.errors) {
+      rendererConsole.error(`Interpreter: ${error.message}`)
+    }
+  }
+
+  return result.output
+}
+
+/**
+ * Legacy string replacement logic.
+ * Kept for backward compatibility with existing commands.
+ */
+async function stringInfoAddLegacy(ctx: StringInfoContext): Promise<string> {
   let result = ctx.message
 
   result = ctx.message.replace(searchRegex, (_match, command) => {
@@ -81,6 +142,25 @@ export function contextForReactionEvent(
     textChannel: event.message.channel as TextChannel,
     messageEvent: event.message as Message<boolean>,
     command: command
+  }
+}
+
+export function contextForInteractionEvent(
+  message: string,
+  interaction: ChatInputCommandInteraction | ButtonInteraction,
+  command: BCFDInteractionCommand
+): StringInfoContext {
+  return {
+    message: message,
+    user: interaction.user,
+    member: (interaction.member as GuildMember) ?? undefined,
+    client: interaction.client,
+    guild: interaction.guild ?? undefined,
+    textChannel: (interaction.channel as TextChannel) ?? undefined,
+    interactionCommand: command,
+    interactionOptions: interaction.isChatInputCommand()
+      ? (interaction.options as CommandInteractionOptionResolver)
+      : undefined
   }
 }
 

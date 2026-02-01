@@ -1,4 +1,5 @@
 export type BCFDCommand = {
+  id: string
   actionArr: boolean[]
   channelMessage: string
   command: string
@@ -63,14 +64,77 @@ export type BCFDSlashCommand = {
   commandReply: string
 }
 
+// =============================================================================
+// Interaction Command Types (Slash Commands with Buttons)
+// =============================================================================
+
+// Button styles (mirrors discord.js ButtonStyle)
+export type BCFDButtonStyle = 1 | 2 | 3 | 4 | 5 // Primary, Secondary, Success, Danger, Link
+
+// Forward declaration for recursive type
+export type BCFDInteractionButton = {
+  customId: string
+  label: string
+  style: BCFDButtonStyle
+  emoji?: string
+  url?: string // Only for Link style
+  disabled: boolean
+  action: BCFDInteractionAction
+}
+
+// Reusable action definition for slash commands and buttons
+export type BCFDInteractionAction = {
+  sendChannelMessage: boolean
+  channelMessage: string
+  sendPrivateMessage: boolean
+  privateMessage: string
+  sendChannelEmbed: boolean
+  channelEmbed: BCFDEmbedMessageTemplate
+  sendPrivateEmbed: boolean
+  privateEmbed: BCFDEmbedMessageTemplate
+  isRoleAssigner: boolean
+  roleToAssign: string
+  ephemeral: boolean // Response only visible to user
+  deferReply: boolean // For long-running actions
+  buttons: BCFDInteractionButton[] // Nested buttons for this action's response
+}
+
+// BCFDInteractionButton is defined above with BCFDInteractionAction for recursive typing
+
+// Slash command option types (mirrors discord.js ApplicationCommandOptionType)
+export type BCFDSlashCommandOptionType = 3 | 4 | 5 | 6 | 7 | 8 | 10 // String, Integer, Boolean, User, Channel, Role, Number
+
+// Slash command option
+export type BCFDSlashCommandOption = {
+  name: string
+  description: string
+  type: BCFDSlashCommandOptionType
+  required: boolean
+  choices?: { name: string; value: string | number }[]
+}
+
+// Main interaction command type
+export type BCFDInteractionCommand = {
+  id: string
+  commandName: string
+  commandDescription: string
+  options: BCFDSlashCommandOption[]
+  rootAction: BCFDInteractionAction
+  isRegistered: boolean
+  guildId?: string
+}
+
 export type AppSettings = {
   theme: string
   showToken: boolean
+  hideOutput: boolean
   language: string
   openaiApiKey: string
   openaiModel: 'gpt-4.1' | 'gpt-4.1-mini' | 'gpt-4.1-nano'
   developerPrompt: string
   useCustomApi: boolean
+  useLegacyInterpreter: boolean // Use old string replacement instead of new interpreter
+  disableReasoningApi: boolean // Disable streaming reasoning API for thinking models
 }
 
 export type BotStatus = {
@@ -78,4 +142,19 @@ export type BotStatus = {
   activity: string
   activityDetails: string
   streamUrl: string
+}
+export interface WebhookPreset {
+  id: string
+  alias: string
+  webhookUrl: string
+  name: string
+  avatarUrl: string
+  messageType: 'message' | 'embed'
+  message: string
+  embedTitle?: string
+  embedDescription?: string
+  embedColor?: string
+  embedFooter?: string
+  embedImageUrl?: string
+  embedThumbnailUrl?: string
 }

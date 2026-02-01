@@ -1,21 +1,21 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte'
   import { botStatusStore, saveBotStatus } from '../stores/status'
-  import { t } from '../stores/localisation'
+  import { t, type TranslationKey } from '../stores/localisation'
 
-  let status = $botStatusStore.status
-  let activity = $botStatusStore.activity
-  let activityDetails = $botStatusStore.activityDetails
-  let streamUrl = $botStatusStore.streamUrl
+  let status = $state($botStatusStore.status)
+  let activity = $state($botStatusStore.activity)
+  let activityDetails = $state($botStatusStore.activityDetails)
+  let streamUrl = $state($botStatusStore.streamUrl)
 
-  const statusOptions = [
+  const statusOptions: Array<{ value: string; label: TranslationKey }> = [
     { value: 'Online', label: 'status-online' },
     { value: 'Idle', label: 'status-idle' },
     { value: 'Do Not Disturb', label: 'status-dnd' },
     { value: 'Invisible', label: 'status-invisible' }
   ]
 
-  const activityOptions = [
+  const activityOptions: Array<{ value: string; label: TranslationKey }> = [
     { value: 'Playing', label: 'activity-playing' },
     { value: 'Streaming', label: 'activity-streaming' },
     { value: 'Listening', label: 'activity-listening' },
@@ -32,7 +32,6 @@
   }
 
   function handleSubmit(): void {
-
     console.log({ status, activity, activityDetails, streamUrl })
     // validate stream url
     if (activity === 'Streaming') {
@@ -44,7 +43,7 @@
     saveBotStatus({ status, activity, activityDetails, streamUrl })
   }
 
-  let unsubscribe: () => void;
+  let unsubscribe: () => void
 
   onMount(async () => {
     unsubscribe = botStatusStore.subscribe((storeStatus) => {
@@ -64,7 +63,7 @@
   <label for="status" class="label">
     <span class="label-text">{$t('status')}:</span>
   </label>
-  <select id="status" class="select select-bordered" bind:value={status}>
+  <select id="status" class="select" bind:value={status}>
     {#each statusOptions as option}
       <option value={option.value}>{$t(option.label)}</option>
     {/each}
@@ -76,9 +75,9 @@
   </label>
   <select
     id="activity"
-    class="select select-bordered"
+    class="select"
     bind:value={activity}
-    on:change={handleActivityChange}
+    onchange={handleActivityChange}
   >
     {#each activityOptions as option}
       <option value={option.value}>{$t(option.label)}</option>
@@ -93,7 +92,7 @@
     <input
       type="text"
       id="activityDetails"
-      class="input input-bordered"
+      class="input"
       bind:value={activityDetails}
       placeholder={$t('status-details-placeholder')}
     />
@@ -106,7 +105,7 @@
       <input
         type="url"
         id="streamUrl"
-        class="input input-bordered"
+        class="input"
         bind:value={streamUrl}
         placeholder="https://www.twitch.tv/username"
       />
@@ -114,5 +113,5 @@
   {/if}
 {/if}
 <div class="card-actions justify-end mt-4">
-  <button class="btn btn-primary" on:click={handleSubmit}>{$t('update-status')}</button>
+  <button class="btn btn-primary" onclick={handleSubmit}>{$t('update-status')}</button>
 </div>
