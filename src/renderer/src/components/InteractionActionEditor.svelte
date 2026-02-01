@@ -404,7 +404,7 @@
 
       {#if action.buttons && action.buttons.length > 0}
         <div class="space-y-2">
-          {#each action.buttons as button, idx}
+          {#each action.buttons as _button, idx}
             <InteractionButtonEditor
               bind:button={action.buttons[idx]}
               onDelete={() => removeNestedButton(idx)}
