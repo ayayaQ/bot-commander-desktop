@@ -40,6 +40,8 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('discriminator', (_args, ctx) => ctx.user?.discriminator ?? '')
   registry.set('tag', (_args, ctx) => ctx.user?.tag ?? '')
   registry.set('id', (_args, ctx) => ctx.user?.id ?? '')
+  registry.set('isBot', (_args, ctx) => ctx.user?.bot.toString() ?? '')
+  registry.set('globalName', (_args, ctx) => ctx.user?.globalName ?? '')
   registry.set('timeCreated', (_args, ctx) =>
     ctx.user ? new Date(ctx.user.createdTimestamp).toLocaleString() : ''
   )
@@ -80,6 +82,13 @@ function createFunctionRegistry(): FunctionRegistry {
   )
   registry.set('memberHasBoosted', (_args, ctx) =>
     (ctx.member?.premiumSinceTimestamp != null).toString()
+  )
+  registry.set('memberColor', (_args, ctx) => ctx.member?.displayHexColor ?? '')
+  registry.set('memberRoles', (_args, ctx) =>
+    ctx.member?.roles.cache.map((r) => r.name).join(', ') ?? ''
+  )
+  registry.set('memberRoleCount', (_args, ctx) =>
+    ctx.member?.roles.cache.size.toString() ?? '0'
   )
 
   // --------------------------------------------------------------------------
@@ -122,6 +131,24 @@ function createFunctionRegistry(): FunctionRegistry {
     new Date(ctx.guild?.createdTimestamp ?? 0).toLocaleString()
   )
   registry.set('memberCount', (_args, ctx) => ctx.guild?.memberCount.toString() ?? '')
+  registry.set('serverID', (_args, ctx) => ctx.guild?.id ?? '')
+  registry.set('serverOwner', async (_args, ctx) => {
+    if (!ctx.guild) return ''
+    const owner = await ctx.guild.fetchOwner().catch(() => null)
+    return owner ? `<@${owner.id}>` : ''
+  })
+  registry.set('serverOwnerPlain', async (_args, ctx) => {
+    if (!ctx.guild) return ''
+    const owner = await ctx.guild.fetchOwner().catch(() => null)
+    return owner?.user.displayName ?? ''
+  })
+  registry.set('serverBoostCount', (_args, ctx) =>
+    ctx.guild?.premiumSubscriptionCount?.toString() ?? '0'
+  )
+  registry.set('serverBoostTier', (_args, ctx) =>
+    ctx.guild?.premiumTier.toString() ?? '0'
+  )
+  registry.set('serverVanityCode', (_args, ctx) => ctx.guild?.vanityURLCode ?? '')
 
   // --------------------------------------------------------------------------
   // Channel Context Functions
@@ -132,6 +159,14 @@ function createFunctionRegistry(): FunctionRegistry {
     new Date(ctx.textChannel?.createdTimestamp ?? 0).toLocaleString()
   )
   registry.set('channelAsMention', (_args, ctx) => `<#${ctx.textChannel?.id ?? ''}>`)
+  registry.set('channelTopic', (_args, ctx) => {
+    const ch = ctx.textChannel
+    return ch && 'topic' in ch ? (ch as any).topic ?? '' : ''
+  })
+  registry.set('channelIsNSFW', (_args, ctx) => {
+    const ch = ctx.textChannel
+    return ch && 'nsfw' in ch ? (ch as any).nsfw.toString() : 'false'
+  })
 
   // --------------------------------------------------------------------------
   // Mentioned User Context Functions
@@ -150,6 +185,7 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('mentionedNamePlain', (_args, ctx) => ctx.mentionedUser?.displayName ?? '')
   registry.set('mentionedDefaultAvatar', (_args, ctx) => ctx.mentionedUser?.defaultAvatarURL ?? '')
   registry.set('mentionedIsBot', (_args, ctx) => ctx.mentionedUser?.bot.toString() ?? '')
+  registry.set('mentionedGlobalName', (_args, ctx) => ctx.mentionedUser?.globalName ?? '')
 
   // --------------------------------------------------------------------------
   // General/Utility Functions
@@ -248,6 +284,46 @@ function createFunctionRegistry(): FunctionRegistry {
     if (args.length < 1 || !ctx.vmContext) return ''
     const value = ctx.vmContext[args[0]]
     return value !== undefined ? String(value) : ''
+  })
+
+  // --------------------------------------------------------------------------
+  // String Manipulation Functions
+  // --------------------------------------------------------------------------
+
+  // $upper(text) - convert to uppercase
+  registry.set('upper', (args) => args[0]?.toUpperCase() ?? '')
+
+  // $lower(text) - convert to lowercase
+  registry.set('lower', (args) => args[0]?.toLowerCase() ?? '')
+
+  // $length(text) - get string length
+  registry.set('length', (args) => (args[0]?.length ?? 0).toString())
+
+  // $replace(text, find, replacement) - replace all occurrences
+  registry.set('replace', (args) => {
+    const text = args[0] ?? ''
+    const find = args[1] ?? ''
+    const replacement = args[2] ?? ''
+    if (find === '') return text
+    return text.split(find).join(replacement)
+  })
+
+  // $substring(text, start, end) - extract substring
+  registry.set('substring', (args) => {
+    const text = args[0] ?? ''
+    const start = Math.max(0, Math.min(parseInt(args[1]?.trim() ?? '0', 10) || 0, text.length))
+    const end = Math.max(start, Math.min(parseInt(args[2]?.trim() ?? String(text.length), 10) || text.length, text.length))
+    return text.substring(start, end)
+  })
+
+  // $trim(text) - trim whitespace
+  registry.set('trim', (args) => args[0]?.trim() ?? '')
+
+  // $repeat(text, count) - repeat text N times (capped at 100)
+  registry.set('repeat', (args) => {
+    const text = args[0] ?? ''
+    const count = Math.max(0, Math.min(parseInt(args[1]?.trim() ?? '1', 10) || 1, 100))
+    return text.repeat(count)
   })
 
   // $chat(prompt) - async AI chat (returns Promise)
