@@ -8,6 +8,11 @@
   import { t } from '../stores/localisation'
   import { connectionStore } from '../stores/connection'
 
+  const emptyKaomojis = ['(´。＿。｀)', '(╥_╥)', '(｡•́︿•̀｡)', '(っ˘̩╭╮˘̩)っ', '(ᵕ—ᴗ—)']
+  const noResultsKaomojis = ['(￣ω￣;)', '(・・;)', '(¬_¬)', '(-_-;)', '(°ロ°)']
+  const emptyKaomoji = emptyKaomojis[Math.floor(Math.random() * emptyKaomojis.length)]
+  const noResultsKaomoji = noResultsKaomojis[Math.floor(Math.random() * noResultsKaomojis.length)]
+
   let interactions: BCFDInteractionCommand[] = $state([])
   let isEditing = $state(false)
   let editingInteraction: BCFDInteractionCommand | null = $state(null)
@@ -161,7 +166,16 @@
     </HeaderBar>
     <div class="p-4">
       {#if filteredInteractions.length === 0}
-        <p class="text-gray-500">{$t('no-interactions-found')}</p>
+        <div class="flex flex-col items-center justify-center py-16 text-base-content/40 select-none">
+          {#if interactions.length === 0}
+            <p class="text-5xl mb-3">{emptyKaomoji}</p>
+            <p class="text-sm font-medium">{$t('no-interactions')}</p>
+            <p class="text-xs mt-1">{$t('add-interaction-hint')}</p>
+          {:else}
+            <p class="text-5xl mb-3">{noResultsKaomoji}</p>
+            <p class="text-sm font-medium">{$t('no-interactions-found')}</p>
+          {/if}
+        </div>
       {:else}
         <ul class="space-y-2">
           {#each filteredInteractions as interaction}

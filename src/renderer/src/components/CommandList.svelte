@@ -10,6 +10,11 @@
   import { t } from '../stores/localisation'
   import { apiAuthStore } from '../stores/apiAuth'
 
+  const emptyKaomojis = ['(´。＿。｀)', '(╥_╥)', '(｡•́︿•̀｡)', '(っ˘̩╭╮˘̩)っ', '(ᵕ—ᴗ—)']
+  const noResultsKaomojis = ['(￣ω￣;)', '(・・;)', '(¬_¬)', '(-_-;)', '(°ロ°)']
+  const emptyKaomoji = emptyKaomojis[Math.floor(Math.random() * emptyKaomojis.length)]
+  const noResultsKaomoji = noResultsKaomojis[Math.floor(Math.random() * noResultsKaomojis.length)]
+
   let commands: BCFDCommand[] = $state([])
   let isEditing = $state(false)
   let editingCommand: BCFDCommand | null = $state(null)
@@ -152,7 +157,16 @@
     </HeaderBar>
     <div class="p-4">
       {#if filteredCommands.length === 0}
-        <p class="text-gray-500">{$t('no-commands-found')}</p>
+        <div class="flex flex-col items-center justify-center py-16 text-base-content/40 select-none">
+          {#if commands.length === 0}
+            <p class="text-5xl mb-3">{emptyKaomoji}</p>
+            <p class="text-sm font-medium">{$t('no-commands')}</p>
+            <p class="text-xs mt-1">{$t('add-command-hint')}</p>
+          {:else}
+            <p class="text-5xl mb-3">{noResultsKaomoji}</p>
+            <p class="text-sm font-medium">{$t('no-commands-found')}</p>
+          {/if}
+        </div>
       {:else}
         <ul class="space-y-2">
           {#each filteredCommands as command}
