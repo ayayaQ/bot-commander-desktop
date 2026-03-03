@@ -93,6 +93,10 @@ export function addWindowIPCHandlers(mainWindow: BrowserWindow) {
     return mainWindow?.isMaximized() ?? false
   })
 
+  ipcMain.handle('get-platform', () => {
+    return process.platform
+  })
+
   // Window state tracking
   mainWindow.on('maximize', () => {
     mainWindow.webContents.send('window-state-changed', true)

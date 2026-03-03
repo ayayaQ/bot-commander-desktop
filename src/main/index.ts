@@ -26,6 +26,7 @@ let tray: Tray | null = null
 
 // Initialize the custom property
 app.isQuitting = false
+app.name = 'Bot Commander for Discord'
 
 async function saveStats() {
   if (stats) {
@@ -45,8 +46,8 @@ function createWindow(): void {
     minHeight: 495,
     show: false,
     autoHideMenuBar: true,
-    frame: false, // Remove the default frame
-    titleBarStyle: 'hidden', // Hide the title bar
+    frame: process.platform === 'darwin', // Use native frame on macOS
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden', // hiddenInset shows traffic lights on macOS
     ...(windowIcon ? { icon: windowIcon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),

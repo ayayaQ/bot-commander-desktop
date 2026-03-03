@@ -5,21 +5,20 @@
   let hasUpdate = $state(false)
   let updateInfo: any = $state(null)
   let checkingUpdate = false
+  let platform = $state('')
+  let isMac = $derived(platform === 'darwin')
 
   onMount(async () => {
-    // Initial state - need to await the invoke call
-    isMaximized = await (window as any).electron.ipcRenderer.invoke('is-window-maximized')
+    platform = await (window as any).electron.ipcRenderer.invoke('get-platform')
 
-    // Listen for window state changes
+    isMaximized = await (window as any).electron.ipcRenderer.invoke('is-window-maximized')
     ;(window as any).electron.ipcRenderer.on(
       'window-state-changed',
       (_event: any, maximized: boolean) => {
-        console.log('Window state changed:', maximized)
         isMaximized = maximized
       }
     )
 
-    // Check for updates on mount
     checkForUpdates()
   })
 
@@ -57,11 +56,14 @@
 </script>
 
 <div class="titlebar bg-base-300 text-base-content flex justify-between items-center h-10 px-4">
-  <div class="flex items-center gap-2">
+  {#if isMac}
+    <div class="flex-1"></div>
+  {/if}
+  <div class="flex items-center gap-2" class:titlebar-center={isMac}>
     <span class="material-symbols-outlined icon-light fill">chat_bubble</span>
     <div class="titlebar-title font-semibold">BCFD</div>
   </div>
-  <div class="flex items-center gap-1">
+  <div class="flex-1 flex justify-end items-center gap-1">
     {#if hasUpdate && updateInfo}
       <div class="update-notification flex items-center gap-2 mr-2">
         <button
@@ -74,25 +76,36 @@
         </button>
       </div>
     {/if}
-    <div class="titlebar-buttons flex">
-      <button class="btn btn-ghost btn-square btn-sm" onclick={minimize}>
-        <span class="material-symbols-outlined icon-light">remove</span>
-      </button>
-      <button class="btn btn-ghost btn-square btn-sm" onclick={maximize}>
-        <span class="material-symbols-outlined icon-light">
-          {isMaximized ? 'select_window_2' : 'crop_square'}
-        </span>
-      </button>
-      <button class="btn btn-ghost btn-square btn-sm" onclick={close}>
-        <span class="material-symbols-outlined icon-light">close</span>
-      </button>
-    </div>
+    {#if !isMac}
+      <div class="titlebar-buttons flex">
+        <button class="btn btn-ghost btn-square btn-sm" onclick={minimize}>
+          <span class="material-symbols-outlined icon-light">remove</span>
+        </button>
+        <button class="btn btn-ghost btn-square btn-sm" onclick={maximize}>
+          <span class="material-symbols-outlined icon-light">
+            {isMaximized ? 'select_window_2' : 'crop_square'}
+          </span>
+        </button>
+        <button class="btn btn-ghost btn-square btn-sm" onclick={close}>
+          <span class="material-symbols-outlined icon-light">close</span>
+        </button>
+      </div>
+    {/if}
+    {#if isMac}
+      <div class="flex-1"></div>
+    {/if}
   </div>
 </div>
 
 <style>
   .titlebar {
     -webkit-app-region: drag;
+  }
+
+  .titlebar-center {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
   }
 
   .titlebar-buttons {
