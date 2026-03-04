@@ -11,6 +11,9 @@
   import HeaderBar from './HeaderBar.svelte'
   import Dialog from './Dialog.svelte'
 
+  const emptyKaomojis = ['(´。＿。｀)', '(╥_╥)', '(｡•́︿•̀｡)', '(っ˘̩╭╮˘̩)っ', '(ᵕ—ᴗ—)']
+  const emptyKaomoji = emptyKaomojis[Math.floor(Math.random() * emptyKaomojis.length)]
+
   let webhookUrl = $state('')
   let name = $state('')
   let avatarUrl = $state('')
@@ -330,7 +333,10 @@
   <div class="w-64 bg-base-300 p-4 overflow-y-auto border-r border-base-content/10">
     <h3 class="text-lg font-bold mb-4">Presets</h3>
     {#if $webhookPresetsStore.length === 0}
-      <p class="text-center text-base-content/60 text-sm py-8">No presets saved yet</p>
+      <div class="flex flex-col items-center justify-center py-8 text-base-content/40 select-none">
+        <p class="text-3xl mb-2">{emptyKaomoji}</p>
+        <p class="text-xs font-medium">{$t('no-presets')}</p>
+      </div>
     {:else}
       <div class="space-y-2">
         {#each $webhookPresetsStore as preset}
