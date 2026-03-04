@@ -24,12 +24,12 @@
   })
 
   async function loadCommands() {
-    const result = await (window as any).electron.ipcRenderer.invoke('get-commands')
+    const result = await window.electron.ipcRenderer.invoke('get-commands')
     commands = result.bcfdCommands
   }
 
   async function saveCommands() {
-    await (window as any).electron.ipcRenderer.invoke('save-commands', { bcfdCommands: $state.snapshot(commands) })
+    await window.electron.ipcRenderer.invoke('save-commands', { bcfdCommands: $state.snapshot(commands) })
   }
 
   function addCommand() {
@@ -64,7 +64,7 @@
   }
 
   async function exportCommands() {
-    const result = await (window as any).electron.ipcRenderer.invoke('export-commands')
+    const result = await window.electron.ipcRenderer.invoke('export-commands')
     if (result.success) {
     } else if (!result.canceled) {
       alert('Error exporting commands: ' + result.error)
@@ -72,7 +72,7 @@
   }
 
   async function importCommands() {
-    const result = await (window as any).electron.ipcRenderer.invoke('import-commands')
+    const result = await window.electron.ipcRenderer.invoke('import-commands')
     if (result.success) {
       commands = [...commands, ...result.commands]
       await saveCommands()

@@ -9,11 +9,11 @@ export const botStatusStore = writable<BotStatus>({
 })
 
 export async function loadBotStatus() {
-  const botStatus = await (window as any).electron.ipcRenderer.invoke('get-bot-status')
+  const botStatus = await window.electron.ipcRenderer.invoke('get-bot-status')
   botStatusStore.set(botStatus)
 }
 
 export async function saveBotStatus(newBotStatus: BotStatus) {
-  await (window as any).electron.ipcRenderer.invoke('save-bot-status', newBotStatus)
+  await window.electron.ipcRenderer.invoke('save-bot-status', newBotStatus)
   botStatusStore.set(newBotStatus)
 }

@@ -68,7 +68,7 @@
   function openExternalLink(event) {
     event.preventDefault()
     const url = event.target.href
-    ;(window as any).electron.ipcRenderer.invoke('open-external-url', url)
+    ;window.electron.ipcRenderer.invoke('open-external-url', url)
   }
 
   onMount(() => {

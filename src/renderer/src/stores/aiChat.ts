@@ -150,7 +150,7 @@ function dataToMessage(data: ChatMessageData): ChatMessage {
 // Initialize from stored chats
 export async function initializeChats(): Promise<void> {
   try {
-    const data: ChatsData = await (window as any).electron.ipcRenderer.invoke('get-chats')
+    const data: ChatsData = await window.electron.ipcRenderer.invoke('get-chats')
     allChats.set(data.chats || [])
     activeChatId.set(data.activeChat)
 
@@ -174,7 +174,7 @@ export async function createNewChat(
   initialContexts: ChatContext[] = []
 ): Promise<SavedChat | null> {
   try {
-    const chat: SavedChat = await (window as any).electron.ipcRenderer.invoke('create-chat', {
+    const chat: SavedChat = await window.electron.ipcRenderer.invoke('create-chat', {
       title,
       commandId,
       contexts: initialContexts
@@ -241,7 +241,7 @@ export async function clearChatMessages(): Promise<void> {
   if (!currentChatId) return
 
   try {
-    await (window as any).electron.ipcRenderer.invoke('clear-chat-messages', currentChatId)
+    await window.electron.ipcRenderer.invoke('clear-chat-messages', currentChatId)
     chatMessages.set([])
     totalTokens.set(0)
 
@@ -259,7 +259,7 @@ export async function clearChatMessages(): Promise<void> {
 // Load a chat by ID
 export async function loadChat(chatId: string): Promise<void> {
   try {
-    const chat: SavedChat | null = await (window as any).electron.ipcRenderer.invoke(
+    const chat: SavedChat | null = await window.electron.ipcRenderer.invoke(
       'get-chat',
       chatId
     )
@@ -272,7 +272,7 @@ export async function loadChat(chatId: string): Promise<void> {
       console.log(JSON.stringify(chat, null, 2))
 
       // Update active chat on backend
-      await (window as any).electron.ipcRenderer.invoke('set-active-chat', chatId)
+      await window.electron.ipcRenderer.invoke('set-active-chat', chatId)
     }
   } catch (error) {
     console.error('Failed to load chat:', error)
@@ -282,7 +282,7 @@ export async function loadChat(chatId: string): Promise<void> {
 // Delete a chat
 export async function deleteStoredChat(chatId: string): Promise<boolean> {
   try {
-    const result = await (window as any).electron.ipcRenderer.invoke('delete-chat', chatId)
+    const result = await window.electron.ipcRenderer.invoke('delete-chat', chatId)
     if (result) {
       allChats.update((chats) => chats.filter((c) => c.id !== chatId))
 
@@ -323,7 +323,7 @@ export async function addMessage(
   const currentChatId = get(activeChatId)
   if (currentChatId) {
     try {
-      const result = await (window as any).electron.ipcRenderer.invoke(
+      const result = await window.electron.ipcRenderer.invoke(
         'add-message-to-chat',
         currentChatId,
         messageToData(message)
@@ -366,7 +366,7 @@ export async function updateMessage(id: string, updates: Partial<ChatMessage>): 
         serializedUpdates.content = updates.content
       }
 
-      await (window as any).electron.ipcRenderer.invoke(
+      await window.electron.ipcRenderer.invoke(
         'update-message-in-chat',
         currentChatId,
         id,
@@ -422,7 +422,7 @@ async function persistContexts(): Promise<void> {
   const currentChatId = get(activeChatId)
   if (currentChatId) {
     try {
-      await (window as any).electron.ipcRenderer.invoke(
+      await window.electron.ipcRenderer.invoke(
         'update-chat-contexts',
         currentChatId,
         get(selectedContexts)
@@ -444,7 +444,7 @@ export async function buildContextString(): Promise<string> {
     switch (ctx.type) {
       case 'startup-js':
         try {
-          const startupJs = await (window as any).electron.ipcRenderer.invoke('get-startup-js')
+          const startupJs = await window.electron.ipcRenderer.invoke('get-startup-js')
           if (startupJs) {
             contextParts.push(`=== Startup JavaScript ===\n${startupJs}`)
           }
@@ -455,7 +455,7 @@ export async function buildContextString(): Promise<string> {
 
       case 'bot-state':
         try {
-          const botState = await (window as any).electron.ipcRenderer.invoke('getBotState')
+          const botState = await window.electron.ipcRenderer.invoke('getBotState')
           if (botState) {
             contextParts.push(`=== Bot State ===\n${JSON.stringify(botState, null, 2)}`)
           }
@@ -466,7 +466,7 @@ export async function buildContextString(): Promise<string> {
 
       case 'all-commands':
         try {
-          const commands = await (window as any).electron.ipcRenderer.invoke('get-commands')
+          const commands = await window.electron.ipcRenderer.invoke('get-commands')
           if (commands?.bcfdCommands) {
             contextParts.push(
               `=== All Commands ===\n${JSON.stringify(commands.bcfdCommands, null, 2)}`
@@ -491,7 +491,7 @@ export async function buildContextString(): Promise<string> {
 // Get recent chats for the history panel
 export async function fetchRecentChats(limit: number = 20): Promise<SavedChat[]> {
   try {
-    const chats = await (window as any).electron.ipcRenderer.invoke('get-recent-chats', limit)
+    const chats = await window.electron.ipcRenderer.invoke('get-recent-chats', limit)
     allChats.set(chats)
     return chats
   } catch (error) {
@@ -503,7 +503,7 @@ export async function fetchRecentChats(limit: number = 20): Promise<SavedChat[]>
 // Search chats
 export async function searchStoredChats(query: string): Promise<SavedChat[]> {
   try {
-    return await (window as any).electron.ipcRenderer.invoke('search-chats', query)
+    return await window.electron.ipcRenderer.invoke('search-chats', query)
   } catch (error) {
     console.error('Failed to search chats:', error)
     return []
@@ -636,7 +636,7 @@ export function initAiChatStreamListeners(
   onDone: (response: StreamingDoneResponse, pendingChanges: CommandDiff | null) => void,
   getCurrentCommand: () => any
 ) {
-  const electron = (window as any).electron
+  const electron = window.electron
 
   if (!electron?.ipcRenderer) {
     console.warn('IPC renderer not available for AI chat streaming')

@@ -50,9 +50,9 @@ function createWindow(): void {
     ...(windowIcon ? { icon: windowIcon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
-      contextIsolation: false, // Required for ipcRenderer in renderer process
-      nodeIntegration: true // Required for ipcRenderer in renderer process
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false
     }
   })
 

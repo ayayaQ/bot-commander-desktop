@@ -16,12 +16,12 @@ export const settingsStore = writable<AppSettings>({
 })
 
 export async function loadSettings() {
-  const settings = await (window as any).electron.ipcRenderer.invoke('get-settings')
+  const settings = await window.electron.ipcRenderer.invoke('get-settings')
   settingsStore.set(settings)
   currentLanguage.set(settings.language)
 }
 
 export async function saveSettings(newSettings: AppSettings) {
-  await (window as any).electron.ipcRenderer.invoke('save-settings', newSettings)
+  await window.electron.ipcRenderer.invoke('save-settings', newSettings)
   settingsStore.set(newSettings)
 }

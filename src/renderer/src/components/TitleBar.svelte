@@ -8,10 +8,10 @@
 
   onMount(async () => {
     // Initial state - need to await the invoke call
-    isMaximized = await (window as any).electron.ipcRenderer.invoke('is-window-maximized')
+    isMaximized = await window.electron.ipcRenderer.invoke('is-window-maximized')
 
     // Listen for window state changes
-    ;(window as any).electron.ipcRenderer.on(
+    ;window.electron.ipcRenderer.on(
       'window-state-changed',
       (_event: any, maximized: boolean) => {
         console.log('Window state changed:', maximized)
@@ -28,7 +28,7 @@
 
     checkingUpdate = true
     try {
-      updateInfo = await (window as any).electron.ipcRenderer.invoke('check-for-updates')
+      updateInfo = await window.electron.ipcRenderer.invoke('check-for-updates')
       hasUpdate = updateInfo.hasUpdate
     } catch (error) {
       console.error('Failed to check for updates:', error)
@@ -39,20 +39,20 @@
 
   function openReleaseUrl() {
     if (updateInfo?.releaseUrl) {
-      ;(window as any).electron.ipcRenderer.invoke('open-external-url', updateInfo.releaseUrl)
+      ;window.electron.ipcRenderer.invoke('open-external-url', updateInfo.releaseUrl)
     }
   }
 
   function minimize() {
-    ;(window as any).electron.ipcRenderer.send('minimize-window')
+    ;window.electron.ipcRenderer.send('minimize-window')
   }
 
   function maximize() {
-    ;(window as any).electron.ipcRenderer.send('maximize-window')
+    ;window.electron.ipcRenderer.send('maximize-window')
   }
 
   function close() {
-    ;(window as any).electron.ipcRenderer.send('close-window')
+    ;window.electron.ipcRenderer.send('close-window')
   }
 </script>
 

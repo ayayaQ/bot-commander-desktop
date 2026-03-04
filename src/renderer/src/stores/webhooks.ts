@@ -5,13 +5,13 @@ export const webhookPresetsStore = writable<WebhookPreset[]>([])
 
 // Load webhook presets from main process
 export async function loadWebhookPresets() {
-  const presets = await (window as any).electron.ipcRenderer.invoke('get-webhook-presets')
+  const presets = await window.electron.ipcRenderer.invoke('get-webhook-presets')
   webhookPresetsStore.set(presets)
 }
 
 // Save webhook presets to main process
 export async function saveWebhookPresets(presets: WebhookPreset[]) {
-  await (window as any).electron.ipcRenderer.invoke('save-webhook-presets', presets)
+  await window.electron.ipcRenderer.invoke('save-webhook-presets', presets)
   webhookPresetsStore.set(presets)
 }
 
@@ -29,7 +29,7 @@ export function sendWebhook(
   embedImageUrl?: string,
   embedThumbnailUrl?: string
 ) {
-  ;(window as any).electron.ipcRenderer.send('send-webhook', {
+  ;window.electron.ipcRenderer.send('send-webhook', {
     webhookUrl,
     name,
     avatarUrl,

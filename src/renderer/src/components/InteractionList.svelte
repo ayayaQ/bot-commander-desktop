@@ -20,11 +20,11 @@
   })
 
   async function loadInteractions() {
-    interactions = await (window as any).electron.ipcRenderer.invoke('get-interactions')
+    interactions = await window.electron.ipcRenderer.invoke('get-interactions')
   }
 
   async function saveInteractions() {
-    await (window as any).electron.ipcRenderer.invoke('save-interactions', $state.snapshot(interactions))
+    await window.electron.ipcRenderer.invoke('save-interactions', $state.snapshot(interactions))
   }
 
   function addInteraction() {
@@ -64,7 +64,7 @@
   async function syncAllCommands() {
     isSyncing = true
     try {
-      const result = await (window as any).electron.ipcRenderer.invoke('sync-all-slash-commands')
+      const result = await window.electron.ipcRenderer.invoke('sync-all-slash-commands')
       if (result.success) {
         await loadInteractions()
       } else {
@@ -76,7 +76,7 @@
   }
 
   async function registerCommand(interaction: BCFDInteractionCommand) {
-    const result = await (window as any).electron.ipcRenderer.invoke(
+    const result = await window.electron.ipcRenderer.invoke(
       'register-slash-command',
       interaction.id
     )
@@ -88,7 +88,7 @@
   }
 
   async function unregisterCommand(interaction: BCFDInteractionCommand) {
-    const result = await (window as any).electron.ipcRenderer.invoke(
+    const result = await window.electron.ipcRenderer.invoke(
       'unregister-slash-command',
       interaction.id
     )

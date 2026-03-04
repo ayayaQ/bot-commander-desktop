@@ -39,7 +39,7 @@ function createConnectionStore() {
 export const connectionStore = createConnectionStore()
 
 function addConnectionListener() {
-  ;(window as any).electron.ipcRenderer.on('connect', (event, data) => {
+  ;window.electron.ipcRenderer.on('connect', (event, data) => {
     console.log('Connected to server', data, event)
 
     connectionStore.update((state) => ({
@@ -50,7 +50,7 @@ function addConnectionListener() {
       avatar: data.avatar
     }))
   })
-  ;(window as any).electron.ipcRenderer.on('disconnect', (event) => {
+  ;window.electron.ipcRenderer.on('disconnect', (event) => {
     console.log('Disconnected from server', event)
   })
 }
@@ -58,7 +58,7 @@ function addConnectionListener() {
 addConnectionListener()
 
 function connect(token: string) {
-  ;(window as any).electron.ipcRenderer.send('connect', token)
+  ;window.electron.ipcRenderer.send('connect', token)
 
   connectionStore.update((state) => ({
     ...state,
@@ -68,15 +68,15 @@ function connect(token: string) {
 }
 
 function disconnect() {
-  ;(window as any).electron.ipcRenderer.send('disconnect')
+  ;window.electron.ipcRenderer.send('disconnect')
 
   connectionStore.set(emptyState())
 }
 
 async function generateInvite() {
-  return await (window as any).electron.ipcRenderer.invoke('generate-invite')
+  return await window.electron.ipcRenderer.invoke('generate-invite')
 }
 
 async function getToken() {
-  return await (window as any).electron.ipcRenderer.invoke('get-token')
+  return await window.electron.ipcRenderer.invoke('get-token')
 }

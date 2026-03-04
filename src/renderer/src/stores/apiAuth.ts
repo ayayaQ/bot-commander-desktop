@@ -52,7 +52,7 @@ async function register(username: string, password: string) {
   }))
 
   try {
-    const result = await (window as any).electron.ipcRenderer.invoke('api-auth-register', {
+    const result = await window.electron.ipcRenderer.invoke('api-auth-register', {
       username,
       password
     })
@@ -91,7 +91,7 @@ async function login(username: string, password: string) {
   }))
 
   try {
-    const result = await (window as any).electron.ipcRenderer.invoke('api-auth-login', {
+    const result = await window.electron.ipcRenderer.invoke('api-auth-login', {
       username,
       password
     })
@@ -124,7 +124,7 @@ async function login(username: string, password: string) {
 
 async function logout() {
   try {
-    await (window as any).electron.ipcRenderer.invoke('api-auth-logout')
+    await window.electron.ipcRenderer.invoke('api-auth-logout')
     apiAuthStore.set(emptyState())
   } catch (error) {
     console.error('Logout error:', error)
@@ -134,7 +134,7 @@ async function logout() {
 
 async function checkAuth() {
   try {
-    const result = await (window as any).electron.ipcRenderer.invoke('api-auth-check')
+    const result = await window.electron.ipcRenderer.invoke('api-auth-check')
 
     if (result.authenticated) {
       apiAuthStore.update((state) => ({

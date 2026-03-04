@@ -111,7 +111,7 @@
       }))
 
       // Call AI API with context
-      const response = await (window as any).electron.ipcRenderer.invoke('ai-command-chat', {
+      const response = await window.electron.ipcRenderer.invoke('ai-command-chat', {
         messages: conversationHistory,
         currentCommand: $state.snapshot(command),
         model: $selectedModel,

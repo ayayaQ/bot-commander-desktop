@@ -33,7 +33,7 @@
   })
 
   async function updateStats() {
-    stats = await (window as any).electron.ipcRenderer.invoke('get-stats')
+    stats = await window.electron.ipcRenderer.invoke('get-stats')
     displayTimeSpentInApp = stats.timeSpentInApp
   }
 

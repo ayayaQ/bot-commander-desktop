@@ -110,7 +110,7 @@ async function fetchCommands(page: number = 1, sortBy: SortBy = 'newest') {
   }))
 
   try {
-    const result = await (window as any).electron.ipcRenderer.invoke('repo-fetch-commands', {
+    const result = await window.electron.ipcRenderer.invoke('repo-fetch-commands', {
       page,
       pageSize: 20,
       sort: sortBy
@@ -154,7 +154,7 @@ async function searchCommands(query: string, page: number = 1) {
   }))
 
   try {
-    const result = await (window as any).electron.ipcRenderer.invoke('repo-search-commands', {
+    const result = await window.electron.ipcRenderer.invoke('repo-search-commands', {
       query,
       page,
       pageSize: 20
@@ -197,7 +197,7 @@ async function shareCommand(
   try {
     // Strip the local id before sharing
     const { id, ...commandWithoutId } = commandData
-    const result = await (window as any).electron.ipcRenderer.invoke('repo-share-command', {
+    const result = await window.electron.ipcRenderer.invoke('repo-share-command', {
       command_name: commandName,
       command_description: commandDescription,
       command_data: commandWithoutId
@@ -215,7 +215,7 @@ async function importCommand(id: string): Promise<{
   error?: string
 }> {
   try {
-    const result = await (window as any).electron.ipcRenderer.invoke('repo-import-command', {
+    const result = await window.electron.ipcRenderer.invoke('repo-import-command', {
       id
     })
 
@@ -237,7 +237,7 @@ async function importCommand(id: string): Promise<{
 
 async function deleteSharedCommand(id: string) {
   try {
-    const result = await (window as any).electron.ipcRenderer.invoke('repo-delete-command', {
+    const result = await window.electron.ipcRenderer.invoke('repo-delete-command', {
       id
     })
 
@@ -264,7 +264,7 @@ async function fetchMyCommands(page: number = 1) {
   }))
 
   try {
-    const result = await (window as any).electron.ipcRenderer.invoke('repo-my-commands', {
+    const result = await window.electron.ipcRenderer.invoke('repo-my-commands', {
       page,
       pageSize: 20
     })

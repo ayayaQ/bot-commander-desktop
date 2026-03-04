@@ -22,7 +22,7 @@ npm run format       # Prettier formatting
 ### Three-Process Electron Model
 
 - **Main** (`src/main/`): Node.js process handling Discord client, IPC handlers, file I/O, VM execution
-- **Preload** (`src/preload/`): Bridge exposing `electron.ipcRenderer` to renderer (context isolation disabled for legacy reasons)
+- **Preload** (`src/preload/`): Bridge using `contextBridge` to expose whitelisted IPC channels to renderer (context isolation enabled, sandboxed)
 - **Renderer** (`src/renderer/`): Svelte UI with stores for state management
 
 ### Core Services (`src/main/services/`)
@@ -45,8 +45,8 @@ npm run format       # Prettier formatting
 **Main → Renderer**: Use `BrowserWindow.webContents.send('event-name', data)` (one-way)
 **Renderer → Main**:
 
-- Send: `(window as any).electron.ipcRenderer.send('event-name', data)`
-- Invoke: `await (window as any).electron.ipcRenderer.invoke('event-name', data)` (request/response)
+- Send: `window.electron.ipcRenderer.send('event-name', data)`
+- Invoke: `await window.electron.ipcRenderer.invoke('event-name', data)` (request/response)
 - Handlers: Registered in `ipcHandlers.ts` with `ipcMain.on()` or `ipcMain.handle()`
 
 ## BCFD Template Language
@@ -90,7 +90,7 @@ Translations in `stores/localisation.ts` with `$t()` function. Supports English/
 
 ## Critical Gotchas
 
-- **Context Isolation Disabled**: Preload sets `contextIsolation: false` for legacy compatibility. Renderer accesses `window.electron` directly.
+- **Preload Channel Whitelisting**: The preload script (`src/preload/index.ts`) whitelists IPC channels. When adding a new IPC handler, you must also add its channel name to the appropriate whitelist array (`validSendChannels`, `validInvokeChannels`, or `validReceiveChannels`) in the preload script.
 - **Two Type Files**: `types.ts` exists in both `main/types/` and `renderer/src/types/`. Keep command/settings types synchronized.
 - **Interpreter Toggle**: Always check `settings.useLegacyInterpreter` when modifying template processing. New features must work in both modes or gracefully degrade.
 - **VM Sandboxing**: Eval blocks block dangerous globals (`require`, `process`, etc.) in `createSafeContext()`. Only `Math`, `Date`, `botState`, and safe built-ins allowed.

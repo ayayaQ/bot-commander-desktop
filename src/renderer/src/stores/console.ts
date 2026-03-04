@@ -44,7 +44,7 @@ export const consoleStore = createConsoleStore()
 
 // Set up IPC listeners for console messages
 export function initConsoleListeners() {
-  const electron = (window as any).electron
+  const electron = window.electron
 
   if (electron?.ipcRenderer) {
     electron.ipcRenderer.on('console:info', (_event: any, message: string) => {

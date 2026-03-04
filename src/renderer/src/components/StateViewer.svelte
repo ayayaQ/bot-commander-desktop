@@ -12,7 +12,7 @@
   async function loadStartupJs() {
     startupJsLoading = true
     try {
-      startupJs = await (window as any).electron.ipcRenderer.invoke('get-startup-js')
+      startupJs = await window.electron.ipcRenderer.invoke('get-startup-js')
       startupJsSaved = true
     } catch (e) {
       showErrorToast('Failed to load startup JS')
@@ -23,7 +23,7 @@
 
   async function saveStartupJs() {
     try {
-      await (window as any).electron.ipcRenderer.invoke('set-startup-js', startupJs)
+      await window.electron.ipcRenderer.invoke('set-startup-js', startupJs)
       startupJsSaved = true
     } catch (e) {
       showErrorToast('Failed to save startup JS')
@@ -37,7 +37,7 @@
 
   async function restartJsEngine() {
     try {
-      await (window as any).electron.ipcRenderer.invoke('restart-js-engine')
+      await window.electron.ipcRenderer.invoke('restart-js-engine')
       await updateBotState()
       await loadStartupJs()
       showErrorToast('JS engine restarted!')
@@ -61,7 +61,7 @@
   let jsonEditorError: string | null = $state(null)
 
   function updateBotState() {
-    ;(window as any).electron.ipcRenderer.invoke('getBotState').then((state) => {
+    ;window.electron.ipcRenderer.invoke('getBotState').then((state) => {
       botState = state
     })
   }
@@ -76,7 +76,7 @@
       try {
         const parsedValue = JSON.parse(editValue)
         if (parsedValue) {
-          ;(window as any).electron.ipcRenderer
+          ;window.electron.ipcRenderer
             .invoke('updateBotState', editingKey, parsedValue)
             .then((success) => {
               if (success) {
@@ -107,7 +107,7 @@
   }
 
   function runCode() {
-    ;(window as any).electron.ipcRenderer
+    ;window.electron.ipcRenderer
       .invoke('runCodeInContext', codeToRun)
       .then((result) => {
         codeOutput = result
@@ -126,7 +126,7 @@
     if (deleteConfirmKey === null) return
     const key = deleteConfirmKey
     deleteConfirmKey = null
-    ;(window as any).electron.ipcRenderer
+    ;window.electron.ipcRenderer
       .invoke('runCodeInContext', `delete botState["${key.replace(/"/g, '\\"')}"];`)
       .then(() => {
         updateBotState()
@@ -157,7 +157,7 @@
     if (jsonEditorKey === null) return
     try {
       const parsedValue = JSON.parse(jsonEditorValue)
-      ;(window as any).electron.ipcRenderer
+      ;window.electron.ipcRenderer
         .invoke('updateBotState', jsonEditorKey, parsedValue)
         .then((success: boolean) => {
           if (success) {
@@ -206,7 +206,7 @@
             const parsedState = JSON.parse(jsonString)
             if (parsedState) {
               let runningCode = `botState = ${jsonString};`
-              ;(window as any).electron.ipcRenderer
+              ;window.electron.ipcRenderer
                 .invoke('runCodeInContext', runningCode)
                 .then((_result) => {
                   updateBotState()
