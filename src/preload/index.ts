@@ -12,6 +12,7 @@ const validSendChannels = [
 
 const validInvokeChannels = [
   // Window
+  'get-platform',
   'is-window-maximized',
   'check-for-updates',
   'open-external-url',

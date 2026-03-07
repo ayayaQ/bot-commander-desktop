@@ -99,6 +99,45 @@ $get(variableName)           → Retrieve a stored value
 
 Variables persist across the bot session and are saved to disk.
 
+### Control Structures
+
+Conditional blocks using `$if`, `$elseif`, `$else`, and `$endif`:
+
+```
+$if($memberIsOwner)
+  Welcome, server owner $namePlain!
+$elseif($args(0) == hello)
+  Hello there!
+$else
+  You don't have permission.
+$endif
+```
+
+**Condition Expressions** support the following operators (ordered by precedence, lowest first):
+
+| Operator    | Description             | Example                    |
+| ----------- | ----------------------- | -------------------------- |
+| `\|` / `\|\|` | Logical OR            | `$a \| $b`                 |
+| `&` / `&&`  | Logical AND             | `$a & $b`                  |
+| `==`        | Equality (case-sensitive) | `$args(0) == hello`      |
+| `!=`        | Inequality              | `$args(0) != goodbye`     |
+| `>`, `<`    | Numeric comparison      | `$rollnum(1,10) > 5`      |
+| `>=`, `<=`  | Numeric comparison      | `$memberCount >= 100`     |
+| `!`         | Logical NOT (unary)     | `!$memberIsOwner`         |
+| `(` `)`     | Grouping                | `($a \| $b) & $c`         |
+
+**Truthiness**: A value is truthy if it is not empty, not `"false"`, and not `"0"`.
+
+**Nesting**: If blocks can be nested inside each other:
+
+```
+$if($memberIsOwner)
+  $if($args(0) == kick)
+    Kicking user...
+  $endif
+$endif
+```
+
 ## Built-in Functions
 
 ### User Context
@@ -196,6 +235,9 @@ Variables persist across the bot session and are saved to disk.
 | `$randomInt`     | `$randomInt`                          | Random 0-99                         |
 | `$randomFloat`   | `$randomFloat`                        | Random 0.0-1.0                      |
 | `$randomBoolean` | `$randomBoolean`                      | Random true/false                   |
+| `$contains`      | `$contains(text, search)`             | True if text contains search        |
+| `$startsWith`    | `$startsWith(text, prefix)`           | True if text starts with prefix     |
+| `$endsWith`      | `$endsWith(text, suffix)`             | True if text ends with suffix       |
 
 ### Date/Time Functions
 
@@ -270,9 +312,4 @@ Legacy mode can be enabled in settings to use the old evaluation order (non-recu
 
 Reserved for future versions:
 
-- `$if(condition, then, else)` - Conditional expressions
 - `$foreach(list, template)` - Iteration
-- `$length(string)` - String length
-- `$substring(string, start, end)` - Substring extraction
-- `$uppercase(string)` / `$lowercase(string)` - Case conversion
-- `$replace(string, search, replacement)` - String replacement

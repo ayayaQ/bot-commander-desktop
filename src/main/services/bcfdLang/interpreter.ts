@@ -11,7 +11,9 @@ import {
   BCFDContext,
   BCFDError,
   BCFDFunction,
+  ConditionNode,
   FunctionRegistry,
+  IfBlockNode,
   InterpreterResult,
   NodeType
 } from './types'
@@ -326,6 +328,15 @@ function createFunctionRegistry(): FunctionRegistry {
     return text.repeat(count)
   })
 
+  // $contains(text, search) - check if text contains search string
+  registry.set('contains', (args) => ((args[0] ?? '').includes(args[1] ?? '')).toString())
+
+  // $startsWith(text, prefix) - check if text starts with prefix
+  registry.set('startsWith', (args) => ((args[0] ?? '').startsWith(args[1] ?? '')).toString())
+
+  // $endsWith(text, suffix) - check if text ends with suffix
+  registry.set('endsWith', (args) => ((args[0] ?? '').endsWith(args[1] ?? '')).toString())
+
   // $chat(prompt) - async AI chat (returns Promise)
   registry.set('chat', async (args) => {
     if (args.length < 1) return ''
@@ -497,6 +508,9 @@ export class Interpreter {
 
       case NodeType.EVAL_BLOCK:
         return this.evaluateEvalBlock(node, ctx)
+
+      case NodeType.IF_BLOCK:
+        return this.evaluateIfBlock(node, ctx)
 
       case NodeType.ERROR:
         return `[BCFD Error: ${node.message}]`
@@ -681,6 +695,89 @@ export class Interpreter {
       this.addError(`JavaScript error: ${message}`, node.position, node.length)
       return `[BCFD Error: ${message}]`
     }
+  }
+
+  private async evaluateIfBlock(node: IfBlockNode, ctx: BCFDContext): Promise<string> {
+    for (const branch of node.branches) {
+      const condResult = await this.evaluateCondition(branch.condition, ctx)
+      if (this.isTruthy(condResult)) {
+        const parts: string[] = []
+        for (const bodyNode of branch.body) {
+          parts.push(await this.evaluateNode(bodyNode, ctx))
+        }
+        return parts.join('')
+      }
+    }
+
+    if (node.elseBranch) {
+      const parts: string[] = []
+      for (const bodyNode of node.elseBranch) {
+        parts.push(await this.evaluateNode(bodyNode, ctx))
+      }
+      return parts.join('')
+    }
+
+    return ''
+  }
+
+  private async evaluateCondition(node: ConditionNode, ctx: BCFDContext): Promise<string> {
+    switch (node.type) {
+      case 'value': {
+        const parts: string[] = []
+        for (const n of node.nodes) {
+          parts.push(await this.evaluateNode(n, ctx))
+        }
+        return parts.join('')
+      }
+      case 'group':
+        return this.evaluateCondition(node.expr, ctx)
+      case 'unary': {
+        const operand = await this.evaluateCondition(node.operand, ctx)
+        return (!this.isTruthy(operand)).toString()
+      }
+      case 'binary': {
+        const left = await this.evaluateCondition(node.left, ctx)
+        const right = await this.evaluateCondition(node.right, ctx)
+        switch (node.op) {
+          case '==':
+            return (left === right).toString()
+          case '!=':
+            return (left !== right).toString()
+          case '>': {
+            const a = parseFloat(left), b = parseFloat(right)
+            if (isNaN(a) || isNaN(b)) return 'false'
+            return (a > b).toString()
+          }
+          case '<': {
+            const a = parseFloat(left), b = parseFloat(right)
+            if (isNaN(a) || isNaN(b)) return 'false'
+            return (a < b).toString()
+          }
+          case '>=': {
+            const a = parseFloat(left), b = parseFloat(right)
+            if (isNaN(a) || isNaN(b)) return 'false'
+            return (a >= b).toString()
+          }
+          case '<=': {
+            const a = parseFloat(left), b = parseFloat(right)
+            if (isNaN(a) || isNaN(b)) return 'false'
+            return (a <= b).toString()
+          }
+          case '&':
+            return (this.isTruthy(left) && this.isTruthy(right)).toString()
+          case '|':
+            return (this.isTruthy(left) || this.isTruthy(right)).toString()
+          default:
+            return 'false'
+        }
+      }
+      default:
+        return ''
+    }
+  }
+
+  private isTruthy(value: string): boolean {
+    return value !== '' && value !== 'false' && value !== '0'
   }
 
   /**

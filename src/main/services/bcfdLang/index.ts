@@ -32,6 +32,12 @@ export type {
   VariableNode,
   FunctionCallNode,
   EvalBlockNode,
+  IfBlockNode,
+  ConditionNode,
+  ConditionBinaryNode,
+  ConditionUnaryNode,
+  ConditionGroupNode,
+  ConditionValueNode,
   ErrorNode,
   BCFDContext,
   BCFDFunction,
@@ -39,3 +45,4 @@ export type {
   InterpreterResult,
   FunctionRegistry
 } from './types'
+export { parseCondition } from './conditionParser'

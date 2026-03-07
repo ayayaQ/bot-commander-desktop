@@ -41,6 +41,7 @@ export enum NodeType {
   VARIABLE = 'VARIABLE', // $variableName (no arguments)
   FUNCTION_CALL = 'FUNCTION_CALL', // $functionName(...) or $functionName{...}
   EVAL_BLOCK = 'EVAL_BLOCK', // $eval ... $halt
+  IF_BLOCK = 'IF_BLOCK', // $if ... $endif
   ERROR = 'ERROR' // Error placeholder
 }
 
@@ -78,6 +79,42 @@ export interface EvalBlockNode extends BaseNode {
   innerNodes: ASTNode[] // Parsed nodes within the eval block for pre-resolution
 }
 
+export interface IfBlockNode extends BaseNode {
+  type: NodeType.IF_BLOCK
+  branches: { condition: ConditionNode; body: ASTNode[] }[]
+  elseBranch: ASTNode[] | null
+}
+
+// Condition expression types for $if/$elseif conditions
+export type ConditionNode =
+  | ConditionBinaryNode
+  | ConditionUnaryNode
+  | ConditionGroupNode
+  | ConditionValueNode
+
+export interface ConditionBinaryNode {
+  type: 'binary'
+  op: '==' | '!=' | '>' | '<' | '>=' | '<=' | '&' | '|'
+  left: ConditionNode
+  right: ConditionNode
+}
+
+export interface ConditionUnaryNode {
+  type: 'unary'
+  op: '!'
+  operand: ConditionNode
+}
+
+export interface ConditionGroupNode {
+  type: 'group'
+  expr: ConditionNode
+}
+
+export interface ConditionValueNode {
+  type: 'value'
+  nodes: ASTNode[]
+}
+
 export interface ErrorNode extends BaseNode {
   type: NodeType.ERROR
   message: string
@@ -90,6 +127,7 @@ export type ASTNode =
   | VariableNode
   | FunctionCallNode
   | EvalBlockNode
+  | IfBlockNode
   | ErrorNode
 
 // ============================================================================

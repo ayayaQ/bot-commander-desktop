@@ -6,10 +6,12 @@
  */
 
 import { tokenize } from './tokenizer'
+import { parseCondition } from './conditionParser'
 import {
   ASTNode,
   BCFDError,
   EvalBlockNode,
+  IfBlockNode,
   NodeType,
   ProgramNode,
   TextNode,
@@ -98,6 +100,15 @@ export class Parser {
     const parenMatch = value.match(/^(\w+)\((.*)?\)$/s)
     if (parenMatch) {
       const [, name, argsStr] = parenMatch
+
+      // Intercept $if(...) to parse as a block
+      if (name === 'if') {
+        const conditionOffset = token.position + name.length + 2 // $if(
+        const { condition, errors: condErrors } = parseCondition(argsStr || '', conditionOffset)
+        this.errors.push(...condErrors)
+        return this.parseIfBlock(token, condition)
+      }
+
       const args = this.parseParenArguments(argsStr || '', token.position + name.length + 2)
       return {
         type: NodeType.FUNCTION_CALL,
@@ -267,7 +278,130 @@ export class Parser {
         }
       } else if (node.type === NodeType.EVAL_BLOCK) {
         this.adjustPositions(node.innerNodes, 0)
+      } else if (node.type === NodeType.IF_BLOCK) {
+        for (const branch of node.branches) {
+          this.adjustPositions(branch.body, 0)
+        }
+        if (node.elseBranch) {
+          this.adjustPositions(node.elseBranch, 0)
+        }
       }
+    }
+  }
+
+  /**
+   * Parse an if/elseif/else/endif block.
+   * Called after $if(...) has been consumed and its condition parsed.
+   */
+  private parseIfBlock(
+    ifToken: Token,
+    ifCondition: import('./types').ConditionNode
+  ): IfBlockNode {
+    const branches: IfBlockNode['branches'] = []
+    let elseBranch: ASTNode[] | null = null
+    let currentCondition = ifCondition
+    let currentBody: ASTNode[] = []
+
+    while (!this.isAtEnd()) {
+      const token = this.current()
+      if (!token || token.type === TokenType.EOF) break
+
+      // Check for control flow markers
+      if (token.type === TokenType.IDENTIFIER) {
+        if (token.value === 'endif') {
+          // End of if block
+          branches.push({ condition: currentCondition, body: currentBody })
+          this.advance() // consume $endif
+          return {
+            type: NodeType.IF_BLOCK,
+            branches,
+            elseBranch,
+            position: ifToken.position,
+            length: this.tokens[this.position - 1].position + this.tokens[this.position - 1].length - ifToken.position
+          }
+        }
+
+        if (token.value === 'else') {
+          // Save current branch, start collecting else body
+          branches.push({ condition: currentCondition, body: currentBody })
+          this.advance() // consume $else
+          elseBranch = []
+
+          // Collect else body until $endif
+          while (!this.isAtEnd()) {
+            const elseToken = this.current()
+            if (
+              elseToken &&
+              elseToken.type === TokenType.IDENTIFIER &&
+              elseToken.value === 'endif'
+            ) {
+              this.advance() // consume $endif
+              return {
+                type: NodeType.IF_BLOCK,
+                branches,
+                elseBranch,
+                position: ifToken.position,
+                length: this.tokens[this.position - 1].position + this.tokens[this.position - 1].length - ifToken.position
+              }
+            }
+            const node = this.parseNode()
+            if (node) elseBranch.push(node)
+          }
+
+          // EOF without $endif
+          this.errors.push({
+            message: '$if block missing $endif',
+            position: ifToken.position,
+            length: ifToken.length
+          })
+          return {
+            type: NodeType.IF_BLOCK,
+            branches,
+            elseBranch,
+            position: ifToken.position,
+            length: (this.tokens[this.tokens.length - 1]?.position ?? ifToken.position) - ifToken.position
+          }
+        }
+
+        // Check for $elseif(...)
+        const elseifMatch = token.value.match(/^elseif\((.*)?\)$/s)
+        if (elseifMatch) {
+          // Save current branch
+          branches.push({ condition: currentCondition, body: currentBody })
+          this.advance() // consume $elseif(...)
+
+          // Parse the new condition
+          const conditionOffset = token.position + 8 // $elseif(
+          const { condition, errors: condErrors } = parseCondition(
+            elseifMatch[1] || '',
+            conditionOffset
+          )
+          this.errors.push(...condErrors)
+
+          currentCondition = condition
+          currentBody = []
+          continue
+        }
+      }
+
+      // Regular node — add to current body
+      const node = this.parseNode()
+      if (node) currentBody.push(node)
+    }
+
+    // EOF without $endif
+    branches.push({ condition: currentCondition, body: currentBody })
+    this.errors.push({
+      message: '$if block missing $endif',
+      position: ifToken.position,
+      length: ifToken.length
+    })
+    return {
+      type: NodeType.IF_BLOCK,
+      branches,
+      elseBranch,
+      position: ifToken.position,
+      length: (this.tokens[this.tokens.length - 1]?.position ?? ifToken.position) - ifToken.position
     }
   }
 
