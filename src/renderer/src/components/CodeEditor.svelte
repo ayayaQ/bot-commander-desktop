@@ -49,6 +49,20 @@
       insertText: 'eval\n\n$halt'
     },
     { name: 'halt', syntax: 'keyword', description: 'End JavaScript eval block' },
+    {
+      name: 'if',
+      syntax: 'keyword',
+      description: 'Conditional block',
+      insertText: 'if()\n\n$endif'
+    },
+    {
+      name: 'elseif',
+      syntax: 'keyword',
+      description: 'Else-if branch',
+      insertText: 'elseif()'
+    },
+    { name: 'else', syntax: 'keyword', description: 'Else branch' },
+    { name: 'endif', syntax: 'keyword', description: 'End if block' },
 
     // User Context
     { name: 'name', syntax: 'variable', description: 'User mention (e.g. @User)' },
@@ -114,6 +128,125 @@
       name: 'channelAsMention',
       syntax: 'variable',
       description: 'Channel mention (e.g. #general)'
+    },
+    { name: 'channelTopic', syntax: 'variable', description: 'Channel topic' },
+    { name: 'channelIsNSFW', syntax: 'variable', description: 'Is channel NSFW (true/false)' },
+    { name: 'channelCount', syntax: 'variable', description: 'Total channel count in server' },
+
+    // Channel Management
+    {
+      name: 'createChannel',
+      syntax: 'function-paren',
+      description: 'Create a new channel',
+      insertText: 'createChannel(name, type)'
+    },
+    {
+      name: 'createChannelIn',
+      syntax: 'function-paren',
+      description: 'Create channel in category',
+      insertText: 'createChannelIn(name, type, categoryID)'
+    },
+    {
+      name: 'cloneChannel',
+      syntax: 'function-paren',
+      description: 'Clone an existing channel',
+      insertText: 'cloneChannel(channelID)'
+    },
+    {
+      name: 'deleteChannel',
+      syntax: 'function-paren',
+      description: 'Delete a channel',
+      insertText: 'deleteChannel(channelID, reason)'
+    },
+    {
+      name: 'setChannelName',
+      syntax: 'function-paren',
+      description: 'Rename a channel',
+      insertText: 'setChannelName(channelID, name)'
+    },
+    {
+      name: 'setChannelTopic',
+      syntax: 'function-paren',
+      description: 'Set channel topic',
+      insertText: 'setChannelTopic(channelID, topic)'
+    },
+    {
+      name: 'setChannelNSFW',
+      syntax: 'function-paren',
+      description: 'Set channel NSFW flag',
+      insertText: 'setChannelNSFW(channelID, true)'
+    },
+    {
+      name: 'setChannelSlowmode',
+      syntax: 'function-paren',
+      description: 'Set slowmode delay (0-21600s)',
+      insertText: 'setChannelSlowmode(channelID, seconds)'
+    },
+    {
+      name: 'setChannelPosition',
+      syntax: 'function-paren',
+      description: 'Set channel position',
+      insertText: 'setChannelPosition(channelID, position)'
+    },
+    {
+      name: 'setChannelParent',
+      syntax: 'function-paren',
+      description: 'Move channel to category',
+      insertText: 'setChannelParent(channelID, categoryID)'
+    },
+    {
+      name: 'findChannel',
+      syntax: 'function-paren',
+      description: 'Find channel by name',
+      insertText: 'findChannel(name)'
+    },
+    {
+      name: 'getChannelName',
+      syntax: 'function-paren',
+      description: 'Get channel name by ID',
+      insertText: 'getChannelName(channelID)'
+    },
+    {
+      name: 'getChannelType',
+      syntax: 'function-paren',
+      description: 'Get channel type',
+      insertText: 'getChannelType(channelID)'
+    },
+    {
+      name: 'getChannelParent',
+      syntax: 'function-paren',
+      description: 'Get parent category ID',
+      insertText: 'getChannelParent(channelID)'
+    },
+    {
+      name: 'listChannels',
+      syntax: 'function-paren',
+      description: 'List channel names by type',
+      insertText: 'listChannels(type)'
+    },
+    {
+      name: 'listChannelIDs',
+      syntax: 'function-paren',
+      description: 'List channel IDs by type',
+      insertText: 'listChannelIDs(type)'
+    },
+    {
+      name: 'lockChannel',
+      syntax: 'function-paren',
+      description: 'Lock channel for a role',
+      insertText: 'lockChannel(channelID, roleID)'
+    },
+    {
+      name: 'unlockChannel',
+      syntax: 'function-paren',
+      description: 'Unlock channel for a role',
+      insertText: 'unlockChannel(channelID, roleID)'
+    },
+    {
+      name: 'channelMention',
+      syntax: 'function-paren',
+      description: 'Format channel ID as mention',
+      insertText: 'channelMention(channelID)'
     },
 
     // Mentioned User Context
@@ -200,6 +333,24 @@
       syntax: 'function-paren',
       description: 'Get option value (interaction commands)',
       insertText: 'option(name)'
+    },
+    {
+      name: 'contains',
+      syntax: 'function-paren',
+      description: 'Check if text contains search string',
+      insertText: 'contains(text, search)'
+    },
+    {
+      name: 'startsWith',
+      syntax: 'function-paren',
+      description: 'Check if text starts with prefix',
+      insertText: 'startsWith(text, prefix)'
+    },
+    {
+      name: 'endsWith',
+      syntax: 'function-paren',
+      description: 'Check if text ends with suffix',
+      insertText: 'endsWith(text, suffix)'
     }
   ]
 

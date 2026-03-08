@@ -18,10 +18,52 @@ import {
   NodeType
 } from './types'
 import { parse } from './parser'
-import { OAuth2Scopes, PermissionsBitField } from 'discord.js'
+import {
+  ChannelType,
+  Guild,
+  type GuildChannelTypes,
+  OAuth2Scopes,
+  PermissionsBitField
+} from 'discord.js'
 import OpenAI from 'openai'
 import { getSettings } from '../settingsService'
 import { getCommands } from '../botService'
+
+// ============================================================================
+// Channel Management Helpers
+// ============================================================================
+
+const channelTypeMap: Record<string, GuildChannelTypes> = {
+  text: ChannelType.GuildText,
+  voice: ChannelType.GuildVoice,
+  category: ChannelType.GuildCategory,
+  announcement: ChannelType.GuildAnnouncement,
+  stage: ChannelType.GuildStageVoice,
+  forum: ChannelType.GuildForum
+}
+
+const channelTypeReverseMap: Record<number, string> = {
+  [ChannelType.GuildText]: 'text',
+  [ChannelType.GuildVoice]: 'voice',
+  [ChannelType.GuildCategory]: 'category',
+  [ChannelType.GuildAnnouncement]: 'announcement',
+  [ChannelType.GuildStageVoice]: 'stage',
+  [ChannelType.GuildForum]: 'forum',
+  [ChannelType.GuildMedia]: 'media'
+}
+
+function parseChannelType(type: string): GuildChannelTypes | null {
+  return channelTypeMap[type.toLowerCase().trim()] ?? null
+}
+
+function channelTypeToString(type: ChannelType): string {
+  return channelTypeReverseMap[type] ?? 'unknown'
+}
+
+async function resolveChannel(guild: Guild, channelID: string) {
+  const id = channelID.trim()
+  return guild.channels.cache.get(id) ?? (await guild.channels.fetch(id).catch(() => null))
+}
 
 // ============================================================================
 // Function Registry - All built-in functions
@@ -168,6 +210,288 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('channelIsNSFW', (_args, ctx) => {
     const ch = ctx.textChannel
     return ch && 'nsfw' in ch ? (ch as any).nsfw.toString() : 'false'
+  })
+
+  // --------------------------------------------------------------------------
+  // Channel Management Functions
+  // --------------------------------------------------------------------------
+
+  // $createChannel(name, type) - create a new channel, returns its ID
+  registry.set('createChannel', async (args, ctx) => {
+    if (!ctx.guild) return '[BCFD Error: createChannel requires a guild context]'
+    const name = args[0]?.trim()
+    if (!name) return '[BCFD Error: createChannel requires a channel name]'
+    const typeStr = args[1]?.trim() || 'text'
+    const channelType = parseChannelType(typeStr)
+    if (channelType === null) return `[BCFD Error: createChannel invalid type "${typeStr}"]`
+    try {
+      const channel = await ctx.guild.channels.create({ name, type: channelType })
+      return channel.id
+    } catch (e) {
+      return `[BCFD Error: createChannel failed: ${e instanceof Error ? e.message : 'Unknown error'}]`
+    }
+  })
+
+  // $createChannelIn(name, type, categoryID) - create a channel under a category
+  registry.set('createChannelIn', async (args, ctx) => {
+    if (!ctx.guild) return '[BCFD Error: createChannelIn requires a guild context]'
+    const name = args[0]?.trim()
+    if (!name) return '[BCFD Error: createChannelIn requires a channel name]'
+    const typeStr = args[1]?.trim() || 'text'
+    const channelType = parseChannelType(typeStr)
+    if (channelType === null) return `[BCFD Error: createChannelIn invalid type "${typeStr}"]`
+    const categoryID = args[2]?.trim()
+    if (!categoryID) return '[BCFD Error: createChannelIn requires a category ID]'
+    try {
+      const channel = await ctx.guild.channels.create({
+        name,
+        type: channelType,
+        parent: categoryID
+      })
+      return channel.id
+    } catch (e) {
+      return `[BCFD Error: createChannelIn failed: ${e instanceof Error ? e.message : 'Unknown error'}]`
+    }
+  })
+
+  // $cloneChannel(channelID) - clone an existing channel, returns new channel ID
+  registry.set('cloneChannel', async (args, ctx) => {
+    if (!ctx.guild) return '[BCFD Error: cloneChannel requires a guild context]'
+    const channelID = args[0]?.trim()
+    if (!channelID) return '[BCFD Error: cloneChannel requires a channel ID]'
+    try {
+      const channel = await resolveChannel(ctx.guild, channelID)
+      if (!channel) return `[BCFD Error: cloneChannel channel not found]`
+      if (!('clone' in channel)) return '[BCFD Error: cloneChannel not supported on this channel type]'
+      const cloned = await (channel as any).clone()
+      return cloned.id
+    } catch (e) {
+      return `[BCFD Error: cloneChannel failed: ${e instanceof Error ? e.message : 'Unknown error'}]`
+    }
+  })
+
+  // $deleteChannel(channelID, reason) - delete a channel
+  registry.set('deleteChannel', async (args, ctx) => {
+    if (!ctx.guild) return '[BCFD Error: deleteChannel requires a guild context]'
+    const channelID = args[0]?.trim()
+    if (!channelID) return '[BCFD Error: deleteChannel requires a channel ID]'
+    const reason = args[1]?.trim() || undefined
+    try {
+      await ctx.guild.channels.delete(channelID, reason)
+      return 'true'
+    } catch (e) {
+      return `[BCFD Error: deleteChannel failed: ${e instanceof Error ? e.message : 'Unknown error'}]`
+    }
+  })
+
+  // $setChannelName(channelID, name) - rename a channel
+  registry.set('setChannelName', async (args, ctx) => {
+    if (!ctx.guild) return '[BCFD Error: setChannelName requires a guild context]'
+    const channelID = args[0]?.trim()
+    const name = args[1]?.trim()
+    if (!channelID || !name) return '[BCFD Error: setChannelName requires a channel ID and name]'
+    try {
+      const channel = await resolveChannel(ctx.guild, channelID)
+      if (!channel) return '[BCFD Error: setChannelName channel not found]'
+      await channel.setName(name)
+      return 'true'
+    } catch (e) {
+      return `[BCFD Error: setChannelName failed: ${e instanceof Error ? e.message : 'Unknown error'}]`
+    }
+  })
+
+  // $setChannelTopic(channelID, topic) - set a channel's topic
+  registry.set('setChannelTopic', async (args, ctx) => {
+    if (!ctx.guild) return '[BCFD Error: setChannelTopic requires a guild context]'
+    const channelID = args[0]?.trim()
+    const topic = args[1] ?? ''
+    if (!channelID) return '[BCFD Error: setChannelTopic requires a channel ID]'
+    try {
+      const channel = await resolveChannel(ctx.guild, channelID)
+      if (!channel) return '[BCFD Error: setChannelTopic channel not found]'
+      if (!('setTopic' in channel)) return '[BCFD Error: setChannelTopic not supported on this channel type]'
+      await (channel as any).setTopic(topic)
+      return 'true'
+    } catch (e) {
+      return `[BCFD Error: setChannelTopic failed: ${e instanceof Error ? e.message : 'Unknown error'}]`
+    }
+  })
+
+  // $setChannelNSFW(channelID, enabled) - toggle NSFW flag
+  registry.set('setChannelNSFW', async (args, ctx) => {
+    if (!ctx.guild) return '[BCFD Error: setChannelNSFW requires a guild context]'
+    const channelID = args[0]?.trim()
+    const enabled = args[1]?.trim()
+    if (!channelID || !enabled) return '[BCFD Error: setChannelNSFW requires a channel ID and true/false]'
+    try {
+      const channel = await resolveChannel(ctx.guild, channelID)
+      if (!channel) return '[BCFD Error: setChannelNSFW channel not found]'
+      if (!('setNSFW' in channel)) return '[BCFD Error: setChannelNSFW not supported on this channel type]'
+      await (channel as any).setNSFW(enabled === 'true')
+      return 'true'
+    } catch (e) {
+      return `[BCFD Error: setChannelNSFW failed: ${e instanceof Error ? e.message : 'Unknown error'}]`
+    }
+  })
+
+  // $setChannelSlowmode(channelID, seconds) - set slowmode (0-21600)
+  registry.set('setChannelSlowmode', async (args, ctx) => {
+    if (!ctx.guild) return '[BCFD Error: setChannelSlowmode requires a guild context]'
+    const channelID = args[0]?.trim()
+    const seconds = parseInt(args[1]?.trim() ?? '', 10)
+    if (!channelID) return '[BCFD Error: setChannelSlowmode requires a channel ID]'
+    if (isNaN(seconds) || seconds < 0 || seconds > 21600)
+      return '[BCFD Error: setChannelSlowmode seconds must be 0-21600]'
+    try {
+      const channel = await resolveChannel(ctx.guild, channelID)
+      if (!channel) return '[BCFD Error: setChannelSlowmode channel not found]'
+      if (!('setRateLimitPerUser' in channel))
+        return '[BCFD Error: setChannelSlowmode not supported on this channel type]'
+      await (channel as any).setRateLimitPerUser(seconds)
+      return 'true'
+    } catch (e) {
+      return `[BCFD Error: setChannelSlowmode failed: ${e instanceof Error ? e.message : 'Unknown error'}]`
+    }
+  })
+
+  // $setChannelPosition(channelID, position) - set channel position
+  registry.set('setChannelPosition', async (args, ctx) => {
+    if (!ctx.guild) return '[BCFD Error: setChannelPosition requires a guild context]'
+    const channelID = args[0]?.trim()
+    const position = parseInt(args[1]?.trim() ?? '', 10)
+    if (!channelID) return '[BCFD Error: setChannelPosition requires a channel ID]'
+    if (isNaN(position)) return '[BCFD Error: setChannelPosition requires a numeric position]'
+    try {
+      const channel = await resolveChannel(ctx.guild, channelID)
+      if (!channel) return '[BCFD Error: setChannelPosition channel not found]'
+      if (!('setPosition' in channel))
+        return '[BCFD Error: setChannelPosition not supported on this channel type]'
+      await (channel as any).setPosition(position)
+      return 'true'
+    } catch (e) {
+      return `[BCFD Error: setChannelPosition failed: ${e instanceof Error ? e.message : 'Unknown error'}]`
+    }
+  })
+
+  // $setChannelParent(channelID, categoryID) - move channel to a category (empty = remove)
+  registry.set('setChannelParent', async (args, ctx) => {
+    if (!ctx.guild) return '[BCFD Error: setChannelParent requires a guild context]'
+    const channelID = args[0]?.trim()
+    if (!channelID) return '[BCFD Error: setChannelParent requires a channel ID]'
+    const categoryID = args[1]?.trim() || null
+    try {
+      const channel = await resolveChannel(ctx.guild, channelID)
+      if (!channel) return '[BCFD Error: setChannelParent channel not found]'
+      if (!('setParent' in channel))
+        return '[BCFD Error: setChannelParent not supported on this channel type]'
+      await (channel as any).setParent(categoryID)
+      return 'true'
+    } catch (e) {
+      return `[BCFD Error: setChannelParent failed: ${e instanceof Error ? e.message : 'Unknown error'}]`
+    }
+  })
+
+  // $findChannel(name) - find a channel by name (case-insensitive), returns ID
+  registry.set('findChannel', (_args, ctx) => {
+    if (!ctx.guild) return ''
+    const name = _args[0]?.trim().toLowerCase()
+    if (!name) return ''
+    const channel = ctx.guild.channels.cache.find((c) => c.name.toLowerCase() === name)
+    return channel?.id ?? ''
+  })
+
+  // $getChannelName(channelID) - get a channel's name by ID
+  registry.set('getChannelName', (_args, ctx) => {
+    if (!ctx.guild) return ''
+    const channelID = _args[0]?.trim()
+    if (!channelID) return ''
+    return ctx.guild.channels.cache.get(channelID)?.name ?? ''
+  })
+
+  // $getChannelType(channelID) - get a channel's type as a friendly string
+  registry.set('getChannelType', (_args, ctx) => {
+    if (!ctx.guild) return ''
+    const channelID = _args[0]?.trim()
+    if (!channelID) return ''
+    const channel = ctx.guild.channels.cache.get(channelID)
+    if (!channel) return ''
+    return channelTypeToString(channel.type)
+  })
+
+  // $getChannelParent(channelID) - get a channel's parent category ID
+  registry.set('getChannelParent', (_args, ctx) => {
+    if (!ctx.guild) return ''
+    const channelID = _args[0]?.trim()
+    if (!channelID) return ''
+    return ctx.guild.channels.cache.get(channelID)?.parentId ?? ''
+  })
+
+  // $channelCount - total number of channels in the guild
+  registry.set('channelCount', (_args, ctx) => ctx.guild?.channels.cache.size.toString() ?? '0')
+
+  // $listChannels(type) - comma-separated list of channel names, optionally filtered by type
+  registry.set('listChannels', (_args, ctx) => {
+    if (!ctx.guild) return ''
+    const typeStr = _args[0]?.trim().toLowerCase()
+    const channelType = typeStr ? parseChannelType(typeStr) : null
+    const channels = ctx.guild.channels.cache.filter(
+      (c) => channelType === null || c.type === channelType
+    )
+    return channels.map((c) => c.name).join(', ')
+  })
+
+  // $listChannelIDs(type) - comma-separated list of channel IDs, optionally filtered by type
+  registry.set('listChannelIDs', (_args, ctx) => {
+    if (!ctx.guild) return ''
+    const typeStr = _args[0]?.trim().toLowerCase()
+    const channelType = typeStr ? parseChannelType(typeStr) : null
+    const channels = ctx.guild.channels.cache.filter(
+      (c) => channelType === null || c.type === channelType
+    )
+    return channels.map((c) => c.id).join(', ')
+  })
+
+  // $lockChannel(channelID, roleID) - deny SendMessages for a role (default @everyone)
+  registry.set('lockChannel', async (args, ctx) => {
+    if (!ctx.guild) return '[BCFD Error: lockChannel requires a guild context]'
+    const channelID = args[0]?.trim()
+    if (!channelID) return '[BCFD Error: lockChannel requires a channel ID]'
+    const roleID = args[1]?.trim() || ctx.guild.id
+    try {
+      const channel = await resolveChannel(ctx.guild, channelID)
+      if (!channel) return '[BCFD Error: lockChannel channel not found]'
+      if (!('permissionOverwrites' in channel))
+        return '[BCFD Error: lockChannel not supported on this channel type]'
+      await (channel as any).permissionOverwrites.edit(roleID, { SendMessages: false })
+      return 'true'
+    } catch (e) {
+      return `[BCFD Error: lockChannel failed: ${e instanceof Error ? e.message : 'Unknown error'}]`
+    }
+  })
+
+  // $unlockChannel(channelID, roleID) - reset SendMessages for a role (default @everyone)
+  registry.set('unlockChannel', async (args, ctx) => {
+    if (!ctx.guild) return '[BCFD Error: unlockChannel requires a guild context]'
+    const channelID = args[0]?.trim()
+    if (!channelID) return '[BCFD Error: unlockChannel requires a channel ID]'
+    const roleID = args[1]?.trim() || ctx.guild.id
+    try {
+      const channel = await resolveChannel(ctx.guild, channelID)
+      if (!channel) return '[BCFD Error: unlockChannel channel not found]'
+      if (!('permissionOverwrites' in channel))
+        return '[BCFD Error: unlockChannel not supported on this channel type]'
+      await (channel as any).permissionOverwrites.edit(roleID, { SendMessages: null })
+      return 'true'
+    } catch (e) {
+      return `[BCFD Error: unlockChannel failed: ${e instanceof Error ? e.message : 'Unknown error'}]`
+    }
+  })
+
+  // $channelMention(channelID) - format a channel ID as a mention
+  registry.set('channelMention', (args) => {
+    const channelID = args[0]?.trim()
+    if (!channelID) return ''
+    return `<#${channelID}>`
   })
 
   // --------------------------------------------------------------------------

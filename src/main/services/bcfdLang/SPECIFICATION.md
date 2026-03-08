@@ -208,6 +208,86 @@ $endif
 | `$channelID`         | Channel ID            |
 | `$channelCreateDate` | Channel creation time |
 | `$channelAsMention`  | Channel as mention    |
+| `$channelTopic`      | Channel topic         |
+| `$channelIsNSFW`     | Is channel NSFW?      |
+
+### Channel Management
+
+These functions create, modify, and manage Discord channels. The bot requires `ManageChannels` permission for most operations and `ManageRoles` for lock/unlock. All mutating operations are async.
+
+**Channel types**: `"text"`, `"voice"`, `"category"`, `"announcement"`, `"stage"`, `"forum"`
+
+#### Creation
+
+| Function | Syntax | Description |
+| --- | --- | --- |
+| `$createChannel` | `$createChannel(name, type)` | Create a channel (type defaults to "text"). Returns channel ID |
+| `$createChannelIn` | `$createChannelIn(name, type, categoryID)` | Create a channel under a category. Returns channel ID |
+| `$cloneChannel` | `$cloneChannel(channelID)` | Clone a channel (copies all properties). Returns new channel ID |
+
+#### Deletion
+
+| Function | Syntax | Description |
+| --- | --- | --- |
+| `$deleteChannel` | `$deleteChannel(channelID, reason)` | Delete a channel. Reason is optional (audit log). Returns "true" |
+
+#### Editing
+
+| Function | Syntax | Description |
+| --- | --- | --- |
+| `$setChannelName` | `$setChannelName(channelID, name)` | Rename a channel |
+| `$setChannelTopic` | `$setChannelTopic(channelID, topic)` | Set channel topic (text channels only) |
+| `$setChannelNSFW` | `$setChannelNSFW(channelID, true/false)` | Toggle NSFW flag |
+| `$setChannelSlowmode` | `$setChannelSlowmode(channelID, seconds)` | Set slowmode (0-21600 seconds, 0 = off) |
+| `$setChannelPosition` | `$setChannelPosition(channelID, position)` | Set channel position in list |
+| `$setChannelParent` | `$setChannelParent(channelID, categoryID)` | Move channel to a category (empty = remove from category) |
+
+#### Lookup & Information
+
+| Function | Syntax | Description |
+| --- | --- | --- |
+| `$findChannel` | `$findChannel(name)` | Find a channel by name (case-insensitive). Returns ID or empty |
+| `$getChannelName` | `$getChannelName(channelID)` | Get a channel's name by ID |
+| `$getChannelType` | `$getChannelType(channelID)` | Get channel type as friendly string |
+| `$getChannelParent` | `$getChannelParent(channelID)` | Get parent category ID (empty if none) |
+| `$channelCount` | `$channelCount` | Total number of channels in the server |
+
+#### Listing
+
+| Function | Syntax | Description |
+| --- | --- | --- |
+| `$listChannels` | `$listChannels(type)` | Comma-separated channel names (type filter optional) |
+| `$listChannelIDs` | `$listChannelIDs(type)` | Comma-separated channel IDs (type filter optional) |
+
+#### Permissions
+
+| Function | Syntax | Description |
+| --- | --- | --- |
+| `$lockChannel` | `$lockChannel(channelID, roleID)` | Deny SendMessages for a role (defaults to @everyone) |
+| `$unlockChannel` | `$unlockChannel(channelID, roleID)` | Reset SendMessages for a role (defaults to @everyone) |
+
+#### Utility
+
+| Function | Syntax | Description |
+| --- | --- | --- |
+| `$channelMention` | `$channelMention(channelID)` | Format a channel ID as a clickable mention `<#ID>` |
+
+#### Examples
+
+```
+$createChannel(announcements, text)
+Created channel: $channelMention($createChannel(general-chat, text))
+
+$if($getChannelType($channelID) == text)
+  $setChannelTopic($channelID, Welcome to $server!)
+$endif
+
+$lockChannel($findChannel(general))
+$deleteChannel($findChannel(old-channel), Cleanup)
+
+Voice channels: $listChannels(voice)
+This server has $channelCount channels.
+```
 
 ### Mentioned User Context
 
