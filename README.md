@@ -8,7 +8,8 @@ Want to try a ready-to-use build? See the [releases](https://github.com/ayayaQ/b
 
 ### Visual Example
 
-![image](https://github.com/user-attachments/assets/18913217-d701-4300-83ef-610176e63421)
+<img width="1417" height="844" alt="bcfd-screenshot" src="https://github.com/user-attachments/assets/978b3e1b-9d7f-47df-8c25-1b81d7c3ecf2" />
+
 
 ## Library References
 
