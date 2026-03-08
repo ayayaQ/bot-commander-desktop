@@ -5,7 +5,7 @@ const DEFAULT_LANGUAGE = 'en'
 
 // English translations as the source of truth
 const en = {
-    'version-value': '1.2.0',
+    'version-value': '1.3.0',
     'send-webhook': 'Send Discord Webhook',
     'no-presets': 'No Presets',
     'webhook-url': 'Webhook URL',
@@ -330,7 +330,7 @@ type Languages = {
 const translations: Languages = {
   en,
   es: {
-    'version-value': '1.2.0',
+    'version-value': '1.3.0',
     'send-webhook': 'Enviar Webhook de Discord',
     'no-presets': 'Sin preajustes',
     'webhook-url': 'URL del Webhook',
@@ -643,7 +643,7 @@ const translations: Languages = {
     'no-actions-configured': 'No hay acciones configuradas para este comando.'
   },
   ja: {
-    'version-value': '1.2.0',
+    'version-value': '1.3.0',
     'send-webhook': 'Discord Webhookを送信',
     'no-presets': 'プリセットなし',
     'webhook-url': 'Webhook URL',
@@ -954,7 +954,7 @@ const translations: Languages = {
     'no-actions-configured': 'このコマンドにはアクションが設定されていません。'
   },
   zh: {
-    'version-value': '1.2.0',
+    'version-value': '1.3.0',
     'send-webhook': '发送Discord Webhook',
     'no-presets': '无预设',
     'webhook-url': 'Webhook URL',
@@ -1263,7 +1263,7 @@ const translations: Languages = {
     'no-actions-configured': '此命令没有配置任何操作。'
   },
   ko: {
-    'version-value': '1.2.0',
+    'version-value': '1.3.0',
     'send-webhook': 'Discord Webhook 보내기',
     'no-presets': '프리셋 없음',
     'webhook-url': 'Webhook URL',
@@ -1574,7 +1574,7 @@ const translations: Languages = {
     'no-actions-configured': '이 명령어에 구성된 작업이 없습니다.'
   },
   ru: {
-    'version-value': '1.2.0',
+    'version-value': '1.3.0',
     'send-webhook': 'Отправить Discord Webhook',
     'no-presets': 'Нет пресетов',
     'webhook-url': 'URL вебхука',
