@@ -82,7 +82,6 @@ function createWindow(): void {
       event.preventDefault()
       mainWindow?.hide()
     }
-    return false
   })
 }
 
@@ -134,7 +133,9 @@ app.whenReady().then(async () => {
   addIPCHandlers()
 
   createWindow()
-  createTray()
+  if (process.platform !== 'darwin') {
+    createTray()
+  }
 
   app.on('before-quit', async (event) => {
     event.preventDefault() // Prevent the app from quitting immediately
@@ -144,9 +145,11 @@ app.whenReady().then(async () => {
   })
 
   app.on('activate', function () {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (mainWindow) {
+      mainWindow.show()
+    } else {
+      createWindow()
+    }
   })
 })
 
