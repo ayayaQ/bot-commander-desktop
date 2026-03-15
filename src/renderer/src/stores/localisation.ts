@@ -273,6 +273,7 @@ const en = {
     'description-too-long': 'Description must be 1-100 characters',
     'duplicate-option-name': 'Duplicate option name',
     'no-actions-added-hint': 'No actions added. Add at least one action.',
+    'action-incompatible-with-type': 'This action has no effect for the selected event type',
     'send-channel-message': 'Send Channel Message',
     // API Auth strings
     account: 'Account',
@@ -606,6 +607,7 @@ const translations: Languages = {
     'description-too-long': 'La descripción debe tener 1-100 caracteres',
     'duplicate-option-name': 'Nombre de opción duplicado',
     'no-actions-added-hint': 'No hay acciones añadidas. Añade al menos una acción.',
+    'action-incompatible-with-type': 'Esta acción no tiene efecto para el tipo de evento seleccionado',
     'send-channel-message': 'Enviar mensaje de canal',
     // API Auth strings
     account: 'Cuenta',
@@ -924,6 +926,7 @@ const translations: Languages = {
     'description-too-long': '説明は1〜100文字である必要があります',
     'duplicate-option-name': 'オプション名が重複しています',
     'no-actions-added-hint': 'アクションが追加されていません。少なくとも1つのアクションを追加してください。',
+    'action-incompatible-with-type': 'このアクションは選択されたイベントタイプでは効果がありません',
     'send-channel-message': 'チャンネルメッセージを送信',
     // API Auth strings
     account: 'アカウント',
@@ -1240,6 +1243,7 @@ const translations: Languages = {
     'description-too-long': '描述必须为1-100个字符',
     'duplicate-option-name': '选项名称重复',
     'no-actions-added-hint': '未添加操作。请至少添加一个操作。',
+    'action-incompatible-with-type': '此操作对所选事件类型无效',
     'send-channel-message': '发送频道消息',
     // API Auth strings
     account: '账户',
@@ -1558,6 +1562,7 @@ const translations: Languages = {
     'description-too-long': '설명은 1-100자여야 합니다',
     'duplicate-option-name': '중복된 옵션 이름',
     'no-actions-added-hint': '액션이 추가되지 않았습니다. 최소 하나의 액션을 추가하세요.',
+    'action-incompatible-with-type': '이 액션은 선택한 이벤트 유형에 효과가 없습니다',
     'send-channel-message': '채널 메시지 보내기',
     // API Auth strings
     account: '계정',
@@ -1878,6 +1883,7 @@ const translations: Languages = {
     'description-too-long': 'Описание должно быть 1-100 символов',
     'duplicate-option-name': 'Дублирующееся имя параметра',
     'no-actions-added-hint': 'Действия не добавлены. Добавьте хотя бы одно действие.',
+    'action-incompatible-with-type': 'Это действие не имеет эффекта для выбранного типа события',
     'send-channel-message': 'Отправить сообщение в канал',
     // API Auth strings
     account: 'Аккаунт',

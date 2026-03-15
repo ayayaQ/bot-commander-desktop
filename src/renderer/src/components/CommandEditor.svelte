@@ -127,9 +127,35 @@
     applyAiCommandUpdate(updatedCommand)
   }
 
+  // Maps each action type to the set of command types it supports,
+  // based on what BotListener actually executes for each event type.
+  const actionCompatibility: Record<string, Set<number>> = {
+    sendMessage: new Set([TYPE_MESSAGE_RECEIVED, TYPE_MEMBER_JOIN, TYPE_MEMBER_LEAVE, TYPE_MEMBER_BAN, TYPE_REACTION]),
+    sendPrivateMessage: new Set([TYPE_MESSAGE_RECEIVED, TYPE_PM_RECEIVED, TYPE_MEMBER_JOIN, TYPE_MEMBER_LEAVE, TYPE_MEMBER_BAN, TYPE_REACTION]),
+    sendChannelEmbed: new Set([TYPE_MESSAGE_RECEIVED, TYPE_MEMBER_JOIN, TYPE_MEMBER_LEAVE, TYPE_MEMBER_BAN, TYPE_REACTION]),
+    sendPrivateEmbed: new Set([TYPE_MESSAGE_RECEIVED, TYPE_PM_RECEIVED, TYPE_MEMBER_JOIN, TYPE_MEMBER_LEAVE, TYPE_MEMBER_BAN, TYPE_REACTION]),
+    specificChannel: new Set([TYPE_MESSAGE_RECEIVED, TYPE_MEMBER_JOIN, TYPE_MEMBER_LEAVE, TYPE_MEMBER_BAN, TYPE_REACTION]),
+    reaction: new Set([TYPE_MESSAGE_RECEIVED, TYPE_PM_RECEIVED]),
+    deleteIf: new Set([TYPE_MESSAGE_RECEIVED]),
+    deleteAfter: new Set([TYPE_MESSAGE_RECEIVED]),
+    deleteX: new Set([TYPE_MESSAGE_RECEIVED]),
+    roleAssigner: new Set([TYPE_MESSAGE_RECEIVED, TYPE_MEMBER_JOIN, TYPE_REACTION]),
+    kick: new Set([TYPE_MESSAGE_RECEIVED]),
+    ban: new Set([TYPE_MESSAGE_RECEIVED]),
+    voiceMute: new Set([TYPE_MESSAGE_RECEIVED]),
+    requiredRole: new Set([TYPE_MESSAGE_RECEIVED, TYPE_REACTION]),
+    requireAdmin: new Set([TYPE_MESSAGE_RECEIVED, TYPE_REACTION]),
+    nsfw: new Set([TYPE_MESSAGE_RECEIVED, TYPE_REACTION]),
+    cooldown: new Set([TYPE_MESSAGE_RECEIVED])
+  }
+
+  function isActionCompatible(actionType: string, commandType: number): boolean {
+    return actionCompatibility[actionType]?.has(commandType) ?? true
+  }
+
   function getAvailableActions(
     activeActions: Array<{ type: string; name: string }>,
-    isLimitedType: boolean
+    commandType: number
   ) {
     const allActions = [
       { type: 'sendMessage', name: $t('send-message') },
@@ -154,13 +180,13 @@
     return allActions.filter(
       (action) =>
         !activeActions.find((active) => active.type === action.type) &&
-        (isLimitedType ? typeLimited.find((t) => t == action.type) : true)
+        isActionCompatible(action.type, commandType)
     )
   }
 
   function addAction(type: string) {
     dropdownOpen = false
-    const action = getAvailableActions(activeActions, isLimitedType).find((a) => a.type === type)
+    const action = getAvailableActions(activeActions, editedCommand?.type ?? 0).find((a) => a.type === type)
     if (action) {
       activeActions = [...activeActions, action]
       // Set corresponding command property
@@ -243,32 +269,16 @@
 
   let editedCommand: BCFDCommand = $state()
 
-  const typeLimited = [
-    'requiredRole',
-    'requireAdmin',
-    'nsfw',
-    'phrase',
-    'deleteAfter',
-    'deleteX',
-    'deleteIf',
-    'reaction',
-    'kick',
-    'ban',
-    'voiceMute'
-  ]
-
-  let isLimitedType =
-    $derived(editedCommand?.type == TYPE_MEMBER_JOIN ||
-    editedCommand?.type == TYPE_MEMBER_LEAVE ||
-    editedCommand?.type == TYPE_MEMBER_BAN)
-
-  $effect(() => {
-    if (isLimitedType) {
-      for (let i of typeLimited) {
-        removeAction(i)
+  // Derived set of actions that are incompatible with the current command type
+  let incompatibleActions: Set<string> = $derived.by(() => {
+    const commandType = editedCommand?.type ?? 0
+    const result = new Set<string>()
+    for (const action of activeActions) {
+      if (!isActionCompatible(action.type, commandType)) {
+        result.add(action.type)
       }
-      // reset the fields that are not needed for these types
     }
+    return result
   })
 
   // Validation
@@ -550,7 +560,7 @@
         <ul
           class="menu dropdown-content bg-base-100 rounded-box z-1 w-52 p-2 shadow max-h-96 overflow-y-auto flex flex-col gap-1 flex-nowrap"
         >
-          {#each getAvailableActions(activeActions, isLimitedType) as action}
+          {#each getAvailableActions(activeActions, editedCommand?.type ?? 0) as action}
             <li>
               <button class="dropdown-item" onclick={() => addAction(action.type)}>
                 {action.name}
@@ -721,7 +731,7 @@
                 <p class="text-center text-error text-xs mt-2">{$t('no-actions-added-hint')}</p>
               {/if}
               {#each activeActions as action}
-                <div class="card bg-base-200">
+                <div class="card bg-base-200 {incompatibleActions.has(action.type) ? 'ring-2 ring-warning' : ''}">
                   <div class="card-header flex justify-between items-center p-3">
                     <h3 class="text-lg font-bold">{action.name}</h3>
                     <button
@@ -984,6 +994,12 @@
                           class="input w-full"
                           placeholder="This command is on cooldown. Try again in $cooldownRemaining()s."
                         />
+                      </div>
+                    {/if}
+                    {#if incompatibleActions.has(action.type)}
+                      <div class="flex items-center gap-2 mt-3 text-warning text-sm">
+                        <span class="material-symbols-outlined text-base">warning</span>
+                        <span>{$t('action-incompatible-with-type')}</span>
                       </div>
                     {/if}
                   </div>
