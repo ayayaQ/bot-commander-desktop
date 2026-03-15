@@ -305,6 +305,93 @@
       insertText: 'sum(n1, n2)'
     },
     {
+      name: 'sub',
+      syntax: 'function-paren',
+      description: 'Subtract two numbers',
+      insertText: 'sub(a, b)'
+    },
+    {
+      name: 'mul',
+      syntax: 'function-paren',
+      description: 'Multiply numbers',
+      insertText: 'mul(n1, n2)'
+    },
+    {
+      name: 'div',
+      syntax: 'function-paren',
+      description: 'Divide two numbers',
+      insertText: 'div(a, b)'
+    },
+    {
+      name: 'mod',
+      syntax: 'function-paren',
+      description: 'Modulo of two numbers',
+      insertText: 'mod(a, b)'
+    },
+    {
+      name: 'round',
+      syntax: 'function-paren',
+      description: 'Round to nearest integer or N decimals',
+      insertText: 'round(n, decimals)'
+    },
+    { name: 'floor', syntax: 'function-paren', description: 'Round down', insertText: 'floor(n)' },
+    { name: 'ceil', syntax: 'function-paren', description: 'Round up', insertText: 'ceil(n)' },
+    {
+      name: 'abs',
+      syntax: 'function-paren',
+      description: 'Absolute value',
+      insertText: 'abs(n)'
+    },
+    {
+      name: 'toFixed',
+      syntax: 'function-paren',
+      description: 'Format to fixed decimal places',
+      insertText: 'toFixed(n, decimals)'
+    },
+    {
+      name: 'min',
+      syntax: 'function-paren',
+      description: 'Minimum of numbers',
+      insertText: 'min(n1, n2)'
+    },
+    {
+      name: 'max',
+      syntax: 'function-paren',
+      description: 'Maximum of numbers',
+      insertText: 'max(n1, n2)'
+    },
+    {
+      name: 'clamp',
+      syntax: 'function-paren',
+      description: 'Clamp value between min and max',
+      insertText: 'clamp(n, min, max)'
+    },
+    {
+      name: 'pow',
+      syntax: 'function-paren',
+      description: 'Exponentiation',
+      insertText: 'pow(base, exp)'
+    },
+    {
+      name: 'sqrt',
+      syntax: 'function-paren',
+      description: 'Square root',
+      insertText: 'sqrt(n)'
+    },
+    {
+      name: 'log',
+      syntax: 'function-paren',
+      description: 'Natural logarithm',
+      insertText: 'log(n)'
+    },
+    { name: 'pi', syntax: 'variable', description: 'Pi constant (3.14159...)' },
+    {
+      name: 'isNumber',
+      syntax: 'function-paren',
+      description: 'Check if text is a valid number',
+      insertText: 'isNumber(text)'
+    },
+    {
       name: 'args',
       syntax: 'function-paren',
       description: 'Get argument at index',

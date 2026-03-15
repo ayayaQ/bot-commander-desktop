@@ -170,6 +170,13 @@ export interface BCFDContext {
   // VM context for $eval blocks
   vmContext?: import('vm').Context
 
+  // Cooldown context
+  commandId?: string
+  cooldown?: number
+  cooldownType?: string
+  userId?: string
+  guildId?: string
+
   // Settings
   useLegacyMode?: boolean
 }

@@ -78,6 +78,8 @@ export async function stringInfoAdd(ctx: StringInfoContext): Promise<string> {
  */
 async function stringInfoAddNew(ctx: StringInfoContext): Promise<string> {
   // Convert StringInfoContext to BCFDContext for the interpreter
+  // Extract cooldown fields from the command or interaction command
+  const cmdSource = ctx.command || ctx.interactionCommand
   const interpreterCtx: InterpreterContext = {
     user: ctx.user,
     member: ctx.member,
@@ -89,7 +91,12 @@ async function stringInfoAddNew(ctx: StringInfoContext): Promise<string> {
     command: ctx.command,
     interactionCommand: ctx.interactionCommand,
     interactionOptions: ctx.interactionOptions,
-    vmContext: getContext()
+    vmContext: getContext(),
+    commandId: cmdSource?.id,
+    cooldown: cmdSource?.cooldown,
+    cooldownType: cmdSource?.cooldownType,
+    userId: ctx.user?.id,
+    guildId: ctx.guild?.id
   }
 
   const result = await interpret(ctx.message, interpreterCtx)

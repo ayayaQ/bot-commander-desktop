@@ -114,6 +114,7 @@
     if (updatedCommand.requiredRole?.trim()) {
       editedCommand.isRequiredRole = true
     }
+    // cooldown is handled via initializeActiveActions below
 
     // Force reactivity after a batch of in-place assignments.
     editedCommand = { ...editedCommand }
@@ -146,7 +147,8 @@
       { type: 'voiceMute', name: $t('voice-mute') },
       { type: 'requiredRole', name: $t('requires-role') },
       { type: 'requireAdmin', name: $t('requires-admin') },
-      { type: 'nsfw', name: $t('is-nsfw') }
+      { type: 'nsfw', name: $t('is-nsfw') },
+      { type: 'cooldown', name: $t('cooldown') }
     ]
 
     return allActions.filter(
@@ -228,6 +230,13 @@
         break
       case 'startsWith':
         editedCommand.startsWith = value
+        break
+      case 'cooldown':
+        if (!value) {
+          editedCommand.cooldown = 0
+          editedCommand.cooldownType = ''
+          editedCommand.cooldownMessage = ''
+        }
         break
     }
   }
@@ -419,6 +428,8 @@
     if (cmd.isRequiredRole) activeActions.push({ type: 'requiredRole', name: $t('requires-role') })
     if (cmd.isAdmin) activeActions.push({ type: 'requireAdmin', name: $t('requires-admin') })
     if (cmd.isNSFW) activeActions.push({ type: 'nsfw', name: $t('is-nsfw') })
+    if (cmd.cooldown && cmd.cooldown > 0)
+      activeActions.push({ type: 'cooldown', name: $t('cooldown') })
 
     if (cmd.phrase) triggerDropdown = 2
     else if (cmd.startsWith) triggerDropdown = 1
@@ -931,6 +942,49 @@
                       Requires Administrator Role
                     {:else if action.type === 'nsfw'}
                       Requires NSFW Channel
+                    {:else if action.type === 'cooldown'}
+                      <p class="text-base-content/50 text-sm mb-2">{$t('cooldown-hint')}</p>
+                      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="form-control">
+                          <label class="label" for="cooldown">
+                            <span class="label-text">{$t('cooldown')} (s)</span>
+                          </label>
+                          <input
+                            type="number"
+                            id="cooldown"
+                            bind:value={editedCommand.cooldown}
+                            class="input w-full"
+                            min="0"
+                            placeholder="0"
+                          />
+                        </div>
+                        <div class="form-control">
+                          <label class="label" for="cooldownType">
+                            <span class="label-text">{$t('cooldown-type')}</span>
+                          </label>
+                          <select
+                            id="cooldownType"
+                            bind:value={editedCommand.cooldownType}
+                            class="select w-full"
+                          >
+                            <option value="User">{$t('cooldown-user')}</option>
+                            <option value="Server">{$t('cooldown-server')}</option>
+                            <option value="Global">{$t('cooldown-global')}</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div class="form-control mt-2">
+                        <label class="label" for="cooldownMessage">
+                          <span class="label-text">{$t('cooldown-message')}</span>
+                        </label>
+                        <input
+                          type="text"
+                          id="cooldownMessage"
+                          bind:value={editedCommand.cooldownMessage}
+                          class="input w-full"
+                          placeholder="This command is on cooldown. Try again in $cooldownRemaining()s."
+                        />
+                      </div>
                     {/if}
                   </div>
                 </div>

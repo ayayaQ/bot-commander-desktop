@@ -52,6 +52,7 @@ import {
   stringInfoAdd
 } from './stringInfo'
 import { getStatsInstance, Stats } from '../utils/stats'
+import { getCooldownManager } from './cooldownManager'
 import { rendererConsole } from '../utils/rendererConsole'
 
 let client: Client | null = null
@@ -265,8 +266,50 @@ async function handleSlashCommand(interaction: ChatInputCommandInteraction) {
   const interactionCommand = findInteractionByCommandName(interaction.commandName)
 
   if (interactionCommand) {
+    // Cooldown check
+    if (interactionCommand.cooldown && interactionCommand.cooldown > 0 && interactionCommand.cooldownType) {
+      const cooldownLevel = interactionCommand.cooldownType.toLowerCase() as 'user' | 'server' | 'global'
+      const cooldownResult = getCooldownManager().check(
+        interactionCommand.id,
+        interactionCommand.cooldown,
+        cooldownLevel,
+        interaction.user.id,
+        interaction.guild?.id
+      )
+      if (!cooldownResult.allowed) {
+        if (interactionCommand.cooldownMessage) {
+          const cooldownReply = await stringInfoAdd(
+            contextForInteractionEvent(
+              interactionCommand.cooldownMessage,
+              interaction,
+              interactionCommand
+            )
+          )
+          await interaction.reply({ content: cooldownReply, ephemeral: true })
+        } else {
+          await interaction.reply({
+            content: `This command is on cooldown. Try again in ${cooldownResult.remaining}s.`,
+            ephemeral: true
+          })
+        }
+        return
+      }
+    }
+
     rendererConsole.info(`Executing interaction command: /${interaction.commandName}`)
     await executeInteractionCommand(interaction, interactionCommand)
+
+    // Record cooldown after successful execution
+    if (interactionCommand.cooldown && interactionCommand.cooldown > 0 && interactionCommand.cooldownType) {
+      const cooldownLevel = interactionCommand.cooldownType.toLowerCase() as 'user' | 'server' | 'global'
+      getCooldownManager().record(
+        interactionCommand.id,
+        interactionCommand.cooldown,
+        cooldownLevel,
+        interaction.user.id,
+        interaction.guild?.id
+      )
+    }
     return
   }
 
@@ -1109,6 +1152,29 @@ async function onMessageCreate(message: OmitPartialGroupDMChannel<Message<boolea
       }
     }
 
+    // Cooldown check
+    if (command.cooldown && command.cooldown > 0 && command.cooldownType) {
+      const cooldownLevel = command.cooldownType.toLowerCase() as 'user' | 'server' | 'global'
+      const cooldownResult = getCooldownManager().check(
+        command.id,
+        command.cooldown,
+        cooldownLevel,
+        message.author.id,
+        message.guild?.id
+      )
+      if (!cooldownResult.allowed) {
+        if (command.cooldownMessage) {
+          const cooldownReply = await stringInfoAdd(
+            contextForMessageEvent(command.cooldownMessage, command, message)
+          )
+          message.reply(cooldownReply)
+        } else if (!command.ignoreErrorMessage) {
+          message.reply(`This command is on cooldown. Try again in ${cooldownResult.remaining}s.`)
+        }
+        continue
+      }
+    }
+
     rendererConsole.info(`Executing command: "${command.command}"`)
 
     deleteIf(command, message)
@@ -1172,6 +1238,18 @@ async function onMessageCreate(message: OmitPartialGroupDMChannel<Message<boolea
 
     if (command.actionArr[0] || command.actionArr[1]) {
       stats.incrementMessagesSent()
+    }
+
+    // Record cooldown after successful execution
+    if (command.cooldown && command.cooldown > 0 && command.cooldownType) {
+      const cooldownLevel = command.cooldownType.toLowerCase() as 'user' | 'server' | 'global'
+      getCooldownManager().record(
+        command.id,
+        command.cooldown,
+        cooldownLevel,
+        message.author.id,
+        message.guild?.id
+      )
     }
   }
 }

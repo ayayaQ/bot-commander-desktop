@@ -576,6 +576,140 @@ function createFunctionRegistry(): FunctionRegistry {
     return total.toString()
   })
 
+  // --------------------------------------------------------------------------
+  // Math Functions
+  // --------------------------------------------------------------------------
+
+  // $sub(a, b) - subtraction
+  registry.set('sub', (args) => {
+    const a = parseFloat(args[0] ?? '')
+    const b = parseFloat(args[1] ?? '')
+    if (isNaN(a) || isNaN(b)) return '[BCFD Error: sub requires numeric arguments]'
+    return (a - b).toString()
+  })
+
+  // $mul(n1, n2, ...) or $mul{n1|n2|...} - multiply all numbers
+  registry.set('mul', (args) => {
+    let total = 1
+    for (const arg of args) {
+      const num = parseFloat(arg)
+      if (isNaN(num)) {
+        return '[BCFD Error: mul requires numeric arguments]'
+      }
+      total *= num
+    }
+    return total.toString()
+  })
+
+  // $div(a, b) - division
+  registry.set('div', (args) => {
+    const a = parseFloat(args[0] ?? '')
+    const b = parseFloat(args[1] ?? '')
+    if (isNaN(a) || isNaN(b)) return '[BCFD Error: div requires numeric arguments]'
+    if (b === 0) return '[BCFD Error: division by zero]'
+    return (a / b).toString()
+  })
+
+  // $mod(a, b) - modulo
+  registry.set('mod', (args) => {
+    const a = parseFloat(args[0] ?? '')
+    const b = parseFloat(args[1] ?? '')
+    if (isNaN(a) || isNaN(b)) return '[BCFD Error: mod requires numeric arguments]'
+    if (b === 0) return '[BCFD Error: division by zero]'
+    return (a % b).toString()
+  })
+
+  // $round(n) or $round(n, decimals) - round to nearest integer or to N decimal places
+  registry.set('round', (args) => {
+    const n = parseFloat(args[0] ?? '')
+    if (isNaN(n)) return '[BCFD Error: round requires a numeric argument]'
+    const decimals = parseInt(args[1]?.trim() ?? '0', 10) || 0
+    const factor = Math.pow(10, decimals)
+    return (Math.round(n * factor) / factor).toString()
+  })
+
+  // $floor(n) - round down
+  registry.set('floor', (args) => {
+    const n = parseFloat(args[0] ?? '')
+    if (isNaN(n)) return '[BCFD Error: floor requires a numeric argument]'
+    return Math.floor(n).toString()
+  })
+
+  // $ceil(n) - round up
+  registry.set('ceil', (args) => {
+    const n = parseFloat(args[0] ?? '')
+    if (isNaN(n)) return '[BCFD Error: ceil requires a numeric argument]'
+    return Math.ceil(n).toString()
+  })
+
+  // $abs(n) - absolute value
+  registry.set('abs', (args) => {
+    const n = parseFloat(args[0] ?? '')
+    if (isNaN(n)) return '[BCFD Error: abs requires a numeric argument]'
+    return Math.abs(n).toString()
+  })
+
+  // $toFixed(n, decimals) - format number to fixed decimal places
+  registry.set('toFixed', (args) => {
+    const n = parseFloat(args[0] ?? '')
+    if (isNaN(n)) return '[BCFD Error: toFixed requires a numeric argument]'
+    const decimals = Math.max(0, Math.min(parseInt(args[1]?.trim() ?? '2', 10) || 2, 20))
+    return n.toFixed(decimals)
+  })
+
+  // $min(n1, n2, ...) or $min{n1|n2|...} - minimum value
+  registry.set('min', (args) => {
+    const nums = args.map((a) => parseFloat(a))
+    if (nums.length === 0 || nums.some(isNaN)) return '[BCFD Error: min requires numeric arguments]'
+    return Math.min(...nums).toString()
+  })
+
+  // $max(n1, n2, ...) or $max{n1|n2|...} - maximum value
+  registry.set('max', (args) => {
+    const nums = args.map((a) => parseFloat(a))
+    if (nums.length === 0 || nums.some(isNaN)) return '[BCFD Error: max requires numeric arguments]'
+    return Math.max(...nums).toString()
+  })
+
+  // $clamp(n, min, max) - clamp value between min and max
+  registry.set('clamp', (args) => {
+    const n = parseFloat(args[0] ?? '')
+    const min = parseFloat(args[1] ?? '')
+    const max = parseFloat(args[2] ?? '')
+    if (isNaN(n) || isNaN(min) || isNaN(max)) return '[BCFD Error: clamp requires numeric arguments]'
+    return Math.max(min, Math.min(n, max)).toString()
+  })
+
+  // $pow(base, exp) - exponentiation
+  registry.set('pow', (args) => {
+    const base = parseFloat(args[0] ?? '')
+    const exp = parseFloat(args[1] ?? '')
+    if (isNaN(base) || isNaN(exp)) return '[BCFD Error: pow requires numeric arguments]'
+    return Math.pow(base, exp).toString()
+  })
+
+  // $sqrt(n) - square root
+  registry.set('sqrt', (args) => {
+    const n = parseFloat(args[0] ?? '')
+    if (isNaN(n)) return '[BCFD Error: sqrt requires a numeric argument]'
+    if (n < 0) return '[BCFD Error: sqrt of negative number]'
+    return Math.sqrt(n).toString()
+  })
+
+  // $log(n) - natural logarithm
+  registry.set('log', (args) => {
+    const n = parseFloat(args[0] ?? '')
+    if (isNaN(n)) return '[BCFD Error: log requires a numeric argument]'
+    if (n <= 0) return '[BCFD Error: log of non-positive number]'
+    return Math.log(n).toString()
+  })
+
+  // $pi - returns pi constant
+  registry.set('pi', () => Math.PI.toString())
+
+  // $isNumber(text) - check if text is a valid number
+  registry.set('isNumber', (args) => (!isNaN(parseFloat(args[0] ?? '')) && isFinite(Number(args[0] ?? ''))).toString())
+
   // $args(index) - get argument at index
   registry.set('args', (args, ctx) => {
     const index = parseInt(args[0] ?? '0', 10)
@@ -666,6 +800,38 @@ function createFunctionRegistry(): FunctionRegistry {
     if (args.length < 1) return ''
     const prompt = args[0]
     return await fetchChatResponse(prompt)
+  })
+
+  // --------------------------------------------------------------------------
+  // Cooldown Functions
+  // --------------------------------------------------------------------------
+
+  // $cooldownRemaining(level) - get remaining cooldown seconds
+  // level arg is optional; defaults to the command's configured cooldownType
+  registry.set('cooldownRemaining', (_args, ctx) => {
+    const level = (_args[0]?.trim().toLowerCase() || ctx.cooldownType?.toLowerCase() || 'user') as 'user' | 'server' | 'global'
+    const commandId = ctx.commandId || ''
+    const cooldownSeconds = ctx.cooldown || 0
+
+    if (!commandId || cooldownSeconds <= 0) return '0'
+
+    const { getCooldownManager } = require('../cooldownManager')
+    const manager = getCooldownManager()
+
+    let scopeId: string | undefined
+    switch (level) {
+      case 'user':
+        scopeId = ctx.userId
+        break
+      case 'server':
+        scopeId = ctx.guildId
+        break
+      case 'global':
+        scopeId = undefined
+        break
+    }
+
+    return String(manager.getRemaining(commandId, level, cooldownSeconds, scopeId))
   })
 
   return registry

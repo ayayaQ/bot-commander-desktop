@@ -33,6 +33,9 @@ export type BCFDCommand = {
   type: BCFDCommandType
   channelEmbed: BCFDEmbedMessageTemplate
   privateEmbed: BCFDEmbedMessageTemplate
+  cooldown?: number        // Cooldown duration in seconds
+  cooldownType?: string    // "User", "Server", or "Global"
+  cooldownMessage?: string // Custom BCFD template message when on cooldown
 }
 
 export type BCFDEmbedMessageTemplate = {
@@ -122,6 +125,9 @@ export type BCFDInteractionCommand = {
   rootAction: BCFDInteractionAction
   isRegistered: boolean
   guildId?: string
+  cooldown?: number
+  cooldownType?: string
+  cooldownMessage?: string
 }
 
 export type AppSettings = {

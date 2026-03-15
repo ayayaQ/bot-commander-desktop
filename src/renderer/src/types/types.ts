@@ -33,6 +33,9 @@ export type BCFDCommand = {
   type: BCFDCommandType
   channelEmbed: BCFDEmbedMessageTemplate
   privateEmbed: BCFDEmbedMessageTemplate
+  cooldown?: number        // Cooldown duration in seconds
+  cooldownType?: string    // "User", "Server", or "Global"
+  cooldownMessage?: string // Custom BCFD template message when on cooldown
 }
 
 export function validateBCFDCommand(jsonString: string): BCFDCommand | null {
@@ -78,7 +81,7 @@ export function validateBCFDCommand(jsonString: string): BCFDCommand | null {
     ]
 
     // id is optional (added at runtime, stripped on export)
-    const allowedFields = [...requiredFields, 'id']
+    const allowedFields = [...requiredFields, 'id', 'cooldown', 'cooldownType', 'cooldownMessage']
 
     // Check if all required fields exist
     const hasAllFields = requiredFields.every((field) => field in parsed)
@@ -187,6 +190,9 @@ export type BCFDInteractionCommand = {
   rootAction: BCFDInteractionAction
   isRegistered: boolean
   guildId?: string
+  cooldown?: number
+  cooldownType?: string
+  cooldownMessage?: string
 }
 
 // Factory function to create default interaction action

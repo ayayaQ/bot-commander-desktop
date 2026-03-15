@@ -342,6 +342,55 @@
     </div>
   </div>
 
+  <!-- Cooldown Settings -->
+  <div class="card bg-base-100 shadow-sm mb-4">
+    <div class="card-body">
+      <h3 class="card-title text-lg">{$t('cooldown')}</h3>
+      <p class="text-base-content/50 text-sm mb-2">{$t('cooldown-hint')}</p>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="form-control">
+          <!-- svelte-ignore a11y_label_has_associated_control -->
+          <label class="label">
+            <span class="label-text">{$t('cooldown')} (s)</span>
+          </label>
+          <input
+            type="number"
+            class="input w-full"
+            bind:value={editedInteraction.cooldown}
+            min="0"
+            placeholder="0"
+          />
+        </div>
+        <div class="form-control">
+          <!-- svelte-ignore a11y_label_has_associated_control -->
+          <label class="label">
+            <span class="label-text">{$t('cooldown-type')}</span>
+          </label>
+          <select
+            class="select w-full"
+            bind:value={editedInteraction.cooldownType}
+          >
+            <option value="User">{$t('cooldown-user')}</option>
+            <option value="Server">{$t('cooldown-server')}</option>
+            <option value="Global">{$t('cooldown-global')}</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-control mt-2">
+        <!-- svelte-ignore a11y_label_has_associated_control -->
+        <label class="label">
+          <span class="label-text">{$t('cooldown-message')}</span>
+        </label>
+        <input
+          type="text"
+          class="input w-full"
+          bind:value={editedInteraction.cooldownMessage}
+          placeholder="This command is on cooldown. Try again in $cooldownRemaining()s."
+        />
+      </div>
+    </div>
+  </div>
+
   <!-- Root Action -->
   <div class="card bg-base-100 shadow-sm mb-4">
     <div class="card-body">
