@@ -10,6 +10,7 @@
   import type { WebhookPreset } from '../types/types'
   import HeaderBar from './HeaderBar.svelte'
   import Dialog from './Dialog.svelte'
+  import TipCard from './TipCard.svelte'
 
   const emptyKaomojis = ['(´。＿。｀)', '(╥_╥)', '(｡•́︿•̀｡)', '(っ˘̩╭╮˘̩)っ', '(ᵕ—ᴗ—)']
   const emptyKaomoji = emptyKaomojis[Math.floor(Math.random() * emptyKaomojis.length)]
@@ -139,6 +140,12 @@
   }
 </script>
 
+<TipCard
+  tipId="tip_webhooks"
+  icon="webhook"
+  title="Webhooks"
+  body="Send messages to Discord channels without hosting a bot. Paste a webhook URL from your Discord server settings."
+/>
 <HeaderBar>
   <h2 class="text-2xl font-bold">{$t('send-webhook')}</h2>
   <div class="flex gap-2">

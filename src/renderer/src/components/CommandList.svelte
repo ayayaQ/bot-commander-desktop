@@ -9,6 +9,7 @@
   import { fade } from 'svelte/transition'
   import { t } from '../stores/localisation'
   import { apiAuthStore } from '../stores/apiAuth'
+  import TipCard from './TipCard.svelte'
 
   const emptyKaomojis = ['(´。＿。｀)', '(╥_╥)', '(｡•́︿•̀｡)', '(っ˘̩╭╮˘̩)っ', '(ᵕ—ᴗ—)']
   const noResultsKaomojis = ['(￣ω￣;)', '(・・;)', '(¬_¬)', '(-_-;)', '(°ロ°)']
@@ -105,6 +106,12 @@
   ))
 </script>
 
+<TipCard
+  tipId="tip_commands"
+  icon="chat"
+  title="Commands"
+  body="Commands define how your bot responds to messages. Create one, set a trigger word, then add actions like Send Message."
+/>
 <div class="">
   {#if showRepository}
     <CommandRepository

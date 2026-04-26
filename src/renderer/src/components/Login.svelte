@@ -6,9 +6,18 @@
   import type { BotStatus } from '../types/types'
   import { settingsStore } from '../stores/settings'
   import { t } from '../stores/localisation'
+  import { onboardingStore, getCurrentStep } from '../stores/onboarding'
+  import OnboardingStepper from './OnboardingStepper.svelte'
+
+  let {
+    onSelectTab
+  }: {
+    onSelectTab?: (tab: string) => void
+  } = $props()
 
   let username = $derived($connectionStore.username)
   let avatar = $derived($connectionStore.avatar)
+  let hasCommands = $state(false)
 
   let token = $state('')
   function handleLogin() {
@@ -36,15 +45,47 @@
     return ''
   }
 
+  let currentStep = $derived(
+    getCurrentStep($onboardingStore, token, hasCommands, $connectionStore.connected)
+  )
+
+  // Mark bot hosted once when connected
+  $effect(() => {
+    if ($connectionStore.connected) {
+      onboardingStore.markBotHostedOnce()
+    }
+  })
+
+  function handleStepperAction() {
+    if (currentStep === 'ENTER_TOKEN') {
+      window.electron.ipcRenderer.invoke('open-external-url', 'https://discord.com/developers/applications')
+    } else if (currentStep === 'CREATE_COMMAND') {
+      onSelectTab?.('commands')
+    }
+  }
+
   onMount(async () => {
     token = await connectionStore.ipc.getToken()
+    // Check if commands exist for stepper
+    try {
+      const result = await window.electron.ipcRenderer.invoke('get-commands')
+      hasCommands = result.bcfdCommands && result.bcfdCommands.length > 0
+    } catch {
+      hasCommands = false
+    }
   })
 </script>
 
 <div class="flex flex-col items-center justify-center bg-base-200 p-4 h-full">
   <div class="card w-96 bg-base-100 shadow-xl">
     <div class="card-body items-center text-center">
-      {#if avatar}
+      {#if currentStep !== 'COMPLETE'}
+        <OnboardingStepper
+          {currentStep}
+          onDismiss={() => onboardingStore.dismissStepper()}
+          onAction={handleStepperAction}
+        />
+      {:else if avatar}
         <div class="avatar placeholder">
           <div
             class={`rounded-full ${$botStatusStore.status === 'Online' ? 'outline-2 outline-green-500' : $botStatusStore.status === 'Do Not Disturb' ? 'outline outline-red-500' : $botStatusStore.status === 'Invisible' ? 'outline outline-gray-500' : 'outline outline-yellow-500'}`}
@@ -61,21 +102,26 @@
       {/if}
 
       {#if !$connectionStore.connected}
-        {#if $settingsStore.showToken}
-          <input
-            type="text"
-            placeholder={$t('token')}
-            class="input w-full"
-            bind:value={token}
-          />
-        {:else}
-          <input
-            type="password"
-            placeholder={$t('token')}
-            class="input w-full"
-            bind:value={token}
-          />
-        {/if}
+        <div class="w-full">
+          {#if $settingsStore.showToken}
+            <input
+              type="text"
+              placeholder={$t('token')}
+              class="input w-full"
+              bind:value={token}
+            />
+          {:else}
+            <input
+              type="password"
+              placeholder={$t('token')}
+              class="input w-full"
+              bind:value={token}
+            />
+          {/if}
+          {#if currentStep === 'ENTER_TOKEN'}
+            <p class="text-xs opacity-50 mt-1 ml-1">From Discord Developer Portal &gt; Bot &gt; Token</p>
+          {/if}
+        </div>
       {:else}
         <h2 class="card-title">{username}</h2>
         <div class="text-sm">

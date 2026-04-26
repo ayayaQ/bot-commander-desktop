@@ -9,6 +9,7 @@
   import { onMount } from 'svelte'
   import { loadSettings, settingsStore } from './stores/settings'
   import { loadBotStatus } from './stores/status'
+  import { onboardingStore } from './stores/onboarding'
   import Stats from './components/Stats.svelte'
   import StateViewer from './components/StateViewer.svelte'
   import TitleBar from './components/TitleBar.svelte'
@@ -26,9 +27,14 @@
 
   let leftPanelCollapsed = $state(false)
 
+  function selectTab(tab: string) {
+    selectedMenu = tab as typeof selectedMenu
+  }
+
   onMount(async () => {
     await loadSettings()
     await loadBotStatus()
+    await onboardingStore.load()
     // apply theme from the settings
     document.documentElement.setAttribute('data-theme', $settingsStore.theme)
     // check API auth status
@@ -43,7 +49,7 @@
     class={`${!leftPanelCollapsed ? 'basis-1/3 grow' : 'w-0'} h-full shrink-0 relative flex flex-col bg-base-200 transition-all duration-0 overflow-hidden`}
   >
     <div class="grow overflow-y-auto">
-      <Login />
+      <Login onSelectTab={selectTab} />
     </div>
     <div class="w-full">
       <Console />

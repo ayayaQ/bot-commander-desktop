@@ -32,6 +32,9 @@ const validInvokeChannels = [
   'save-settings',
   'get-bot-status',
   'save-bot-status',
+  // Onboarding
+  'get-onboarding',
+  'save-onboarding',
   // Connection
   'generate-invite',
   'get-token',

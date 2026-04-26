@@ -3,6 +3,7 @@
   import { t } from '../stores/localisation'
   import HeaderBar from './HeaderBar.svelte'
   import CodeEditor from './CodeEditor.svelte'
+  import TipCard from './TipCard.svelte'
 
   // Startup JS logic
   let startupJs = $state('')
@@ -238,6 +239,12 @@
   })
 </script>
 
+<TipCard
+  tipId="tip_debugger"
+  icon="bug_report"
+  title="Debugger"
+  body="Bot State shows persistent variables from your commands. Console lets you test JavaScript snippets against the bot context."
+/>
 <HeaderBar>
   <h2 class="text-2xl font-bold">{$t('bot-state')}</h2>
   <div>

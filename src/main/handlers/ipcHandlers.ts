@@ -32,7 +32,9 @@ import {
   saveSettings,
   saveInteractions,
   getWebhookPresets,
-  saveWebhookPresets
+  saveWebhookPresets,
+  getOnboarding,
+  saveOnboarding
 } from '../services/fileService'
 import {
   getInteractions,
@@ -211,6 +213,15 @@ export function addIPCHandlers() {
     setBotStatus(newBotStatus)
     await saveBotStatus()
     applyBotStatus(getBotStatus())
+    return true
+  })
+
+  ipcMain.handle('get-onboarding', async () => {
+    return await getOnboarding()
+  })
+
+  ipcMain.handle('save-onboarding', async (_, state) => {
+    await saveOnboarding(state)
     return true
   })
 

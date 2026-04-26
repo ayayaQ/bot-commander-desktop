@@ -8,7 +8,8 @@ import {
   BCFDSlashCommand,
   BotStatus,
   BCFDInteractionCommand,
-  WebhookPreset
+  WebhookPreset,
+  OnboardingState
 } from '../types/types'
 import { getCommands, setCommands } from './botService'
 import { getSettings, setSettings } from './settingsService'
@@ -151,5 +152,28 @@ export async function saveWebhookPresets(presets: WebhookPreset[]): Promise<void
     await fs.writeFile(presetsPath, JSON.stringify(presets, null, 2))
   } catch (error) {
     console.error('Error saving webhook presets:', error)
+  }
+}
+
+export async function getOnboarding(): Promise<OnboardingState> {
+  const onboardingPath = join(app.getPath('userData'), 'onboarding.json')
+  try {
+    const data = await fs.readFile(onboardingPath, 'utf-8')
+    return JSON.parse(data) as OnboardingState
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { stepperDismissed: false, botHostedOnce: false, dismissedTips: [] }
+    }
+    console.error('Error loading onboarding:', error)
+    return { stepperDismissed: false, botHostedOnce: false, dismissedTips: [] }
+  }
+}
+
+export async function saveOnboarding(state: OnboardingState): Promise<void> {
+  const onboardingPath = join(app.getPath('userData'), 'onboarding.json')
+  try {
+    await fs.writeFile(onboardingPath, JSON.stringify(state, null, 2))
+  } catch (error) {
+    console.error('Error saving onboarding:', error)
   }
 }

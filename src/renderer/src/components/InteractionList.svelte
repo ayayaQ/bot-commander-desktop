@@ -7,6 +7,7 @@
   import { fade } from 'svelte/transition'
   import { t } from '../stores/localisation'
   import { connectionStore } from '../stores/connection'
+  import TipCard from './TipCard.svelte'
 
   const emptyKaomojis = ['(´。＿。｀)', '(╥_╥)', '(｡•́︿•̀｡)', '(っ˘̩╭╮˘̩)っ', '(ᵕ—ᴗ—)']
   const noResultsKaomojis = ['(￣ω￣;)', '(・・;)', '(¬_¬)', '(-_-;)', '(°ロ°)']
@@ -111,6 +112,12 @@
   ))
 </script>
 
+<TipCard
+  tipId="tip_interactions"
+  icon="smart_button"
+  title="Interactions"
+  body="Interactions are Discord slash commands. Create one, then tap Sync to register it with Discord."
+/>
 <div class="">
   {#if isEditing}
     <InteractionEditor
