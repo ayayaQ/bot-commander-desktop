@@ -135,6 +135,8 @@
     sendChannelEmbed: new Set([TYPE_MESSAGE_RECEIVED, TYPE_MEMBER_JOIN, TYPE_MEMBER_LEAVE, TYPE_MEMBER_BAN, TYPE_REACTION]),
     sendPrivateEmbed: new Set([TYPE_MESSAGE_RECEIVED, TYPE_PM_RECEIVED, TYPE_MEMBER_JOIN, TYPE_MEMBER_LEAVE, TYPE_MEMBER_BAN, TYPE_REACTION]),
     specificChannel: new Set([TYPE_MESSAGE_RECEIVED, TYPE_MEMBER_JOIN, TYPE_MEMBER_LEAVE, TYPE_MEMBER_BAN, TYPE_REACTION]),
+    channelWhitelist: new Set([TYPE_MESSAGE_RECEIVED, TYPE_REACTION]),
+    serverWhitelist: new Set([TYPE_MESSAGE_RECEIVED, TYPE_PM_RECEIVED, TYPE_MEMBER_JOIN, TYPE_MEMBER_LEAVE, TYPE_MEMBER_BAN, TYPE_REACTION]),
     reaction: new Set([TYPE_MESSAGE_RECEIVED, TYPE_PM_RECEIVED]),
     deleteIf: new Set([TYPE_MESSAGE_RECEIVED]),
     deleteAfter: new Set([TYPE_MESSAGE_RECEIVED]),
@@ -162,7 +164,9 @@
       { type: 'sendPrivateMessage', name: $t('send-private-message') },
       { type: 'sendChannelEmbed', name: $t('send-channel-embed') },
       { type: 'sendPrivateEmbed', name: $t('send-private-embed') },
-      { type: 'specificChannel', name: $t('is-specific-channel') },
+      { type: 'specificChannel', name: $t('send-in-specific-channel') },
+      { type: 'channelWhitelist', name: $t('channel-whitelist') },
+      { type: 'serverWhitelist', name: $t('server-whitelist') },
       { type: 'reaction', name: $t('react-to-message') },
       { type: 'deleteIf', name: $t('delete-if-contains') },
       { type: 'deleteAfter', name: $t('delete-after') },
@@ -217,6 +221,12 @@
         break
       case 'specificChannel':
         editedCommand.isSpecificChannel = value
+        break
+      case 'channelWhitelist':
+        if (!value) editedCommand.channelWhitelist = ''
+        break
+      case 'serverWhitelist':
+        if (!value) editedCommand.serverWhitelist = ''
         break
       case 'reaction':
         editedCommand.isReact = value
@@ -348,6 +358,16 @@
             errors['specificChannel'] = 'channel-id-required'
           }
           break
+        case 'channelWhitelist':
+          if (!editedCommand?.channelWhitelist?.trim()) {
+            errors['channelWhitelist'] = 'channel-ids-required'
+          }
+          break
+        case 'serverWhitelist':
+          if (!editedCommand?.serverWhitelist?.trim()) {
+            errors['serverWhitelist'] = 'server-ids-required'
+          }
+          break
         case 'reaction':
           if (!editedCommand?.reaction?.trim()) {
             errors['reaction'] = 'reaction-required'
@@ -426,7 +446,11 @@
     if (cmd.sendPrivateEmbed)
       activeActions.push({ type: 'sendPrivateEmbed', name: $t('send-private-embed') })
     if (cmd.isSpecificChannel)
-      activeActions.push({ type: 'specificChannel', name: $t('is-specific-channel') })
+      activeActions.push({ type: 'specificChannel', name: $t('send-in-specific-channel') })
+    if (cmd.channelWhitelist?.trim())
+      activeActions.push({ type: 'channelWhitelist', name: $t('channel-whitelist') })
+    if (cmd.serverWhitelist?.trim())
+      activeActions.push({ type: 'serverWhitelist', name: $t('server-whitelist') })
     if (cmd.isReact) activeActions.push({ type: 'reaction', name: $t('react-to-message') })
     if (cmd.deleteIf) activeActions.push({ type: 'deleteIf', name: $t('delete-if-contains') })
     if (cmd.deleteAfter) activeActions.push({ type: 'deleteAfter', name: $t('delete-after') })
@@ -481,6 +505,8 @@
           specificMessage: '',
           startsWith: false,
           requiredRole: '',
+          channelWhitelist: '',
+          serverWhitelist: '',
           type: 0,
           channelEmbed: {
             title: '',
@@ -750,6 +776,12 @@
                       {#if actionErrors['sendMessage']}
                         <p class="text-error text-xs mt-2">{$t(actionErrors['sendMessage'])}</p>
                       {/if}
+                      {#if editedCommand.type === TYPE_MESSAGE_RECEIVED || editedCommand.type === TYPE_REACTION}
+                        <label class="label cursor-pointer justify-start gap-2 mt-2">
+                          <input type="checkbox" class="toggle toggle-sm" bind:checked={editedCommand.channelMessageAsReply} />
+                          <span class="label-text">{$t('as-reply')}</span>
+                        </label>
+                      {/if}
                     {:else if action.type === 'sendChannelEmbed'}
                       <div
                         class={actionErrors['sendChannelEmbed']
@@ -802,6 +834,12 @@
                         <p class="text-error text-xs mt-2">
                           {$t(actionErrors['sendChannelEmbed'])}
                         </p>
+                      {/if}
+                      {#if editedCommand.type === TYPE_MESSAGE_RECEIVED || editedCommand.type === TYPE_REACTION}
+                        <label class="label cursor-pointer justify-start gap-2 mt-2">
+                          <input type="checkbox" class="toggle toggle-sm" bind:checked={editedCommand.channelEmbedAsReply} />
+                          <span class="label-text">{$t('as-reply')}</span>
+                        </label>
                       {/if}
                     {:else if action.type === 'sendPrivateMessage'}
                       <div
@@ -877,6 +915,24 @@
                       </div>
                       {#if actionErrors['specificChannel']}
                         <p class="text-error text-xs mt-2">{$t(actionErrors['specificChannel'])}</p>
+                      {/if}
+                    {:else if action.type === 'channelWhitelist'}
+                      <div
+                        class={actionErrors['channelWhitelist'] ? 'ring-2 ring-error rounded' : ''}
+                      >
+                        <CodeEditor bind:value={editedCommand.channelWhitelist} />
+                      </div>
+                      {#if actionErrors['channelWhitelist']}
+                        <p class="text-error text-xs mt-2">{$t(actionErrors['channelWhitelist'])}</p>
+                      {/if}
+                    {:else if action.type === 'serverWhitelist'}
+                      <div
+                        class={actionErrors['serverWhitelist'] ? 'ring-2 ring-error rounded' : ''}
+                      >
+                        <CodeEditor bind:value={editedCommand.serverWhitelist} />
+                      </div>
+                      {#if actionErrors['serverWhitelist']}
+                        <p class="text-error text-xs mt-2">{$t(actionErrors['serverWhitelist'])}</p>
                       {/if}
                     {:else if action.type === 'reaction'}
                       <div class={actionErrors['reaction'] ? 'ring-2 ring-error rounded' : ''}>

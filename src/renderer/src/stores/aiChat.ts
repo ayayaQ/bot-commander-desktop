@@ -521,7 +521,9 @@ export function generateCommandDiff(before: BCFDCommand, after: BCFDCommand): Co
     privateMessage: 'Private Message',
     type: 'Command Type',
     reaction: 'Reaction',
-    specificChannel: 'Specific Channel',
+    specificChannel: 'Send in Specific Channel',
+    channelWhitelist: 'Channel Whitelist',
+    serverWhitelist: 'Server Whitelist',
     roleToAssign: 'Role to Assign',
     requiredRole: 'Required Role',
     deleteIfStrings: 'Delete If Contains',
@@ -574,6 +576,8 @@ export function generateCommandDiff(before: BCFDCommand, after: BCFDCommand): Co
     'deleteX',
     'deleteIf',
     'isSpecificChannel',
+    'channelWhitelist',
+    'serverWhitelist',
     'sendChannelEmbed',
     'sendPrivateEmbed'
   ]

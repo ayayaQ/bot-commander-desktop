@@ -398,6 +398,8 @@ const COMMAND_RESPONSE_SCHEMA = {
               additionalProperties: false
             },
             specificChannel: { type: 'string' },
+            channelWhitelist: { type: 'string' },
+            serverWhitelist: { type: 'string' },
             reaction: { type: 'string' },
             deleteIfStrings: { type: 'string' },
             deleteAfter: { type: 'boolean' },

@@ -697,11 +697,16 @@ async function channelMessage(
     | PublicThreadChannel<boolean>
     | PrivateThreadChannel
     | VoiceChannel,
-  stringInfoMethod: () => Promise<string>
+  stringInfoMethod: () => Promise<string>,
+  replyTarget?: OmitPartialGroupDMChannel<Message<boolean>>
 ): Promise<boolean> {
   if (command.actionArr[0]) {
-    // reply to message
-    channel.send(await stringInfoMethod())
+    const content = await stringInfoMethod()
+    if (command.channelMessageAsReply && replyTarget) {
+      replyTarget.reply(content)
+    } else {
+      channel.send(content)
+    }
   }
 
   return true
@@ -829,7 +834,8 @@ async function sendChannelEmbed(
     | PublicThreadChannel<boolean>
     | PrivateThreadChannel
     | VoiceChannel,
-  stringInfoMethod: (field: string) => Promise<string>
+  stringInfoMethod: (field: string) => Promise<string>,
+  replyTarget?: OmitPartialGroupDMChannel<Message<boolean>>
 ): Promise<boolean> {
   if (command.sendChannelEmbed) {
     // builds an embed with our embed template
@@ -862,7 +868,11 @@ async function sendChannelEmbed(
     }
 
     // send the embed
-    channel.send({ embeds: [embed] })
+    if (command.channelEmbedAsReply && replyTarget) {
+      replyTarget.reply({ embeds: [embed] })
+    } else {
+      channel.send({ embeds: [embed] })
+    }
   }
 
   return true
@@ -936,12 +946,18 @@ async function onGuildMemberAdd(member: GuildMember) {
   let filteredCommands = commands.bcfdCommands.filter((c) => c.type == 2)
 
   for (const command of filteredCommands) {
+    if (command.serverWhitelist?.trim()) {
+      const ids = command.serverWhitelist.split(',').map((s) => s.trim())
+      if (!ids.includes(member.guild.id)) continue
+    }
+
     if (command.isRoleAssigner) {
       roleAssigner(command, member, async (field) => field)
     }
 
-    // get the first channel of the guild
-    let channel = member.guild.channels.cache.first() as TextChannel | undefined
+    const channel = command.isSpecificChannel
+      ? (member.guild.channels.cache.get(command.specificChannel) as TextChannel | undefined)
+      : (member.guild.channels.cache.first() as TextChannel | undefined)
 
     if (channel) {
       sendChannelEmbed(command, channel, async (field) => field)
@@ -959,8 +975,14 @@ async function onGuildMemberRemove(member: GuildMember | PartialGuildMember) {
   let filteredCommands = commands.bcfdCommands.filter((c) => c.type == 3)
 
   for (const command of filteredCommands) {
-    // get the first channel of the guild
-    let channel = member.guild.channels.cache.first() as TextChannel | undefined
+    if (command.serverWhitelist?.trim()) {
+      const ids = command.serverWhitelist.split(',').map((s) => s.trim())
+      if (!ids.includes(member.guild.id)) continue
+    }
+
+    const channel = command.isSpecificChannel
+      ? (member.guild.channels.cache.get(command.specificChannel) as TextChannel | undefined)
+      : (member.guild.channels.cache.first() as TextChannel | undefined)
 
     if (channel) {
       sendChannelEmbed(command, channel, async (field) => field)
@@ -978,8 +1000,14 @@ async function onGuildBanAdd(ban: GuildBan) {
   let filteredCommands = commands.bcfdCommands.filter((c) => c.type == 4)
 
   for (const command of filteredCommands) {
-    // get the first channel of the guild
-    let channel = ban.guild.channels.cache.first() as TextChannel | undefined
+    if (command.serverWhitelist?.trim()) {
+      const ids = command.serverWhitelist.split(',').map((s) => s.trim())
+      if (!ids.includes(ban.guild.id)) continue
+    }
+
+    const channel = command.isSpecificChannel
+      ? (ban.guild.channels.cache.get(command.specificChannel) as TextChannel | undefined)
+      : (ban.guild.channels.cache.first() as TextChannel | undefined)
 
     if (channel) {
       sendChannelEmbed(command, channel, async (field) => field)
@@ -1045,6 +1073,18 @@ async function onMessageReactionAdd(
   )
 
   for (const command of filteredCommands) {
+    // Check channel whitelist
+    if (command.channelWhitelist?.trim()) {
+      const ids = command.channelWhitelist.split(',').map((s) => s.trim())
+      if (!ids.includes(message.channelId)) continue
+    }
+
+    // Check server whitelist
+    if (command.serverWhitelist?.trim()) {
+      const ids = command.serverWhitelist.split(',').map((s) => s.trim())
+      if (!ids.includes(message.guildId ?? '')) continue
+    }
+
     // Check required role
     if (command.isRequiredRole) {
       if (!member.roles.cache.has(command.requiredRole)) {
@@ -1069,13 +1109,18 @@ async function onMessageReactionAdd(
       }
     }
 
+    // Resolve target channel (specific channel override or event channel)
+    const reactionTargetChannel = command.isSpecificChannel
+      ? (message.guild?.channels.cache.get(command.specificChannel) as TextChannel | undefined) ?? message.channel as TextChannel
+      : message.channel as TextChannel
+
     // Handle channel message
     if (command.actionArr[0]) {
-      channelMessage(command, message.channel as TextChannel, async () => {
+      channelMessage(command, reactionTargetChannel, async () => {
         return await stringInfoAdd(
           contextForReactionEvent(command.channelMessage, reaction, command)
         )
-      })
+      }, message as OmitPartialGroupDMChannel<Message<boolean>>)
     }
 
     // Handle private message
@@ -1089,9 +1134,9 @@ async function onMessageReactionAdd(
 
     // Handle channel embed
     if (command.sendChannelEmbed) {
-      sendChannelEmbed(command, message.channel as TextChannel, async (field) => {
+      sendChannelEmbed(command, reactionTargetChannel, async (field) => {
         return await stringInfoAdd(contextForReactionEvent(field, reaction, command))
-      })
+      }, message as OmitPartialGroupDMChannel<Message<boolean>>)
     }
 
     // Handle private embed
@@ -1135,6 +1180,18 @@ async function onMessageCreate(message: OmitPartialGroupDMChannel<Message<boolea
   )
 
   for (const command of filteredCommands) {
+    // Check channel whitelist
+    if (command.channelWhitelist?.trim()) {
+      const ids = command.channelWhitelist.split(',').map((s) => s.trim())
+      if (!ids.includes(message.channelId)) continue
+    }
+
+    // Check server whitelist
+    if (command.serverWhitelist?.trim()) {
+      const ids = command.serverWhitelist.split(',').map((s) => s.trim())
+      if (!ids.includes(message.guildId ?? '')) continue
+    }
+
     if (!(await requiredRole(command, message))) {
       rendererConsole.warning(`Command "${command.command}" blocked: missing required role`)
       continue
@@ -1183,11 +1240,16 @@ async function onMessageCreate(message: OmitPartialGroupDMChannel<Message<boolea
       continue
     }
 
+    const msgTargetChannel = command.isSpecificChannel
+      ? (message.guild?.channels.cache.get(command.specificChannel) as TextChannel | undefined) ?? message.channel
+      : message.channel
+
     channelMessage(
       command,
-      message.channel,
+      msgTargetChannel,
       async () =>
-        await stringInfoAdd(contextForMessageEvent(command.channelMessage, command, message))
+        await stringInfoAdd(contextForMessageEvent(command.channelMessage, command, message)),
+      message
     )
 
     privateMessage(
@@ -1219,8 +1281,9 @@ async function onMessageCreate(message: OmitPartialGroupDMChannel<Message<boolea
 
     sendChannelEmbed(
       command,
-      message.channel,
-      async (field) => await stringInfoAdd(contextForMessageEvent(field, command, message))
+      msgTargetChannel,
+      async (field) => await stringInfoAdd(contextForMessageEvent(field, command, message)),
+      message
     )
 
     sendPrivateEmbed(

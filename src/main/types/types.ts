@@ -36,6 +36,10 @@ export type BCFDCommand = {
   cooldown?: number        // Cooldown duration in seconds
   cooldownType?: string    // "User", "Server", or "Global"
   cooldownMessage?: string // Custom BCFD template message when on cooldown
+  channelMessageAsReply?: boolean  // Send channel message as a reply to the triggering message
+  channelEmbedAsReply?: boolean    // Send channel embed as a reply to the triggering message
+  channelWhitelist?: string  // Comma-separated channel IDs; command only runs in these channels
+  serverWhitelist?: string   // Comma-separated guild IDs; command only runs in these servers
 }
 
 export type BCFDEmbedMessageTemplate = {
@@ -163,4 +167,10 @@ export interface WebhookPreset {
   embedFooter?: string
   embedImageUrl?: string
   embedThumbnailUrl?: string
+}
+
+export interface OnboardingState {
+  stepperDismissed: boolean
+  botHostedOnce: boolean
+  dismissedTips: string[]
 }
