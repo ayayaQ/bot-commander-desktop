@@ -143,8 +143,8 @@
 <TipCard
   tipId="tip_webhooks"
   icon="webhook"
-  title="Webhooks"
-  body="Send messages to Discord channels without hosting a bot. Paste a webhook URL from your Discord server settings."
+  title={$t('webhooks')}
+  body={$t('tip-webhooks-body')}
 />
 <HeaderBar>
   <h2 class="text-2xl font-bold">{$t('send-webhook')}</h2>
@@ -160,7 +160,13 @@
   <!-- Main Content Area -->
   <div class="flex-1 p-4 overflow-y-auto">
     <div class="p-4 bg-base-200 rounded-lg shadow-lg max-w-2xl mx-auto">
-      <form onsubmit={(e) => { e.preventDefault(); send() }} class="space-y-4">
+      <form
+        onsubmit={(e) => {
+          e.preventDefault()
+          send()
+        }}
+        class="space-y-4"
+      >
         <div class="form-control">
           <label for="webhookUrl" class="label">
             <span class="label-text">{$t('webhook-url')}</span>
@@ -281,12 +287,7 @@
             <label for="embedColor" class="label">
               <span class="label-text">Embed Color</span>
             </label>
-            <input
-              type="color"
-              id="embedColor"
-              bind:value={embedColor}
-              class="input w-full h-12"
-            />
+            <input type="color" id="embedColor" bind:value={embedColor} class="input w-full h-12" />
           </div>
 
           <div class="form-control">
@@ -364,7 +365,10 @@
                   <p class="text-xs text-base-content/60 truncate">{preset.webhookUrl}</p>
                 </div>
                 <button
-                  onclick={(e) => { e.stopPropagation(); openDeleteConfirmDialog(preset) }}
+                  onclick={(e) => {
+                    e.stopPropagation()
+                    openDeleteConfirmDialog(preset)
+                  }}
                   class="btn btn-xs btn-ghost btn-square text-error"
                   title="Delete preset"
                 >
@@ -384,7 +388,10 @@
   <h3 class="font-bold text-lg mb-4">Save Webhook Preset</h3>
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <form
-    onsubmit={(e) => { e.preventDefault(); savePreset() }}
+    onsubmit={(e) => {
+      e.preventDefault()
+      savePreset()
+    }}
     class="space-y-4"
     onkeydown={(e) => e.key === 'Escape' && savePresetDialog.close()}
   >

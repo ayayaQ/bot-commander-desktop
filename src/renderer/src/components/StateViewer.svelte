@@ -62,7 +62,7 @@
   let jsonEditorError: string | null = $state(null)
 
   function updateBotState() {
-    ;window.electron.ipcRenderer.invoke('getBotState').then((state) => {
+    window.electron.ipcRenderer.invoke('getBotState').then((state) => {
       botState = state
     })
   }
@@ -77,7 +77,7 @@
       try {
         const parsedValue = JSON.parse(editValue)
         if (parsedValue) {
-          ;window.electron.ipcRenderer
+          window.electron.ipcRenderer
             .invoke('updateBotState', editingKey, parsedValue)
             .then((success) => {
               if (success) {
@@ -108,7 +108,7 @@
   }
 
   function runCode() {
-    ;window.electron.ipcRenderer
+    window.electron.ipcRenderer
       .invoke('runCodeInContext', codeToRun)
       .then((result) => {
         codeOutput = result
@@ -127,7 +127,7 @@
     if (deleteConfirmKey === null) return
     const key = deleteConfirmKey
     deleteConfirmKey = null
-    ;window.electron.ipcRenderer
+    window.electron.ipcRenderer
       .invoke('runCodeInContext', `delete botState["${key.replace(/"/g, '\\"')}"];`)
       .then(() => {
         updateBotState()
@@ -158,7 +158,7 @@
     if (jsonEditorKey === null) return
     try {
       const parsedValue = JSON.parse(jsonEditorValue)
-      ;window.electron.ipcRenderer
+      window.electron.ipcRenderer
         .invoke('updateBotState', jsonEditorKey, parsedValue)
         .then((success: boolean) => {
           if (success) {
@@ -207,7 +207,7 @@
             const parsedState = JSON.parse(jsonString)
             if (parsedState) {
               let runningCode = `botState = ${jsonString};`
-              ;window.electron.ipcRenderer
+              window.electron.ipcRenderer
                 .invoke('runCodeInContext', runningCode)
                 .then((_result) => {
                   updateBotState()
@@ -242,8 +242,8 @@
 <TipCard
   tipId="tip_debugger"
   icon="bug_report"
-  title="Debugger"
-  body="Bot State shows persistent variables from your commands. Console lets you test JavaScript snippets against the bot context."
+  title={$t('debugger')}
+  body={$t('tip-debugger-body')}
 />
 <HeaderBar>
   <h2 class="text-2xl font-bold">{$t('bot-state')}</h2>
@@ -407,7 +407,8 @@
     <div class="modal-box">
       <h3 class="font-bold text-lg">{$t('confirm-delete')}</h3>
       <p class="py-4">
-        {$t('confirm-delete-variable')} <code class="font-mono bg-base-300 px-1 rounded">{deleteConfirmKey}</code>?
+        {$t('confirm-delete-variable')}
+        <code class="font-mono bg-base-300 px-1 rounded">{deleteConfirmKey}</code>?
       </p>
       <div class="modal-action">
         <button class="btn" onclick={cancelDelete}>{$t('cancel')}</button>
@@ -415,7 +416,11 @@
       </div>
     </div>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal-backdrop" onclick={cancelDelete} onkeydown={(e) => e.key === 'Escape' && cancelDelete()}></div>
+    <div
+      class="modal-backdrop"
+      onclick={cancelDelete}
+      onkeydown={(e) => e.key === 'Escape' && cancelDelete()}
+    ></div>
   </div>
 {/if}
 
@@ -423,7 +428,8 @@
   <div class="modal modal-open">
     <div class="modal-box max-w-2xl">
       <h3 class="font-bold text-lg mb-4">
-        {$t('edit-json-value')}: <code class="font-mono bg-base-300 px-2 py-1 rounded">{jsonEditorKey}</code>
+        {$t('edit-json-value')}:
+        <code class="font-mono bg-base-300 px-2 py-1 rounded">{jsonEditorKey}</code>
       </h3>
       <div class="mb-4">
         <CodeEditor
@@ -446,6 +452,10 @@
       </div>
     </div>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal-backdrop" onclick={closeJsonEditor} onkeydown={(e) => e.key === 'Escape' && closeJsonEditor()}></div>
+    <div
+      class="modal-backdrop"
+      onclick={closeJsonEditor}
+      onkeydown={(e) => e.key === 'Escape' && closeJsonEditor()}
+    ></div>
   </div>
 {/if}

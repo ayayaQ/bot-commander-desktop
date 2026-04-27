@@ -105,18 +105,20 @@
     }
   }
 
-  let filteredInteractions = $derived(interactions.filter(
-    (i) =>
-      i.commandName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      i.commandDescription.toLowerCase().includes(searchQuery.toLowerCase())
-  ))
+  let filteredInteractions = $derived(
+    interactions.filter(
+      (i) =>
+        i.commandName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        i.commandDescription.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+  )
 </script>
 
 <TipCard
   tipId="tip_interactions"
   icon="smart_button"
-  title="Interactions"
-  body="Interactions are Discord slash commands. Create one, then tap Sync to register it with Discord."
+  title={$t('interactions')}
+  body={$t('tip-interactions-body')}
 />
 <div class="">
   {#if isEditing}
@@ -173,7 +175,9 @@
     </HeaderBar>
     <div class="p-4">
       {#if filteredInteractions.length === 0}
-        <div class="flex flex-col items-center justify-center py-16 text-base-content/40 select-none">
+        <div
+          class="flex flex-col items-center justify-center py-16 text-base-content/40 select-none"
+        >
           {#if interactions.length === 0}
             <p class="text-5xl mb-3">{emptyKaomoji}</p>
             <p class="text-sm font-medium">{$t('no-interactions')}</p>

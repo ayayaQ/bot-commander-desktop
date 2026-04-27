@@ -25,9 +25,9 @@ import {
   OAuth2Scopes,
   PermissionsBitField
 } from 'discord.js'
-import OpenAI from 'openai'
 import { getSettings } from '../settingsService'
 import { getCommands } from '../botService'
+import { createAiChatCompletion, moderateTextWithOpenAI } from '../aiProviderService'
 
 // ============================================================================
 // Channel Management Helpers
@@ -923,27 +923,24 @@ async function fetchChatResponse(prompt: string): Promise<string> {
     }
   }
 
-  if (!settings.openaiApiKey) {
-    return 'Error: OpenAI API key not set in settings'
-  }
-
   try {
-    const openai = new OpenAI({
-      apiKey: settings.openaiApiKey
-    })
-
-    const completion = await openai.chat.completions.create({
-      messages: [
+    const completion = await createAiChatCompletion(
+      settings,
+      [
         { role: 'system', content: basePrompt },
         { role: 'system', content: settings.developerPrompt },
         { role: 'user', content: prompt }
       ],
-      model: settings.openaiModel
-    })
+      undefined,
+      { reasoningEffort: settings.aiReasoningEffort || 'none' }
+    )
 
-    return completion.choices[0].message.content ?? 'Failed to fetch chat response'
-  } catch {
-    return 'OpenAI API Unavailable'
+    const flagged = await moderateTextWithOpenAI(settings, completion.content)
+    if (flagged) return 'Sorry, I am unable to help you with that.'
+
+    return completion.content || 'Failed to fetch chat response'
+  } catch (error) {
+    return error instanceof Error ? error.message : 'AI API Unavailable'
   }
 }
 

@@ -2,19 +2,26 @@
   import { createEventDispatcher, onDestroy, onMount, tick } from 'svelte'
   import { marked } from 'marked'
   import { t } from '../stores/localisation'
-  import { settingsStore } from '../stores/settings'
+  import {
+    getSelectedModelForProvider,
+    saveSettings,
+    settingsStore,
+    withSelectedModelForProvider
+  } from '../stores/settings'
   import DiffViewer from './DiffViewer.svelte'
+  import ModelPicker from './ModelPicker.svelte'
   import type { BCFDCommand, ChatContext } from '../types/types'
   import {
     chatMessages,
     isAiLoading,
     selectedModel,
+    selectedReasoningEffort,
     totalTokens,
     addMessage,
     updateMessage,
     estimateTokens,
     generateCommandDiff,
-    AI_MODELS,
+    applyCommandPatch,
     type CommandDiff,
     // Persistence and context
     activeChatId,
@@ -38,12 +45,12 @@
   import { consoleStore } from '../stores/console'
 
   interface Props {
-    command: BCFDCommand;
-    onCommandUpdate: (updated: BCFDCommand) => void;
-    allCommands?: BCFDCommand[];
+    command: BCFDCommand
+    onCommandUpdate: (updated: BCFDCommand) => void
+    allCommands?: BCFDCommand[]
   }
 
-  let { command, onCommandUpdate, allCommands = [] }: Props = $props();
+  let { command, onCommandUpdate, allCommands = [] }: Props = $props()
 
   const dispatch = createEventDispatcher<{
     close: void
@@ -53,6 +60,15 @@
   let messagesContainer: HTMLDivElement = $state()
   let inputElement: HTMLTextAreaElement = $state()
   let cleanupStreamListeners: (() => void) | null = null
+  let aiModels: Array<{ id: string; name: string; supportsStructuredOutputs?: boolean }> = $state(
+    []
+  )
+  let isLoadingModels = $state(false)
+  let modelFetchError = $state('')
+  let activeRequestId: string | null = null
+  let lastProvider: 'openai' | 'openrouter' | null = null
+  let lastProviderModel: string | null = null
+  let componentDestroyed = false
 
   // Available context options
   let availableContexts = $derived([
@@ -93,28 +109,35 @@
 
     // Set loading state
     isAiLoading.set(true)
+    activeRequestId = `ai_${Date.now()}_${Math.random().toString(36).slice(2)}`
 
     // Reset thinking state for thinking models
-    if (isThinkingModel($selectedModel)) {
+    if (isThinkingModel($selectedModel) && $selectedReasoningEffort !== 'none') {
       thinkingContent.set('')
       thinkingExpanded.set(true) // Expand while thinking
     }
+
+    let isStreamingResponse = false
 
     try {
       // Build additional context from selected contexts
       const additionalContext = await buildContextString()
 
       // Build conversation history
-      const conversationHistory = $chatMessages.map((msg) => ({
-        role: msg.role,
-        content: msg.content
-      }))
+      const conversationHistory = $chatMessages
+        .filter((msg) => msg.role !== 'system')
+        .map((msg) => ({
+          role: msg.role,
+          content: msg.content
+        }))
 
       // Call AI API with context
       const response = await window.electron.ipcRenderer.invoke('ai-command-chat', {
         messages: conversationHistory,
         currentCommand: $state.snapshot(command),
         model: $selectedModel,
+        reasoningEffort: $selectedReasoningEffort,
+        requestId: activeRequestId,
         additionalContext: additionalContext
       })
 
@@ -122,6 +145,7 @@
       if (response.streaming) {
         // Response will come via IPC events (ai-chat:thinking, ai-chat:done)
         // The stream listeners will handle adding the message and updating state
+        isStreamingResponse = true
         return
       }
 
@@ -132,16 +156,18 @@
         let pendingChanges: CommandDiff | null = null
 
         // Check if AI is proposing changes
-        if (response.hasChanges && response.updatedCommand) {
-          // Merge with existing command to preserve fields not in the update
-          const mergedCommand: BCFDCommand = {
-            ...command,
-            ...response.updatedCommand
+        if (response.hasChanges && response.changes?.length) {
+          const result = applyCommandPatch(command, response.changes)
+          pendingChanges = result.diff
+          if (result.warnings.length) {
+            response.explanation += `\n\nSome proposed edits were ignored: ${result.warnings.join('; ')}`
           }
-          pendingChanges = generateCommandDiff(command, mergedCommand)
+        } else if (response.hasChanges && response.updatedCommand) {
+          pendingChanges = generateCommandDiff(command, response.updatedCommand)
         }
 
         addMessage('assistant', response.explanation, pendingChanges)
+        activeRequestId = null
 
         // Update token count
         totalTokens.update((t) => t + (response.tokenCount || estimateTokens(response.explanation)))
@@ -155,8 +181,9 @@
     } finally {
       // Only set loading to false for non-streaming responses
       // Streaming responses will set this in the done handler
-      if (!isThinkingModel($selectedModel)) {
+      if (!isStreamingResponse) {
         isAiLoading.set(false)
+        activeRequestId = null
       }
       await tick()
       scrollToBottom()
@@ -221,10 +248,63 @@
     return $selectedContexts.some((c) => c.type === ctx.type && c.id === ctx.id)
   }
 
+  function handleModelChange(model: string) {
+    if (!model) return
+    const provider = $settingsStore.aiProvider || 'openai'
+    lastProviderModel = model
+    selectedModel.set(model)
+    saveSettings(withSelectedModelForProvider($settingsStore, provider, model))
+  }
+
+  function handleReasoningChange(event: Event) {
+    selectedReasoningEffort.set((event.target as HTMLSelectElement).value as any)
+  }
+
+  async function refreshAiModels() {
+    if (($settingsStore.aiProvider || 'openai') === 'openai' && !$settingsStore.openaiApiKey) {
+      aiModels = []
+      modelFetchError = 'Add an OpenAI API key in Settings to fetch OpenAI models.'
+      return
+    }
+    isLoadingModels = true
+    modelFetchError = ''
+    try {
+      aiModels = await window.electron.ipcRenderer.invoke('fetch-ai-models')
+    } catch (error) {
+      modelFetchError = error instanceof Error ? error.message : 'Failed to fetch models'
+    } finally {
+      isLoadingModels = false
+    }
+  }
+
+  $effect(() => {
+    const provider = $settingsStore.aiProvider || 'openai'
+    const providerModel = getSelectedModelForProvider($settingsStore, provider)
+
+    if (providerModel !== lastProviderModel) {
+      lastProviderModel = providerModel
+      selectedModel.set(providerModel)
+    }
+
+    if (provider !== lastProvider) {
+      lastProvider = provider
+      refreshAiModels()
+    }
+  })
+
   onMount(async () => {
+    componentDestroyed = false
+    const provider = $settingsStore.aiProvider || 'openai'
+    lastProvider = provider
+    lastProviderModel = getSelectedModelForProvider($settingsStore, provider)
+    selectedModel.set(lastProviderModel)
+    refreshAiModels()
+
     // Initialize chats from storage
     await initializeChats()
+    if (componentDestroyed) return
     await fetchRecentChats()
+    if (componentDestroyed) return
 
     // Load or create the single chat for this command
     const commandLabel = command.commandDescription || command.command || 'New Command'
@@ -235,15 +315,20 @@
       content: JSON.stringify(command, null, 2)
     }
     await loadOrCreateChatForCommand(command.id, commandLabel, commandContext)
+    if (componentDestroyed) return
 
     // Add initial system message if chat is empty
     if ($chatMessages.length === 0) {
       addMessage('system', `${$t('ai-chat-started')} "${commandLabel}"`)
     }
+    if (componentDestroyed) return
 
     // Initialize stream listeners for thinking models
     cleanupStreamListeners = initAiChatStreamListeners(
       async (response: StreamingDoneResponse, pendingChanges: CommandDiff | null) => {
+        if (response.warnings?.length) {
+          response.explanation += `\n\nSome proposed edits were ignored: ${response.warnings.join('; ')}`
+        }
         // Add the assistant message with thinking content
         addMessage('assistant', response.explanation, pendingChanges, response.thinkingContent)
 
@@ -252,22 +337,29 @@
 
         // Finish loading
         isAiLoading.set(false)
+        activeRequestId = null
 
         await tick()
         scrollToBottom()
       },
-      () => $state.snapshot(command) // Provide current command for diff generation (snapshot to avoid proxy issues)
+      () => $state.snapshot(command), // Provide current command for diff generation (snapshot to avoid proxy issues)
+      () => activeRequestId
     )
 
     await tick()
+    if (componentDestroyed) return
     scrollToBottom()
     inputElement?.focus()
   })
 
   onDestroy(() => {
+    componentDestroyed = true
+    activeRequestId = null
+
     // Clean up stream listeners
     if (cleanupStreamListeners) {
       cleanupStreamListeners()
+      cleanupStreamListeners = null
     }
 
     // Clear the local state when component is destroyed
@@ -278,9 +370,20 @@
     // Clear thinking state
     thinkingContent.set('')
     isThinking.set(false)
+    thinkingExpanded.set(false)
+    isAiLoading.set(false)
   })
 
-  let hasApiKey = $derived($settingsStore.openaiApiKey && $settingsStore.openaiApiKey.length > 0)
+  let hasApiKey = $derived(
+    $settingsStore.aiProvider === 'openrouter'
+      ? !!$settingsStore.openrouterApiKey && !!$settingsStore.openaiApiKey
+      : !!$settingsStore.openaiApiKey
+  )
+  let apiKeyWarning = $derived(
+    $settingsStore.aiProvider === 'openrouter'
+      ? 'Add your OpenRouter API key and OpenAI moderation key in Settings to use the AI assistant.'
+      : $t('openai-key-required')
+  )
 
   // Render markdown to HTML
   function renderMarkdown(content: string): string {
@@ -297,27 +400,7 @@
       <span class="material-symbols-outlined text-primary">smart_toy</span>
       <span class="font-bold">{$t('ai-assistant')}</span>
     </div>
-    <div class="flex items-center gap-2">
-      <!-- Context Picker -->
-      <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('select-context')}>
-        <button
-          class="btn btn-ghost btn-sm btn-circle"
-          class:btn-active={$contextPickerOpen}
-          onclick={() => contextPickerOpen.update((v) => !v)}
-        >
-          <span class="material-symbols-outlined">attach_file</span>
-        </button>
-      </span>
-
-      <!-- Model Picker -->
-      <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('select-model')}>
-        <select bind:value={$selectedModel} class="select select-sm w-32">
-          {#each AI_MODELS as model}
-            <option value={model.id}>{model.name}</option>
-          {/each}
-        </select>
-      </span>
-
+    <div class="flex items-center gap-1">
       <!-- Token Counter -->
       <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('total-tokens')}>
         <div class="badge badge-ghost text-xs">
@@ -342,71 +425,11 @@
     </div>
   </div>
 
-  <!-- Context Pills -->
-  {#if $selectedContexts.length > 0}
-    <div class="flex flex-wrap gap-1 p-2 border-b border-base-300 bg-base-200/50">
-      {#each $selectedContexts as ctx}
-        <div
-          class="badge gap-1 p-3"
-          class:badge-primary={!isCurrentCommandContext(ctx)}
-          class:badge-secondary={isCurrentCommandContext(ctx)}
-        >
-          {#if isCurrentCommandContext(ctx)}
-            <span class="material-symbols-outlined text-xs">lock</span>
-          {/if}
-          <span class="text-xs truncate max-w-24">{ctx.label}</span>
-          {#if !isCurrentCommandContext(ctx)}
-            <button class="hover:text-error" onclick={() => removeContext(ctx)}>
-              <span class="material-symbols-outlined text-xs">close</span>
-            </button>
-          {/if}
-        </div>
-      {/each}
-    </div>
-  {/if}
-
-  <!-- Context Picker Panel -->
-  {#if $contextPickerOpen}
-    <div class="border-b border-base-300 bg-base-200 p-3 max-h-48 overflow-y-auto">
-      <div class="text-xs font-semibold mb-2 text-base-content/70">Select Context</div>
-      <div class="space-y-1">
-        {#each availableContexts as ctx}
-          <label
-            class="flex items-center gap-2 p-1 rounded"
-            class:cursor-pointer={!isCurrentCommandContext(ctx)}
-            class:hover:bg-base-300={!isCurrentCommandContext(ctx)}
-            class:opacity-60={isCurrentCommandContext(ctx)}
-          >
-            <input
-              type="checkbox"
-              class="checkbox checkbox-xs checkbox-primary"
-              checked={isContextSelected(ctx)}
-              disabled={isCurrentCommandContext(ctx)}
-              onchange={() => toggleContext(ctx)}
-            />
-            <span class="text-sm truncate">{ctx.label}</span>
-            {#if isCurrentCommandContext(ctx)}
-              <span class="badge badge-xs badge-secondary">Locked</span>
-            {:else if ctx.type === 'startup-js'}
-              <span class="badge badge-xs badge-ghost">JS</span>
-            {:else if ctx.type === 'bot-state'}
-              <span class="badge badge-xs badge-ghost">State</span>
-            {:else if ctx.type === 'all-commands'}
-              <span class="badge badge-xs badge-ghost">All</span>
-            {:else if ctx.type === 'command'}
-              <span class="badge badge-xs badge-ghost">Cmd</span>
-            {/if}
-          </label>
-        {/each}
-      </div>
-    </div>
-  {/if}
-
   <!-- API Key Warning -->
   {#if !hasApiKey}
     <div class="alert alert-warning m-3 text-sm">
       <span class="material-symbols-outlined">warning</span>
-      <span>{$t('openai-key-required')}</span>
+      <span>{apiKeyWarning}</span>
     </div>
   {/if}
 
@@ -416,7 +439,11 @@
       <div class="chat {message.role === 'user' ? 'chat-end' : 'chat-start'}">
         {#if message.role !== 'system'}
           <div class="chat-image avatar placeholder">
-            <div class="w-8 rounded-full flex items-center justify-center {message.role === 'user' ? 'bg-primary' : 'bg-secondary'}">
+            <div
+              class="w-8 rounded-full flex items-center justify-center {message.role === 'user'
+                ? 'bg-primary'
+                : 'bg-secondary'}"
+            >
               <span class="material-symbols-outlined text-sm text-base-100">
                 {message.role === 'user' ? 'person' : 'smart_toy'}
               </span>
@@ -505,27 +532,140 @@
 
   <!-- Input -->
   <div class="chat-input p-3 border-t border-base-300 bg-base-200">
-    <div class="flex gap-2">
+    {#if $contextPickerOpen}
+      <div
+        class="context-picker-panel mb-2 border border-base-300 bg-base-100 p-3 max-h-48 overflow-y-auto"
+      >
+        <div class="text-xs font-semibold mb-2 text-base-content/70">Select Context</div>
+        <div class="space-y-1">
+          {#each availableContexts as ctx}
+            <label
+              class="flex items-center gap-2 p-1 rounded"
+              class:cursor-pointer={!isCurrentCommandContext(ctx)}
+              class:hover:bg-base-200={!isCurrentCommandContext(ctx)}
+              class:opacity-60={isCurrentCommandContext(ctx)}
+            >
+              <input
+                type="checkbox"
+                class="checkbox checkbox-xs checkbox-primary"
+                checked={isContextSelected(ctx)}
+                disabled={isCurrentCommandContext(ctx)}
+                onchange={() => toggleContext(ctx)}
+              />
+              <span class="text-sm truncate">{ctx.label}</span>
+              {#if isCurrentCommandContext(ctx)}
+                <span class="badge badge-xs badge-secondary">Locked</span>
+              {:else if ctx.type === 'startup-js'}
+                <span class="badge badge-xs badge-ghost">JS</span>
+              {:else if ctx.type === 'bot-state'}
+                <span class="badge badge-xs badge-ghost">State</span>
+              {:else if ctx.type === 'all-commands'}
+                <span class="badge badge-xs badge-ghost">All</span>
+              {:else if ctx.type === 'command'}
+                <span class="badge badge-xs badge-ghost">Cmd</span>
+              {/if}
+            </label>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
+    <div class="composer border border-base-300 bg-base-100 p-2">
+      {#if $selectedContexts.length > 0}
+        <div class="flex flex-wrap gap-1 mb-2">
+          {#each $selectedContexts as ctx}
+            <div
+              class="badge gap-1 p-3"
+              class:badge-primary={!isCurrentCommandContext(ctx)}
+              class:badge-secondary={isCurrentCommandContext(ctx)}
+            >
+              {#if isCurrentCommandContext(ctx)}
+                <span class="material-symbols-outlined text-xs">lock</span>
+              {/if}
+              <span class="text-xs truncate max-w-32">{ctx.label}</span>
+              {#if !isCurrentCommandContext(ctx)}
+                <button class="hover:text-error" onclick={() => removeContext(ctx)}>
+                  <span class="material-symbols-outlined text-xs">close</span>
+                </button>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      {/if}
+
       <textarea
         bind:this={inputElement}
         bind:value={inputMessage}
         onkeydown={handleKeydown}
         placeholder={hasApiKey ? $t('describe-changes') : $t('api-key-needed')}
-        class="textarea flex-1 resize-none min-h-10 max-h-32"
+        class="textarea textarea-ghost w-full resize-none min-h-10 max-h-32 p-2 focus:outline-none"
         rows="1"
         disabled={!hasApiKey || $isAiLoading}
       ></textarea>
-      <button
-        class="btn btn-primary"
-        onclick={sendMessage}
-        disabled={!inputMessage.trim() || !hasApiKey || $isAiLoading}
-      >
-        {#if $isAiLoading}
-          <span class="loading loading-spinner loading-sm"></span>
-        {:else}
-          <span class="material-symbols-outlined">send</span>
-        {/if}
-      </button>
+
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-2">
+        <div class="flex flex-wrap items-center gap-2 min-w-0">
+          <!-- Context Picker -->
+          <span class="tooltip tooltip-primary tooltip-top" data-tip={$t('select-context')}>
+            <button
+              class="btn btn-ghost btn-sm btn-circle"
+              class:btn-active={$contextPickerOpen}
+              onclick={() => contextPickerOpen.update((v) => !v)}
+            >
+              <span class="material-symbols-outlined">attach_file</span>
+            </button>
+          </span>
+
+          <!-- Model Picker -->
+          <span class="tooltip tooltip-primary tooltip-top" data-tip={$t('select-model')}>
+            <div class="w-44 max-w-[45vw]">
+              <ModelPicker
+                value={$selectedModel}
+                models={aiModels}
+                provider={$settingsStore.aiProvider || 'openai'}
+                title="Select assistant model"
+                placeholder={$settingsStore.aiProvider === 'openrouter'
+                  ? 'openai/gpt-5.2'
+                  : 'gpt-4.1-nano'}
+                disabled={isLoadingModels}
+                error={modelFetchError}
+                isLoading={isLoadingModels}
+                onRefresh={refreshAiModels}
+                buttonClass="btn btn-sm btn-ghost justify-between w-full"
+                onChange={handleModelChange}
+              />
+            </div>
+          </span>
+
+          <!-- Reasoning Picker -->
+          <span class="tooltip tooltip-primary tooltip-top" data-tip="Reasoning effort">
+            <select
+              value={$selectedReasoningEffort}
+              onchange={handleReasoningChange}
+              class="select select-ghost select-sm w-32"
+            >
+              <option value="none">No reasoning</option>
+              <option value="minimal">Minimal</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="xhigh">XHigh</option>
+            </select>
+          </span>
+        </div>
+
+        <button
+          class="btn btn-primary btn-sm btn-circle"
+          onclick={sendMessage}
+          disabled={!inputMessage.trim() || !hasApiKey || $isAiLoading}
+        >
+          {#if $isAiLoading}
+            <span class="loading loading-spinner loading-sm"></span>
+          {:else}
+            <span class="material-symbols-outlined">send</span>
+          {/if}
+        </button>
+      </div>
     </div>
 
     <!-- Quick Actions -->

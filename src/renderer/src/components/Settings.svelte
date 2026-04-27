@@ -1,20 +1,34 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { saveSettings, settingsStore } from '../stores/settings'
+  import {
+    getSelectedModelForProvider,
+    saveSettings,
+    settingsStore,
+    withSelectedModelForProvider
+  } from '../stores/settings'
   import { currentLanguage, t } from '../stores/localisation'
   import HeaderBar from './HeaderBar.svelte'
   import ApiAuth from './ApiAuth.svelte'
+  import ModelPicker from './ModelPicker.svelte'
 
   let selectedTheme: string = $state()
   let showToken: boolean = $state()
   let selectedLanguage: string = $state()
+  let aiProvider: 'openai' | 'openrouter' = $state('openai')
   let openaiApiKey: string = $state()
-  let openaiModel: 'gpt-4.1' | 'gpt-4.1-mini' | 'gpt-4.1-nano' = $state()
+  let openrouterApiKey: string = $state('')
+  let selectedAiModel: string = $state('gpt-4.1-nano')
+  let aiReasoningEffort: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' = $state('none')
   let developerPrompt: string = $state()
   let useCustomApi: boolean = $state()
   let useLegacyInterpreter: boolean = $state()
   let hideOutput: boolean = $state()
   let disableReasoningApi: boolean = $state()
+  let aiModels: Array<{ id: string; name: string; supportsStructuredOutputs?: boolean }> = $state(
+    []
+  )
+  let isLoadingModels = $state(false)
+  let modelFetchError = $state('')
 
   function changeTheme(event) {
     let theme = event.target.value
@@ -43,9 +57,45 @@
     saveSettings({ ...$settingsStore, openaiApiKey })
   }
 
-  function updateOpenAIModel(event) {
-    openaiModel = event.target.value
-    saveSettings({ ...$settingsStore, openaiModel })
+  function updateOpenRouterKey(event) {
+    openrouterApiKey = event.target.value
+    saveSettings({ ...$settingsStore, openrouterApiKey })
+  }
+
+  async function updateAiProvider(event) {
+    aiProvider = event.target.value
+    selectedAiModel = getSelectedModelForProvider($settingsStore, aiProvider)
+    await saveSettings({ ...$settingsStore, aiProvider, selectedAiModel })
+    await refreshAiModels()
+  }
+
+  function updateModelValue(model: string) {
+    if (!model) return
+    selectedAiModel = model
+    saveSettings(withSelectedModelForProvider($settingsStore, aiProvider, selectedAiModel))
+  }
+
+  function updateReasoningEffort(event) {
+    aiReasoningEffort = event.target.value
+    saveSettings({ ...$settingsStore, aiReasoningEffort })
+  }
+
+  async function refreshAiModels() {
+    if (aiProvider === 'openai' && !openaiApiKey) {
+      aiModels = []
+      modelFetchError =
+        'Add an OpenAI API key to fetch OpenAI models. You can still enter a custom model ID.'
+      return
+    }
+    isLoadingModels = true
+    modelFetchError = ''
+    try {
+      aiModels = await window.electron.ipcRenderer.invoke('fetch-ai-models')
+    } catch (error) {
+      modelFetchError = error instanceof Error ? error.message : 'Failed to fetch models'
+    } finally {
+      isLoadingModels = false
+    }
   }
 
   function updateDeveloperPrompt(event) {
@@ -68,20 +118,24 @@
   function openExternalLink(event) {
     event.preventDefault()
     const url = event.target.href
-    ;window.electron.ipcRenderer.invoke('open-external-url', url)
+    window.electron.ipcRenderer.invoke('open-external-url', url)
   }
 
   onMount(() => {
     selectedTheme = $settingsStore.theme
     showToken = $settingsStore.showToken
     selectedLanguage = $settingsStore.language
+    aiProvider = $settingsStore.aiProvider || 'openai'
     openaiApiKey = $settingsStore.openaiApiKey
-    openaiModel = $settingsStore.openaiModel
+    openrouterApiKey = $settingsStore.openrouterApiKey || ''
+    selectedAiModel = getSelectedModelForProvider($settingsStore, aiProvider)
+    aiReasoningEffort = $settingsStore.aiReasoningEffort || 'none'
     developerPrompt = $settingsStore.developerPrompt
     useCustomApi = $settingsStore.useCustomApi
     useLegacyInterpreter = $settingsStore.useLegacyInterpreter
     hideOutput = $settingsStore.hideOutput
     disableReasoningApi = $settingsStore.disableReasoningApi
+    refreshAiModels()
   })
 </script>
 
@@ -149,12 +203,7 @@
         <span class="label-text">{$t('hide-output')}</span>
         <span class="label-text text-xs opacity-60">{$t('hide-output-description')}</span>
       </div>
-      <input
-        type="checkbox"
-        class="toggle"
-        bind:checked={hideOutput}
-        onchange={toggleHideOutput}
-      />
+      <input type="checkbox" class="toggle" bind:checked={hideOutput} onchange={toggleHideOutput} />
     </label>
   </div>
 
@@ -178,37 +227,82 @@
   </div>
 
   <div class="divider"></div>
-  <h2 class="text-2xl font-bold mb-4">{$t('openai')}</h2>
+  <h2 class="text-2xl font-bold mb-4">AI Provider</h2>
+
+  <div class="form-control">
+    <!-- svelte-ignore a11y_label_has_associated_control -->
+    <label class="label">
+      <span class="label-text">Provider</span>
+    </label>
+    <select class="select" value={aiProvider} onchange={updateAiProvider}>
+      <option value="openai">OpenAI</option>
+      <option value="openrouter">OpenRouter</option>
+    </select>
+  </div>
 
   <div class="form-control">
     <!-- svelte-ignore a11y_label_has_associated_control -->
     <label class="label">
       <span class="label-text">{$t('openai-api-key')}</span>
+      {#if aiProvider === 'openrouter'}
+        <span class="label-text-alt">Required for moderation</span>
+      {/if}
     </label>
     <input
       type={showToken ? 'text' : 'password'}
       class="input w-full"
       value={openaiApiKey}
       oninput={updateOpenAIKey}
-      disabled={$settingsStore.useCustomApi}
       placeholder={$t('enter-your-openai-api-key')}
+    />
+  </div>
+
+  {#if aiProvider === 'openrouter'}
+    <div class="form-control">
+      <!-- svelte-ignore a11y_label_has_associated_control -->
+      <label class="label">
+        <span class="label-text">OpenRouter API Key</span>
+      </label>
+      <input
+        type={showToken ? 'text' : 'password'}
+        class="input w-full"
+        value={openrouterApiKey}
+        oninput={updateOpenRouterKey}
+        placeholder="Enter your OpenRouter API key..."
+      />
+    </div>
+  {/if}
+
+  <div class="form-control">
+    <!-- svelte-ignore a11y_label_has_associated_control -->
+    <label class="label">
+      <span class="label-text">Model</span>
+    </label>
+    <ModelPicker
+      value={selectedAiModel}
+      models={aiModels}
+      provider={aiProvider}
+      title="Select $chat model"
+      placeholder={aiProvider === 'openrouter' ? 'openai/gpt-5.2' : 'gpt-4.1-nano'}
+      error={modelFetchError}
+      isLoading={isLoadingModels}
+      onRefresh={refreshAiModels}
+      onChange={updateModelValue}
     />
   </div>
 
   <div class="form-control">
     <!-- svelte-ignore a11y_label_has_associated_control -->
     <label class="label">
-      <span class="label-text">{$t('openai-model')}</span>
+      <span class="label-text">Reasoning for $chat</span>
     </label>
-    <select
-      class="select"
-      value={openaiModel}
-      onchange={updateOpenAIModel}
-      disabled={$settingsStore.useCustomApi}
-    >
-      <option value="gpt-4.1">GPT-4.1</option>
-      <option value="gpt-4.1-mini">GPT-4.1 Mini</option>
-      <option value="gpt-4.1-nano">GPT-4.1 Nano</option>
+    <select class="select" value={aiReasoningEffort} onchange={updateReasoningEffort}>
+      <option value="none">None</option>
+      <option value="minimal">Minimal</option>
+      <option value="low">Low</option>
+      <option value="medium">Medium</option>
+      <option value="high">High</option>
+      <option value="xhigh">Extra high</option>
     </select>
   </div>
 
@@ -230,9 +324,7 @@
     <label class="label cursor-pointer">
       <div class="flex flex-col">
         <span class="label-text">{$t('disable-reasoning-api')}</span>
-        <span class="label-text text-xs opacity-60"
-          >{$t('disable-reasoning-api-description')}</span
-        >
+        <span class="label-text text-xs opacity-60">{$t('disable-reasoning-api-description')}</span>
       </div>
       <input
         type="checkbox"
@@ -267,7 +359,8 @@
     <label class="label cursor-pointer">
       <div class="flex flex-col">
         <span class="label-text">{$t('use-legacy-interpreter')}</span>
-        <span class="label-text text-xs opacity-60">{$t('use-legacy-interpreter-description')}</span>
+        <span class="label-text text-xs opacity-60">{$t('use-legacy-interpreter-description')}</span
+        >
       </div>
       <input
         type="checkbox"
@@ -282,10 +375,8 @@
   <h2 class="text-2xl font-bold mb-4">{$t('about')}</h2>
   <p>Version: {$t('version-value')}</p>
   <p>
-    Author: <a
-      href="https://github.com/ayayaQ"
-      class="link link-primary"
-      onclick={openExternalLink}>ayayaQ</a
+    Author: <a href="https://github.com/ayayaQ" class="link link-primary" onclick={openExternalLink}
+      >ayayaQ</a
     >
   </p>
   <p>

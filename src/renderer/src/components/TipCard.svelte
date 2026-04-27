@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onboardingStore } from '../stores/onboarding'
+  import { t } from '../stores/localisation'
   import { slide } from 'svelte/transition'
 
   let {
@@ -16,23 +17,23 @@
     dismissed?: boolean
   } = $props()
 
-  let visible = $state(true)
+  let dismissedLocally = $state(false)
+  let dismissedByStore = $derived($onboardingStore.dismissedTips.includes(tipId))
 
   $effect(() => {
-    if (onboardingStore.isTipDismissed(tipId)) {
-      visible = false
+    if (dismissedByStore) {
       dismissed = true
     }
   })
 
   function dismiss() {
-    visible = false
+    dismissedLocally = true
     dismissed = true
     onboardingStore.dismissTip(tipId)
   }
 </script>
 
-{#if visible}
+{#if !dismissedLocally && !dismissed && !dismissedByStore}
   <div transition:slide={{ duration: 200 }} class="mx-4 my-3">
     <div class="alert shadow-md">
       <span class="material-symbols-outlined text-primary">{icon}</span>
@@ -40,7 +41,7 @@
         <h3 class="font-bold text-sm">{title}</h3>
         <div class="text-xs opacity-70">{body}</div>
       </div>
-      <button class="btn btn-ghost btn-xs" onclick={dismiss}>Got it</button>
+      <button class="btn btn-ghost btn-xs" onclick={dismiss}>{$t('got-it')}</button>
     </div>
   </div>
 {/if}

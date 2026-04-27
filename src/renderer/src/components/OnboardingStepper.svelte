@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { OnboardingStep } from '../stores/onboarding'
+  import { t, type TranslationKey } from '../stores/localisation'
   import { slide } from 'svelte/transition'
 
   let {
@@ -12,23 +13,28 @@
     onAction?: () => void
   } = $props()
 
-  const steps: { key: OnboardingStep; label: string; message: string; actionLabel?: string }[] = [
+  const steps: {
+    key: OnboardingStep
+    label: string
+    messageKey: TranslationKey
+    actionLabelKey?: TranslationKey
+  }[] = [
     {
       key: 'ENTER_TOKEN',
       label: '1',
-      message: 'Visit the Discord Developer Portal to create a bot and copy its token.',
-      actionLabel: 'Open Portal'
+      messageKey: 'onboarding-enter-token-message',
+      actionLabelKey: 'onboarding-open-portal'
     },
     {
       key: 'CREATE_COMMAND',
       label: '2',
-      message: 'Create a command so your bot has something to do.',
-      actionLabel: 'Go to Commands'
+      messageKey: 'onboarding-create-command-message',
+      actionLabelKey: 'onboarding-go-to-commands'
     },
     {
       key: 'HOST_BOT',
       label: '3',
-      message: 'Press Login to bring your bot online!'
+      messageKey: 'onboarding-host-bot-message'
     }
   ]
 
@@ -41,8 +47,8 @@
     <div class="card-body p-4">
       <!-- Header -->
       <div class="flex justify-between items-center">
-        <h3 class="card-title text-sm">Getting Started</h3>
-        <button class="btn btn-ghost btn-xs opacity-60" onclick={onDismiss}>Dismiss</button>
+        <h3 class="card-title text-sm">{$t('onboarding-getting-started')}</h3>
+        <button class="btn btn-ghost btn-xs opacity-60" onclick={onDismiss}>{$t('dismiss')}</button>
       </div>
 
       <!-- Step dots -->
@@ -73,11 +79,11 @@
 
       <!-- Message -->
       {#if activeStep}
-        <p class="text-center text-sm opacity-70">{activeStep.message}</p>
-        {#if activeStep.actionLabel}
+        <p class="text-center text-sm opacity-70">{$t(activeStep.messageKey)}</p>
+        {#if activeStep.actionLabelKey}
           <div class="card-actions justify-center mt-1">
             <button class="btn btn-outline btn-primary btn-sm" onclick={onAction}>
-              {activeStep.actionLabel}
+              {$t(activeStep.actionLabelKey)}
             </button>
           </div>
         {/if}

@@ -16,8 +16,8 @@ import {
 import { BCFDCommand, BCFDInteractionCommand } from '../types/types'
 import { getCommands, getContext } from './botService'
 import { stringInfoAddEval } from '../utils/virtual'
-import OpenAI from 'openai'
 import { getSettings } from './settingsService'
+import { createAiChatCompletion, moderateTextWithOpenAI } from './aiProviderService'
 import { interpret, BCFDContext as InterpreterContext } from './bcfdLang'
 import { rendererConsole } from '../utils/rendererConsole'
 
@@ -459,18 +459,10 @@ async function fetchChatResponse(prompt: string): Promise<string> {
     }
   }
 
-  // Use OpenAI if custom API is not enabled
-  if (!settings.openaiApiKey) {
-    return 'Error: OpenAI API key not set in settings'
-  }
-
   try {
-    const openai = new OpenAI({
-      apiKey: settings.openaiApiKey
-    })
-
-    const completion = await openai.chat.completions.create({
-      messages: [
+    const completion = await createAiChatCompletion(
+      settings,
+      [
         {
           role: 'system',
           content: basePrompt
@@ -481,11 +473,15 @@ async function fetchChatResponse(prompt: string): Promise<string> {
         },
         { role: 'user', content: prompt }
       ],
-      model: settings.openaiModel
-    })
+      undefined,
+      { reasoningEffort: settings.aiReasoningEffort || 'none' }
+    )
 
-    return completion.choices[0].message.content ?? 'Failed to fetch chat response'
+    const flagged = await moderateTextWithOpenAI(settings, completion.content)
+    if (flagged) return 'Sorry, I am unable to help you with that.'
+
+    return completion.content || 'Failed to fetch chat response'
   } catch (error) {
-    return 'OpenAI API Unavailable'
+    return error instanceof Error ? error.message : 'AI API Unavailable'
   }
 }

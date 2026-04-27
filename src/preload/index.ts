@@ -30,6 +30,7 @@ const validInvokeChannels = [
   // Settings & status
   'get-settings',
   'save-settings',
+  'fetch-ai-models',
   'get-bot-status',
   'save-bot-status',
   // Onboarding

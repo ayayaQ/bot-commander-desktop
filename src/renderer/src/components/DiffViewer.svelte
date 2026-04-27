@@ -4,27 +4,34 @@
   import { t } from '../stores/localisation'
 
   interface Props {
-    diff: CommandDiff;
+    diff: CommandDiff
   }
 
-  let { diff }: Props = $props();
+  let { diff }: Props = $props()
 
   const dispatch = createEventDispatcher<{
     accept: CommandDiff
     reject: void
   }>()
 
-  function formatValue(value: string | boolean | number): string {
+  function formatValue(value: unknown): string {
     if (typeof value === 'boolean') {
       return value ? 'Yes' : 'No'
     }
     if (typeof value === 'string') {
-      if (value.length > 100) {
-        return value.substring(0, 100) + '...'
-      }
       return value || '(empty)'
     }
+    if (value === null || value === undefined) {
+      return '(empty)'
+    }
+    if (typeof value === 'object') {
+      return JSON.stringify(value, null, 2)
+    }
     return String(value)
+  }
+
+  function isLongValue(value: unknown): boolean {
+    return formatValue(value).length > 180 || formatValue(value).includes('\n')
   }
 
   function getChangeTypeClass(change: DiffChange): string {
@@ -75,23 +82,62 @@
                 <div class="grid grid-cols-1 gap-1 text-xs">
                   <div class="diff-old p-2 rounded bg-error/20 border-l-2 border-error">
                     <span class="opacity-60">-</span>
-                    <code class="break-all">{formatValue(change.oldValue)}</code>
+                    {#if isLongValue(change.oldValue)}
+                      <details>
+                        <summary class="cursor-pointer opacity-80">View value</summary>
+                        <pre class="mt-1 whitespace-pre-wrap break-words">{formatValue(
+                            change.oldValue
+                          )}</pre>
+                      </details>
+                    {:else}
+                      <code class="break-all">{formatValue(change.oldValue)}</code>
+                    {/if}
                   </div>
                   <div class="diff-new p-2 rounded bg-success/20 border-l-2 border-success">
                     <span class="opacity-60">+</span>
-                    <code class="break-all">{formatValue(change.newValue)}</code>
+                    {#if isLongValue(change.newValue)}
+                      <details open>
+                        <summary class="cursor-pointer opacity-80">View value</summary>
+                        <pre class="mt-1 whitespace-pre-wrap break-words">{formatValue(
+                            change.newValue
+                          )}</pre>
+                      </details>
+                    {:else}
+                      <code class="break-all">{formatValue(change.newValue)}</code>
+                    {/if}
                   </div>
                 </div>
               {:else if getChangeTypeClass(change) === 'addition'}
                 <div class="diff-new p-2 rounded bg-success/20 border-l-2 border-success text-xs">
                   <span class="opacity-60">+</span>
-                  <code class="break-all">{formatValue(change.newValue)}</code>
+                  {#if isLongValue(change.newValue)}
+                    <details open>
+                      <summary class="cursor-pointer opacity-80">View value</summary>
+                      <pre class="mt-1 whitespace-pre-wrap break-words">{formatValue(
+                          change.newValue
+                        )}</pre>
+                    </details>
+                  {:else}
+                    <code class="break-all">{formatValue(change.newValue)}</code>
+                  {/if}
                 </div>
               {:else}
                 <div class="diff-old p-2 rounded bg-error/20 border-l-2 border-error text-xs">
                   <span class="opacity-60">-</span>
-                  <code class="break-all">{formatValue(change.oldValue)}</code>
+                  {#if isLongValue(change.oldValue)}
+                    <details>
+                      <summary class="cursor-pointer opacity-80">View value</summary>
+                      <pre class="mt-1 whitespace-pre-wrap break-words">{formatValue(
+                          change.oldValue
+                        )}</pre>
+                    </details>
+                  {:else}
+                    <code class="break-all">{formatValue(change.oldValue)}</code>
+                  {/if}
                 </div>
+              {/if}
+              {#if change.reason}
+                <div class="text-xs opacity-70 mt-1">{change.reason}</div>
               {/if}
             </div>
           </div>

@@ -47,6 +47,7 @@ import {
   syncAllSlashCommands
 } from '../services/slashCommandRegistry'
 import { getSettings, setSettings } from '../services/settingsService'
+import { fetchAiModels, getAiProvider } from '../services/aiProviderService'
 import { getBotStatus, setBotStatus } from '../services/statusService'
 import { getStatsInstance } from '../utils/stats'
 import { checkForUpdates } from '../services/updateService'
@@ -202,7 +203,14 @@ export function addIPCHandlers() {
   ipcMain.handle('save-settings', async (_, newSettings: AppSettings) => {
     setSettings(newSettings)
     await saveSettings()
-    return true
+    return getSettings()
+  })
+
+  ipcMain.handle('fetch-ai-models', async () => {
+    const settings = getSettings()
+    const provider = getAiProvider(settings)
+    const apiKey = provider === 'openrouter' ? settings.openrouterApiKey : settings.openaiApiKey
+    return await fetchAiModels(provider, apiKey)
   })
 
   ipcMain.handle('get-bot-status', () => {
@@ -424,13 +432,25 @@ export function addIPCHandlers() {
         messages: Array<{ role: string; content: string }>
         currentCommand: BCFDCommand
         model: string
+        requestId?: string
+        reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
         additionalContext?: string
       }
     ) => {
       const settings = getSettings()
 
-      if (!settings.openaiApiKey) {
-        return { error: 'OpenAI API key not configured. Please add your API key in Settings.' }
+      const requiredKeyMissing =
+        settings.aiProvider === 'openrouter'
+          ? !settings.openrouterApiKey || !settings.openaiApiKey
+          : !settings.openaiApiKey
+
+      if (requiredKeyMissing) {
+        return {
+          error:
+            settings.aiProvider === 'openrouter'
+              ? 'OpenRouter requires an OpenRouter API key and an OpenAI API key for moderation. Please add them in Settings.'
+              : 'OpenAI API key not configured. Please add your API key in Settings.'
+        }
       }
 
       const win = BrowserWindow.fromWebContents(event.sender)
@@ -439,19 +459,28 @@ export function addIPCHandlers() {
         await executeAiCommandChat(
           payload,
           {
+            aiProvider: settings.aiProvider,
             openaiApiKey: settings.openaiApiKey,
+            openrouterApiKey: settings.openrouterApiKey,
+            selectedAiModel: settings.selectedAiModel,
+            selectedOpenAiModel: settings.selectedOpenAiModel,
+            selectedOpenRouterModel: settings.selectedOpenRouterModel,
             openaiModel: settings.openaiModel,
             disableReasoningApi: settings.disableReasoningApi
           },
           {
             onThinking: (delta, accumulated) => {
-              win?.webContents.send('ai-chat:thinking', { delta, accumulated })
+              win?.webContents.send('ai-chat:thinking', {
+                requestId: payload.requestId,
+                delta,
+                accumulated
+              })
             },
             onDone: (result) => {
-              win?.webContents.send('ai-chat:done', result)
+              win?.webContents.send('ai-chat:done', { ...result, requestId: payload.requestId })
             },
             onError: (error) => {
-              win?.webContents.send('ai-chat:error', { error })
+              win?.webContents.send('ai-chat:error', { requestId: payload.requestId, error })
             }
           }
         )
@@ -459,7 +488,10 @@ export function addIPCHandlers() {
         return { streaming: true }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
-        win?.webContents.send('ai-chat:error', { error: errorMessage })
+        win?.webContents.send('ai-chat:error', {
+          requestId: payload.requestId,
+          error: errorMessage
+        })
         return { streaming: true, error: errorMessage }
       }
     }

@@ -33,13 +33,13 @@ export type BCFDCommand = {
   type: BCFDCommandType
   channelEmbed: BCFDEmbedMessageTemplate
   privateEmbed: BCFDEmbedMessageTemplate
-  cooldown?: number        // Cooldown duration in seconds
-  cooldownType?: string    // "User", "Server", or "Global"
+  cooldown?: number // Cooldown duration in seconds
+  cooldownType?: string // "User", "Server", or "Global"
   cooldownMessage?: string // Custom BCFD template message when on cooldown
-  channelMessageAsReply?: boolean  // Send channel message as a reply to the triggering message
-  channelEmbedAsReply?: boolean    // Send channel embed as a reply to the triggering message
-  channelWhitelist?: string  // Comma-separated channel IDs; command only runs in these channels
-  serverWhitelist?: string   // Comma-separated guild IDs; command only runs in these servers
+  channelMessageAsReply?: boolean // Send channel message as a reply to the triggering message
+  channelEmbedAsReply?: boolean // Send channel embed as a reply to the triggering message
+  channelWhitelist?: string // Comma-separated channel IDs; command only runs in these channels
+  serverWhitelist?: string // Comma-separated guild IDs; command only runs in these servers
 }
 
 export function validateBCFDCommand(jsonString: string): BCFDCommand | null {
@@ -85,7 +85,17 @@ export function validateBCFDCommand(jsonString: string): BCFDCommand | null {
     ]
 
     // id is optional (added at runtime, stripped on export)
-    const allowedFields = [...requiredFields, 'id', 'cooldown', 'cooldownType', 'cooldownMessage', 'channelMessageAsReply', 'channelEmbedAsReply', 'channelWhitelist', 'serverWhitelist']
+    const allowedFields = [
+      ...requiredFields,
+      'id',
+      'cooldown',
+      'cooldownType',
+      'cooldownMessage',
+      'channelMessageAsReply',
+      'channelEmbedAsReply',
+      'channelWhitelist',
+      'serverWhitelist'
+    ]
 
     // Check if all required fields exist
     const hasAllFields = requiredFields.every((field) => field in parsed)
@@ -260,8 +270,14 @@ export type AppSettings = {
   showToken: boolean
   hideOutput: boolean
   language: string
+  aiProvider?: 'openai' | 'openrouter'
   openaiApiKey: string
-  openaiModel: 'gpt-4.1' | 'gpt-4.1-mini' | 'gpt-4.1-nano'
+  openrouterApiKey?: string
+  selectedAiModel?: string
+  selectedOpenAiModel?: string
+  selectedOpenRouterModel?: string
+  aiReasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+  openaiModel: string
   developerPrompt: string
   useCustomApi: boolean
   useLegacyInterpreter: boolean

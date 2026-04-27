@@ -7,6 +7,13 @@ import type {
   ChatsData
 } from '../types/types'
 import { consoleStore } from './console'
+import {
+  applyCommandPatch,
+  generateCommandDiff,
+  type CommandDiff,
+  type CommandPatchChange,
+  type DiffChange
+} from '../../../shared/commandPatch'
 
 export interface ChatMessage {
   id: string
@@ -18,18 +25,7 @@ export interface ChatMessage {
   thinkingContent?: string
 }
 
-export interface CommandDiff {
-  before: BCFDCommand
-  after: BCFDCommand
-  changes: DiffChange[]
-}
-
-export interface DiffChange {
-  field: string
-  fieldLabel: string
-  oldValue: string | boolean | number
-  newValue: string | boolean | number
-}
+export type { CommandDiff, CommandPatchChange, DiffChange }
 
 export interface AIModel {
   id: string
@@ -53,34 +49,15 @@ export const AI_MODELS: AIModel[] = [
     description: 'Fast and efficient',
     maxTokens: 128000
   },
-  {
-    id: 'gpt-5.1:reasoning',
-    name: 'GPT-5.1',
-    description: 'Next-gen with reasoning',
-    reasoning: true
-  },
-  {
-    id: 'gpt-5.1:fast',
-    name: 'GPT-5.1 (Fast)',
-    description: 'Next-gen, no reasoning',
-    reasoning: false
-  },
-  {
-    id: 'gpt-5.2:reasoning',
-    name: 'GPT-5.2',
-    description: 'Latest with reasoning',
-    reasoning: true
-  },
-  {
-    id: 'gpt-5.2:fast',
-    name: 'GPT-5.2 (Fast)',
-    description: 'Latest, no reasoning',
-    reasoning: false
-  }
+  { id: 'gpt-5.1', name: 'GPT-5.1', description: 'Next-gen model' },
+  { id: 'gpt-5.2', name: 'GPT-5.2', description: 'Latest model' }
 ]
 
 // Parse a model selection ID to get the actual model ID and reasoning preference
-export function parseModelSelection(selectionId: string): { modelId: string; useReasoning: boolean } {
+export function parseModelSelection(selectionId: string): {
+  modelId: string
+  useReasoning: boolean
+} {
   if (selectionId.endsWith(':reasoning')) {
     return { modelId: selectionId.replace(':reasoning', ''), useReasoning: true }
   }
@@ -96,6 +73,9 @@ export function parseModelSelection(selectionId: string): { modelId: string; use
 export const chatMessages = writable<ChatMessage[]>([])
 export const isAiLoading = writable<boolean>(false)
 export const selectedModel = writable<string>('gpt-4.1-nano')
+export const selectedReasoningEffort = writable<
+  'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+>('none')
 export const totalTokens = writable<number>(0)
 export const aiPanelOpen = writable<boolean>(false)
 
@@ -259,10 +239,7 @@ export async function clearChatMessages(): Promise<void> {
 // Load a chat by ID
 export async function loadChat(chatId: string): Promise<void> {
   try {
-    const chat: SavedChat | null = await window.electron.ipcRenderer.invoke(
-      'get-chat',
-      chatId
-    )
+    const chat: SavedChat | null = await window.electron.ipcRenderer.invoke('get-chat', chatId)
     if (chat) {
       activeChatId.set(chat.id)
       chatMessages.set(chat.messages.map(dataToMessage))
@@ -510,113 +487,7 @@ export async function searchStoredChats(query: string): Promise<SavedChat[]> {
   }
 }
 
-// Compare two commands and generate a diff
-export function generateCommandDiff(before: BCFDCommand, after: BCFDCommand): CommandDiff {
-  const changes: DiffChange[] = []
-
-  const fieldLabels: Record<string, string> = {
-    command: 'Command',
-    commandDescription: 'Description',
-    channelMessage: 'Channel Message',
-    privateMessage: 'Private Message',
-    type: 'Command Type',
-    reaction: 'Reaction',
-    specificChannel: 'Send in Specific Channel',
-    channelWhitelist: 'Channel Whitelist',
-    serverWhitelist: 'Server Whitelist',
-    roleToAssign: 'Role to Assign',
-    requiredRole: 'Required Role',
-    deleteIfStrings: 'Delete If Contains',
-    deleteNum: 'Delete Count',
-    startsWith: 'Starts With',
-    phrase: 'Phrase',
-    isNSFW: 'NSFW Only',
-    isAdmin: 'Admin Only',
-    isKick: 'Is Kick',
-    isBan: 'Is Ban',
-    isVoiceMute: 'Is Voice Mute',
-    'channelEmbed.title': 'Embed Title',
-    'channelEmbed.description': 'Embed Description',
-    'channelEmbed.footer': 'Embed Footer',
-    'channelEmbed.hexColor': 'Embed Color',
-    'channelEmbed.imageURL': 'Embed Image',
-    'channelEmbed.thumbnailURL': 'Embed Thumbnail',
-    'privateEmbed.title': 'Private Embed Title',
-    'privateEmbed.description': 'Private Embed Description',
-    'privateEmbed.footer': 'Private Embed Footer',
-    'privateEmbed.hexColor': 'Private Embed Color',
-    'privateEmbed.imageURL': 'Private Embed Image',
-    'privateEmbed.thumbnailURL': 'Private Embed Thumbnail'
-  }
-
-  // Compare simple fields
-  const simpleFields = [
-    'command',
-    'commandDescription',
-    'channelMessage',
-    'privateMessage',
-    'type',
-    'reaction',
-    'specificChannel',
-    'roleToAssign',
-    'requiredRole',
-    'deleteIfStrings',
-    'deleteNum',
-    'phrase',
-    'startsWith',
-    'isNSFW',
-    'isAdmin',
-    'isReact',
-    'isKick',
-    'isBan',
-    'isVoiceMute',
-    'isRoleAssigner',
-    'isRequiredRole',
-    'deleteAfter',
-    'deleteX',
-    'deleteIf',
-    'isSpecificChannel',
-    'channelWhitelist',
-    'serverWhitelist',
-    'sendChannelEmbed',
-    'sendPrivateEmbed'
-  ]
-
-  for (const field of simpleFields) {
-    const beforeVal = (before as any)[field]
-    const afterVal = (after as any)[field]
-    if (JSON.stringify(beforeVal) !== JSON.stringify(afterVal)) {
-      changes.push({
-        field,
-        fieldLabel: fieldLabels[field] || field,
-        oldValue: beforeVal,
-        newValue: afterVal
-      })
-    }
-  }
-
-  // Compare embed fields
-  const embedTypes = ['channelEmbed', 'privateEmbed'] as const
-  const embedFields = ['title', 'description', 'footer', 'hexColor', 'imageURL', 'thumbnailURL']
-
-  for (const embedType of embedTypes) {
-    for (const field of embedFields) {
-      const beforeVal = (before[embedType] as any)[field]
-      const afterVal = (after[embedType] as any)[field]
-      if (beforeVal !== afterVal) {
-        const fullField = `${embedType}.${field}`
-        changes.push({
-          field: fullField,
-          fieldLabel: fieldLabels[fullField] || fullField,
-          oldValue: beforeVal,
-          newValue: afterVal
-        })
-      }
-    }
-  }
-
-  return { before, after, changes }
-}
+export { applyCommandPatch, generateCommandDiff }
 
 // Thinking models that support reasoning tokens
 const THINKING_MODELS = ['gpt-5.1', 'gpt-5.2']
@@ -627,18 +498,22 @@ export function isThinkingModel(modelId: string): boolean {
 
 // Streaming response type from thinking models
 export interface StreamingDoneResponse {
+  requestId?: string
   thinkingContent: string
   explanation: string
   hasChanges: boolean
-  updatedCommand: any | null
+  changes?: CommandPatchChange[]
+  updatedCommand?: BCFDCommand | null
   tokenCount: number
+  warnings?: string[]
 }
 
 // Initialize IPC listeners for streaming AI chat responses
 // Call this once when the AIChat component mounts
 export function initAiChatStreamListeners(
   onDone: (response: StreamingDoneResponse, pendingChanges: CommandDiff | null) => void,
-  getCurrentCommand: () => any
+  getCurrentCommand: () => any,
+  getActiveRequestId: () => string | null = () => null
 ) {
   const electron = window.electron
 
@@ -647,11 +522,22 @@ export function initAiChatStreamListeners(
     return () => {}
   }
 
+  function shouldIgnoreEvent(requestId?: string): boolean {
+    const activeRequestId = getActiveRequestId()
+
+    // All current AI chat requests include a request id. If this listener belongs
+    // to an old component instance, it will have no active id and must ignore it.
+    if (requestId) return activeRequestId !== requestId
+
+    return false
+  }
+
   // Handler for thinking token deltas
   const thinkingHandler = (
     _event: any,
-    data: { delta: string; accumulated: string }
+    data: { requestId?: string; delta: string; accumulated: string }
   ) => {
+    if (shouldIgnoreEvent(data.requestId)) return
     console.log('[aiChat] thinkingHandler received:', data)
     isThinking.set(true)
     thinkingContent.set(data.accumulated)
@@ -659,16 +545,21 @@ export function initAiChatStreamListeners(
 
   // Handler for completed response
   const doneHandler = (_event: any, response: StreamingDoneResponse) => {
+    if (shouldIgnoreEvent(response.requestId)) return
     console.log('[aiChat] doneHandler received:', response)
     isThinking.set(false)
     thinkingExpanded.set(false) // Auto-collapse when complete
 
     // Generate pending changes if the AI proposed updates
     let pendingChanges: CommandDiff | null = null
-    if (response.hasChanges && response.updatedCommand) {
+    if (response.hasChanges && response.changes?.length) {
       const currentCommand = getCurrentCommand()
-      const mergedCommand = { ...currentCommand, ...response.updatedCommand }
-      pendingChanges = generateCommandDiff(currentCommand, mergedCommand)
+      const result = applyCommandPatch(currentCommand, response.changes)
+      pendingChanges = result.diff
+      response.warnings = result.warnings
+    } else if (response.hasChanges && response.updatedCommand) {
+      const currentCommand = getCurrentCommand()
+      pendingChanges = generateCommandDiff(currentCommand, response.updatedCommand)
     }
 
     onDone(response, pendingChanges)
@@ -678,17 +569,21 @@ export function initAiChatStreamListeners(
   }
 
   // Handler for errors
-  const errorHandler = (_event: any, data: { error: string }) => {
+  const errorHandler = (_event: any, data: { requestId?: string; error: string }) => {
+    if (shouldIgnoreEvent(data.requestId)) return
     console.log('[aiChat] errorHandler received:', data)
     isThinking.set(false)
     thinkingContent.set('')
     thinkingExpanded.set(false)
     isAiLoading.set(false)
     consoleStore.error('AI chat streaming error:' + data.error)
+    addMessage('assistant', `Error: ${data.error}`)
   }
 
   // Register listeners
-  console.log('[aiChat] Registering IPC listeners for ai-chat:thinking, ai-chat:done, ai-chat:error')
+  console.log(
+    '[aiChat] Registering IPC listeners for ai-chat:thinking, ai-chat:done, ai-chat:error'
+  )
   electron.ipcRenderer.on('ai-chat:thinking', thinkingHandler)
   electron.ipcRenderer.on('ai-chat:done', doneHandler)
   electron.ipcRenderer.on('ai-chat:error', errorHandler)

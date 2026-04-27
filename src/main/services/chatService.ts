@@ -3,6 +3,15 @@ import { join } from 'path'
 import fs from 'fs/promises'
 import OpenAI from 'openai'
 import type { BCFDCommand } from '../types/types'
+import {
+  createAiChatCompletion,
+  getAiProvider,
+  getSelectedAiModel,
+  validateAiConfiguration,
+  type AiChatMessage,
+  type ReasoningEffort
+} from './aiProviderService'
+import { editableCommandFields, type CommandPatchChange } from '../../shared/commandPatch'
 
 // Thinking models that support reasoning tokens
 const THINKING_MODELS = ['gpt-5.1', 'gpt-5.2']
@@ -12,7 +21,10 @@ export function isThinkingModel(modelId: string): boolean {
 }
 
 // Parse model selection ID (e.g., "gpt-5.1:reasoning" or "gpt-5.1:fast")
-export function parseModelSelection(selectionId: string): { modelId: string; useReasoning: boolean } {
+export function parseModelSelection(selectionId: string): {
+  modelId: string
+  useReasoning: boolean
+} {
   if (selectionId.endsWith(':reasoning')) {
     return { modelId: selectionId.replace(':reasoning', ''), useReasoning: true }
   }
@@ -66,21 +78,58 @@ function getChatsPath(): string {
   return join(app.getPath('userData'), CHATS_FILENAME)
 }
 
+function getEmptyChatsData(): ChatsData {
+  return { chats: [], activeChat: null }
+}
+
+function isChatsData(value: unknown): value is ChatsData {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<ChatsData>
+  return (
+    Array.isArray(candidate.chats) &&
+    (candidate.activeChat === null || typeof candidate.activeChat === 'string')
+  )
+}
+
+async function backupCorruptChatsFile(path: string): Promise<string | null> {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const backupPath = `${path}.corrupt-${timestamp}`
+
+  try {
+    await fs.copyFile(path, backupPath)
+    return backupPath
+  } catch (backupError) {
+    console.error('Failed to back up corrupt chats file:', backupError)
+    return null
+  }
+}
+
 export async function loadChats(): Promise<ChatsData> {
   const path = getChatsPath()
   try {
     const data = await fs.readFile(path, 'utf-8')
-    chatsData = JSON.parse(data) as ChatsData
+    const parsed = JSON.parse(data)
+    if (!isChatsData(parsed)) {
+      throw new Error('Invalid chats data shape')
+    }
+    chatsData = parsed
     return chatsData
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       // File doesn't exist, create with empty data
-      chatsData = { chats: [], activeChat: null }
+      chatsData = getEmptyChatsData()
       await saveChats()
       return chatsData
     }
-    console.error('Error loading chats:', error)
-    throw error
+
+    const backupPath = await backupCorruptChatsFile(path)
+    console.error(
+      `Error loading chats. Resetting chat history${backupPath ? ` after backup to ${backupPath}` : ''}:`,
+      error
+    )
+    chatsData = getEmptyChatsData()
+    await saveChats()
+    return chatsData
   }
 }
 
@@ -230,8 +279,8 @@ export function searchChats(query: string): SavedChat[] {
 // AI Command Chat
 // ============================================================================
 
- // BCFD Language system prompt
-  const BCFD_SYSTEM_PROMPT = `You are an expert Discord bot command editor. You help users create and modify commands using the BCFD Template Language.
+// BCFD Language system prompt
+const BCFD_SYSTEM_PROMPT = `You are an expert Discord bot command editor. You help users create and modify commands using the BCFD Template Language.
 
 ## BCFD Template Language Overview:
 
@@ -318,10 +367,12 @@ If user is "John" and typed "hello":
 You respond in a structured format with:
 1. **explanation**: A brief, friendly explanation of what you'll change or why something works a certain way
 2. **hasChanges**: true if you're proposing command modifications, false if just answering questions
-3. **updatedCommand**: The complete modified command object (only when hasChanges is true)
+3. **changes**: A list of command field edits (empty when hasChanges is false)
 
 When making changes:
-- Always provide the FULL command object with ALL fields
+- Return only the fields that need to change
+- Use nested embed fields like channelEmbed.description, not full embed objects
+- Do not edit id or unrelated fields
 - Explain the changes clearly in the explanation field
 - Use BCFD language features creatively (variables, functions, $eval blocks)
 - Keep explanations concise but informative
@@ -331,8 +382,13 @@ When making changes:
 
 When answering questions without changes:
 - Set hasChanges to false
+- Set changes to []
 - Provide helpful explanations about BCFD language features
 - Give examples when appropriate`
+
+const PATCH_SCHEMA_FIELDS = editableCommandFields.filter(
+  (field) => field !== 'actionArr' && field !== 'channelEmbed' && field !== 'privateEmbed'
+)
 
 // Structured output schema for command updates
 const COMMAND_RESPONSE_SCHEMA = {
@@ -346,109 +402,32 @@ const COMMAND_RESPONSE_SCHEMA = {
       type: 'boolean',
       description: 'Whether any changes are being proposed to the command'
     },
-    updatedCommand: {
-      anyOf: [
-        { type: 'null' },
-        {
-          type: 'object',
-          properties: {
-            command: { type: 'string' },
-            commandDescription: { type: 'string' },
-            type: { type: 'number' },
-            channelMessage: { type: 'string' },
-            privateMessage: { type: 'string' },
-            channelEmbed: {
-              type: 'object',
-              properties: {
-                title: { type: 'string' },
-                description: { type: 'string' },
-                hexColor: { type: 'string' },
-                imageURL: { type: 'string' },
-                thumbnailURL: { type: 'string' },
-                footer: { type: 'string' }
-              },
-              required: [
-                'title',
-                'description',
-                'hexColor',
-                'imageURL',
-                'thumbnailURL',
-                'footer'
-              ],
-              additionalProperties: false
-            },
-            privateEmbed: {
-              type: 'object',
-              properties: {
-                title: { type: 'string' },
-                description: { type: 'string' },
-                hexColor: { type: 'string' },
-                imageURL: { type: 'string' },
-                thumbnailURL: { type: 'string' },
-                footer: { type: 'string' }
-              },
-              required: [
-                'title',
-                'description',
-                'hexColor',
-                'imageURL',
-                'thumbnailURL',
-                'footer'
-              ],
-              additionalProperties: false
-            },
-            specificChannel: { type: 'string' },
-            channelWhitelist: { type: 'string' },
-            serverWhitelist: { type: 'string' },
-            reaction: { type: 'string' },
-            deleteIfStrings: { type: 'string' },
-            deleteAfter: { type: 'boolean' },
-            deleteNum: { type: 'number' },
-            roleToAssign: { type: 'string' },
-            isKick: { type: 'boolean' },
-            isBan: { type: 'boolean' },
-            isVoiceMute: { type: 'boolean' },
-            requiredRole: { type: 'string' },
-            isAdmin: { type: 'boolean' },
-            phrase: { type: 'boolean' },
-            startsWith: { type: 'boolean' },
-            isNSFW: { type: 'boolean' },
-            specificMessage: { type: 'string' },
-            ignoreErrorMessage: { type: 'boolean' }
+    changes: {
+      type: 'array',
+      description: 'The command field edits to apply. Empty when hasChanges is false.',
+      items: {
+        type: 'object',
+        properties: {
+          field: {
+            type: 'string',
+            enum: PATCH_SCHEMA_FIELDS,
+            description: 'Editable command field to change'
           },
-          required: [
-            'command',
-            'commandDescription',
-            'type',
-            'channelMessage',
-            'privateMessage',
-            'channelEmbed',
-            'privateEmbed',
-            'specificChannel',
-            'reaction',
-            'deleteIfStrings',
-            'deleteAfter',
-            'deleteNum',
-            'roleToAssign',
-            'isKick',
-            'isBan',
-            'isVoiceMute',
-            'requiredRole',
-            'isAdmin',
-            'phrase',
-            'startsWith',
-            'isNSFW',
-            'specificMessage',
-            'ignoreErrorMessage'
-          ],
-          additionalProperties: false
-        }
-      ],
-      description:
-        'The updated command object with changes applied (null when hasChanges is false)'
+          value: {
+            anyOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }],
+            description: 'New value for the field'
+          },
+          reason: {
+            type: 'string',
+            description: 'Short reason for this edit, or an empty string'
+          }
+        },
+        required: ['field', 'value', 'reason'],
+        additionalProperties: false
+      }
     }
   },
-  required: ['explanation', 'hasChanges', 'updatedCommand'],
+  required: ['explanation', 'hasChanges', 'changes'],
   additionalProperties: false
 } as const
 
@@ -456,12 +435,18 @@ export interface AiCommandChatPayload {
   messages: Array<{ role: string; content: string }>
   currentCommand: BCFDCommand
   model: string
+  reasoningEffort?: ReasoningEffort
   additionalContext?: string
 }
 
 export interface AiCommandChatSettings {
   openaiApiKey: string
   openaiModel?: string
+  aiProvider?: 'openai' | 'openrouter'
+  openrouterApiKey?: string
+  selectedAiModel?: string
+  selectedOpenAiModel?: string
+  selectedOpenRouterModel?: string
   disableReasoningApi?: boolean
 }
 
@@ -471,7 +456,7 @@ export interface AiChatStreamCallbacks {
     thinkingContent: string
     explanation: string
     hasChanges: boolean
-    updatedCommand: BCFDCommand | null
+    changes: CommandPatchChange[]
     tokenCount: number
   }) => void
   onError: (error: string) => void
@@ -482,14 +467,28 @@ export async function executeAiCommandChat(
   settings: AiCommandChatSettings,
   callbacks: AiChatStreamCallbacks
 ): Promise<void> {
-  const selection = parseModelSelection(payload.model || settings.openaiModel || 'gpt-4.1-nano')
+  const configError = validateAiConfiguration(settings)
+  if (configError) {
+    callbacks.onError(configError)
+    return
+  }
+
+  const selection = parseModelSelection(
+    payload.model || getSelectedAiModel(settings) || settings.openaiModel || 'gpt-4.1-nano'
+  )
   const modelId = selection.modelId
   // Use reasoning if model selection requests it, unless globally disabled
-  const useReasoning = selection.useReasoning && !settings.disableReasoningApi
+  const reasoningEffort = payload.reasoningEffort || (selection.useReasoning ? 'low' : 'none')
+  const useReasoning = reasoningEffort !== 'none' && !settings.disableReasoningApi
 
-  console.log('[AI-Chat] Model:', modelId, '| Reasoning:', useReasoning)
-
-  const openai = new OpenAI({ apiKey: settings.openaiApiKey })
+  console.log(
+    '[AI-Chat] Provider:',
+    getAiProvider(settings),
+    '| Model:',
+    modelId,
+    '| Reasoning:',
+    reasoningEffort
+  )
 
   // Build system content
   let systemContent = BCFD_SYSTEM_PROMPT
@@ -513,6 +512,42 @@ export async function executeAiCommandChat(
     }
   }
 
+  if (getAiProvider(settings) === 'openrouter') {
+    try {
+      const response = await createAiChatCompletion(
+        settings,
+        inputMessages as AiChatMessage[],
+        modelId,
+        {
+          responseFormat: {
+            type: 'json_schema',
+            json_schema: {
+              name: 'command_update_response',
+              strict: true,
+              schema: COMMAND_RESPONSE_SCHEMA
+            }
+          },
+          reasoningEffort,
+          requireStructuredOutputs: true
+        }
+      )
+      const parsed = JSON.parse(response.content)
+      callbacks.onDone({
+        thinkingContent: '',
+        explanation: parsed.explanation,
+        hasChanges: parsed.hasChanges,
+        changes: parsed.hasChanges ? parsed.changes : [],
+        tokenCount: response.tokenCount
+      })
+      return
+    } catch (error) {
+      callbacks.onError(error instanceof Error ? error.message : 'OpenRouter request failed')
+      return
+    }
+  }
+
+  const openai = new OpenAI({ apiKey: settings.openaiApiKey })
+
   let thinkingContent = ''
   let outputContent = ''
 
@@ -528,13 +563,12 @@ export async function executeAiCommandChat(
         schema: COMMAND_RESPONSE_SCHEMA
       }
     },
-    ...(useReasoning && { reasoning: { summary: 'auto', effort: 'low' } })
+    ...(useReasoning && { reasoning: { summary: 'auto', effort: reasoningEffort } })
   })
 
   let eventTypesLogged = new Set<string>()
 
   for await (const event of stream) {
-
     if (!eventTypesLogged.has(event.type)) {
       console.log('[AI-Chat] Stream event type:', event.type)
       eventTypesLogged.add(event.type)
@@ -554,7 +588,7 @@ export async function executeAiCommandChat(
           thinkingContent,
           explanation: parsed.explanation,
           hasChanges: parsed.hasChanges,
-          updatedCommand: parsed.hasChanges ? parsed.updatedCommand : null,
+          changes: parsed.hasChanges ? parsed.changes : [],
           tokenCount
         })
         return
@@ -574,7 +608,7 @@ export async function executeAiCommandChat(
         thinkingContent,
         explanation: parsed.explanation,
         hasChanges: parsed.hasChanges,
-        updatedCommand: parsed.hasChanges ? parsed.updatedCommand : null,
+        changes: parsed.hasChanges ? parsed.changes : [],
         tokenCount: 0
       })
     } catch (parseError) {

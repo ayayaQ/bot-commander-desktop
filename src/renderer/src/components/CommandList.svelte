@@ -35,7 +35,9 @@
   }
 
   async function saveCommands() {
-    await window.electron.ipcRenderer.invoke('save-commands', { bcfdCommands: $state.snapshot(commands) })
+    await window.electron.ipcRenderer.invoke('save-commands', {
+      bcfdCommands: $state.snapshot(commands)
+    })
   }
 
   function addCommand() {
@@ -99,25 +101,19 @@
     showRepository = false
   }
 
-  let filteredCommands = $derived(commands.filter(
-    (cmd) =>
-      cmd.command.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      cmd.commandDescription.toLowerCase().includes(searchQuery.toLowerCase())
-  ))
+  let filteredCommands = $derived(
+    commands.filter(
+      (cmd) =>
+        cmd.command.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        cmd.commandDescription.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+  )
 </script>
 
-<TipCard
-  tipId="tip_commands"
-  icon="chat"
-  title="Commands"
-  body="Commands define how your bot responds to messages. Create one, set a trigger word, then add actions like Send Message."
-/>
+<TipCard tipId="tip_commands" icon="chat" title={$t('commands')} body={$t('tip-commands-body')} />
 <div class="">
   {#if showRepository}
-    <CommandRepository
-      on:import={handleRepoImport}
-      on:close={() => showRepository = false}
-    />
+    <CommandRepository on:import={handleRepoImport} on:close={() => (showRepository = false)} />
   {:else if isEditing}
     <CommandEditor
       mode={editingCommand ? 'edit' : 'add'}
@@ -134,8 +130,11 @@
         <div class="flex justify-between items-center mb-4">
           <h2 class="text-2xl font-bold">{$t('commands')}</h2>
           <div class="flex gap-2">
-            <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('browse-repository') || 'Browse Repository'}>
-              <button class="btn btn-secondary" onclick={() => showRepository = true}>
+            <span
+              class="tooltip tooltip-primary tooltip-bottom"
+              data-tip={$t('browse-repository') || 'Browse Repository'}
+            >
+              <button class="btn btn-secondary" onclick={() => (showRepository = true)}>
                 <span class="material-symbols-outlined">explore</span>
               </button>
             </span>
@@ -164,7 +163,9 @@
     </HeaderBar>
     <div class="p-4">
       {#if filteredCommands.length === 0}
-        <div class="flex flex-col items-center justify-center py-16 text-base-content/40 select-none">
+        <div
+          class="flex flex-col items-center justify-center py-16 text-base-content/40 select-none"
+        >
           {#if commands.length === 0}
             <p class="text-5xl mb-3">{emptyKaomoji}</p>
             <p class="text-sm font-medium">{$t('no-commands')}</p>
@@ -195,5 +196,5 @@
 <ShareCommandModal
   bind:dialog={shareDialog}
   command={commandToShare}
-  on:shared={() => commandToShare = null}
+  on:shared={() => (commandToShare = null)}
 />

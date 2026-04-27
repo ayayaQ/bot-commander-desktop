@@ -10,6 +10,7 @@ import {
   DMChannel,
   EmbedBuilder,
   Events,
+  Guild,
   GuildBan,
   GuildMember,
   IntentsBitField,
@@ -63,6 +64,14 @@ let commands: { bcfdCommands: BCFDCommand[]; bcfdSlashCommands: BCFDSlashCommand
 }
 let context: vm.Context
 let stats: Stats
+
+type GuildSendableChannel =
+  | TextChannel
+  | NewsChannel
+  | StageChannel
+  | VoiceChannel
+  | PublicThreadChannel<boolean>
+  | PrivateThreadChannel
 
 export function setCommands(newCommands: {
   bcfdCommands: BCFDCommand[]
@@ -253,6 +262,35 @@ export function applyBotStatus(botStatus: BotStatus) {
   }
 }
 
+function isGuildSendableChannel(channel: unknown): channel is GuildSendableChannel {
+  return typeof (channel as { send?: unknown })?.send === 'function'
+}
+
+function normalizeChannelName(channelName: string): string {
+  return channelName.trim().replace(/^#/, '').toLowerCase()
+}
+
+function getFirstSendableGuildChannel(guild: Guild): GuildSendableChannel | undefined {
+  return guild.channels.cache.find(isGuildSendableChannel) as GuildSendableChannel | undefined
+}
+
+function resolveSpecificGuildChannel(
+  guild: Guild | null | undefined,
+  specificChannel: string
+): GuildSendableChannel | undefined {
+  const value = specificChannel.trim()
+  if (!guild || !value) return undefined
+
+  const mentionedChannelId = value.match(/^<#(\d+)>$/)?.[1]
+  const byId = guild.channels.cache.get(mentionedChannelId ?? value)
+  if (isGuildSendableChannel(byId)) return byId
+
+  const channelName = normalizeChannelName(value)
+  return guild.channels.cache.find(
+    (channel) => isGuildSendableChannel(channel) && channel.name.toLowerCase() === channelName
+  ) as GuildSendableChannel | undefined
+}
+
 async function onInteractionCreate(interaction: Interaction) {
   if (interaction.isChatInputCommand()) {
     await handleSlashCommand(interaction)
@@ -267,8 +305,15 @@ async function handleSlashCommand(interaction: ChatInputCommandInteraction) {
 
   if (interactionCommand) {
     // Cooldown check
-    if (interactionCommand.cooldown && interactionCommand.cooldown > 0 && interactionCommand.cooldownType) {
-      const cooldownLevel = interactionCommand.cooldownType.toLowerCase() as 'user' | 'server' | 'global'
+    if (
+      interactionCommand.cooldown &&
+      interactionCommand.cooldown > 0 &&
+      interactionCommand.cooldownType
+    ) {
+      const cooldownLevel = interactionCommand.cooldownType.toLowerCase() as
+        | 'user'
+        | 'server'
+        | 'global'
       const cooldownResult = getCooldownManager().check(
         interactionCommand.id,
         interactionCommand.cooldown,
@@ -300,8 +345,15 @@ async function handleSlashCommand(interaction: ChatInputCommandInteraction) {
     await executeInteractionCommand(interaction, interactionCommand)
 
     // Record cooldown after successful execution
-    if (interactionCommand.cooldown && interactionCommand.cooldown > 0 && interactionCommand.cooldownType) {
-      const cooldownLevel = interactionCommand.cooldownType.toLowerCase() as 'user' | 'server' | 'global'
+    if (
+      interactionCommand.cooldown &&
+      interactionCommand.cooldown > 0 &&
+      interactionCommand.cooldownType
+    ) {
+      const cooldownLevel = interactionCommand.cooldownType.toLowerCase() as
+        | 'user'
+        | 'server'
+        | 'global'
       getCooldownManager().record(
         interactionCommand.id,
         interactionCommand.cooldown,
@@ -956,8 +1008,8 @@ async function onGuildMemberAdd(member: GuildMember) {
     }
 
     const channel = command.isSpecificChannel
-      ? (member.guild.channels.cache.get(command.specificChannel) as TextChannel | undefined)
-      : (member.guild.channels.cache.first() as TextChannel | undefined)
+      ? resolveSpecificGuildChannel(member.guild, command.specificChannel)
+      : getFirstSendableGuildChannel(member.guild)
 
     if (channel) {
       sendChannelEmbed(command, channel, async (field) => field)
@@ -981,8 +1033,8 @@ async function onGuildMemberRemove(member: GuildMember | PartialGuildMember) {
     }
 
     const channel = command.isSpecificChannel
-      ? (member.guild.channels.cache.get(command.specificChannel) as TextChannel | undefined)
-      : (member.guild.channels.cache.first() as TextChannel | undefined)
+      ? resolveSpecificGuildChannel(member.guild, command.specificChannel)
+      : getFirstSendableGuildChannel(member.guild)
 
     if (channel) {
       sendChannelEmbed(command, channel, async (field) => field)
@@ -1006,8 +1058,8 @@ async function onGuildBanAdd(ban: GuildBan) {
     }
 
     const channel = command.isSpecificChannel
-      ? (ban.guild.channels.cache.get(command.specificChannel) as TextChannel | undefined)
-      : (ban.guild.channels.cache.first() as TextChannel | undefined)
+      ? resolveSpecificGuildChannel(ban.guild, command.specificChannel)
+      : getFirstSendableGuildChannel(ban.guild)
 
     if (channel) {
       sendChannelEmbed(command, channel, async (field) => field)
@@ -1111,16 +1163,22 @@ async function onMessageReactionAdd(
 
     // Resolve target channel (specific channel override or event channel)
     const reactionTargetChannel = command.isSpecificChannel
-      ? (message.guild?.channels.cache.get(command.specificChannel) as TextChannel | undefined) ?? message.channel as TextChannel
-      : message.channel as TextChannel
+      ? (resolveSpecificGuildChannel(message.guild, command.specificChannel) ??
+        (message.channel as GuildSendableChannel))
+      : (message.channel as GuildSendableChannel)
 
     // Handle channel message
     if (command.actionArr[0]) {
-      channelMessage(command, reactionTargetChannel, async () => {
-        return await stringInfoAdd(
-          contextForReactionEvent(command.channelMessage, reaction, command)
-        )
-      }, message as OmitPartialGroupDMChannel<Message<boolean>>)
+      channelMessage(
+        command,
+        reactionTargetChannel,
+        async () => {
+          return await stringInfoAdd(
+            contextForReactionEvent(command.channelMessage, reaction, command)
+          )
+        },
+        message as OmitPartialGroupDMChannel<Message<boolean>>
+      )
     }
 
     // Handle private message
@@ -1134,9 +1192,14 @@ async function onMessageReactionAdd(
 
     // Handle channel embed
     if (command.sendChannelEmbed) {
-      sendChannelEmbed(command, reactionTargetChannel, async (field) => {
-        return await stringInfoAdd(contextForReactionEvent(field, reaction, command))
-      }, message as OmitPartialGroupDMChannel<Message<boolean>>)
+      sendChannelEmbed(
+        command,
+        reactionTargetChannel,
+        async (field) => {
+          return await stringInfoAdd(contextForReactionEvent(field, reaction, command))
+        },
+        message as OmitPartialGroupDMChannel<Message<boolean>>
+      )
     }
 
     // Handle private embed
@@ -1241,7 +1304,7 @@ async function onMessageCreate(message: OmitPartialGroupDMChannel<Message<boolea
     }
 
     const msgTargetChannel = command.isSpecificChannel
-      ? (message.guild?.channels.cache.get(command.specificChannel) as TextChannel | undefined) ?? message.channel
+      ? (resolveSpecificGuildChannel(message.guild, command.specificChannel) ?? message.channel)
       : message.channel
 
     channelMessage(
