@@ -3,10 +3,10 @@
   import { marked } from 'marked'
   import { t } from '../stores/localisation'
   import {
-    getSelectedModelForProvider,
+    getSelectedCommandModelForProvider,
     saveSettings,
     settingsStore,
-    withSelectedModelForProvider
+    withSelectedCommandModelForProvider
   } from '../stores/settings'
   import DiffViewer from './DiffViewer.svelte'
   import ModelPicker from './ModelPicker.svelte'
@@ -253,7 +253,7 @@
     const provider = $settingsStore.aiProvider || 'openai'
     lastProviderModel = model
     selectedModel.set(model)
-    saveSettings(withSelectedModelForProvider($settingsStore, provider, model))
+    saveSettings(withSelectedCommandModelForProvider($settingsStore, provider, model))
   }
 
   function handleReasoningChange(event: Event) {
@@ -279,7 +279,7 @@
 
   $effect(() => {
     const provider = $settingsStore.aiProvider || 'openai'
-    const providerModel = getSelectedModelForProvider($settingsStore, provider)
+    const providerModel = getSelectedCommandModelForProvider($settingsStore, provider)
 
     if (providerModel !== lastProviderModel) {
       lastProviderModel = providerModel
@@ -296,7 +296,7 @@
     componentDestroyed = false
     const provider = $settingsStore.aiProvider || 'openai'
     lastProvider = provider
-    lastProviderModel = getSelectedModelForProvider($settingsStore, provider)
+    lastProviderModel = getSelectedCommandModelForProvider($settingsStore, provider)
     selectedModel.set(lastProviderModel)
     refreshAiModels()
 

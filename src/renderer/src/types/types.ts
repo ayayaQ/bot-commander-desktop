@@ -276,6 +276,8 @@ export type AppSettings = {
   selectedAiModel?: string
   selectedOpenAiModel?: string
   selectedOpenRouterModel?: string
+  selectedCommandOpenAiModel?: string
+  selectedCommandOpenRouterModel?: string
   aiReasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
   openaiModel: string
   developerPrompt: string

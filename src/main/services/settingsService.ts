@@ -11,6 +11,8 @@ let settings: AppSettings = {
   selectedAiModel: 'gpt-4.1-nano',
   selectedOpenAiModel: 'gpt-4.1-nano',
   selectedOpenRouterModel: 'openai/gpt-5.2',
+  selectedCommandOpenAiModel: 'gpt-4.1-nano',
+  selectedCommandOpenRouterModel: 'openai/gpt-5.2',
   aiReasoningEffort: 'none',
   openaiModel: 'gpt-4.1-nano',
   developerPrompt: '',
@@ -79,6 +81,20 @@ export function setSettings(newSettings: AppSettings) {
     newSettings.aiProvider === 'openrouter'
       ? newSettings.selectedOpenRouterModel
       : newSettings.selectedOpenAiModel
+
+  if (!newSettings.selectedCommandOpenAiModel) {
+    newSettings.selectedCommandOpenAiModel =
+      newSettings.aiProvider === 'openai'
+        ? newSettings.selectedAiModel || newSettings.selectedOpenAiModel
+        : newSettings.selectedOpenAiModel || newSettings.openaiModel || 'gpt-4.1-nano'
+  }
+
+  if (!newSettings.selectedCommandOpenRouterModel) {
+    newSettings.selectedCommandOpenRouterModel =
+      newSettings.aiProvider === 'openrouter'
+        ? newSettings.selectedAiModel || newSettings.selectedOpenRouterModel
+        : newSettings.selectedOpenRouterModel || 'openai/gpt-5.2'
+  }
 
   if (!newSettings.aiReasoningEffort) {
     newSettings.aiReasoningEffort = 'none'

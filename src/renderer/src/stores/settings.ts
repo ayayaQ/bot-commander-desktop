@@ -15,6 +15,8 @@ export const settingsStore = writable<AppSettings>({
   selectedAiModel: 'gpt-4.1-nano',
   selectedOpenAiModel: 'gpt-4.1-nano',
   selectedOpenRouterModel: 'openai/gpt-5.2',
+  selectedCommandOpenAiModel: 'gpt-4.1-nano',
+  selectedCommandOpenRouterModel: 'openai/gpt-5.2',
   aiReasoningEffort: 'none',
   openaiModel: 'gpt-4.1-nano',
   developerPrompt: '',
@@ -69,5 +71,35 @@ export function withSelectedModelForProvider(
     selectedOpenAiModel: model,
     selectedAiModel: model,
     openaiModel: model
+  }
+}
+
+export function getSelectedCommandModelForProvider(
+  settings: AppSettings,
+  provider: AiProvider = settings.aiProvider || 'openai'
+): string {
+  if (provider === 'openrouter') {
+    return (
+      settings.selectedCommandOpenRouterModel || getSelectedModelForProvider(settings, provider)
+    )
+  }
+  return settings.selectedCommandOpenAiModel || getSelectedModelForProvider(settings, provider)
+}
+
+export function withSelectedCommandModelForProvider(
+  settings: AppSettings,
+  provider: AiProvider,
+  model: string
+): AppSettings {
+  if (provider === 'openrouter') {
+    return {
+      ...settings,
+      selectedCommandOpenRouterModel: model
+    }
+  }
+
+  return {
+    ...settings,
+    selectedCommandOpenAiModel: model
   }
 }
