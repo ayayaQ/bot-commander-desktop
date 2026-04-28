@@ -12,13 +12,13 @@ export const settingsStore = writable<AppSettings>({
   aiProvider: 'openai',
   openaiApiKey: '',
   openrouterApiKey: '',
-  selectedAiModel: 'gpt-4.1-nano',
-  selectedOpenAiModel: 'gpt-4.1-nano',
-  selectedOpenRouterModel: 'openai/gpt-5.2',
-  selectedCommandOpenAiModel: 'gpt-4.1-nano',
-  selectedCommandOpenRouterModel: 'openai/gpt-5.2',
+  selectedAiModel: 'gpt-5.4-nano',
+  selectedOpenAiModel: 'gpt-5.4-nano',
+  selectedOpenRouterModel: 'openai/gpt-5.4-nano',
+  selectedCommandOpenAiModel: 'gpt-5.4-nano',
+  selectedCommandOpenRouterModel: 'openai/gpt-5.4-nano',
   aiReasoningEffort: 'none',
-  openaiModel: 'gpt-4.1-nano',
+  openaiModel: 'gpt-5.4-nano',
   developerPrompt: '',
   useCustomApi: false,
   useLegacyInterpreter: false,
@@ -41,13 +41,13 @@ export function getSelectedModelForProvider(
   provider: AiProvider = settings.aiProvider || 'openai'
 ): string {
   if (provider === 'openrouter') {
-    return settings.selectedOpenRouterModel || settings.selectedAiModel || 'openai/gpt-5.2'
+    return settings.selectedOpenRouterModel || settings.selectedAiModel || 'openai/gpt-5.4-nano'
   }
   return (
     settings.selectedOpenAiModel ||
     settings.selectedAiModel ||
     settings.openaiModel ||
-    'gpt-4.1-nano'
+    'gpt-5.4-nano'
   )
 }
 

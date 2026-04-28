@@ -8,13 +8,13 @@ let settings: AppSettings = {
   aiProvider: 'openai',
   openaiApiKey: '',
   openrouterApiKey: '',
-  selectedAiModel: 'gpt-4.1-nano',
-  selectedOpenAiModel: 'gpt-4.1-nano',
-  selectedOpenRouterModel: 'openai/gpt-5.2',
-  selectedCommandOpenAiModel: 'gpt-4.1-nano',
-  selectedCommandOpenRouterModel: 'openai/gpt-5.2',
+  selectedAiModel: 'gpt-5.4-nano',
+  selectedOpenAiModel: 'gpt-5.4-nano',
+  selectedOpenRouterModel: 'openai/gpt-5.4-nano',
+  selectedCommandOpenAiModel: 'gpt-5.4-nano',
+  selectedCommandOpenRouterModel: 'openai/gpt-5.4-nano',
   aiReasoningEffort: 'none',
-  openaiModel: 'gpt-4.1-nano',
+  openaiModel: 'gpt-5.4-nano',
   developerPrompt: '',
   useCustomApi: false,
   useLegacyInterpreter: false, // Default to new interpreter
@@ -56,7 +56,7 @@ export function setSettings(newSettings: AppSettings) {
   }
 
   if (!newSettings.openaiModel) {
-    newSettings.openaiModel = 'gpt-4.1-nano'
+    newSettings.openaiModel = 'gpt-5.4-nano'
   }
 
   if (!newSettings.selectedAiModel) {
@@ -67,14 +67,14 @@ export function setSettings(newSettings: AppSettings) {
     newSettings.selectedOpenAiModel =
       newSettings.aiProvider === 'openai'
         ? newSettings.selectedAiModel || newSettings.openaiModel
-        : newSettings.openaiModel || 'gpt-4.1-nano'
+        : newSettings.openaiModel || 'gpt-5.4-nano'
   }
 
   if (!newSettings.selectedOpenRouterModel) {
     newSettings.selectedOpenRouterModel =
       newSettings.aiProvider === 'openrouter'
-        ? newSettings.selectedAiModel || 'openai/gpt-5.2'
-        : 'openai/gpt-5.2'
+        ? newSettings.selectedAiModel || 'openai/gpt-5.4-nano'
+        : 'openai/gpt-5.4-nano'
   }
 
   newSettings.selectedAiModel =
@@ -86,14 +86,14 @@ export function setSettings(newSettings: AppSettings) {
     newSettings.selectedCommandOpenAiModel =
       newSettings.aiProvider === 'openai'
         ? newSettings.selectedAiModel || newSettings.selectedOpenAiModel
-        : newSettings.selectedOpenAiModel || newSettings.openaiModel || 'gpt-4.1-nano'
+        : newSettings.selectedOpenAiModel || newSettings.openaiModel || 'gpt-5.4-nano'
   }
 
   if (!newSettings.selectedCommandOpenRouterModel) {
     newSettings.selectedCommandOpenRouterModel =
       newSettings.aiProvider === 'openrouter'
         ? newSettings.selectedAiModel || newSettings.selectedOpenRouterModel
-        : newSettings.selectedOpenRouterModel || 'openai/gpt-5.2'
+        : newSettings.selectedOpenRouterModel || 'openai/gpt-5.4-nano'
   }
 
   if (!newSettings.aiReasoningEffort) {

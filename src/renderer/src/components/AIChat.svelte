@@ -625,8 +625,8 @@
                 provider={$settingsStore.aiProvider || 'openai'}
                 title="Select assistant model"
                 placeholder={$settingsStore.aiProvider === 'openrouter'
-                  ? 'openai/gpt-5.2'
-                  : 'gpt-4.1-nano'}
+                  ? 'openai/gpt-5.4-nano'
+                  : 'gpt-5.4-nano'}
                 disabled={isLoadingModels}
                 error={modelFetchError}
                 isLoading={isLoadingModels}

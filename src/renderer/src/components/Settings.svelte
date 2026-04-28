@@ -17,7 +17,7 @@
   let aiProvider: 'openai' | 'openrouter' = $state('openai')
   let openaiApiKey: string = $state()
   let openrouterApiKey: string = $state('')
-  let selectedAiModel: string = $state('gpt-4.1-nano')
+  let selectedAiModel: string = $state('gpt-5.4-nano')
   let aiReasoningEffort: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' = $state('none')
   let developerPrompt: string = $state()
   let useCustomApi: boolean = $state()
@@ -283,7 +283,7 @@
       models={aiModels}
       provider={aiProvider}
       title="Select $chat model"
-      placeholder={aiProvider === 'openrouter' ? 'openai/gpt-5.2' : 'gpt-4.1-nano'}
+      placeholder={aiProvider === 'openrouter' ? 'openai/gpt-5.4-nano' : 'gpt-5.4-nano'}
       error={modelFetchError}
       isLoading={isLoadingModels}
       onRefresh={refreshAiModels}

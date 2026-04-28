@@ -474,7 +474,7 @@ export async function executeAiCommandChat(
   }
 
   const selection = parseModelSelection(
-    payload.model || getSelectedAiModel(settings) || settings.openaiModel || 'gpt-4.1-nano'
+    payload.model || getSelectedAiModel(settings) || settings.openaiModel || 'gpt-5.4-nano'
   )
   const modelId = selection.modelId
   // Use reasoning if model selection requests it, unless globally disabled

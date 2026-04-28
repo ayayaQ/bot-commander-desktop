@@ -48,24 +48,26 @@
   let isOpen = $state(false)
   let query = $state('')
   let customModel = $state('')
+  let freeOnly = $state(false)
 
   let selectedModel = $derived(models.find((model) => model.id === value))
   let filteredModels = $derived(
-    models.filter((model) => {
+    models
+      .map((model, index) => ({ model, index, score: modelMatchScore(model, query) }))
+      .filter(({ model, score }) => {
       const q = query.trim().toLowerCase()
-      if (!q) return true
-      return (
-        model.id.toLowerCase().includes(q) ||
-        (model.name || '').toLowerCase().includes(q) ||
-        (model.description || '').toLowerCase().includes(q)
-      )
-    })
+        if (freeOnly && !isFreeModel(model)) return false
+        return !q || score < Number.MAX_SAFE_INTEGER
+      })
+      .sort((a, b) => a.score - b.score || a.index - b.index)
+      .map(({ model }) => model)
   )
 
   function openModal() {
     if (disabled) return
     customModel = value
     query = ''
+    freeOnly = false
     isOpen = true
   }
 
@@ -122,6 +124,46 @@
     if (reasoning) parts.push(`${reasoning} reasoning`)
     return parts.length > 0 ? parts.join(' · ') : null
   }
+
+  function numericPrice(value: string | undefined): number | null {
+    if (value == null || value === '') return null
+    const numeric = Number(value)
+    return Number.isFinite(numeric) ? numeric : null
+  }
+
+  function isFreeModel(model: ModelOption): boolean {
+    if (model.id.toLowerCase().endsWith(':free')) return true
+    if (!model.pricing) return false
+    const prices = [
+      model.pricing.prompt,
+      model.pricing.completion,
+      model.pricing.request,
+      model.pricing.image,
+      model.pricing.webSearch,
+      model.pricing.internalReasoning,
+      model.pricing.inputCacheRead,
+      model.pricing.inputCacheWrite
+    ].map(numericPrice).filter((price): price is number => price !== null)
+    return prices.length > 0 && prices.every((price) => price === 0)
+  }
+
+  function modelMatchScore(model: ModelOption, search: string): number {
+    const q = search.trim().toLowerCase()
+    if (!q) return 0
+
+    const id = model.id.toLowerCase()
+    const name = (model.name || '').toLowerCase()
+    const description = (model.description || '').toLowerCase()
+
+    if (id === q || name === q) return 0
+    if (id.startsWith(q)) return 1
+    if (name.startsWith(q)) return 2
+    if (id.includes(`/${q}`) || id.includes(`-${q}`) || id.includes(`:${q}`)) return 3
+    if (id.includes(q)) return 4
+    if (name.includes(q)) return 5
+    if (description.includes(q)) return 6
+    return Number.MAX_SAFE_INTEGER
+  }
 </script>
 
 <button type="button" class={buttonClass} onclick={openModal} {disabled}>
@@ -156,6 +198,11 @@
           bind:value={query}
           placeholder="Search models..."
         />
+
+        <label class="label cursor-pointer justify-start gap-3 px-1">
+          <input type="checkbox" class="checkbox checkbox-sm" bind:checked={freeOnly} />
+          <span class="label-text">Free models only</span>
+        </label>
 
         {#if error}
           <div class="alert alert-warning text-sm">

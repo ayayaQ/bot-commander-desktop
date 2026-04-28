@@ -49,6 +49,11 @@ export const AI_MODELS: AIModel[] = [
     description: 'Fast and efficient',
     maxTokens: 128000
   },
+  {
+    id: 'gpt-5.4-nano',
+    name: 'GPT-5.4 Nano',
+    description: 'Default fast model'
+  },
   { id: 'gpt-5.1', name: 'GPT-5.1', description: 'Next-gen model' },
   { id: 'gpt-5.2', name: 'GPT-5.2', description: 'Latest model' }
 ]
@@ -72,7 +77,7 @@ export function parseModelSelection(selectionId: string): {
 // Chat state
 export const chatMessages = writable<ChatMessage[]>([])
 export const isAiLoading = writable<boolean>(false)
-export const selectedModel = writable<string>('gpt-4.1-nano')
+export const selectedModel = writable<string>('gpt-5.4-nano')
 export const selectedReasoningEffort = writable<
   'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 >('none')

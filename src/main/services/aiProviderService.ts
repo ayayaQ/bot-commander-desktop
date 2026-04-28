@@ -69,10 +69,10 @@ export function getAiProvider(settings: AiRuntimeSettings): AiProvider {
 
 export function getSelectedAiModel(settings: AiRuntimeSettings): string {
   if (getAiProvider(settings) === 'openrouter') {
-    return settings.selectedOpenRouterModel || settings.selectedAiModel || 'openai/gpt-5.2'
+    return settings.selectedOpenRouterModel || settings.selectedAiModel || 'openai/gpt-5.4-nano'
   }
   if (settings.selectedOpenAiModel) return settings.selectedOpenAiModel
-  return settings.selectedAiModel || settings.openaiModel || 'gpt-4.1-nano'
+  return settings.selectedAiModel || settings.openaiModel || 'gpt-5.4-nano'
 }
 
 export function getProviderApiKey(settings: AiRuntimeSettings): string {
