@@ -91,6 +91,57 @@ function isChatsData(value: unknown): value is ChatsData {
   )
 }
 
+function findFirstCompleteJsonObjectEnd(data: string): number {
+  let depth = 0
+  let inString = false
+  let escaped = false
+
+  for (let i = 0; i < data.length; i++) {
+    const char = data[i]
+
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === '"') {
+        inString = false
+      }
+      continue
+    }
+
+    if (char === '"') {
+      inString = true
+    } else if (char === '{') {
+      depth++
+    } else if (char === '}') {
+      depth--
+      if (depth === 0) return i + 1
+    }
+  }
+
+  return -1
+}
+
+function parseChatsData(data: string): ChatsData {
+  const parsed = JSON.parse(data)
+  if (!isChatsData(parsed)) {
+    throw new Error('Invalid chats data shape')
+  }
+  return parsed
+}
+
+function recoverChatsDataWithTrailingGarbage(data: string): ChatsData | null {
+  const objectEnd = findFirstCompleteJsonObjectEnd(data)
+  if (objectEnd === -1 || !data.slice(objectEnd).trim()) return null
+
+  try {
+    return parseChatsData(data.slice(0, objectEnd))
+  } catch {
+    return null
+  }
+}
+
 async function backupCorruptChatsFile(path: string): Promise<string | null> {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
   const backupPath = `${path}.corrupt-${timestamp}`
@@ -108,11 +159,10 @@ export async function loadChats(): Promise<ChatsData> {
   const path = getChatsPath()
   try {
     const data = await fs.readFile(path, 'utf-8')
-    const parsed = JSON.parse(data)
-    if (!isChatsData(parsed)) {
-      throw new Error('Invalid chats data shape')
+    if (!data.trim()) {
+      throw new Error('Empty chats data')
     }
-    chatsData = parsed
+    chatsData = parseChatsData(data)
     return chatsData
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -123,6 +173,19 @@ export async function loadChats(): Promise<ChatsData> {
     }
 
     const backupPath = await backupCorruptChatsFile(path)
+    if (error instanceof SyntaxError) {
+      const data = await fs.readFile(path, 'utf-8').catch(() => '')
+      const recovered = recoverChatsDataWithTrailingGarbage(data)
+      if (recovered) {
+        chatsData = recovered
+        await saveChats()
+        console.warn(
+          `Recovered chats from valid JSON prefix${backupPath ? ` after backup to ${backupPath}` : ''}.`
+        )
+        return chatsData
+      }
+    }
+
     console.error(
       `Error loading chats. Resetting chat history${backupPath ? ` after backup to ${backupPath}` : ''}:`,
       error
@@ -136,7 +199,9 @@ export async function loadChats(): Promise<ChatsData> {
 export async function saveChats(): Promise<void> {
   const path = getChatsPath()
   try {
-    await fs.writeFile(path, JSON.stringify(chatsData, null, 2))
+    const tempPath = `${path}.tmp`
+    await fs.writeFile(tempPath, JSON.stringify(chatsData, null, 2))
+    await fs.rename(tempPath, path)
   } catch (error) {
     console.error('Error saving chats:', error)
     throw error

@@ -76,18 +76,29 @@ export class Stats {
   async saveToFile(filePath: string): Promise<void> {
     this.updateTimeSpentInApp()
     const data = JSON.stringify(this, null, 2)
-    await fs.writeFile(filePath, data, 'utf-8')
+    const tempPath = `${filePath}.tmp`
+    await fs.writeFile(tempPath, data, 'utf-8')
+    await fs.rename(tempPath, filePath)
   }
 
   async loadFromFile(filePath: string): Promise<void> {
     try {
       const data = await fs.readFile(filePath, 'utf-8')
+      if (!data.trim()) {
+        console.warn('Stats file is empty. Starting with default values.')
+        return
+      }
+
       const parsedData = JSON.parse(data)
       Object.assign(this, parsedData)
       this.lastUpdateTime = Date.now() // Reset the last update time
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         console.log('Stats file not found. Starting with default values.')
+      } else if (error instanceof SyntaxError) {
+        const corruptPath = `${filePath}.corrupt-${Date.now()}`
+        await fs.rename(filePath, corruptPath).catch(() => {})
+        console.warn(`Stats file was invalid JSON. Backed it up to ${corruptPath}.`)
       } else {
         throw error
       }
