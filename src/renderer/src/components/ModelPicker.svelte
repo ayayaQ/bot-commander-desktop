@@ -4,7 +4,10 @@
     name?: string
     description?: string
     contextLength?: number
+    supportedParameters?: string[]
+    outputModalities?: string[]
     supportsStructuredOutputs?: boolean
+    supportsReasoning?: boolean
     pricing?: {
       prompt?: string
       completion?: string
@@ -55,7 +58,7 @@
     models
       .map((model, index) => ({ model, index, score: modelMatchScore(model, query) }))
       .filter(({ model, score }) => {
-      const q = query.trim().toLowerCase()
+        const q = query.trim().toLowerCase()
         if (freeOnly && !isFreeModel(model)) return false
         return !q || score < Number.MAX_SAFE_INTEGER
       })
@@ -67,7 +70,7 @@
     if (disabled) return
     customModel = value
     query = ''
-    freeOnly = false
+    freeOnly = provider === 'openrouter' ? freeOnly : false
     isOpen = true
   }
 
@@ -100,6 +103,9 @@
   function secondaryLabel(model: ModelOption): string {
     const details = [model.id]
     if (model.contextLength) details.push(`${model.contextLength.toLocaleString()} ctx`)
+    if (model.outputModalities?.length) {
+      details.push(model.outputModalities.join('+'))
+    }
     return details.join(' · ')
   }
 
@@ -143,7 +149,9 @@
       model.pricing.internalReasoning,
       model.pricing.inputCacheRead,
       model.pricing.inputCacheWrite
-    ].map(numericPrice).filter((price): price is number => price !== null)
+    ]
+      .map(numericPrice)
+      .filter((price): price is number => price !== null)
     return prices.length > 0 && prices.every((price) => price === 0)
   }
 
@@ -177,7 +185,9 @@
       <div class="p-4 border-b border-base-300 flex items-center justify-between gap-3">
         <div class="min-w-0">
           <h3 class="font-bold text-lg">{title}</h3>
-          <p class="text-xs opacity-70 truncate">{provider === 'openrouter' ? 'OpenRouter' : 'OpenAI'} · Current: {value || 'None'}</p>
+          <p class="text-xs opacity-70 truncate">
+            {provider === 'openrouter' ? 'OpenRouter' : 'OpenAI'} · Current: {value || 'None'}
+          </p>
         </div>
         <div class="flex items-center gap-2">
           {#if onRefresh}
@@ -199,10 +209,12 @@
           placeholder="Search models..."
         />
 
-        <label class="label cursor-pointer justify-start gap-3 px-1">
-          <input type="checkbox" class="checkbox checkbox-sm" bind:checked={freeOnly} />
-          <span class="label-text">Free models only</span>
-        </label>
+        {#if provider === 'openrouter'}
+          <label class="label cursor-pointer justify-start gap-3 px-1">
+            <input type="checkbox" class="checkbox checkbox-sm" bind:checked={freeOnly} />
+            <span class="label-text">Free models only</span>
+          </label>
+        {/if}
 
         {#if error}
           <div class="alert alert-warning text-sm">
@@ -261,6 +273,9 @@
                   {#if provider === 'openrouter' && model.supportsStructuredOutputs === false}
                     <span class="badge badge-warning badge-sm shrink-0">JSON?</span>
                   {/if}
+                  {#if model.supportsReasoning}
+                    <span class="badge badge-info badge-sm shrink-0">Reasoning</span>
+                  {/if}
                 </div>
               </button>
             {/each}
@@ -272,12 +287,10 @@
           <input
             class="input input-bordered flex-1"
             bind:value={customModel}
-            placeholder={placeholder}
+            {placeholder}
             onkeydown={handleCustomKeydown}
           />
-          <button type="button" class="btn btn-primary" onclick={chooseCustomModel}>
-            Use
-          </button>
+          <button type="button" class="btn btn-primary" onclick={chooseCustomModel}> Use </button>
         </div>
       </div>
     </div>

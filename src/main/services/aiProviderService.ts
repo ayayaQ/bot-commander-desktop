@@ -18,7 +18,10 @@ export interface AiModelInfo {
   name: string
   description?: string
   contextLength?: number
+  supportedParameters?: string[]
+  outputModalities?: string[]
   supportsStructuredOutputs?: boolean
+  supportsReasoning?: boolean
   pricing?: {
     prompt?: string
     completion?: string
@@ -37,31 +40,185 @@ export interface AiChatMessage {
 }
 
 interface OpenRouterModelsResponse {
-  data?: Array<{
-    id: string
-    name?: string
-    description?: string
-    context_length?: number
-    supported_parameters?: string[]
-    pricing?: {
-      prompt?: string
-      completion?: string
-      request?: string
-      image?: string
-      web_search?: string
-      internal_reasoning?: string
-      input_cache_read?: string
-      input_cache_write?: string
-    }
-    architecture?: {
-      output_modalities?: string[]
-    }
-  }>
+  data?: OpenRouterModel[]
+}
+
+interface OpenRouterModel {
+  id: string
+  name?: string
+  description?: string
+  context_length?: number
+  supported_parameters?: string[]
+  pricing?: {
+    prompt?: string
+    completion?: string
+    request?: string
+    image?: string
+    web_search?: string
+    internal_reasoning?: string
+    input_cache_read?: string
+    input_cache_write?: string
+  }
+  architecture?: {
+    output_modalities?: string[]
+  }
+}
+
+interface OpenRouterErrorResponse {
+  error?: {
+    code?: number | string
+    message?: string
+    metadata?: Record<string, unknown>
+  }
+  message?: string
 }
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
 const APP_REFERER = 'https://github.com/ayayaQ/bot-commander-desktop'
 const APP_TITLE = 'Bot Commander for Discord'
+const OPENAI_TEXT_MODEL_PREFIXES = [/^gpt-/, /^o\d/, /^chatgpt-/]
+const OPENAI_NON_TEXT_MODEL_PATTERNS = [
+  /^o\d/,
+  /(^|[-/])audio($|[-/])/,
+  /(^|[-/])realtime($|[-/])/,
+  /(^|[-/])search($|[-/])/,
+  /(^|[-/])pro($|[-/])/,
+  /(^|[-/])transcribe($|[-/])/,
+  /(^|[-/])tts($|[-/])/,
+  /(^|[-/])image($|[-/])/,
+  /^gpt-image/,
+  /^dall-e/,
+  /^tts-/,
+  /^whisper-/
+]
+const OPENAI_REASONING_MODEL_PREFIXES = [/^gpt-5(?:\.|-|$)/, /^o\d/]
+
+function includesOpenRouterParameter(model: OpenRouterModel, parameter: string): boolean {
+  return model.supported_parameters?.includes(parameter) === true
+}
+
+function hasTextOutput(model: OpenRouterModel): boolean {
+  const outputModalities = model.architecture?.output_modalities
+  return !outputModalities || outputModalities.length === 0 || outputModalities.includes('text')
+}
+
+function toAiModelInfo(model: OpenRouterModel): AiModelInfo {
+  const supportsStructuredOutputs =
+    includesOpenRouterParameter(model, 'response_format') ||
+    includesOpenRouterParameter(model, 'structured_outputs')
+
+  return {
+    id: model.id,
+    name: model.name || model.id,
+    description: model.description,
+    contextLength: model.context_length,
+    supportedParameters: model.supported_parameters || [],
+    outputModalities: model.architecture?.output_modalities || [],
+    supportsStructuredOutputs,
+    supportsReasoning:
+      includesOpenRouterParameter(model, 'reasoning') ||
+      includesOpenRouterParameter(model, 'include_reasoning'),
+    pricing: model.pricing
+      ? {
+          prompt: model.pricing.prompt,
+          completion: model.pricing.completion,
+          request: model.pricing.request,
+          image: model.pricing.image,
+          webSearch: model.pricing.web_search,
+          internalReasoning: model.pricing.internal_reasoning,
+          inputCacheRead: model.pricing.input_cache_read,
+          inputCacheWrite: model.pricing.input_cache_write
+        }
+      : undefined
+  }
+}
+
+function isOpenAiTextGenerationModel(id: string): boolean {
+  return (
+    OPENAI_TEXT_MODEL_PREFIXES.some((pattern) => pattern.test(id)) &&
+    !OPENAI_NON_TEXT_MODEL_PATTERNS.some((pattern) => pattern.test(id))
+  )
+}
+
+function openAiModelSupportsReasoning(id: string): boolean {
+  return OPENAI_REASONING_MODEL_PREFIXES.some((pattern) => pattern.test(id))
+}
+
+function toOpenAiModelInfo(id: string): AiModelInfo {
+  const supportsReasoning = openAiModelSupportsReasoning(id)
+  return {
+    id,
+    name: id,
+    outputModalities: ['text'],
+    supportsReasoning,
+    supportsStructuredOutputs: true,
+    supportedParameters: supportsReasoning
+      ? ['reasoning_effort', 'response_format']
+      : ['response_format']
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function formatOpenRouterMetadata(metadata: Record<string, unknown> | undefined): string[] {
+  if (!metadata) return []
+  const details: string[] = []
+  const providerName = metadata.provider_name
+  const modelSlug = metadata.model_slug
+  const reasons = metadata.reasons
+  const flaggedInput = metadata.flagged_input
+  const raw = metadata.raw
+
+  if (typeof providerName === 'string' && providerName) details.push(`Provider: ${providerName}`)
+  if (typeof modelSlug === 'string' && modelSlug) details.push(`Model: ${modelSlug}`)
+  if (Array.isArray(reasons) && reasons.length > 0) {
+    details.push(`Reasons: ${reasons.map(String).join(', ')}`)
+  }
+  if (typeof flaggedInput === 'string' && flaggedInput) {
+    details.push(`Flagged input: ${flaggedInput}`)
+  }
+  if (raw !== undefined) {
+    details.push(`Provider detail: ${typeof raw === 'string' ? raw : JSON.stringify(raw)}`)
+  }
+
+  return details
+}
+
+function formatOpenRouterError(
+  body: string,
+  status?: number,
+  retryAfter?: string | null,
+  fallbackMessage = body
+): string {
+  try {
+    const json = JSON.parse(body) as OpenRouterErrorResponse
+    const error = json.error
+    const message = error?.message || json.message || fallbackMessage
+    const code = error?.code ?? status
+    const details = [
+      code ? `Code: ${code}` : null,
+      retryAfter ? `Retry after: ${retryAfter}s` : null,
+      ...formatOpenRouterMetadata(isRecord(error?.metadata) ? error.metadata : undefined)
+    ].filter((detail): detail is string => Boolean(detail))
+
+    return details.length > 0 ? `${message} (${details.join('; ')})` : message
+  } catch {
+    return fallbackMessage
+  }
+}
+
+function formatOpenRouterChoiceError(choice: any): string | null {
+  const error = choice?.error
+  if (!error) return null
+  const message = error.message || JSON.stringify(error)
+  const details = [
+    error.code ? `Code: ${error.code}` : null,
+    ...formatOpenRouterMetadata(isRecord(error.metadata) ? error.metadata : undefined)
+  ].filter((detail): detail is string => Boolean(detail))
+  return details.length > 0 ? `${message} (${details.join('; ')})` : message
+}
 
 export function getAiProvider(settings: AiRuntimeSettings): AiProvider {
   return settings.aiProvider === 'openrouter' ? 'openrouter' : 'openai'
@@ -98,34 +255,23 @@ export function validateAiConfiguration(settings: AiRuntimeSettings): string | n
 
 export async function fetchAiModels(provider: AiProvider, apiKey?: string): Promise<AiModelInfo[]> {
   if (provider === 'openrouter') {
-    const response = await fetch(`${OPENROUTER_BASE_URL}/models?output_modalities=text`, {
+    const params = new URLSearchParams({ output_modalities: 'text' })
+    const response = await fetch(`${OPENROUTER_BASE_URL}/models?${params.toString()}`, {
       headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined
     })
     if (!response.ok) {
-      throw new Error(`OpenRouter models request failed (${response.status})`)
+      const errorText = formatOpenRouterError(
+        await response.text(),
+        response.status,
+        response.headers.get('Retry-After')
+      )
+      throw new Error(`OpenRouter models request failed (${response.status}): ${errorText}`)
     }
     const json = (await response.json()) as OpenRouterModelsResponse
-    return (json.data || []).map((model) => ({
-      id: model.id,
-      name: model.name || model.id,
-      description: model.description,
-      contextLength: model.context_length,
-      supportsStructuredOutputs:
-        model.supported_parameters?.includes('response_format') ||
-        model.supported_parameters?.includes('structured_outputs'),
-      pricing: model.pricing
-        ? {
-            prompt: model.pricing.prompt,
-            completion: model.pricing.completion,
-            request: model.pricing.request,
-            image: model.pricing.image,
-            webSearch: model.pricing.web_search,
-            internalReasoning: model.pricing.internal_reasoning,
-            inputCacheRead: model.pricing.input_cache_read,
-            inputCacheWrite: model.pricing.input_cache_write
-          }
-        : undefined
-    }))
+    return (json.data || [])
+      .filter((model) => model.id && hasTextOutput(model))
+      .map(toAiModelInfo)
+      .sort((a, b) => a.name.localeCompare(b.name))
   }
 
   if (!apiKey) {
@@ -136,10 +282,10 @@ export async function fetchAiModels(provider: AiProvider, apiKey?: string): Prom
   const page = await openai.models.list()
   const ids = page.data
     .map((model) => model.id)
-    .filter((id) => /^(gpt-|o[0-9]|chatgpt-)/.test(id))
-    .sort()
+    .filter(isOpenAiTextGenerationModel)
+    .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
 
-  return ids.map((id) => ({ id, name: id }))
+  return ids.map(toOpenAiModelInfo)
 }
 
 export async function moderateTextWithOpenAI(
@@ -192,13 +338,28 @@ export async function createAiChatCompletion(
     })
 
     if (!response.ok) {
-      const errorText = await response.text()
+      const errorText = formatOpenRouterError(
+        await response.text(),
+        response.status,
+        response.headers.get('Retry-After')
+      )
       throw new Error(`OpenRouter API error (${response.status}): ${errorText}`)
     }
 
     const json = await response.json()
+    const choice = json.choices?.[0]
+    const choiceError = formatOpenRouterChoiceError(choice)
+    if (choiceError) {
+      throw new Error(`OpenRouter API error: ${choiceError}`)
+    }
+    const content = choice?.message?.content
+    if (typeof content !== 'string' || !content.trim()) {
+      throw new Error(
+        'OpenRouter response did not include text content. The provider may still be warming up; try again shortly or choose a different model.'
+      )
+    }
     return {
-      content: json.choices?.[0]?.message?.content ?? '',
+      content,
       tokenCount: json.usage?.total_tokens || 0
     }
   }

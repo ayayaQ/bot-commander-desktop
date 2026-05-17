@@ -10,6 +10,11 @@
   import HeaderBar from './HeaderBar.svelte'
   import ApiAuth from './ApiAuth.svelte'
   import ModelPicker from './ModelPicker.svelte'
+  import {
+    modelSupportsReasoning,
+    normalizeReasoningEffort,
+    type ReasoningEffort
+  } from '../utils/aiModelCapabilities'
 
   let selectedTheme: string = $state()
   let showToken: boolean = $state()
@@ -18,15 +23,18 @@
   let openaiApiKey: string = $state()
   let openrouterApiKey: string = $state('')
   let selectedAiModel: string = $state('gpt-5.4-nano')
-  let aiReasoningEffort: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' = $state('none')
+  let aiReasoningEffort: ReasoningEffort = $state('none')
   let developerPrompt: string = $state()
   let useCustomApi: boolean = $state()
   let useLegacyInterpreter: boolean = $state()
   let hideOutput: boolean = $state()
   let disableReasoningApi: boolean = $state()
-  let aiModels: Array<{ id: string; name: string; supportsStructuredOutputs?: boolean }> = $state(
-    []
-  )
+  let aiModels: Array<{
+    id: string
+    name: string
+    supportsStructuredOutputs?: boolean
+    supportsReasoning?: boolean
+  }> = $state([])
   let isLoadingModels = $state(false)
   let modelFetchError = $state('')
 
@@ -73,10 +81,20 @@
     if (!model) return
     selectedAiModel = model
     saveSettings(withSelectedModelForProvider($settingsStore, aiProvider, selectedAiModel))
+    reconcileReasoningSupport()
   }
 
   function updateReasoningEffort(event) {
-    aiReasoningEffort = event.target.value
+    aiReasoningEffort = normalizeReasoningEffort(
+      event.target.value as ReasoningEffort,
+      selectedModelSupportsReasoning
+    )
+    saveSettings({ ...$settingsStore, aiReasoningEffort })
+  }
+
+  function reconcileReasoningSupport() {
+    if (selectedModelSupportsReasoning || aiReasoningEffort === 'none') return
+    aiReasoningEffort = 'none'
     saveSettings({ ...$settingsStore, aiReasoningEffort })
   }
 
@@ -91,6 +109,7 @@
     modelFetchError = ''
     try {
       aiModels = await window.electron.ipcRenderer.invoke('fetch-ai-models')
+      reconcileReasoningSupport()
     } catch (error) {
       modelFetchError = error instanceof Error ? error.message : 'Failed to fetch models'
     } finally {
@@ -120,6 +139,10 @@
     const url = event.target.href
     window.electron.ipcRenderer.invoke('open-external-url', url)
   }
+
+  let selectedModelSupportsReasoning = $derived(
+    modelSupportsReasoning(aiProvider, selectedAiModel, aiModels)
+  )
 
   onMount(() => {
     selectedTheme = $settingsStore.theme
@@ -295,8 +318,16 @@
     <!-- svelte-ignore a11y_label_has_associated_control -->
     <label class="label">
       <span class="label-text">Reasoning for $chat</span>
+      {#if !selectedModelSupportsReasoning}
+        <span class="label-text-alt">Not supported by selected model</span>
+      {/if}
     </label>
-    <select class="select" value={aiReasoningEffort} onchange={updateReasoningEffort}>
+    <select
+      class="select"
+      value={aiReasoningEffort}
+      onchange={updateReasoningEffort}
+      disabled={!selectedModelSupportsReasoning}
+    >
       <option value="none">None</option>
       <option value="minimal">Minimal</option>
       <option value="low">Low</option>

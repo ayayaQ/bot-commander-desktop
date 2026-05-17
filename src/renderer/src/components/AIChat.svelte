@@ -12,6 +12,11 @@
   import ModelPicker from './ModelPicker.svelte'
   import type { BCFDCommand, ChatContext } from '../types/types'
   import {
+    modelSupportsReasoning,
+    normalizeReasoningEffort,
+    type ReasoningEffort
+  } from '../utils/aiModelCapabilities'
+  import {
     chatMessages,
     isAiLoading,
     selectedModel,
@@ -60,9 +65,12 @@
   let messagesContainer: HTMLDivElement = $state()
   let inputElement: HTMLTextAreaElement = $state()
   let cleanupStreamListeners: (() => void) | null = null
-  let aiModels: Array<{ id: string; name: string; supportsStructuredOutputs?: boolean }> = $state(
-    []
-  )
+  let aiModels: Array<{
+    id: string
+    name: string
+    supportsStructuredOutputs?: boolean
+    supportsReasoning?: boolean
+  }> = $state([])
   let isLoadingModels = $state(false)
   let modelFetchError = $state('')
   let activeRequestId: string | null = null
@@ -112,7 +120,12 @@
     activeRequestId = `ai_${Date.now()}_${Math.random().toString(36).slice(2)}`
 
     // Reset thinking state for thinking models
-    if (isThinkingModel($selectedModel) && $selectedReasoningEffort !== 'none') {
+    const effectiveReasoningEffort = normalizeReasoningEffort(
+      $selectedReasoningEffort,
+      selectedModelSupportsReasoning
+    )
+
+    if (isThinkingModel($selectedModel) && effectiveReasoningEffort !== 'none') {
       thinkingContent.set('')
       thinkingExpanded.set(true) // Expand while thinking
     }
@@ -136,7 +149,7 @@
         messages: conversationHistory,
         currentCommand: $state.snapshot(command),
         model: $selectedModel,
-        reasoningEffort: $selectedReasoningEffort,
+        reasoningEffort: effectiveReasoningEffort,
         requestId: activeRequestId,
         additionalContext: additionalContext
       })
@@ -254,10 +267,21 @@
     lastProviderModel = model
     selectedModel.set(model)
     saveSettings(withSelectedCommandModelForProvider($settingsStore, provider, model))
+    reconcileReasoningSupport()
   }
 
   function handleReasoningChange(event: Event) {
-    selectedReasoningEffort.set((event.target as HTMLSelectElement).value as any)
+    selectedReasoningEffort.set(
+      normalizeReasoningEffort(
+        (event.target as HTMLSelectElement).value as ReasoningEffort,
+        selectedModelSupportsReasoning
+      )
+    )
+  }
+
+  function reconcileReasoningSupport() {
+    if (selectedModelSupportsReasoning || $selectedReasoningEffort === 'none') return
+    selectedReasoningEffort.set('none')
   }
 
   async function refreshAiModels() {
@@ -270,6 +294,7 @@
     modelFetchError = ''
     try {
       aiModels = await window.electron.ipcRenderer.invoke('fetch-ai-models')
+      reconcileReasoningSupport()
     } catch (error) {
       modelFetchError = error instanceof Error ? error.message : 'Failed to fetch models'
     } finally {
@@ -383,6 +408,9 @@
     $settingsStore.aiProvider === 'openrouter'
       ? 'Add your OpenRouter API key and OpenAI moderation key in Settings to use the AI assistant.'
       : $t('openai-key-required')
+  )
+  let selectedModelSupportsReasoning = $derived(
+    modelSupportsReasoning($settingsStore.aiProvider || 'openai', $selectedModel, aiModels)
   )
 
   // Render markdown to HTML
@@ -638,11 +666,17 @@
           </span>
 
           <!-- Reasoning Picker -->
-          <span class="tooltip tooltip-primary tooltip-top" data-tip="Reasoning effort">
+          <span
+            class="tooltip tooltip-primary tooltip-top"
+            data-tip={selectedModelSupportsReasoning
+              ? 'Reasoning effort'
+              : 'Selected model does not support reasoning'}
+          >
             <select
               value={$selectedReasoningEffort}
               onchange={handleReasoningChange}
               class="select select-ghost select-sm w-32"
+              disabled={!selectedModelSupportsReasoning}
             >
               <option value="none">No reasoning</option>
               <option value="minimal">Minimal</option>
