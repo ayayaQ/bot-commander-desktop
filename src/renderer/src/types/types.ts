@@ -38,6 +38,8 @@ export type BCFDCommand = {
   cooldownMessage?: string // Custom BCFD template message when on cooldown
   channelMessageAsReply?: boolean // Send channel message as a reply to the triggering message
   channelEmbedAsReply?: boolean // Send channel embed as a reply to the triggering message
+  channelMessageTyping?: boolean // Show typing in the channel until the channel message is sent
+  channelEmbedTyping?: boolean // Show typing in the channel until the channel embed is sent
   channelWhitelist?: string // Comma-separated channel IDs; command only runs in these channels
   serverWhitelist?: string // Comma-separated guild IDs; command only runs in these servers
 }
@@ -93,6 +95,8 @@ export function validateBCFDCommand(jsonString: string): BCFDCommand | null {
       'cooldownMessage',
       'channelMessageAsReply',
       'channelEmbedAsReply',
+      'channelMessageTyping',
+      'channelEmbedTyping',
       'channelWhitelist',
       'serverWhitelist'
     ]

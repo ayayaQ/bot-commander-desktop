@@ -782,6 +782,10 @@
                           <span class="label-text">{$t('as-reply')}</span>
                         </label>
                       {/if}
+                      <label class="label cursor-pointer justify-start gap-2 mt-2">
+                        <input type="checkbox" class="toggle toggle-sm" bind:checked={editedCommand.channelMessageTyping} />
+                        <span class="label-text">{$t('show-typing')}</span>
+                      </label>
                     {:else if action.type === 'sendChannelEmbed'}
                       <div
                         class={actionErrors['sendChannelEmbed']
@@ -841,6 +845,10 @@
                           <span class="label-text">{$t('as-reply')}</span>
                         </label>
                       {/if}
+                      <label class="label cursor-pointer justify-start gap-2 mt-2">
+                        <input type="checkbox" class="toggle toggle-sm" bind:checked={editedCommand.channelEmbedTyping} />
+                        <span class="label-text">{$t('show-typing')}</span>
+                      </label>
                     {:else if action.type === 'sendPrivateMessage'}
                       <div
                         class={actionErrors['sendPrivateMessage']

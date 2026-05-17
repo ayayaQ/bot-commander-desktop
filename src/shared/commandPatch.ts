@@ -64,6 +64,8 @@ const fieldDefinitions: Record<string, FieldDefinition> = {
   isNSFW: { label: 'NSFW Only', kind: 'boolean' },
   channelMessageAsReply: { label: 'Channel Message as Reply', kind: 'boolean' },
   channelEmbedAsReply: { label: 'Channel Embed as Reply', kind: 'boolean' },
+  channelMessageTyping: { label: 'Channel Message Typing', kind: 'boolean' },
+  channelEmbedTyping: { label: 'Channel Embed Typing', kind: 'boolean' },
   cooldown: { label: 'Cooldown', kind: 'number' },
   cooldownType: { label: 'Cooldown Type', kind: 'string' },
   cooldownMessage: { label: 'Cooldown Message', kind: 'string' }

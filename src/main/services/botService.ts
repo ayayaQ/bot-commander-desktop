@@ -73,6 +73,33 @@ type GuildSendableChannel =
   | PublicThreadChannel<boolean>
   | PrivateThreadChannel
 
+type TypingCapableChannel = {
+  sendTyping: () => Promise<unknown>
+}
+
+function startTypingUntilStopped(channel: unknown, enabled?: boolean): () => void {
+  if (!enabled || !channel || typeof (channel as TypingCapableChannel).sendTyping !== 'function') {
+    return () => {}
+  }
+
+  const typingChannel = channel as TypingCapableChannel
+  let stopped = false
+
+  const sendTyping = () => {
+    if (!stopped) {
+      typingChannel.sendTyping().catch(() => {})
+    }
+  }
+
+  sendTyping()
+  const interval = setInterval(sendTyping, 8000)
+
+  return () => {
+    stopped = true
+    clearInterval(interval)
+  }
+}
+
 export function setCommands(newCommands: {
   bcfdCommands: BCFDCommand[]
   bcfdSlashCommands: BCFDSlashCommand[]
@@ -753,11 +780,20 @@ async function channelMessage(
   replyTarget?: OmitPartialGroupDMChannel<Message<boolean>>
 ): Promise<boolean> {
   if (command.actionArr[0]) {
-    const content = await stringInfoMethod()
-    if (command.channelMessageAsReply && replyTarget) {
-      replyTarget.reply(content)
-    } else {
-      channel.send(content)
+    const typingChannel = command.channelMessageAsReply && replyTarget ? replyTarget.channel : channel
+    const stopTyping = startTypingUntilStopped(typingChannel, command.channelMessageTyping)
+
+    try {
+      const content = await stringInfoMethod()
+      if (command.channelMessageAsReply && replyTarget) {
+        await replyTarget.reply(content)
+      } else {
+        await channel.send(content)
+      }
+    } catch (error) {
+      console.error('Error sending channel message:', error)
+    } finally {
+      stopTyping()
     }
   }
 
@@ -890,40 +926,49 @@ async function sendChannelEmbed(
   replyTarget?: OmitPartialGroupDMChannel<Message<boolean>>
 ): Promise<boolean> {
   if (command.sendChannelEmbed) {
+    const typingChannel = command.channelEmbedAsReply && replyTarget ? replyTarget.channel : channel
+    const stopTyping = startTypingUntilStopped(typingChannel, command.channelEmbedTyping)
+
     // builds an embed with our embed template
-    let embed = new EmbedBuilder()
+    try {
+      let embed = new EmbedBuilder()
 
-    if (command.channelEmbed.title != '') {
-      embed.setTitle(await stringInfoMethod(command.channelEmbed.title))
-    }
+      if (command.channelEmbed.title != '') {
+        embed.setTitle(await stringInfoMethod(command.channelEmbed.title))
+      }
 
-    if (command.channelEmbed.description != '') {
-      embed.setDescription(await stringInfoMethod(command.channelEmbed.description))
-    }
+      if (command.channelEmbed.description != '') {
+        embed.setDescription(await stringInfoMethod(command.channelEmbed.description))
+      }
 
-    if (command.channelEmbed.hexColor != '') {
-      // convert our hex color string to 'color'
-      let color = parseInt(await stringInfoMethod(command.channelEmbed.hexColor), 16)
-      embed.setColor(color)
-    }
+      if (command.channelEmbed.hexColor != '') {
+        // convert our hex color string to 'color'
+        let color = parseInt(await stringInfoMethod(command.channelEmbed.hexColor), 16)
+        embed.setColor(color)
+      }
 
-    if (command.channelEmbed.imageURL != '') {
-      embed.setImage(await stringInfoMethod(command.channelEmbed.imageURL))
-    }
+      if (command.channelEmbed.imageURL != '') {
+        embed.setImage(await stringInfoMethod(command.channelEmbed.imageURL))
+      }
 
-    if (command.channelEmbed.thumbnailURL != '') {
-      embed.setThumbnail(await stringInfoMethod(command.channelEmbed.thumbnailURL))
-    }
+      if (command.channelEmbed.thumbnailURL != '') {
+        embed.setThumbnail(await stringInfoMethod(command.channelEmbed.thumbnailURL))
+      }
 
-    if (command.channelEmbed.footer != '') {
-      embed.setFooter({ text: await stringInfoMethod(command.channelEmbed.footer) })
-    }
+      if (command.channelEmbed.footer != '') {
+        embed.setFooter({ text: await stringInfoMethod(command.channelEmbed.footer) })
+      }
 
-    // send the embed
-    if (command.channelEmbedAsReply && replyTarget) {
-      replyTarget.reply({ embeds: [embed] })
-    } else {
-      channel.send({ embeds: [embed] })
+      // send the embed
+      if (command.channelEmbedAsReply && replyTarget) {
+        await replyTarget.reply({ embeds: [embed] })
+      } else {
+        await channel.send({ embeds: [embed] })
+      }
+    } catch (error) {
+      console.error('Error sending channel embed:', error)
+    } finally {
+      stopTyping()
     }
   }
 
