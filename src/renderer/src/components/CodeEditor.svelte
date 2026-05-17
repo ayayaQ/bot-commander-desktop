@@ -72,6 +72,11 @@
     { name: 'tag', syntax: 'variable', description: 'User tag (e.g. User#1234)' },
     { name: 'id', syntax: 'variable', description: 'User ID' },
     { name: 'timeCreated', syntax: 'variable', description: 'User account creation time' },
+    {
+      name: 'timeCreatedDiscord',
+      syntax: 'variable',
+      description: 'User account creation time as Discord timestamp'
+    },
     { name: 'defaultavatar', syntax: 'variable', description: 'User default avatar URL' },
 
     // Member Context
@@ -81,6 +86,11 @@
     { name: 'memberID', syntax: 'variable', description: 'Member ID' },
     { name: 'memberHasTimeJoined', syntax: 'variable', description: 'Has member join time' },
     { name: 'memberTimeJoined', syntax: 'variable', description: 'Member join time' },
+    {
+      name: 'memberTimeJoinedDiscord',
+      syntax: 'variable',
+      description: 'Member join time as Discord timestamp'
+    },
     { name: 'memberEffectiveAvatar', syntax: 'variable', description: 'Member effective avatar' },
     { name: 'memberEffectiveTag', syntax: 'variable', description: 'Member effective tag' },
     { name: 'memberEffectiveID', syntax: 'variable', description: 'Member effective ID' },
@@ -90,11 +100,21 @@
       description: 'Member account creation time'
     },
     {
+      name: 'memberEffectiveTimeCreatedDiscord',
+      syntax: 'variable',
+      description: 'Member account creation time as Discord timestamp'
+    },
+    {
       name: 'memberEffectiveDefaultAvatar',
       syntax: 'variable',
       description: 'Member default avatar'
     },
     { name: 'memberTimeBoosted', syntax: 'variable', description: 'When member started boosting' },
+    {
+      name: 'memberTimeBoostedDiscord',
+      syntax: 'variable',
+      description: 'Member boost time as Discord timestamp'
+    },
     { name: 'memberHasBoosted', syntax: 'variable', description: 'Is member boosting' },
 
     // Bot Context
@@ -107,6 +127,11 @@
     { name: 'botNamePlain', syntax: 'variable', description: 'Bot display name' },
     { name: 'botID', syntax: 'variable', description: 'Bot user ID' },
     { name: 'botTimeCreated', syntax: 'variable', description: 'Bot account creation time' },
+    {
+      name: 'botTimeCreatedDiscord',
+      syntax: 'variable',
+      description: 'Bot account creation time as Discord timestamp'
+    },
     { name: 'botDefaultAvatar', syntax: 'variable', description: 'Bot default avatar URL' },
     { name: 'botDiscriminator', syntax: 'variable', description: 'Bot discriminator' },
     { name: 'botTag', syntax: 'variable', description: 'Bot tag' },
@@ -118,12 +143,22 @@
     { name: 'serverDescription', syntax: 'variable', description: 'Server description' },
     { name: 'serverSplash', syntax: 'variable', description: 'Server splash URL' },
     { name: 'serverCreateTime', syntax: 'variable', description: 'Server creation time' },
+    {
+      name: 'serverCreateTimeDiscord',
+      syntax: 'variable',
+      description: 'Server creation time as Discord timestamp'
+    },
     { name: 'memberCount', syntax: 'variable', description: 'Server member count' },
 
     // Channel Context
     { name: 'channel', syntax: 'variable', description: 'Channel name' },
     { name: 'channelID', syntax: 'variable', description: 'Channel ID' },
     { name: 'channelCreateDate', syntax: 'variable', description: 'Channel creation date' },
+    {
+      name: 'channelCreateDateDiscord',
+      syntax: 'variable',
+      description: 'Channel creation date as Discord timestamp'
+    },
     {
       name: 'channelAsMention',
       syntax: 'variable',
@@ -264,6 +299,11 @@
       syntax: 'variable',
       description: 'Mentioned user creation time'
     },
+    {
+      name: 'mentionedTimeCreatedDiscord',
+      syntax: 'variable',
+      description: 'Mentioned user creation time as Discord timestamp'
+    },
     { name: 'mentionedNamePlain', syntax: 'variable', description: 'Mentioned user display name' },
     {
       name: 'mentionedDefaultAvatar',
@@ -278,6 +318,11 @@
     { name: 'randomBoolean', syntax: 'variable', description: 'Random true/false' },
     { name: 'commandCount', syntax: 'variable', description: 'Number of BCFD commands' },
     { name: 'date', syntax: 'variable', description: 'Current date/time' },
+    {
+      name: 'dateDiscord',
+      syntax: 'variable',
+      description: 'Current date/time as Discord timestamp'
+    },
     { name: 'hours', syntax: 'variable', description: 'Current hour (00-23)' },
     { name: 'minutes', syntax: 'variable', description: 'Current minute (00-59)' },
     { name: 'seconds', syntax: 'variable', description: 'Current second (00-59)' },

@@ -65,6 +65,10 @@ async function resolveChannel(guild: Guild, channelID: string) {
   return guild.channels.cache.get(id) ?? (await guild.channels.fetch(id).catch(() => null))
 }
 
+function discordTimestampFromMillis(timestamp?: number | null): string {
+  return timestamp == null ? '' : `<t:${Math.floor(timestamp / 1000)}>`
+}
+
 // ============================================================================
 // Function Registry - All built-in functions
 // ============================================================================
@@ -89,6 +93,9 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('timeCreated', (_args, ctx) =>
     ctx.user ? new Date(ctx.user.createdTimestamp).toLocaleString() : ''
   )
+  registry.set('timeCreatedDiscord', (_args, ctx) =>
+    discordTimestampFromMillis(ctx.user?.createdTimestamp)
+  )
   registry.set('defaultavatar', (_args, ctx) => ctx.user?.defaultAvatarURL ?? '')
 
   // --------------------------------------------------------------------------
@@ -106,6 +113,9 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('memberTimeJoined', (_args, ctx) =>
     ctx.member?.joinedTimestamp != null ? new Date(ctx.member.joinedTimestamp).toLocaleString() : ''
   )
+  registry.set('memberTimeJoinedDiscord', (_args, ctx) =>
+    discordTimestampFromMillis(ctx.member?.joinedTimestamp)
+  )
   registry.set(
     'memberEffectiveAvatar',
     (_args, ctx) => ctx.member?.displayAvatarURL({}) ?? ctx.member?.user.defaultAvatarURL ?? ''
@@ -114,6 +124,9 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('memberEffectiveID', (_args, ctx) => ctx.member?.user.id ?? '')
   registry.set('memberEffectiveTimeCreated', (_args, ctx) =>
     ctx.member ? new Date(ctx.member.user.createdTimestamp).toLocaleString() : ''
+  )
+  registry.set('memberEffectiveTimeCreatedDiscord', (_args, ctx) =>
+    discordTimestampFromMillis(ctx.member?.user.createdTimestamp)
   )
   registry.set(
     'memberEffectiveDefaultAvatar',
@@ -124,16 +137,18 @@ function createFunctionRegistry(): FunctionRegistry {
       ? new Date(ctx.member.premiumSinceTimestamp).toLocaleString()
       : ''
   )
+  registry.set('memberTimeBoostedDiscord', (_args, ctx) =>
+    discordTimestampFromMillis(ctx.member?.premiumSinceTimestamp)
+  )
   registry.set('memberHasBoosted', (_args, ctx) =>
     (ctx.member?.premiumSinceTimestamp != null).toString()
   )
   registry.set('memberColor', (_args, ctx) => ctx.member?.displayHexColor ?? '')
-  registry.set('memberRoles', (_args, ctx) =>
-    ctx.member?.roles.cache.map((r) => r.name).join(', ') ?? ''
+  registry.set(
+    'memberRoles',
+    (_args, ctx) => ctx.member?.roles.cache.map((r) => r.name).join(', ') ?? ''
   )
-  registry.set('memberRoleCount', (_args, ctx) =>
-    ctx.member?.roles.cache.size.toString() ?? '0'
-  )
+  registry.set('memberRoleCount', (_args, ctx) => ctx.member?.roles.cache.size.toString() ?? '0')
 
   // --------------------------------------------------------------------------
   // Client/Bot Context Functions
@@ -159,6 +174,9 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('botTimeCreated', (_args, ctx) =>
     new Date(ctx.client?.user?.createdTimestamp ?? 0).toLocaleString()
   )
+  registry.set('botTimeCreatedDiscord', (_args, ctx) =>
+    discordTimestampFromMillis(ctx.client?.user?.createdTimestamp)
+  )
   registry.set('botDefaultAvatar', (_args, ctx) => ctx.client?.user?.defaultAvatarURL ?? '')
   registry.set('botDiscriminator', (_args, ctx) => ctx.client?.user?.discriminator ?? '')
   registry.set('botTag', (_args, ctx) => ctx.client?.user?.tag ?? '')
@@ -174,6 +192,9 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('serverCreateTime', (_args, ctx) =>
     new Date(ctx.guild?.createdTimestamp ?? 0).toLocaleString()
   )
+  registry.set('serverCreateTimeDiscord', (_args, ctx) =>
+    discordTimestampFromMillis(ctx.guild?.createdTimestamp)
+  )
   registry.set('memberCount', (_args, ctx) => ctx.guild?.memberCount.toString() ?? '')
   registry.set('serverID', (_args, ctx) => ctx.guild?.id ?? '')
   registry.set('serverOwner', async (_args, ctx) => {
@@ -186,12 +207,11 @@ function createFunctionRegistry(): FunctionRegistry {
     const owner = await ctx.guild.fetchOwner().catch(() => null)
     return owner?.user.displayName ?? ''
   })
-  registry.set('serverBoostCount', (_args, ctx) =>
-    ctx.guild?.premiumSubscriptionCount?.toString() ?? '0'
+  registry.set(
+    'serverBoostCount',
+    (_args, ctx) => ctx.guild?.premiumSubscriptionCount?.toString() ?? '0'
   )
-  registry.set('serverBoostTier', (_args, ctx) =>
-    ctx.guild?.premiumTier.toString() ?? '0'
-  )
+  registry.set('serverBoostTier', (_args, ctx) => ctx.guild?.premiumTier.toString() ?? '0')
   registry.set('serverVanityCode', (_args, ctx) => ctx.guild?.vanityURLCode ?? '')
 
   // --------------------------------------------------------------------------
@@ -202,10 +222,13 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('channelCreateDate', (_args, ctx) =>
     new Date(ctx.textChannel?.createdTimestamp ?? 0).toLocaleString()
   )
+  registry.set('channelCreateDateDiscord', (_args, ctx) =>
+    discordTimestampFromMillis(ctx.textChannel?.createdTimestamp)
+  )
   registry.set('channelAsMention', (_args, ctx) => `<#${ctx.textChannel?.id ?? ''}>`)
   registry.set('channelTopic', (_args, ctx) => {
     const ch = ctx.textChannel
-    return ch && 'topic' in ch ? (ch as any).topic ?? '' : ''
+    return ch && 'topic' in ch ? ((ch as any).topic ?? '') : ''
   })
   registry.set('channelIsNSFW', (_args, ctx) => {
     const ch = ctx.textChannel
@@ -262,7 +285,8 @@ function createFunctionRegistry(): FunctionRegistry {
     try {
       const channel = await resolveChannel(ctx.guild, channelID)
       if (!channel) return `[BCFD Error: cloneChannel channel not found]`
-      if (!('clone' in channel)) return '[BCFD Error: cloneChannel not supported on this channel type]'
+      if (!('clone' in channel))
+        return '[BCFD Error: cloneChannel not supported on this channel type]'
       const cloned = await (channel as any).clone()
       return cloned.id
     } catch (e) {
@@ -309,7 +333,8 @@ function createFunctionRegistry(): FunctionRegistry {
     try {
       const channel = await resolveChannel(ctx.guild, channelID)
       if (!channel) return '[BCFD Error: setChannelTopic channel not found]'
-      if (!('setTopic' in channel)) return '[BCFD Error: setChannelTopic not supported on this channel type]'
+      if (!('setTopic' in channel))
+        return '[BCFD Error: setChannelTopic not supported on this channel type]'
       await (channel as any).setTopic(topic)
       return 'true'
     } catch (e) {
@@ -322,11 +347,13 @@ function createFunctionRegistry(): FunctionRegistry {
     if (!ctx.guild) return '[BCFD Error: setChannelNSFW requires a guild context]'
     const channelID = args[0]?.trim()
     const enabled = args[1]?.trim()
-    if (!channelID || !enabled) return '[BCFD Error: setChannelNSFW requires a channel ID and true/false]'
+    if (!channelID || !enabled)
+      return '[BCFD Error: setChannelNSFW requires a channel ID and true/false]'
     try {
       const channel = await resolveChannel(ctx.guild, channelID)
       if (!channel) return '[BCFD Error: setChannelNSFW channel not found]'
-      if (!('setNSFW' in channel)) return '[BCFD Error: setChannelNSFW not supported on this channel type]'
+      if (!('setNSFW' in channel))
+        return '[BCFD Error: setChannelNSFW not supported on this channel type]'
       await (channel as any).setNSFW(enabled === 'true')
       return 'true'
     } catch (e) {
@@ -508,6 +535,9 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('mentionedTimeCreated', (_args, ctx) =>
     new Date(ctx.mentionedUser?.createdTimestamp ?? 0).toLocaleString()
   )
+  registry.set('mentionedTimeCreatedDiscord', (_args, ctx) =>
+    discordTimestampFromMillis(ctx.mentionedUser?.createdTimestamp)
+  )
   registry.set('mentionedNamePlain', (_args, ctx) => ctx.mentionedUser?.displayName ?? '')
   registry.set('mentionedDefaultAvatar', (_args, ctx) => ctx.mentionedUser?.defaultAvatarURL ?? '')
   registry.set('mentionedIsBot', (_args, ctx) => ctx.mentionedUser?.bot.toString() ?? '')
@@ -521,6 +551,7 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('randomBoolean', () => (Math.random() > 0.5).toString())
   registry.set('commandCount', () => getCommands().bcfdCommands.length.toString())
   registry.set('date', () => new Date().toLocaleString())
+  registry.set('dateDiscord', () => discordTimestampFromMillis(Date.now()))
   registry.set('hours', () => {
     const h = new Date().getHours()
     return (h < 10 ? '0' : '') + h.toString()
@@ -676,7 +707,8 @@ function createFunctionRegistry(): FunctionRegistry {
     const n = parseFloat(args[0] ?? '')
     const min = parseFloat(args[1] ?? '')
     const max = parseFloat(args[2] ?? '')
-    if (isNaN(n) || isNaN(min) || isNaN(max)) return '[BCFD Error: clamp requires numeric arguments]'
+    if (isNaN(n) || isNaN(min) || isNaN(max))
+      return '[BCFD Error: clamp requires numeric arguments]'
     return Math.max(min, Math.min(n, max)).toString()
   })
 
@@ -708,7 +740,9 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('pi', () => Math.PI.toString())
 
   // $isNumber(text) - check if text is a valid number
-  registry.set('isNumber', (args) => (!isNaN(parseFloat(args[0] ?? '')) && isFinite(Number(args[0] ?? ''))).toString())
+  registry.set('isNumber', (args) =>
+    (!isNaN(parseFloat(args[0] ?? '')) && isFinite(Number(args[0] ?? ''))).toString()
+  )
 
   // $args(index) - get argument at index
   registry.set('args', (args, ctx) => {
@@ -772,7 +806,10 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('substring', (args) => {
     const text = args[0] ?? ''
     const start = Math.max(0, Math.min(parseInt(args[1]?.trim() ?? '0', 10) || 0, text.length))
-    const end = Math.max(start, Math.min(parseInt(args[2]?.trim() ?? String(text.length), 10) || text.length, text.length))
+    const end = Math.max(
+      start,
+      Math.min(parseInt(args[2]?.trim() ?? String(text.length), 10) || text.length, text.length)
+    )
     return text.substring(start, end)
   })
 
@@ -809,7 +846,10 @@ function createFunctionRegistry(): FunctionRegistry {
   // $cooldownRemaining(level) - get remaining cooldown seconds
   // level arg is optional; defaults to the command's configured cooldownType
   registry.set('cooldownRemaining', (_args, ctx) => {
-    const level = (_args[0]?.trim().toLowerCase() || ctx.cooldownType?.toLowerCase() || 'user') as 'user' | 'server' | 'global'
+    const level = (_args[0]?.trim().toLowerCase() || ctx.cooldownType?.toLowerCase() || 'user') as
+      | 'user'
+      | 'server'
+      | 'global'
     const commandId = ctx.commandId || ''
     const cooldownSeconds = ctx.cooldown || 0
 
@@ -1231,22 +1271,26 @@ export class Interpreter {
           case '!=':
             return (left !== right).toString()
           case '>': {
-            const a = parseFloat(left), b = parseFloat(right)
+            const a = parseFloat(left),
+              b = parseFloat(right)
             if (isNaN(a) || isNaN(b)) return 'false'
             return (a > b).toString()
           }
           case '<': {
-            const a = parseFloat(left), b = parseFloat(right)
+            const a = parseFloat(left),
+              b = parseFloat(right)
             if (isNaN(a) || isNaN(b)) return 'false'
             return (a < b).toString()
           }
           case '>=': {
-            const a = parseFloat(left), b = parseFloat(right)
+            const a = parseFloat(left),
+              b = parseFloat(right)
             if (isNaN(a) || isNaN(b)) return 'false'
             return (a >= b).toString()
           }
           case '<=': {
-            const a = parseFloat(left), b = parseFloat(right)
+            const a = parseFloat(left),
+              b = parseFloat(right)
             if (isNaN(a) || isNaN(b)) return 'false'
             return (a <= b).toString()
           }

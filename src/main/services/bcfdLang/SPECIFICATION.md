@@ -115,16 +115,16 @@ $endif
 
 **Condition Expressions** support the following operators (ordered by precedence, lowest first):
 
-| Operator    | Description             | Example                    |
-| ----------- | ----------------------- | -------------------------- |
-| `\|` / `\|\|` | Logical OR            | `$a \| $b`                 |
-| `&` / `&&`  | Logical AND             | `$a & $b`                  |
-| `==`        | Equality (case-sensitive) | `$args(0) == hello`      |
-| `!=`        | Inequality              | `$args(0) != goodbye`     |
-| `>`, `<`    | Numeric comparison      | `$rollnum(1,10) > 5`      |
-| `>=`, `<=`  | Numeric comparison      | `$memberCount >= 100`     |
-| `!`         | Logical NOT (unary)     | `!$memberIsOwner`         |
-| `(` `)`     | Grouping                | `($a \| $b) & $c`         |
+| Operator      | Description               | Example               |
+| ------------- | ------------------------- | --------------------- |
+| `\|` / `\|\|` | Logical OR                | `$a \| $b`            |
+| `&` / `&&`    | Logical AND               | `$a & $b`             |
+| `==`          | Equality (case-sensitive) | `$args(0) == hello`   |
+| `!=`          | Inequality                | `$args(0) != goodbye` |
+| `>`, `<`      | Numeric comparison        | `$rollnum(1,10) > 5`  |
+| `>=`, `<=`    | Numeric comparison        | `$memberCount >= 100` |
+| `!`           | Logical NOT (unary)       | `!$memberIsOwner`     |
+| `(` `)`       | Grouping                  | `($a \| $b) & $c`     |
 
 **Truthiness**: A value is truthy if it is not empty, not `"false"`, and not `"0"`.
 
@@ -142,74 +142,81 @@ $endif
 
 ### User Context
 
-| Function         | Description           | Example Output          |
-| ---------------- | --------------------- | ----------------------- |
-| `$name`          | User as mention       | `<@123456789>`          |
-| `$namePlain`     | User's display name   | `JohnDoe`               |
-| `$avatar`        | User's avatar URL     | `https://...`           |
-| `$discriminator` | User's discriminator  | `1234`                  |
-| `$tag`           | User's tag            | `JohnDoe#1234`          |
-| `$id`            | User's ID             | `123456789`             |
-| `$timeCreated`   | Account creation time | `1/1/2020, 12:00:00 PM` |
-| `$defaultavatar` | Default avatar URL    | `https://...`           |
+| Function              | Description                                | Example Output          |
+| --------------------- | ------------------------------------------ | ----------------------- |
+| `$name`               | User as mention                            | `<@123456789>`          |
+| `$namePlain`          | User's display name                        | `JohnDoe`               |
+| `$avatar`             | User's avatar URL                          | `https://...`           |
+| `$discriminator`      | User's discriminator                       | `1234`                  |
+| `$tag`                | User's tag                                 | `JohnDoe#1234`          |
+| `$id`                 | User's ID                                  | `123456789`             |
+| `$timeCreated`        | Account creation time                      | `1/1/2020, 12:00:00 PM` |
+| `$timeCreatedDiscord` | Account creation time as Discord timestamp | `<t:1577880000>`        |
+| `$defaultavatar`      | Default avatar URL                         | `https://...`           |
 
 ### Member Context
 
-| Function                        | Description                     |
-| ------------------------------- | ------------------------------- |
-| `$memberIsOwner`                | Is the member the server owner? |
-| `$memberEffectiveName`          | Member's display name in server |
-| `$memberNickname`               | Member's nickname               |
-| `$memberID`                     | Member's ID                     |
-| `$memberHasTimeJoined`          | Has join timestamp?             |
-| `$memberTimeJoined`             | When member joined              |
-| `$memberEffectiveAvatar`        | Member's effective avatar       |
-| `$memberEffectiveTag`           | Member's tag                    |
-| `$memberEffectiveID`            | Member's ID                     |
-| `$memberEffectiveTimeCreated`   | Account creation time           |
-| `$memberEffectiveDefaultAvatar` | Default avatar URL              |
-| `$memberTimeBoosted`            | When member started boosting    |
-| `$memberHasBoosted`             | Is member boosting?             |
+| Function                             | Description                                       |
+| ------------------------------------ | ------------------------------------------------- |
+| `$memberIsOwner`                     | Is the member the server owner?                   |
+| `$memberEffectiveName`               | Member's display name in server                   |
+| `$memberNickname`                    | Member's nickname                                 |
+| `$memberID`                          | Member's ID                                       |
+| `$memberHasTimeJoined`               | Has join timestamp?                               |
+| `$memberTimeJoined`                  | When member joined                                |
+| `$memberTimeJoinedDiscord`           | When member joined as Discord timestamp           |
+| `$memberEffectiveAvatar`             | Member's effective avatar                         |
+| `$memberEffectiveTag`                | Member's tag                                      |
+| `$memberEffectiveID`                 | Member's ID                                       |
+| `$memberEffectiveTimeCreated`        | Account creation time                             |
+| `$memberEffectiveTimeCreatedDiscord` | Account creation time as Discord timestamp        |
+| `$memberEffectiveDefaultAvatar`      | Default avatar URL                                |
+| `$memberTimeBoosted`                 | When member started boosting                      |
+| `$memberTimeBoostedDiscord`          | When member started boosting as Discord timestamp |
+| `$memberHasBoosted`                  | Is member boosting?                               |
 
 ### Bot Context
 
-| Function            | Description                 |
-| ------------------- | --------------------------- |
-| `$ping`             | Bot's websocket ping (ms)   |
-| `$inviteURL`        | Bot's invite URL            |
-| `$serverCount`      | Number of servers bot is in |
-| `$allMemberCount`   | Total cached members        |
-| `$botAvatar`        | Bot's avatar URL            |
-| `$botName`          | Bot as mention              |
-| `$botNamePlain`     | Bot's display name          |
-| `$botID`            | Bot's user ID               |
-| `$botTimeCreated`   | Bot account creation time   |
-| `$botDefaultAvatar` | Bot's default avatar URL    |
-| `$botDiscriminator` | Bot's discriminator         |
-| `$botTag`           | Bot's tag                   |
+| Function                 | Description                                    |
+| ------------------------ | ---------------------------------------------- |
+| `$ping`                  | Bot's websocket ping (ms)                      |
+| `$inviteURL`             | Bot's invite URL                               |
+| `$serverCount`           | Number of servers bot is in                    |
+| `$allMemberCount`        | Total cached members                           |
+| `$botAvatar`             | Bot's avatar URL                               |
+| `$botName`               | Bot as mention                                 |
+| `$botNamePlain`          | Bot's display name                             |
+| `$botID`                 | Bot's user ID                                  |
+| `$botTimeCreated`        | Bot account creation time                      |
+| `$botTimeCreatedDiscord` | Bot account creation time as Discord timestamp |
+| `$botDefaultAvatar`      | Bot's default avatar URL                       |
+| `$botDiscriminator`      | Bot's discriminator                            |
+| `$botTag`                | Bot's tag                                      |
 
 ### Server Context
 
-| Function             | Description          |
-| -------------------- | -------------------- |
-| `$server`            | Server name          |
-| `$serverIcon`        | Server icon URL      |
-| `$serverBanner`      | Server banner URL    |
-| `$serverDescription` | Server description   |
-| `$serverSplash`      | Server splash URL    |
-| `$serverCreateTime`  | Server creation time |
-| `$memberCount`       | Server member count  |
+| Function                   | Description                               |
+| -------------------------- | ----------------------------------------- |
+| `$server`                  | Server name                               |
+| `$serverIcon`              | Server icon URL                           |
+| `$serverBanner`            | Server banner URL                         |
+| `$serverDescription`       | Server description                        |
+| `$serverSplash`            | Server splash URL                         |
+| `$serverCreateTime`        | Server creation time                      |
+| `$serverCreateTimeDiscord` | Server creation time as Discord timestamp |
+| `$memberCount`             | Server member count                       |
 
 ### Channel Context
 
-| Function             | Description           |
-| -------------------- | --------------------- |
-| `$channel`           | Channel name          |
-| `$channelID`         | Channel ID            |
-| `$channelCreateDate` | Channel creation time |
-| `$channelAsMention`  | Channel as mention    |
-| `$channelTopic`      | Channel topic         |
-| `$channelIsNSFW`     | Is channel NSFW?      |
+| Function                    | Description                                |
+| --------------------------- | ------------------------------------------ |
+| `$channel`                  | Channel name                               |
+| `$channelID`                | Channel ID                                 |
+| `$channelCreateDate`        | Channel creation time                      |
+| `$channelCreateDateDiscord` | Channel creation time as Discord timestamp |
+| `$channelAsMention`         | Channel as mention                         |
+| `$channelTopic`             | Channel topic                              |
+| `$channelIsNSFW`            | Is channel NSFW?                           |
 
 ### Channel Management
 
@@ -219,57 +226,57 @@ These functions create, modify, and manage Discord channels. The bot requires `M
 
 #### Creation
 
-| Function | Syntax | Description |
-| --- | --- | --- |
-| `$createChannel` | `$createChannel(name, type)` | Create a channel (type defaults to "text"). Returns channel ID |
-| `$createChannelIn` | `$createChannelIn(name, type, categoryID)` | Create a channel under a category. Returns channel ID |
-| `$cloneChannel` | `$cloneChannel(channelID)` | Clone a channel (copies all properties). Returns new channel ID |
+| Function           | Syntax                                     | Description                                                     |
+| ------------------ | ------------------------------------------ | --------------------------------------------------------------- |
+| `$createChannel`   | `$createChannel(name, type)`               | Create a channel (type defaults to "text"). Returns channel ID  |
+| `$createChannelIn` | `$createChannelIn(name, type, categoryID)` | Create a channel under a category. Returns channel ID           |
+| `$cloneChannel`    | `$cloneChannel(channelID)`                 | Clone a channel (copies all properties). Returns new channel ID |
 
 #### Deletion
 
-| Function | Syntax | Description |
-| --- | --- | --- |
+| Function         | Syntax                              | Description                                                      |
+| ---------------- | ----------------------------------- | ---------------------------------------------------------------- |
 | `$deleteChannel` | `$deleteChannel(channelID, reason)` | Delete a channel. Reason is optional (audit log). Returns "true" |
 
 #### Editing
 
-| Function | Syntax | Description |
-| --- | --- | --- |
-| `$setChannelName` | `$setChannelName(channelID, name)` | Rename a channel |
-| `$setChannelTopic` | `$setChannelTopic(channelID, topic)` | Set channel topic (text channels only) |
-| `$setChannelNSFW` | `$setChannelNSFW(channelID, true/false)` | Toggle NSFW flag |
-| `$setChannelSlowmode` | `$setChannelSlowmode(channelID, seconds)` | Set slowmode (0-21600 seconds, 0 = off) |
-| `$setChannelPosition` | `$setChannelPosition(channelID, position)` | Set channel position in list |
-| `$setChannelParent` | `$setChannelParent(channelID, categoryID)` | Move channel to a category (empty = remove from category) |
+| Function              | Syntax                                     | Description                                               |
+| --------------------- | ------------------------------------------ | --------------------------------------------------------- |
+| `$setChannelName`     | `$setChannelName(channelID, name)`         | Rename a channel                                          |
+| `$setChannelTopic`    | `$setChannelTopic(channelID, topic)`       | Set channel topic (text channels only)                    |
+| `$setChannelNSFW`     | `$setChannelNSFW(channelID, true/false)`   | Toggle NSFW flag                                          |
+| `$setChannelSlowmode` | `$setChannelSlowmode(channelID, seconds)`  | Set slowmode (0-21600 seconds, 0 = off)                   |
+| `$setChannelPosition` | `$setChannelPosition(channelID, position)` | Set channel position in list                              |
+| `$setChannelParent`   | `$setChannelParent(channelID, categoryID)` | Move channel to a category (empty = remove from category) |
 
 #### Lookup & Information
 
-| Function | Syntax | Description |
-| --- | --- | --- |
-| `$findChannel` | `$findChannel(name)` | Find a channel by name (case-insensitive). Returns ID or empty |
-| `$getChannelName` | `$getChannelName(channelID)` | Get a channel's name by ID |
-| `$getChannelType` | `$getChannelType(channelID)` | Get channel type as friendly string |
-| `$getChannelParent` | `$getChannelParent(channelID)` | Get parent category ID (empty if none) |
-| `$channelCount` | `$channelCount` | Total number of channels in the server |
+| Function            | Syntax                         | Description                                                    |
+| ------------------- | ------------------------------ | -------------------------------------------------------------- |
+| `$findChannel`      | `$findChannel(name)`           | Find a channel by name (case-insensitive). Returns ID or empty |
+| `$getChannelName`   | `$getChannelName(channelID)`   | Get a channel's name by ID                                     |
+| `$getChannelType`   | `$getChannelType(channelID)`   | Get channel type as friendly string                            |
+| `$getChannelParent` | `$getChannelParent(channelID)` | Get parent category ID (empty if none)                         |
+| `$channelCount`     | `$channelCount`                | Total number of channels in the server                         |
 
 #### Listing
 
-| Function | Syntax | Description |
-| --- | --- | --- |
-| `$listChannels` | `$listChannels(type)` | Comma-separated channel names (type filter optional) |
-| `$listChannelIDs` | `$listChannelIDs(type)` | Comma-separated channel IDs (type filter optional) |
+| Function          | Syntax                  | Description                                          |
+| ----------------- | ----------------------- | ---------------------------------------------------- |
+| `$listChannels`   | `$listChannels(type)`   | Comma-separated channel names (type filter optional) |
+| `$listChannelIDs` | `$listChannelIDs(type)` | Comma-separated channel IDs (type filter optional)   |
 
 #### Permissions
 
-| Function | Syntax | Description |
-| --- | --- | --- |
-| `$lockChannel` | `$lockChannel(channelID, roleID)` | Deny SendMessages for a role (defaults to @everyone) |
+| Function         | Syntax                              | Description                                           |
+| ---------------- | ----------------------------------- | ----------------------------------------------------- |
+| `$lockChannel`   | `$lockChannel(channelID, roleID)`   | Deny SendMessages for a role (defaults to @everyone)  |
 | `$unlockChannel` | `$unlockChannel(channelID, roleID)` | Reset SendMessages for a role (defaults to @everyone) |
 
 #### Utility
 
-| Function | Syntax | Description |
-| --- | --- | --- |
+| Function          | Syntax                       | Description                                        |
+| ----------------- | ---------------------------- | -------------------------------------------------- |
 | `$channelMention` | `$channelMention(channelID)` | Format a channel ID as a clickable mention `<#ID>` |
 
 #### Examples
@@ -291,17 +298,18 @@ This server has $channelCount channels.
 
 ### Mentioned User Context
 
-| Function                  | Description                       |
-| ------------------------- | --------------------------------- |
-| `$mentionedName`          | Mentioned user as mention         |
-| `$mentionedID`            | Mentioned user's ID               |
-| `$mentionedTag`           | Mentioned user's tag              |
-| `$mentionedDiscriminator` | Mentioned user's discriminator    |
-| `$mentionedAvatar`        | Mentioned user's avatar           |
-| `$mentionedTimeCreated`   | Mentioned user's account creation |
-| `$mentionedNamePlain`     | Mentioned user's display name     |
-| `$mentionedDefaultAvatar` | Mentioned user's default avatar   |
-| `$mentionedIsBot`         | Is mentioned user a bot?          |
+| Function                       | Description                                            |
+| ------------------------------ | ------------------------------------------------------ |
+| `$mentionedName`               | Mentioned user as mention                              |
+| `$mentionedID`                 | Mentioned user's ID                                    |
+| `$mentionedTag`                | Mentioned user's tag                                   |
+| `$mentionedDiscriminator`      | Mentioned user's discriminator                         |
+| `$mentionedAvatar`             | Mentioned user's avatar                                |
+| `$mentionedTimeCreated`        | Mentioned user's account creation                      |
+| `$mentionedTimeCreatedDiscord` | Mentioned user's account creation as Discord timestamp |
+| `$mentionedNamePlain`          | Mentioned user's display name                          |
+| `$mentionedDefaultAvatar`      | Mentioned user's default avatar                        |
+| `$mentionedIsBot`              | Is mentioned user a bot?                               |
 
 ### Utility Functions
 
@@ -321,12 +329,13 @@ This server has $channelCount channels.
 
 ### Date/Time Functions
 
-| Function   | Description            |
-| ---------- | ---------------------- |
-| `$date`    | Current date/time      |
-| `$hours`   | Current hour (00-23)   |
-| `$minutes` | Current minute (00-59) |
-| `$seconds` | Current second (00-59) |
+| Function       | Description                            |
+| -------------- | -------------------------------------- |
+| `$date`        | Current date/time                      |
+| `$dateDiscord` | Current date/time as Discord timestamp |
+| `$hours`       | Current hour (00-23)                   |
+| `$minutes`     | Current minute (00-59)                 |
+| `$seconds`     | Current second (00-59)                 |
 
 ### Message Context
 

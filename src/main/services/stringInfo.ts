@@ -38,6 +38,10 @@ export type StringInfoContext = {
 
 const searchRegex = /\$(\w+)(?:\{([^}]*)\})?/g
 
+function discordTimestampFromMillis(timestamp?: number | null): string {
+  return timestamp == null ? '' : `<t:${Math.floor(timestamp / 1000)}>`
+}
+
 export function contextForMessageEvent(
   message: string,
   command: BCFDCommand,
@@ -179,6 +183,7 @@ const userReplacements = new Map<string, (context: StringInfoContext) => string>
   ['tag', (ctx) => ctx.user?.tag ?? ''],
   ['id', (ctx) => ctx.user?.id ?? ''],
   ['timeCreated', (ctx) => (ctx.user ? new Date(ctx.user?.createdTimestamp).toLocaleString() : '')],
+  ['timeCreatedDiscord', (ctx) => discordTimestampFromMillis(ctx.user?.createdTimestamp)],
   ['defaultavatar', (ctx) => ctx.user?.defaultAvatarURL ?? '']
   // todo $serversSharedWithBot
 ])
@@ -199,6 +204,7 @@ const memberReplacements = new Map<string, (context: StringInfoContext) => strin
         ? new Date(ctx.member.joinedTimestamp).toLocaleString()
         : ''
   ],
+  ['memberTimeJoinedDiscord', (ctx) => discordTimestampFromMillis(ctx.member?.joinedTimestamp)],
   [
     'memberEffectiveAvatar',
     (ctx) => ctx.member?.displayAvatarURL({}) ?? ctx.member?.user.defaultAvatarURL ?? ''
@@ -209,6 +215,10 @@ const memberReplacements = new Map<string, (context: StringInfoContext) => strin
     'memberEffectiveTimeCreated',
     (ctx) => (ctx.member ? new Date(ctx.member.user.createdTimestamp).toLocaleString() : '')
   ],
+  [
+    'memberEffectiveTimeCreatedDiscord',
+    (ctx) => discordTimestampFromMillis(ctx.member?.user.createdTimestamp)
+  ],
   ['memberEffectiveDefaultAvatar', (ctx) => ctx.member?.user.defaultAvatarURL ?? ''],
   [
     'memberTimeBoosted',
@@ -216,6 +226,10 @@ const memberReplacements = new Map<string, (context: StringInfoContext) => strin
       ctx.member?.premiumSinceTimestamp != null
         ? new Date(ctx.member.premiumSinceTimestamp).toLocaleString()
         : ''
+  ],
+  [
+    'memberTimeBoostedDiscord',
+    (ctx) => discordTimestampFromMillis(ctx.member?.premiumSinceTimestamp)
   ],
   ['memberHasBoosted', (ctx) => (ctx.member?.premiumSinceTimestamp != null).toString()]
 ])
@@ -240,6 +254,10 @@ const clientReplacements = new Map<string, (context: StringInfoContext) => strin
   ['botNamePlain', (ctx) => ctx.client?.user?.displayName ?? ''],
   ['botID', (ctx) => ctx.client?.user?.id ?? ''],
   ['botTimeCreated', (ctx) => new Date(ctx.client?.user?.createdTimestamp ?? 0).toLocaleString()],
+  [
+    'botTimeCreatedDiscord',
+    (ctx) => discordTimestampFromMillis(ctx.client?.user?.createdTimestamp)
+  ],
   ['botDefaultAvatar', (ctx) => ctx.client?.user?.defaultAvatarURL ?? ''],
   ['botDiscriminator', (ctx) => ctx.client?.user?.discriminator ?? ''],
   ['botTag', (ctx) => ctx.client?.user?.tag ?? '']
@@ -252,6 +270,7 @@ const guildReplacements = new Map<string, (context: StringInfoContext) => string
   ['serverDescription', (ctx) => ctx.guild?.description ?? ''],
   ['serverSplash', (ctx) => ctx.guild?.splashURL({}) ?? ''],
   ['serverCreateTime', (ctx) => new Date(ctx.guild?.createdTimestamp ?? 0).toLocaleString()],
+  ['serverCreateTimeDiscord', (ctx) => discordTimestampFromMillis(ctx.guild?.createdTimestamp)],
   ['memberCount', (ctx) => ctx.guild?.memberCount.toString() ?? '']
 ])
 
@@ -259,6 +278,10 @@ const channelReplacements = new Map<string, (context: StringInfoContext) => stri
   ['channel', (ctx) => ctx.textChannel?.name ?? ''],
   ['channelID', (ctx) => ctx.textChannel?.id ?? ''],
   ['channelCreateDate', (ctx) => new Date(ctx.textChannel?.createdTimestamp ?? 0).toLocaleString()],
+  [
+    'channelCreateDateDiscord',
+    (ctx) => discordTimestampFromMillis(ctx.textChannel?.createdTimestamp)
+  ],
   ['channelAsMention', (ctx) => `<#${ctx.textChannel?.id ?? ''}>`]
 ])
 
@@ -275,6 +298,10 @@ const mentionedReplacements = new Map<string, (context: StringInfoContext) => st
     'mentionedTimeCreated',
     (ctx) => new Date(ctx.mentionedUser?.createdTimestamp ?? 0).toLocaleString()
   ],
+  [
+    'mentionedTimeCreatedDiscord',
+    (ctx) => discordTimestampFromMillis(ctx.mentionedUser?.createdTimestamp)
+  ],
   ['mentionedNamePlain', (ctx) => ctx.mentionedUser?.displayName ?? ''],
   ['mentionedDefaultAvatar', (ctx) => ctx.mentionedUser?.defaultAvatarURL ?? ''],
   ['mentionedIsBot', (ctx) => ctx.mentionedUser?.bot.toString() ?? '']
@@ -286,6 +313,7 @@ const generalReplacements = new Map<string, (context: StringInfoContext) => stri
   ['randomBoolean', (_ctx) => (Math.random() > 0.5).toString()],
   ['commandCount', (_ctx) => getCommands().bcfdCommands.length.toString()],
   ['date', (_ctx) => new Date().toLocaleString()],
+  ['dateDiscord', (_ctx) => discordTimestampFromMillis(Date.now())],
   ['hours', (_ctx) => (new Date().getHours() < 10 ? '0' : '') + new Date().getHours().toString()],
   [
     'minutes',
