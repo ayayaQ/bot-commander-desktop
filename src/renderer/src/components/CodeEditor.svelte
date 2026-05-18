@@ -176,6 +176,12 @@
       insertText: 'createChannel(name, type)'
     },
     {
+      name: 'createPrivateChannel',
+      syntax: 'function-paren',
+      description: 'Create a private channel for the caller',
+      insertText: 'createPrivateChannel(name, type)'
+    },
+    {
       name: 'createChannelIn',
       syntax: 'function-paren',
       description: 'Create channel in category',

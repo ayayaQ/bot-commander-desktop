@@ -255,6 +255,37 @@ function createFunctionRegistry(): FunctionRegistry {
     }
   })
 
+  // $createPrivateChannel(name, type) - create a private channel for the caller, returns its ID
+  registry.set('createPrivateChannel', async (args, ctx) => {
+    if (!ctx.guild) return '[BCFD Error: createPrivateChannel requires a guild context]'
+    if (!ctx.user) return '[BCFD Error: createPrivateChannel requires a user context]'
+    const name = args[0]?.trim()
+    if (!name) return '[BCFD Error: createPrivateChannel requires a channel name]'
+    const typeStr = args[1]?.trim() || 'text'
+    const channelType = parseChannelType(typeStr)
+    if (channelType === null)
+      return `[BCFD Error: createPrivateChannel invalid type "${typeStr}"]`
+    try {
+      const channel = await ctx.guild.channels.create({
+        name,
+        type: channelType,
+        permissionOverwrites: [
+          {
+            id: ctx.guild.roles.everyone.id,
+            deny: [PermissionsBitField.Flags.ViewChannel]
+          },
+          {
+            id: ctx.user.id,
+            allow: [PermissionsBitField.Flags.ViewChannel]
+          }
+        ]
+      })
+      return channel.id
+    } catch (e) {
+      return `[BCFD Error: createPrivateChannel failed: ${e instanceof Error ? e.message : 'Unknown error'}]`
+    }
+  })
+
   // $createChannelIn(name, type, categoryID) - create a channel under a category
   registry.set('createChannelIn', async (args, ctx) => {
     if (!ctx.guild) return '[BCFD Error: createChannelIn requires a guild context]'

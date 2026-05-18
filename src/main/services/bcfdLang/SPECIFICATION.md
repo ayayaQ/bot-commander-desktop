@@ -226,11 +226,12 @@ These functions create, modify, and manage Discord channels. The bot requires `M
 
 #### Creation
 
-| Function           | Syntax                                     | Description                                                     |
-| ------------------ | ------------------------------------------ | --------------------------------------------------------------- |
-| `$createChannel`   | `$createChannel(name, type)`               | Create a channel (type defaults to "text"). Returns channel ID  |
-| `$createChannelIn` | `$createChannelIn(name, type, categoryID)` | Create a channel under a category. Returns channel ID           |
-| `$cloneChannel`    | `$cloneChannel(channelID)`                 | Clone a channel (copies all properties). Returns new channel ID |
+| Function                | Syntax                                          | Description                                                                 |
+| ----------------------- | ----------------------------------------------- | --------------------------------------------------------------------------- |
+| `$createChannel`        | `$createChannel(name, type)`                    | Create a channel (type defaults to "text"). Returns channel ID              |
+| `$createPrivateChannel` | `$createPrivateChannel(name, type)`             | Create a channel visible to the caller and admins. Returns channel ID        |
+| `$createChannelIn`      | `$createChannelIn(name, type, categoryID)`      | Create a channel under a category. Returns channel ID                        |
+| `$cloneChannel`         | `$cloneChannel(channelID)`                      | Clone a channel (copies all properties). Returns new channel ID             |
 
 #### Deletion
 
