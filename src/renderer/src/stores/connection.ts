@@ -3,6 +3,7 @@ import { writable } from 'svelte/store'
 export type ConnectionState = {
   connected: boolean
   isConnecting: boolean
+  error: string
   username: string
   avatar: string
   token: string
@@ -12,6 +13,7 @@ function emptyState(): ConnectionState {
   return {
     connected: false,
     isConnecting: false,
+    error: '',
     username: '',
     avatar: '',
     token: ''
@@ -46,8 +48,17 @@ function addConnectionListener() {
       ...state,
       connected: true,
       isConnecting: false,
+      error: '',
       username: data.user,
       avatar: data.avatar
+    }))
+  })
+  ;window.electron.ipcRenderer.on('connect-error', (_event, message: string) => {
+    connectionStore.update((state) => ({
+      ...state,
+      connected: false,
+      isConnecting: false,
+      error: message
     }))
   })
   ;window.electron.ipcRenderer.on('disconnect', (event) => {
@@ -63,6 +74,7 @@ function connect(token: string) {
   connectionStore.update((state) => ({
     ...state,
     isConnecting: true,
+    error: '',
     token: token
   }))
 }

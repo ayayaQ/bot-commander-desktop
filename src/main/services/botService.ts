@@ -219,8 +219,12 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
   })
 
   client.login(token).catch((err) => {
-    rendererConsole.error(`Login failed: ${err.message || err}`)
-    event.reply('fail', { error: err })
+    const message = `Login failed: ${err.message || err}`
+    rendererConsole.error(message)
+    client?.destroy()
+    client = null
+    connection = false
+    event.reply('connect-error', message)
   })
 }
 

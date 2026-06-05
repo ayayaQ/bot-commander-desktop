@@ -20,6 +20,19 @@
   let hasCommands = $state(false)
 
   let token = $state('')
+  let loginError = $state('')
+
+  $effect(() => {
+    if (!$connectionStore.error) return undefined
+
+    loginError = $connectionStore.error
+    const timeout = setTimeout(() => {
+      loginError = ''
+    }, 5000)
+
+    return () => clearTimeout(timeout)
+  })
+
   function handleLogin() {
     connectionStore.ipc.connect(token)
   }
@@ -138,7 +151,10 @@
         />
       {/if}
       {#if !$connectionStore.connected}
-        <button class="btn btn-primary w-full" onclick={handleLogin}
+        <button
+          class="btn btn-primary w-full"
+          onclick={handleLogin}
+          disabled={$connectionStore.isConnecting}
           ><span class="material-symbols-outlined">login</span>{$t('login')}
           {#if $connectionStore.isConnecting}
             <span class="loading loading-spinner"></span>
@@ -166,3 +182,19 @@
     </div>
   </div>
 </div>
+
+{#if loginError}
+  <div class="toast toast-end toast-bottom z-50">
+    <div class="alert alert-error">
+      <span class="material-symbols-outlined">error</span>
+      <span>{loginError}</span>
+      <button
+        class="btn btn-ghost btn-sm btn-circle"
+        onclick={() => (loginError = '')}
+        aria-label="Dismiss"
+      >
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+  </div>
+{/if}

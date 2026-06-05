@@ -82,6 +82,7 @@ const validInvokeChannels = [
 
 const validReceiveChannels = [
   'connect',
+  'connect-error',
   'disconnect',
   'window-state-changed',
   'console:info',
