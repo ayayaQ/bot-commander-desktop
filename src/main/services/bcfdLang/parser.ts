@@ -293,10 +293,7 @@ export class Parser {
    * Parse an if/elseif/else/endif block.
    * Called after $if(...) has been consumed and its condition parsed.
    */
-  private parseIfBlock(
-    ifToken: Token,
-    ifCondition: import('./types').ConditionNode
-  ): IfBlockNode {
+  private parseIfBlock(ifToken: Token, ifCondition: import('./types').ConditionNode): IfBlockNode {
     const branches: IfBlockNode['branches'] = []
     let elseBranch: ASTNode[] | null = null
     let currentCondition = ifCondition
@@ -317,7 +314,10 @@ export class Parser {
             branches,
             elseBranch,
             position: ifToken.position,
-            length: this.tokens[this.position - 1].position + this.tokens[this.position - 1].length - ifToken.position
+            length:
+              this.tokens[this.position - 1].position +
+              this.tokens[this.position - 1].length -
+              ifToken.position
           }
         }
 
@@ -341,7 +341,10 @@ export class Parser {
                 branches,
                 elseBranch,
                 position: ifToken.position,
-                length: this.tokens[this.position - 1].position + this.tokens[this.position - 1].length - ifToken.position
+                length:
+                  this.tokens[this.position - 1].position +
+                  this.tokens[this.position - 1].length -
+                  ifToken.position
               }
             }
             const node = this.parseNode()
@@ -359,7 +362,8 @@ export class Parser {
             branches,
             elseBranch,
             position: ifToken.position,
-            length: (this.tokens[this.tokens.length - 1]?.position ?? ifToken.position) - ifToken.position
+            length:
+              (this.tokens[this.tokens.length - 1]?.position ?? ifToken.position) - ifToken.position
           }
         }
 
@@ -416,13 +420,14 @@ export class Parser {
     for (const error of innerErrors) {
       this.errors.push({
         ...error,
-        position: error.position + token.position + 5 // +5 for "$eval"
+        position: error.position + (token.valuePosition ?? token.position + 5)
       })
     }
 
     return {
       type: NodeType.EVAL_BLOCK,
       code: token.value,
+      codePosition: token.valuePosition ?? token.position + 5,
       innerNodes: innerAst.children,
       position: token.position,
       length: token.length

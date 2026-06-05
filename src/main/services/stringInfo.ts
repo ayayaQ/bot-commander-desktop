@@ -109,7 +109,14 @@ async function stringInfoAddNew(ctx: StringInfoContext): Promise<string> {
   if (result.errors.length > 0) {
     console.warn('BCFD Interpreter errors:', result.errors)
     for (const error of result.errors) {
-      rendererConsole.error(`Interpreter: ${error.message}`)
+      const location =
+        error.lineNumber != null
+          ? ` (JS line ${error.lineNumber}${
+              error.columnNumber != null ? `, column ${error.columnNumber}` : ''
+            })`
+          : ''
+      const context = error.sourceContext ? `\nNear:\n${error.sourceContext}` : ''
+      rendererConsole.error(`Interpreter: ${error.message}${location}${context}`)
     }
   }
 

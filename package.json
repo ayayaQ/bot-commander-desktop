@@ -25,7 +25,8 @@
     "@electron-toolkit/utils": "^4.0.0",
     "discord.js": "^14.25.1",
     "marked": "^18.0.3",
-    "openai": "^6.16.0"
+    "openai": "^6.16.0",
+    "quickjs-emscripten": "^0.32.0"
   },
   "devDependencies": {
     "@electron-toolkit/tsconfig": "^2.0.0",

@@ -1,58 +1,33 @@
-import vm from 'vm'
 import fs from 'fs/promises'
 import { app } from 'electron'
 import { join } from 'path'
 import { rendererConsole } from './rendererConsole'
+import {
+  createQuickJSScriptContext,
+  type ScriptContext
+} from './quickJsScriptContext'
 
-let botStateContext: vm.Context
+let botStateContext: ScriptContext
 const STARTUP_JS_FILENAME = 'startup.js'
 
-/**
- * Create a sandboxed VM context that blocks dangerous globals
- * while allowing safe operations and shared state like botState
- */
-function createSafeContext(initialContext: Record<string, any>): vm.Context {
-  const context = vm.createContext({
-    ...initialContext,
-    // Provide safe built-in objects
-    Math: Math,
-    Date: Date,
-    String: String,
-    Number: Number,
-    Boolean: Boolean,
-    Array: Array,
-    Object: Object,
-    JSON: JSON,
-    // Provide safe debug function
-    debug: debug,
-    // Block dangerous globals to prevent code injection
-    process: undefined,
-    require: undefined,
-    import: undefined,
-    eval: undefined,
-    Function: undefined,
-    globalThis: undefined,
-    global: undefined,
-    console: undefined
-  })
-  return context
-}
-
-function debug(msg: any, level: 'info' | 'error' | 'warning' | 'success' = 'info') {
-  // convert msg to string if it's not and then render to client console via rendererConsole.info
+function debug(msg: unknown, level: 'info' | 'error' | 'warning' | 'success' = 'info') {
   const message = typeof msg === 'string' ? msg : JSON.stringify(msg, null, 2)
   if (level === 'error') {
     rendererConsole.error(message)
-  }
-  else if (level === 'warning') {
+  } else if (level === 'warning') {
     rendererConsole.warning(message)
-  }
-  else if (level === 'success') {
+  } else if (level === 'success') {
     rendererConsole.success(message)
-  }
-  else {
+  } else {
     rendererConsole.info(message)
   }
+}
+
+async function createScriptContext(initialContext: Record<string, unknown>): Promise<ScriptContext> {
+  return createQuickJSScriptContext({
+    initialContext,
+    debug
+  })
 }
 
 // Get the path to the startup JS file
@@ -80,13 +55,13 @@ export async function setStartupJs(js: string): Promise<void> {
 }
 
 // Run the startup JS in the given context
-export async function runStartupJs(context: vm.Context) {
+export async function runStartupJs(context: ScriptContext) {
   const js = await getStartupJs()
   if (js && js.trim()) {
     try {
-      vm.runInContext(js, context, {
-        timeout: 5000, // 5 second timeout for startup
-        breakOnSigint: true
+      context.run(js, {
+        timeoutMs: 5000,
+        wrapReturn: false
       })
     } catch (e) {
       console.error('Error running startup JS:', e)
@@ -96,32 +71,28 @@ export async function runStartupJs(context: vm.Context) {
 
 // Restart the JS engine: re-create context, run startup JS, load botState
 export async function restartJsEngine() {
-  botStateContext = createSafeContext({ botState: {} })
+  botStateContext?.dispose()
+  botStateContext = await createScriptContext({ botState: {} })
   await runStartupJs(botStateContext)
   await loadBotState()
 }
 
-export function get(variableName: string, context: vm.Context) {
-  return context[variableName]
-  //return vm.runInContext(`${variableName}`, context)
+export function get(variableName: string, context: ScriptContext) {
+  return context.getVariable(variableName)
 }
 
-export function set(variableName: string, value: any, context: vm.Context) {
-  context[variableName] = value
-  //vm.runInContext(`${variableName} = ${value}`, context)
+export function set(variableName: string, value: unknown, context: ScriptContext) {
+  context.setVariable(variableName, value)
 }
 
-function run(code: string, context: vm.Context) {
-  vm.runInContext(code, context, {
-    timeout: 1000, // 1 second timeout
-    breakOnSigint: true
-  })
+function run(code: string, context: ScriptContext) {
+  context.run(code, { wrapReturn: false })
 }
 
 // This function will take in a string that will have a $eval keyword at the start of a codeblock and a $halt keyword at the end of the codeblock.
 // It will then run the code in between the $eval and $halt keywords.
 // It will return the output of the code.
-export function evaluate(code: string, context: vm.Context) {
+export function evaluate(code: string, context: ScriptContext) {
   // throw an error if there is no halt keyword
   if (!code.includes('$halt')) {
     throw new Error('Code block must end with $halt')
@@ -134,7 +105,7 @@ export function evaluate(code: string, context: vm.Context) {
   return code.slice(0, code.indexOf('$eval')) + code.slice(code.indexOf('$halt') + 6)
 }
 
-export function evaluateGet(code: string, context: vm.Context) {
+export function evaluateGet(code: string, context: ScriptContext) {
   // there will be a $get keyword in the form $get(variableName), we will take that and run the get function and replace the $get(variableName) with the return value
   const getStartIndex = code.indexOf('$get(')
   const startIndex = getStartIndex + 5
@@ -145,7 +116,7 @@ export function evaluateGet(code: string, context: vm.Context) {
   return code.slice(0, getStartIndex) + value + code.slice(endIndex + 1)
 }
 
-export function evaluateSet(code: string, context: vm.Context) {
+export function evaluateSet(code: string, context: ScriptContext) {
   // there will be a $set keyword in the form $set(variableName, value), we will take that and run the set function and replace the $set(variableName, value) with nothing
   const setStartIndex = code.indexOf('$set(')
   const startIndex = setStartIndex + 5
@@ -158,7 +129,7 @@ export function evaluateSet(code: string, context: vm.Context) {
   return code.slice(0, setStartIndex) + code.slice(endIndex + 1)
 }
 
-export function stringInfoAddEval(code: string, context: vm.Context) {
+export function stringInfoAddEval(code: string, context: ScriptContext) {
   if (code.includes('$eval')) {
     code = evaluate(code, context)
   }
@@ -172,7 +143,7 @@ export function stringInfoAddEval(code: string, context: vm.Context) {
 }
 
 export async function initializeBotState() {
-  botStateContext = createSafeContext({ botState: {} })
+  botStateContext = await createScriptContext({ botState: {} })
   await runStartupJs(botStateContext)
   await loadBotState()
 }
@@ -182,11 +153,11 @@ export async function loadBotState() {
   try {
     const data = await fs.readFile(botStatePath, 'utf-8')
     const loadedState = JSON.parse(data)
-    vm.runInContext('botState = ' + JSON.stringify(loadedState), botStateContext)
+    botStateContext.setVariable('botState', loadedState)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       // File doesn't exist, use default empty object
-      vm.runInContext('botState = {}', botStateContext)
+      botStateContext.setVariable('botState', {})
     } else {
       console.error('Error loading bot state:', error)
     }
@@ -196,7 +167,7 @@ export async function loadBotState() {
 export async function saveBotState() {
   const botStatePath = join(app.getPath('userData'), 'botState.json')
   try {
-    const state = vm.runInContext('JSON.stringify(botState)', botStateContext)
+    const state = JSON.stringify(botStateContext.getVariable('botState') ?? {})
     await fs.writeFile(botStatePath, state)
   } catch (error) {
     console.error('Error saving bot state:', error)
