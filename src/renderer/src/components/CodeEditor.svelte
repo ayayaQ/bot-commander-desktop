@@ -770,7 +770,7 @@
 
   // Calculate dynamic height based on content
   let lineCount = $derived(value.split('\n').length)
-  let computedHeight = $derived(Math.max(parseInt(minHeight), lineCount * 24 + 16)) // 24px per line + padding
+  let computedHeight = $derived(Math.max(parseInt(minHeight), lineCount * 24 + 40)) // 24px per line + editor padding and footer
 </script>
 
 <div
@@ -781,7 +781,7 @@
   <!-- Line Numbers -->
   <div
     bind:this={lineNumbersElement}
-    class="line-numbers absolute left-0 top-0 bottom-0 w-12 bg-base-200 text-base-content/50 text-right pr-2 pt-2 pb-4 select-none font-mono text-sm leading-6 overflow-hidden"
+    class="line-numbers absolute left-0 top-0 bottom-6 w-12 bg-base-200 text-base-content/50 text-right pr-2 pt-2 pb-4 select-none font-mono text-sm leading-6 overflow-hidden"
   >
     <div class="line-number">1</div>
   </div>
@@ -789,7 +789,7 @@
   <!-- Scrollable Editor Area -->
   <div
     bind:this={scrollAreaElement}
-    class="editor-scroll-area absolute left-12 top-0 right-0 bottom-0 overflow-x-auto overflow-y-hidden"
+    class="editor-scroll-area absolute left-12 top-0 right-0 bottom-6 overflow-x-auto overflow-y-hidden"
     onscroll={syncScroll}
   >
     <!-- Inner container that sizes to content -->
@@ -852,6 +852,13 @@
       {/each}
     </div>
   {/if}
+
+  <div
+    class="absolute left-0 right-0 bottom-0 h-6 border-t border-base-300 bg-base-200 px-2 flex items-center justify-end text-xs text-base-content/60 select-none"
+  >
+    {value.length}
+    {value.length === 1 ? 'character' : 'characters'}
+  </div>
 </div>
 
 <style>
