@@ -4,6 +4,12 @@ type BCFDTokenType = 'text' | 'variable' | 'function' | 'args' | 'keyword' | 'ev
 interface BCFDToken {
   type: BCFDTokenType
   value: string
+  position: number
+}
+
+interface BCFDHighlightDiagnostic {
+  message: string
+  position: number
 }
 
 // Character-by-character tokenizer for BCFDLang
@@ -63,9 +69,9 @@ function tokenizeBCFD(code: string): BCFDToken[] {
     return result
   }
 
-  function addToken(type: BCFDTokenType, value: string) {
+  function addToken(type: BCFDTokenType, value: string, position: number) {
     if (value.length > 0) {
-      tokens.push({ type, value })
+      tokens.push({ type, value, position })
     }
   }
 
@@ -73,22 +79,23 @@ function tokenizeBCFD(code: string): BCFDToken[] {
     // Check for $eval block
     if (lookingAt('$eval')) {
       // Consume $eval keyword
-      addToken('keyword', '$eval')
+      addToken('keyword', '$eval', i)
       i += 5
 
       // Find the matching $halt
       let evalContent = ''
+      const evalContentPosition = i
       while (i < code.length && !lookingAt('$halt')) {
         evalContent += consume()
       }
 
       if (evalContent.length > 0) {
-        addToken('eval-content', evalContent)
+        addToken('eval-content', evalContent, evalContentPosition)
       }
 
       // Consume $halt if present
       if (lookingAt('$halt')) {
-        addToken('keyword', '$halt')
+        addToken('keyword', '$halt', i)
         i += 5
       }
       continue
@@ -96,6 +103,7 @@ function tokenizeBCFD(code: string): BCFDToken[] {
 
     // Check for $ prefix (variable or function)
     if (peek() === '$') {
+      const dollarPosition = i
       consume() // consume $
 
       // Check if followed by identifier
@@ -104,51 +112,70 @@ function tokenizeBCFD(code: string): BCFDToken[] {
 
         // Check what follows: ( for function, { for brace-function, or end for variable
         if (peek() === '(') {
-          addToken('function', '$' + name)
+          addToken('function', '$' + name, dollarPosition)
+          const argsPosition = i
           const args = consumeBalanced('(', ')')
-          addToken('args', args)
+          addToken('args', args, argsPosition)
         } else if (peek() === '{') {
-          addToken('function', '$' + name)
+          addToken('function', '$' + name, dollarPosition)
+          const argsPosition = i
           const args = consumeBalanced('{', '}')
-          addToken('args', args)
+          addToken('args', args, argsPosition)
         } else {
-          addToken('variable', '$' + name)
+          addToken('variable', '$' + name, dollarPosition)
         }
       } else {
         // Lone $ sign, treat as text
-        addToken('text', '$')
+        addToken('text', '$', dollarPosition)
       }
       continue
     }
 
     // Regular text - consume until we hit a $ or end
+    const textPosition = i
     const text = consumeWhile((char) => char !== '$')
-    addToken('text', text)
+    addToken('text', text, textPosition)
   }
 
   return tokens
 }
 
+function escapeHTML(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function escapeAttribute(value: string): string {
+  return escapeHTML(value).replace(/"/g, '&quot;')
+}
+
 // Render tokens to HTML
-function renderBCFDTokens(tokens: BCFDToken[]): string {
+function renderBCFDTokens(
+  tokens: BCFDToken[],
+  diagnostics: BCFDHighlightDiagnostic[] = []
+): string {
   let html = ''
+  const diagnosticByPosition = new Map(
+    diagnostics.map((diagnostic) => [diagnostic.position, diagnostic])
+  )
 
   for (const token of tokens) {
     // Escape HTML in the value
-    const escaped = token.value
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
+    const escaped = escapeHTML(token.value)
+    const diagnostic = diagnosticByPosition.get(token.position)
 
     switch (token.type) {
       case 'text':
         html += escaped
         break
       case 'variable':
-        html += `<span class="bcfd-variable">${escaped}</span>`
+        html += diagnostic
+          ? `<span class="bcfd-variable bcfd-warning" title="${escapeAttribute(diagnostic.message)}">${escaped}</span>`
+          : `<span class="bcfd-variable">${escaped}</span>`
         break
       case 'function':
-        html += `<span class="bcfd-function">${escaped}</span>`
+        html += diagnostic
+          ? `<span class="bcfd-function bcfd-warning" title="${escapeAttribute(diagnostic.message)}">${escaped}</span>`
+          : `<span class="bcfd-function">${escaped}</span>`
         break
       case 'args':
         html += `<span class="bcfd-args">${escaped}</span>`
@@ -158,7 +185,7 @@ function renderBCFDTokens(tokens: BCFDToken[]): string {
         break
       case 'eval-content':
         // Apply JS highlighting to eval content
-        const jsHighlighted = highlightJavaScript(escaped)
+        const jsHighlighted = highlightJavaScript(token.value, diagnostics, token.position)
         html += `<span class="bcfd-eval">${jsHighlighted}</span>`
         break
     }
@@ -167,9 +194,9 @@ function renderBCFDTokens(tokens: BCFDToken[]): string {
   return html
 }
 
-export function highlightBCFD(code: string): string {
+export function highlightBCFD(code: string, diagnostics: BCFDHighlightDiagnostic[] = []): string {
   const tokens = tokenizeBCFD(code)
-  let html = renderBCFDTokens(tokens)
+  let html = renderBCFDTokens(tokens, diagnostics)
 
   // Preserve newlines for proper line alignment
   html = html.replace(/\n/g, '<br>')
@@ -183,28 +210,82 @@ export function highlightBCFD(code: string): string {
 }
 
 // Token types for JavaScript
-type JSTokenType = 'text' | 'keyword' | 'string' | 'number' | 'comment' | 'builtin' | 'interpolation-bracket'
+type JSTokenType =
+  | 'text'
+  | 'keyword'
+  | 'string'
+  | 'number'
+  | 'comment'
+  | 'builtin'
+  | 'interpolation-bracket'
 
 interface JSToken {
   type: JSTokenType
   value: string
+  position: number
 }
 
 const JS_KEYWORDS = new Set([
-  'let', 'const', 'var', 'function', 'return', 'if', 'else', 'for', 'while', 'do',
-  'switch', 'case', 'break', 'continue', 'default', 'try', 'catch', 'finally',
-  'throw', 'new', 'typeof', 'instanceof', 'this', 'null', 'true', 'false',
-  'class', 'extends', 'super', 'import', 'from', 'export', 'as', 'await', 'async',
-  'yield', 'delete', 'in', 'of', 'with', 'void', 'undefined'
+  'let',
+  'const',
+  'var',
+  'function',
+  'return',
+  'if',
+  'else',
+  'for',
+  'while',
+  'do',
+  'switch',
+  'case',
+  'break',
+  'continue',
+  'default',
+  'try',
+  'catch',
+  'finally',
+  'throw',
+  'new',
+  'typeof',
+  'instanceof',
+  'this',
+  'null',
+  'true',
+  'false',
+  'class',
+  'extends',
+  'super',
+  'import',
+  'from',
+  'export',
+  'as',
+  'await',
+  'async',
+  'yield',
+  'delete',
+  'in',
+  'of',
+  'with',
+  'void',
+  'undefined'
 ])
 
 const JS_BUILTINS = new Set([
-  'Math', 'JSON', 'Array', 'Object', 'String', 'Number', 'Boolean',
-  'Date', 'RegExp', 'console', 'botState'
+  'Math',
+  'JSON',
+  'Array',
+  'Object',
+  'String',
+  'Number',
+  'Boolean',
+  'Date',
+  'RegExp',
+  'console',
+  'botState'
 ])
 
 // Character-by-character tokenizer for JavaScript
-function tokenizeJS(code: string): JSToken[] {
+function tokenizeJS(code: string, basePosition = 0): JSToken[] {
   const tokens: JSToken[] = []
   let i = 0
 
@@ -228,9 +309,9 @@ function tokenizeJS(code: string): JSToken[] {
     return /[0-9]/.test(char)
   }
 
-  function addToken(type: JSTokenType, value: string) {
+  function addToken(type: JSTokenType, value: string, position: number) {
     if (value.length > 0) {
-      tokens.push({ type, value })
+      tokens.push({ type, value, position: basePosition + position })
     }
   }
 
@@ -239,16 +320,18 @@ function tokenizeJS(code: string): JSToken[] {
 
     // Single-line comment
     if (char === '/' && peek(1) === '/') {
+      const tokenPosition = i
       let comment = ''
       while (i < code.length && peek() !== '\n') {
         comment += consume()
       }
-      addToken('comment', comment)
+      addToken('comment', comment, tokenPosition)
       continue
     }
 
     // Multi-line comment
     if (char === '/' && peek(1) === '*') {
+      const tokenPosition = i
       let comment = consume() + consume() // /*
       while (i < code.length && !(peek() === '*' && peek(1) === '/')) {
         comment += consume()
@@ -256,24 +339,26 @@ function tokenizeJS(code: string): JSToken[] {
       if (i < code.length) {
         comment += consume() + consume() // */
       }
-      addToken('comment', comment)
+      addToken('comment', comment, tokenPosition)
       continue
     }
 
     // Template literal
     if (char === '`') {
+      let strPosition = i
       let str = consume() // opening `
       while (i < code.length && peek() !== '`') {
         if (peek() === '\\' && i + 1 < code.length) {
           str += consume() + consume() // escape sequence
         } else if (peek() === '$' && peek(1) === '{') {
           // End current string token
-          addToken('string', str)
+          addToken('string', str, strPosition)
           str = ''
 
           // Add interpolation opening bracket
-          addToken('interpolation-bracket', '${')
+          addToken('interpolation-bracket', '${', i)
           i += 2
+          const interpolationPosition = i
 
           // Find matching closing brace, tracking depth
           let depth = 1
@@ -293,16 +378,17 @@ function tokenizeJS(code: string): JSToken[] {
           }
 
           // Recursively tokenize interpolation content
-          const innerTokens = tokenizeJS(interpolationContent)
+          const innerTokens = tokenizeJS(interpolationContent, basePosition + interpolationPosition)
           tokens.push(...innerTokens)
 
           // Add closing bracket
           if (peek() === '}') {
-            addToken('interpolation-bracket', '}')
+            addToken('interpolation-bracket', '}', i)
             consume()
           }
 
           // Continue building string after interpolation
+          strPosition = i
           str = ''
         } else {
           str += consume()
@@ -311,12 +397,13 @@ function tokenizeJS(code: string): JSToken[] {
       if (peek() === '`') {
         str += consume() // closing `
       }
-      addToken('string', str)
+      addToken('string', str, strPosition)
       continue
     }
 
     // Double-quoted string
     if (char === '"') {
+      const tokenPosition = i
       let str = consume() // opening "
       while (i < code.length && peek() !== '"') {
         if (peek() === '\\' && i + 1 < code.length) {
@@ -330,12 +417,13 @@ function tokenizeJS(code: string): JSToken[] {
       if (peek() === '"') {
         str += consume() // closing "
       }
-      addToken('string', str)
+      addToken('string', str, tokenPosition)
       continue
     }
 
     // Single-quoted string
     if (char === "'") {
+      const tokenPosition = i
       let str = consume() // opening '
       while (i < code.length && peek() !== "'") {
         if (peek() === '\\' && i + 1 < code.length) {
@@ -349,12 +437,13 @@ function tokenizeJS(code: string): JSToken[] {
       if (peek() === "'") {
         str += consume() // closing '
       }
-      addToken('string', str)
+      addToken('string', str, tokenPosition)
       continue
     }
 
     // Number
     if (isDigit(char) || (char === '.' && isDigit(peek(1)))) {
+      const tokenPosition = i
       let num = ''
       // Integer part
       while (i < code.length && isDigit(peek())) {
@@ -377,47 +466,53 @@ function tokenizeJS(code: string): JSToken[] {
           num += consume()
         }
       }
-      addToken('number', num)
+      addToken('number', num, tokenPosition)
       continue
     }
 
     // Identifier or keyword
     if (isIdentifierStart(char)) {
+      const tokenPosition = i
       let ident = ''
       while (i < code.length && isIdentifierChar(peek())) {
         ident += consume()
       }
       if (JS_KEYWORDS.has(ident)) {
-        addToken('keyword', ident)
+        addToken('keyword', ident, tokenPosition)
       } else if (JS_BUILTINS.has(ident)) {
-        addToken('builtin', ident)
+        addToken('builtin', ident, tokenPosition)
       } else {
-        addToken('text', ident)
+        addToken('text', ident, tokenPosition)
       }
       continue
     }
 
     // Everything else (operators, punctuation, whitespace)
-    addToken('text', consume())
+    const tokenPosition = i
+    addToken('text', consume(), tokenPosition)
   }
 
   return tokens
 }
 
 // Render JS tokens to HTML
-function renderJSTokens(tokens: JSToken[]): string {
+function renderJSTokens(tokens: JSToken[], diagnostics: BCFDHighlightDiagnostic[] = []): string {
   let html = ''
+  const diagnosticByPosition = new Map(
+    diagnostics.map((diagnostic) => [diagnostic.position, diagnostic])
+  )
 
   for (const token of tokens) {
     // Escape HTML in the value
-    const escaped = token.value
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
+    const escaped = token.value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+    const diagnostic = diagnosticByPosition.get(token.position)
 
     switch (token.type) {
       case 'text':
-        html += escaped
+        html += diagnostic
+          ? `<span class="bcfd-warning" title="${escapeAttribute(diagnostic.message)}">${escaped}</span>`
+          : escaped
         break
       case 'keyword':
         html += `<span class="js-keyword">${escaped}</span>`
@@ -443,7 +538,11 @@ function renderJSTokens(tokens: JSToken[]): string {
   return html
 }
 
-export function highlightJavaScript(code: string): string {
-  const tokens = tokenizeJS(code)
-  return renderJSTokens(tokens)
+export function highlightJavaScript(
+  code: string,
+  diagnostics: BCFDHighlightDiagnostic[] = [],
+  basePosition = 0
+): string {
+  const tokens = tokenizeJS(code, basePosition)
+  return renderJSTokens(tokens, diagnostics)
 }

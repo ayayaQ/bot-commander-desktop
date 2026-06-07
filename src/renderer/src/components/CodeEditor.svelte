@@ -1,5 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onMount, tick } from 'svelte'
+  import { bcfdItems, type BCFDLanguageItem } from '../../../shared/bcfdLanguage'
+  import { lintBCFD, type BCFDLintDiagnostic } from '../../../shared/bcfdLint'
   import { highlightBCFD, highlightJavaScript } from '../utils/highlight'
 
   interface Props {
@@ -31,466 +33,12 @@
   let currentWord = ''
   let wordStartIndex = 0
   let isJsAutocomplete = $state(false) // Track if we're showing JS keywords (no $ prefix)
+  let diagnostics: BCFDLintDiagnostic[] = $state([])
+  let warningTooltipVisible = $state(false)
+  let warningTooltipPosition = $state({ top: 0, left: 0 })
+  let warningTooltipContent = $state('')
 
-  interface AutocompleteItem {
-    name: string
-    syntax: 'variable' | 'function-paren' | 'function-brace' | 'keyword'
-    description: string
-    insertText?: string
-  }
-
-  // BCFD Language definitions for autocomplete
-  const bcfdItems: AutocompleteItem[] = [
-    // Keywords
-    {
-      name: 'eval',
-      syntax: 'keyword',
-      description: 'Start JavaScript eval block',
-      insertText: 'eval\n\n$halt'
-    },
-    { name: 'halt', syntax: 'keyword', description: 'End JavaScript eval block' },
-    {
-      name: 'if',
-      syntax: 'keyword',
-      description: 'Conditional block',
-      insertText: 'if()\n\n$endif'
-    },
-    {
-      name: 'elseif',
-      syntax: 'keyword',
-      description: 'Else-if branch',
-      insertText: 'elseif()'
-    },
-    { name: 'else', syntax: 'keyword', description: 'Else branch' },
-    { name: 'endif', syntax: 'keyword', description: 'End if block' },
-
-    // User Context
-    { name: 'name', syntax: 'variable', description: 'User mention (e.g. @User)' },
-    { name: 'namePlain', syntax: 'variable', description: 'User display name (plain text)' },
-    { name: 'avatar', syntax: 'variable', description: 'User avatar URL' },
-    { name: 'discriminator', syntax: 'variable', description: 'User discriminator' },
-    { name: 'tag', syntax: 'variable', description: 'User tag (e.g. User#1234)' },
-    { name: 'id', syntax: 'variable', description: 'User ID' },
-    { name: 'timeCreated', syntax: 'variable', description: 'User account creation time' },
-    {
-      name: 'timeCreatedDiscord',
-      syntax: 'variable',
-      description: 'User account creation time as Discord timestamp'
-    },
-    { name: 'defaultavatar', syntax: 'variable', description: 'User default avatar URL' },
-
-    // Member Context
-    { name: 'memberIsOwner', syntax: 'variable', description: 'Is member the server owner' },
-    { name: 'memberEffectiveName', syntax: 'variable', description: 'Member display name' },
-    { name: 'memberNickname', syntax: 'variable', description: 'Member nickname' },
-    { name: 'memberID', syntax: 'variable', description: 'Member ID' },
-    { name: 'memberHasTimeJoined', syntax: 'variable', description: 'Has member join time' },
-    { name: 'memberTimeJoined', syntax: 'variable', description: 'Member join time' },
-    {
-      name: 'memberTimeJoinedDiscord',
-      syntax: 'variable',
-      description: 'Member join time as Discord timestamp'
-    },
-    { name: 'memberEffectiveAvatar', syntax: 'variable', description: 'Member effective avatar' },
-    { name: 'memberEffectiveTag', syntax: 'variable', description: 'Member effective tag' },
-    { name: 'memberEffectiveID', syntax: 'variable', description: 'Member effective ID' },
-    {
-      name: 'memberEffectiveTimeCreated',
-      syntax: 'variable',
-      description: 'Member account creation time'
-    },
-    {
-      name: 'memberEffectiveTimeCreatedDiscord',
-      syntax: 'variable',
-      description: 'Member account creation time as Discord timestamp'
-    },
-    {
-      name: 'memberEffectiveDefaultAvatar',
-      syntax: 'variable',
-      description: 'Member default avatar'
-    },
-    { name: 'memberTimeBoosted', syntax: 'variable', description: 'When member started boosting' },
-    {
-      name: 'memberTimeBoostedDiscord',
-      syntax: 'variable',
-      description: 'Member boost time as Discord timestamp'
-    },
-    { name: 'memberHasBoosted', syntax: 'variable', description: 'Is member boosting' },
-
-    // Bot Context
-    { name: 'ping', syntax: 'variable', description: 'Bot WebSocket ping (ms)' },
-    { name: 'inviteURL', syntax: 'variable', description: 'Bot invite URL' },
-    { name: 'serverCount', syntax: 'variable', description: 'Number of servers bot is in' },
-    { name: 'allMemberCount', syntax: 'variable', description: 'Total cached member count' },
-    { name: 'botAvatar', syntax: 'variable', description: 'Bot avatar URL' },
-    { name: 'botName', syntax: 'variable', description: 'Bot mention' },
-    { name: 'botNamePlain', syntax: 'variable', description: 'Bot display name' },
-    { name: 'botID', syntax: 'variable', description: 'Bot user ID' },
-    { name: 'botTimeCreated', syntax: 'variable', description: 'Bot account creation time' },
-    {
-      name: 'botTimeCreatedDiscord',
-      syntax: 'variable',
-      description: 'Bot account creation time as Discord timestamp'
-    },
-    { name: 'botDefaultAvatar', syntax: 'variable', description: 'Bot default avatar URL' },
-    { name: 'botDiscriminator', syntax: 'variable', description: 'Bot discriminator' },
-    { name: 'botTag', syntax: 'variable', description: 'Bot tag' },
-
-    // Guild Context
-    { name: 'server', syntax: 'variable', description: 'Server name' },
-    { name: 'serverIcon', syntax: 'variable', description: 'Server icon URL' },
-    { name: 'serverBanner', syntax: 'variable', description: 'Server banner URL' },
-    { name: 'serverDescription', syntax: 'variable', description: 'Server description' },
-    { name: 'serverSplash', syntax: 'variable', description: 'Server splash URL' },
-    { name: 'serverCreateTime', syntax: 'variable', description: 'Server creation time' },
-    {
-      name: 'serverCreateTimeDiscord',
-      syntax: 'variable',
-      description: 'Server creation time as Discord timestamp'
-    },
-    { name: 'memberCount', syntax: 'variable', description: 'Server member count' },
-
-    // Channel Context
-    { name: 'channel', syntax: 'variable', description: 'Channel name' },
-    { name: 'channelID', syntax: 'variable', description: 'Channel ID' },
-    { name: 'channelCreateDate', syntax: 'variable', description: 'Channel creation date' },
-    {
-      name: 'channelCreateDateDiscord',
-      syntax: 'variable',
-      description: 'Channel creation date as Discord timestamp'
-    },
-    {
-      name: 'channelAsMention',
-      syntax: 'variable',
-      description: 'Channel mention (e.g. #general)'
-    },
-    { name: 'channelTopic', syntax: 'variable', description: 'Channel topic' },
-    { name: 'channelIsNSFW', syntax: 'variable', description: 'Is channel NSFW (true/false)' },
-    { name: 'channelCount', syntax: 'variable', description: 'Total channel count in server' },
-
-    // Channel Management
-    {
-      name: 'createChannel',
-      syntax: 'function-paren',
-      description: 'Create a new channel',
-      insertText: 'createChannel(name, type)'
-    },
-    {
-      name: 'createPrivateChannel',
-      syntax: 'function-paren',
-      description: 'Create a private channel for the caller',
-      insertText: 'createPrivateChannel(name, type)'
-    },
-    {
-      name: 'createChannelIn',
-      syntax: 'function-paren',
-      description: 'Create channel in category',
-      insertText: 'createChannelIn(name, type, categoryID)'
-    },
-    {
-      name: 'cloneChannel',
-      syntax: 'function-paren',
-      description: 'Clone an existing channel',
-      insertText: 'cloneChannel(channelID)'
-    },
-    {
-      name: 'deleteChannel',
-      syntax: 'function-paren',
-      description: 'Delete a channel',
-      insertText: 'deleteChannel(channelID, reason)'
-    },
-    {
-      name: 'setChannelName',
-      syntax: 'function-paren',
-      description: 'Rename a channel',
-      insertText: 'setChannelName(channelID, name)'
-    },
-    {
-      name: 'setChannelTopic',
-      syntax: 'function-paren',
-      description: 'Set channel topic',
-      insertText: 'setChannelTopic(channelID, topic)'
-    },
-    {
-      name: 'setChannelNSFW',
-      syntax: 'function-paren',
-      description: 'Set channel NSFW flag',
-      insertText: 'setChannelNSFW(channelID, true)'
-    },
-    {
-      name: 'setChannelSlowmode',
-      syntax: 'function-paren',
-      description: 'Set slowmode delay (0-21600s)',
-      insertText: 'setChannelSlowmode(channelID, seconds)'
-    },
-    {
-      name: 'setChannelPosition',
-      syntax: 'function-paren',
-      description: 'Set channel position',
-      insertText: 'setChannelPosition(channelID, position)'
-    },
-    {
-      name: 'setChannelParent',
-      syntax: 'function-paren',
-      description: 'Move channel to category',
-      insertText: 'setChannelParent(channelID, categoryID)'
-    },
-    {
-      name: 'findChannel',
-      syntax: 'function-paren',
-      description: 'Find channel by name',
-      insertText: 'findChannel(name)'
-    },
-    {
-      name: 'getChannelName',
-      syntax: 'function-paren',
-      description: 'Get channel name by ID',
-      insertText: 'getChannelName(channelID)'
-    },
-    {
-      name: 'getChannelType',
-      syntax: 'function-paren',
-      description: 'Get channel type',
-      insertText: 'getChannelType(channelID)'
-    },
-    {
-      name: 'getChannelParent',
-      syntax: 'function-paren',
-      description: 'Get parent category ID',
-      insertText: 'getChannelParent(channelID)'
-    },
-    {
-      name: 'listChannels',
-      syntax: 'function-paren',
-      description: 'List channel names by type',
-      insertText: 'listChannels(type)'
-    },
-    {
-      name: 'listChannelIDs',
-      syntax: 'function-paren',
-      description: 'List channel IDs by type',
-      insertText: 'listChannelIDs(type)'
-    },
-    {
-      name: 'lockChannel',
-      syntax: 'function-paren',
-      description: 'Lock channel for a role',
-      insertText: 'lockChannel(channelID, roleID)'
-    },
-    {
-      name: 'unlockChannel',
-      syntax: 'function-paren',
-      description: 'Unlock channel for a role',
-      insertText: 'unlockChannel(channelID, roleID)'
-    },
-    {
-      name: 'channelMention',
-      syntax: 'function-paren',
-      description: 'Format channel ID as mention',
-      insertText: 'channelMention(channelID)'
-    },
-
-    // Mentioned User Context
-    { name: 'mentionedName', syntax: 'variable', description: 'Mentioned user mention' },
-    { name: 'mentionedID', syntax: 'variable', description: 'Mentioned user ID' },
-    { name: 'mentionedTag', syntax: 'variable', description: 'Mentioned user tag' },
-    {
-      name: 'mentionedDiscriminator',
-      syntax: 'variable',
-      description: 'Mentioned user discriminator'
-    },
-    { name: 'mentionedAvatar', syntax: 'variable', description: 'Mentioned user avatar' },
-    {
-      name: 'mentionedTimeCreated',
-      syntax: 'variable',
-      description: 'Mentioned user creation time'
-    },
-    {
-      name: 'mentionedTimeCreatedDiscord',
-      syntax: 'variable',
-      description: 'Mentioned user creation time as Discord timestamp'
-    },
-    { name: 'mentionedNamePlain', syntax: 'variable', description: 'Mentioned user display name' },
-    {
-      name: 'mentionedDefaultAvatar',
-      syntax: 'variable',
-      description: 'Mentioned user default avatar'
-    },
-    { name: 'mentionedIsBot', syntax: 'variable', description: 'Is mentioned user a bot' },
-
-    // Utility Variables
-    { name: 'randomInt', syntax: 'variable', description: 'Random integer 0-99' },
-    { name: 'randomFloat', syntax: 'variable', description: 'Random float 0-1' },
-    { name: 'randomBoolean', syntax: 'variable', description: 'Random true/false' },
-    { name: 'commandCount', syntax: 'variable', description: 'Number of BCFD commands' },
-    { name: 'date', syntax: 'variable', description: 'Current date/time' },
-    {
-      name: 'dateDiscord',
-      syntax: 'variable',
-      description: 'Current date/time as Discord timestamp'
-    },
-    { name: 'hours', syntax: 'variable', description: 'Current hour (00-23)' },
-    { name: 'minutes', syntax: 'variable', description: 'Current minute (00-59)' },
-    { name: 'seconds', syntax: 'variable', description: 'Current second (00-59)' },
-    { name: 'message', syntax: 'variable', description: 'Full message content' },
-    { name: 'messageAfterCommand', syntax: 'variable', description: 'Message after command' },
-    { name: 'argsCount', syntax: 'variable', description: 'Number of arguments' },
-
-    // Functions with arguments
-    {
-      name: 'random',
-      syntax: 'function-brace',
-      description: 'Pick random option',
-      insertText: 'random{|}'
-    },
-    {
-      name: 'rollnum',
-      syntax: 'function-paren',
-      description: 'Random number in range',
-      insertText: 'rollnum(min, max)'
-    },
-    {
-      name: 'sum',
-      syntax: 'function-paren',
-      description: 'Sum of numbers',
-      insertText: 'sum(n1, n2)'
-    },
-    {
-      name: 'sub',
-      syntax: 'function-paren',
-      description: 'Subtract two numbers',
-      insertText: 'sub(a, b)'
-    },
-    {
-      name: 'mul',
-      syntax: 'function-paren',
-      description: 'Multiply numbers',
-      insertText: 'mul(n1, n2)'
-    },
-    {
-      name: 'div',
-      syntax: 'function-paren',
-      description: 'Divide two numbers',
-      insertText: 'div(a, b)'
-    },
-    {
-      name: 'mod',
-      syntax: 'function-paren',
-      description: 'Modulo of two numbers',
-      insertText: 'mod(a, b)'
-    },
-    {
-      name: 'round',
-      syntax: 'function-paren',
-      description: 'Round to nearest integer or N decimals',
-      insertText: 'round(n, decimals)'
-    },
-    { name: 'floor', syntax: 'function-paren', description: 'Round down', insertText: 'floor(n)' },
-    { name: 'ceil', syntax: 'function-paren', description: 'Round up', insertText: 'ceil(n)' },
-    {
-      name: 'abs',
-      syntax: 'function-paren',
-      description: 'Absolute value',
-      insertText: 'abs(n)'
-    },
-    {
-      name: 'toFixed',
-      syntax: 'function-paren',
-      description: 'Format to fixed decimal places',
-      insertText: 'toFixed(n, decimals)'
-    },
-    {
-      name: 'min',
-      syntax: 'function-paren',
-      description: 'Minimum of numbers',
-      insertText: 'min(n1, n2)'
-    },
-    {
-      name: 'max',
-      syntax: 'function-paren',
-      description: 'Maximum of numbers',
-      insertText: 'max(n1, n2)'
-    },
-    {
-      name: 'clamp',
-      syntax: 'function-paren',
-      description: 'Clamp value between min and max',
-      insertText: 'clamp(n, min, max)'
-    },
-    {
-      name: 'pow',
-      syntax: 'function-paren',
-      description: 'Exponentiation',
-      insertText: 'pow(base, exp)'
-    },
-    {
-      name: 'sqrt',
-      syntax: 'function-paren',
-      description: 'Square root',
-      insertText: 'sqrt(n)'
-    },
-    {
-      name: 'log',
-      syntax: 'function-paren',
-      description: 'Natural logarithm',
-      insertText: 'log(n)'
-    },
-    { name: 'pi', syntax: 'variable', description: 'Pi constant (3.14159...)' },
-    {
-      name: 'isNumber',
-      syntax: 'function-paren',
-      description: 'Check if text is a valid number',
-      insertText: 'isNumber(text)'
-    },
-    {
-      name: 'args',
-      syntax: 'function-paren',
-      description: 'Get argument at index',
-      insertText: 'args(0)'
-    },
-    {
-      name: 'set',
-      syntax: 'function-paren',
-      description: 'Store a variable',
-      insertText: 'set(name, value)'
-    },
-    {
-      name: 'get',
-      syntax: 'function-paren',
-      description: 'Retrieve a variable',
-      insertText: 'get(name)'
-    },
-    {
-      name: 'chat',
-      syntax: 'function-paren',
-      description: 'AI chat response',
-      insertText: 'chat(prompt)'
-    },
-    {
-      name: 'option',
-      syntax: 'function-paren',
-      description: 'Get option value (interaction commands)',
-      insertText: 'option(name)'
-    },
-    {
-      name: 'contains',
-      syntax: 'function-paren',
-      description: 'Check if text contains search string',
-      insertText: 'contains(text, search)'
-    },
-    {
-      name: 'startsWith',
-      syntax: 'function-paren',
-      description: 'Check if text starts with prefix',
-      insertText: 'startsWith(text, prefix)'
-    },
-    {
-      name: 'endsWith',
-      syntax: 'function-paren',
-      description: 'Check if text ends with suffix',
-      insertText: 'endsWith(text, suffix)'
-    }
-  ]
+  type AutocompleteItem = BCFDLanguageItem
 
   // JavaScript keywords for autocomplete inside $eval blocks
   const jsKeywords: AutocompleteItem[] = [
@@ -574,8 +122,8 @@
 
   function handleInput() {
     dispatch('change', value)
+    updateDiagnostics()
     updateHighlighting()
-    updateLineNumbers()
     checkAutocomplete()
   }
 
@@ -710,35 +258,28 @@
       textareaElement.focus()
       // Update highlighting and line numbers without triggering autocomplete
       dispatch('change', value)
+      updateDiagnostics()
       updateHighlighting()
-      updateLineNumbers()
     })
+  }
+
+  function updateDiagnostics() {
+    diagnostics = lintBCFD(value, { mode })
   }
 
   function updateHighlighting() {
     if (!highlightElement) return
     if (mode === 'js') {
       // Pure JavaScript mode - use JS highlighting with line breaks
-      let html = value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      html = highlightJavaScript(html)
+      let html = highlightJavaScript(value, diagnostics)
       html = html.replace(/\n/g, '<br>')
       if (html.endsWith('<br>')) {
         html += '&nbsp;'
       }
       highlightElement.innerHTML = html
     } else {
-      highlightElement.innerHTML = highlightBCFD(value)
+      highlightElement.innerHTML = highlightBCFD(value, diagnostics)
     }
-  }
-
-  function updateLineNumbers() {
-    if (!lineNumbersElement) return
-    const lines = value.split('\n').length
-    let html = ''
-    for (let i = 1; i <= lines; i++) {
-      html += `<div class="line-number">${i}</div>`
-    }
-    lineNumbersElement.innerHTML = html
   }
 
   function handleClick() {
@@ -753,24 +294,68 @@
     }
   }
 
+  function showWarningTooltip(target: EventTarget | null, content: string) {
+    if (!(target instanceof HTMLElement)) return
+
+    const rect = target.getBoundingClientRect()
+    warningTooltipPosition = {
+      top: rect.top - 8,
+      left: rect.left + rect.width / 2
+    }
+    warningTooltipContent = content
+    warningTooltipVisible = true
+  }
+
+  function hideWarningTooltip() {
+    warningTooltipVisible = false
+  }
+
   onMount(() => {
+    updateDiagnostics()
     updateHighlighting()
-    updateLineNumbers()
   })
 
   // React to external value changes
   $effect(() => {
     if (textareaElement && value !== undefined) {
       tick().then(() => {
+        updateDiagnostics()
         updateHighlighting()
-        updateLineNumbers()
       })
     }
   })
 
   // Calculate dynamic height based on content
   let lineCount = $derived(value.split('\n').length)
+  let lineNumbers = $derived(Array.from({ length: lineCount }, (_, index) => index + 1))
   let computedHeight = $derived(Math.max(parseInt(minHeight), lineCount * 24 + 40)) // 24px per line + editor padding and footer
+  let warningSummary = $derived(diagnostics.map((diagnostic) => diagnostic.message).join('\n'))
+  let diagnosticsByLine = $derived(
+    (() => {
+      const byLine = new Map<number, BCFDLintDiagnostic[]>()
+      for (const diagnostic of diagnostics) {
+        const line = lineForPosition(value, diagnostic.position)
+        const lineDiagnostics = byLine.get(line) ?? []
+        lineDiagnostics.push(diagnostic)
+        byLine.set(line, lineDiagnostics)
+      }
+      return byLine
+    })()
+  )
+
+  function lineForPosition(text: string, position: number): number {
+    let line = 1
+    for (let index = 0; index < position && index < text.length; index++) {
+      if (text[index] === '\n') {
+        line++
+      }
+    }
+    return line
+  }
+
+  function lineWarningSummary(line: number): string {
+    return (diagnosticsByLine.get(line) ?? []).map((diagnostic) => diagnostic.message).join('\n')
+  }
 </script>
 
 <div
@@ -781,9 +366,27 @@
   <!-- Line Numbers -->
   <div
     bind:this={lineNumbersElement}
-    class="line-numbers absolute left-0 top-0 bottom-6 w-12 bg-base-200 text-base-content/50 text-right pr-2 pt-2 pb-4 select-none font-mono text-sm leading-6 overflow-hidden"
+    class="line-numbers absolute left-0 top-0 bottom-6 w-12 bg-base-200 text-base-content/50 pr-2 pt-2 pb-4 select-none font-mono text-sm leading-6 overflow-hidden"
   >
-    <div class="line-number">1</div>
+    {#each lineNumbers as line}
+      <div class="line-number flex items-center justify-end gap-1">
+        {#if diagnosticsByLine.has(line)}
+          <button
+            type="button"
+            class="line-warning-marker material-symbols-outlined text-warning cursor-help bg-transparent border-0 p-0 leading-none"
+            aria-label={lineWarningSummary(line)}
+            onmouseenter={(event) =>
+              showWarningTooltip(event.currentTarget, lineWarningSummary(line))}
+            onmouseleave={hideWarningTooltip}
+            onfocus={(event) => showWarningTooltip(event.currentTarget, lineWarningSummary(line))}
+            onblur={hideWarningTooltip}
+          >
+            warning
+          </button>
+        {/if}
+        <span>{line}</span>
+      </div>
+    {/each}
   </div>
 
   <!-- Scrollable Editor Area -->
@@ -854,12 +457,40 @@
   {/if}
 
   <div
-    class="absolute left-0 right-0 bottom-0 h-6 border-t border-base-300 bg-base-200 px-2 flex items-center justify-end text-xs text-base-content/60 select-none"
+    class="absolute left-0 right-0 bottom-0 h-6 border-t border-base-300 bg-base-200 px-2 flex items-center justify-between gap-2 text-xs text-base-content/60 select-none"
   >
-    {value.length}
-    {value.length === 1 ? 'character' : 'characters'}
+    <div class="min-w-0 truncate">
+      {#if diagnostics.length > 0}
+        <button
+          type="button"
+          class="text-warning cursor-help bg-transparent border-0 p-0 text-xs"
+          aria-label={warningSummary}
+          onmouseenter={(event) => showWarningTooltip(event.currentTarget, warningSummary)}
+          onmouseleave={hideWarningTooltip}
+          onfocus={(event) => showWarningTooltip(event.currentTarget, warningSummary)}
+          onblur={hideWarningTooltip}
+        >
+          {diagnostics.length}
+          {diagnostics.length === 1 ? 'warning' : 'warnings'}
+        </button>
+      {/if}
+    </div>
+    <div class="shrink-0">
+      {value.length}
+      {value.length === 1 ? 'character' : 'characters'}
+    </div>
   </div>
 </div>
+
+{#if warningTooltipVisible && warningTooltipContent}
+  <div
+    class="fixed z-[10000] max-w-sm -translate-x-1/2 -translate-y-full rounded bg-warning px-2 py-1 text-xs text-warning-content shadow-lg whitespace-pre-line pointer-events-none"
+    style="top: {warningTooltipPosition.top}px; left: {warningTooltipPosition.left}px;"
+    role="tooltip"
+  >
+    {warningTooltipContent}
+  </div>
+{/if}
 
 <style>
   .code-editor-container {
@@ -874,6 +505,20 @@
   .line-number {
     height: 1.5rem;
     line-height: 1.5rem;
+  }
+
+  .line-warning-marker {
+    width: 0.75rem;
+    min-width: 0.75rem;
+    max-width: 0.75rem;
+    height: 0.75rem;
+    overflow: hidden;
+    font-size: 0.75rem;
+    font-variation-settings:
+      'FILL' 1,
+      'wght' 400,
+      'GRAD' 0,
+      'opsz' 20;
   }
 
   .editor-scroll-area {
@@ -947,6 +592,14 @@
 
   :global(.bcfd-eval) {
     color: color-mix(in oklch, var(--color-base-content) 80%, transparent);
+  }
+
+  :global(.bcfd-warning) {
+    text-decoration-line: underline;
+    text-decoration-style: wavy;
+    text-decoration-color: var(--color-warning);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
   }
 
   /* JavaScript syntax highlighting */
