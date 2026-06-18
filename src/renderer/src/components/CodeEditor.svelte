@@ -10,6 +10,8 @@
     minHeight?: string
     mode?: 'bcfd' | 'js' // 'bcfd' for template language, 'js' for pure JavaScript
     readonly?: boolean
+    useStartupGlobals?: boolean
+    startupJsForLint?: string
   }
 
   let {
@@ -17,7 +19,9 @@
     placeholder = '',
     minHeight = '200px',
     mode = 'bcfd',
-    readonly = false
+    readonly = false,
+    useStartupGlobals,
+    startupJsForLint
   }: Props = $props()
 
   const dispatch = createEventDispatcher<{ change: string }>()
@@ -34,6 +38,7 @@
   let wordStartIndex = 0
   let isJsAutocomplete = $state(false) // Track if we're showing JS keywords (no $ prefix)
   let diagnostics: BCFDLintDiagnostic[] = $state([])
+  let startupJs = $state('')
   let warningTooltipVisible = $state(false)
   let warningTooltipPosition = $state({ top: 0, left: 0 })
   let warningTooltipContent = $state('')
@@ -263,8 +268,36 @@
     })
   }
 
+  function shouldUseStartupGlobals() {
+    return useStartupGlobals ?? mode === 'bcfd'
+  }
+
+  function currentStartupJsForLinting() {
+    return startupJsForLint ?? startupJs
+  }
+
+  async function loadStartupJsForLinting() {
+    if (!shouldUseStartupGlobals()) {
+      startupJs = ''
+      return
+    }
+    if (startupJsForLint !== undefined) {
+      startupJs = startupJsForLint
+      return
+    }
+
+    try {
+      startupJs = await window.electron.ipcRenderer.invoke('get-startup-js')
+    } catch {
+      startupJs = ''
+    }
+  }
+
   function updateDiagnostics() {
-    diagnostics = lintBCFD(value, { mode })
+    diagnostics = lintBCFD(value, {
+      mode,
+      startupJs: shouldUseStartupGlobals() ? currentStartupJsForLinting() : undefined
+    })
   }
 
   function updateHighlighting() {
@@ -311,6 +344,10 @@
   }
 
   onMount(() => {
+    loadStartupJsForLinting().then(() => {
+      updateDiagnostics()
+      updateHighlighting()
+    })
     updateDiagnostics()
     updateHighlighting()
   })
@@ -325,11 +362,23 @@
     }
   })
 
+  // React to externally managed startup JS changes used for lint globals.
+  $effect(() => {
+    if (startupJsForLint !== undefined) {
+      startupJs = startupJsForLint
+      tick().then(() => {
+        updateDiagnostics()
+        updateHighlighting()
+      })
+    }
+  })
+
   // Calculate dynamic height based on content
   let lineCount = $derived(value.split('\n').length)
   let lineNumbers = $derived(Array.from({ length: lineCount }, (_, index) => index + 1))
   let computedHeight = $derived(Math.max(parseInt(minHeight), lineCount * 24 + 40)) // 24px per line + editor padding and footer
   let warningSummary = $derived(diagnostics.map((diagnostic) => diagnostic.message).join('\n'))
+  let hasError = $derived(diagnostics.some((diagnostic) => diagnostic.severity === 'error'))
   let diagnosticsByLine = $derived(
     (() => {
       const byLine = new Map<number, BCFDLintDiagnostic[]>()
@@ -356,6 +405,10 @@
   function lineWarningSummary(line: number): string {
     return (diagnosticsByLine.get(line) ?? []).map((diagnostic) => diagnostic.message).join('\n')
   }
+
+  function lineHasError(line: number): boolean {
+    return (diagnosticsByLine.get(line) ?? []).some((diagnostic) => diagnostic.severity === 'error')
+  }
 </script>
 
 <div
@@ -373,7 +426,9 @@
         {#if diagnosticsByLine.has(line)}
           <button
             type="button"
-            class="line-warning-marker material-symbols-outlined text-warning cursor-help bg-transparent border-0 p-0 leading-none"
+            class="line-warning-marker material-symbols-outlined cursor-help bg-transparent border-0 p-0 leading-none"
+            class:text-error={lineHasError(line)}
+            class:text-warning={!lineHasError(line)}
             aria-label={lineWarningSummary(line)}
             onmouseenter={(event) =>
               showWarningTooltip(event.currentTarget, lineWarningSummary(line))}
@@ -463,7 +518,9 @@
       {#if diagnostics.length > 0}
         <button
           type="button"
-          class="text-warning cursor-help bg-transparent border-0 p-0 text-xs"
+          class="cursor-help bg-transparent border-0 p-0 text-xs"
+          class:text-error={hasError}
+          class:text-warning={!hasError}
           aria-label={warningSummary}
           onmouseenter={(event) => showWarningTooltip(event.currentTarget, warningSummary)}
           onmouseleave={hideWarningTooltip}
@@ -471,7 +528,7 @@
           onblur={hideWarningTooltip}
         >
           {diagnostics.length}
-          {diagnostics.length === 1 ? 'warning' : 'warnings'}
+          {diagnostics.length === 1 ? 'issue' : 'issues'}
         </button>
       {/if}
     </div>
@@ -484,7 +541,11 @@
 
 {#if warningTooltipVisible && warningTooltipContent}
   <div
-    class="fixed z-[10000] max-w-sm -translate-x-1/2 -translate-y-full rounded bg-warning px-2 py-1 text-xs text-warning-content shadow-lg whitespace-pre-line pointer-events-none"
+    class="fixed z-[10000] max-w-sm -translate-x-1/2 -translate-y-full rounded px-2 py-1 text-xs shadow-lg whitespace-pre-line pointer-events-none"
+    class:bg-error={hasError}
+    class:text-error-content={hasError}
+    class:bg-warning={!hasError}
+    class:text-warning-content={!hasError}
     style="top: {warningTooltipPosition.top}px; left: {warningTooltipPosition.left}px;"
     role="tooltip"
   >
