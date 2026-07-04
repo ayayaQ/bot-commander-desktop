@@ -8,7 +8,6 @@ import {
   setStartupJs,
   restartJsEngine
 } from '../utils/virtual'
-import vm from 'node:vm'
 import fs from 'fs/promises'
 import {
   applyBotStatus,
@@ -259,13 +258,17 @@ export function addIPCHandlers() {
 
   ipcMain.handle('getBotState', () => {
     const context = getBotStateContext()
-    return vm.runInContext('JSON.parse(JSON.stringify(botState))', context)
+    return context.getVariable('botState') ?? {}
   })
 
   ipcMain.handle('updateBotState', (_event, key: string, value: any) => {
     try {
       const context = getBotStateContext()
-      vm.runInContext(`botState['${key}'] = ${JSON.stringify(value)}`, context)
+      const botState = context.getVariable('botState')
+      const nextState: Record<string, unknown> =
+        botState && typeof botState === 'object' ? { ...(botState as Record<string, unknown>) } : {}
+      nextState[key] = value
+      context.setVariable('botState', nextState)
       saveBotState() // Save the updated state
       return true
     } catch (error) {
@@ -277,7 +280,7 @@ export function addIPCHandlers() {
   ipcMain.handle('runCodeInContext', (_event, code: string) => {
     try {
       const context = getBotStateContext()
-      const result = vm.runInContext(code, context, { timeout: 2000, breakOnSigint: true })
+      const result = context.evaluate(code, { timeoutMs: 2000, wrapReturn: false })
       saveBotState() // Save the state in case it was modified
       return JSON.stringify(result, null, 2)
     } catch (error) {

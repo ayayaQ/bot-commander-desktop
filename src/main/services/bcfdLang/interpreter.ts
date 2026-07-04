@@ -5,7 +5,6 @@
  * Supports async functions and recursive evaluation.
  */
 
-import vm from 'vm'
 import {
   ASTNode,
   BCFDContext,
@@ -28,6 +27,7 @@ import {
 import { getSettings } from '../settingsService'
 import { getCommands } from '../botService'
 import { createAiChatCompletion, moderateTextWithOpenAI } from '../aiProviderService'
+import { ScriptExecutionError } from '../../utils/quickJsScriptContext'
 
 // ============================================================================
 // Channel Management Helpers
@@ -263,8 +263,7 @@ function createFunctionRegistry(): FunctionRegistry {
     if (!name) return '[BCFD Error: createPrivateChannel requires a channel name]'
     const typeStr = args[1]?.trim() || 'text'
     const channelType = parseChannelType(typeStr)
-    if (channelType === null)
-      return `[BCFD Error: createPrivateChannel invalid type "${typeStr}"]`
+    if (channelType === null) return `[BCFD Error: createPrivateChannel invalid type "${typeStr}"]`
     try {
       const channel = await ctx.guild.channels.create({
         name,
@@ -800,14 +799,14 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('set', (args, ctx) => {
     if (args.length < 2 || !ctx.vmContext) return ''
     const [name, value] = args
-    ctx.vmContext[name] = value
+    ctx.vmContext.setVariable(name, value)
     return ''
   })
 
   // $get(name) - retrieve a variable
   registry.set('get', (args, ctx) => {
     if (args.length < 1 || !ctx.vmContext) return ''
-    const value = ctx.vmContext[args[0]]
+    const value = ctx.vmContext.getVariable(args[0])
     return value !== undefined ? String(value) : ''
   })
 
@@ -1040,6 +1039,7 @@ export class Interpreter {
 
     // Evaluate the AST
     const output = await this.evaluateNode(ast, ctx)
+    this.addSourceContexts(input)
 
     return {
       output,
@@ -1161,6 +1161,7 @@ export class Interpreter {
     node: {
       type: NodeType.EVAL_BLOCK
       code: string
+      codePosition: number
       innerNodes: ASTNode[]
       position: number
       length: number
@@ -1197,7 +1198,7 @@ export class Interpreter {
 
         // Store the value in the VM context
         tempVars[tempVarName] = evaluatedValue
-        ctx.vmContext[tempVarName] = evaluatedValue
+        ctx.vmContext.setVariable(tempVarName, evaluatedValue)
 
         // Queue the replacement by position (not string matching)
         replacements.push({
@@ -1219,39 +1220,38 @@ export class Interpreter {
     }
 
     try {
-      // Execute the JavaScript code with timeout protection
-      // Wrap in a function to support 'return' statements
-      const wrappedCode = `(function() { ${resolvedCode} })()`
-      const result = vm.runInContext(wrappedCode, ctx.vmContext, {
-        timeout: 1000, // 1 second timeout
-        breakOnSigint: true
+      // Execute the JavaScript code with timeout protection.
+      const result = ctx.vmContext.evaluate(resolvedCode, {
+        timeoutMs: 1000,
+        wrapReturn: true
       })
 
       // Clean up temporary variables
       for (const tempVarName of Object.keys(tempVars)) {
-        delete ctx.vmContext[tempVarName]
+        ctx.vmContext.deleteVariable(tempVarName)
       }
 
       return result !== undefined ? String(result) : ''
     } catch (e) {
       // Clean up temporary variables even on error
       for (const tempVarName of Object.keys(tempVars)) {
-        delete ctx.vmContext[tempVarName]
+        ctx.vmContext.deleteVariable(tempVarName)
       }
 
-      // Extract error message - VM errors can be objects, strings, or Error instances
-      let message = 'Unknown error'
-      if (e instanceof Error) {
-        message = e.message
-      } else if (typeof e === 'string') {
-        message = e
-      } else if (e && typeof e === 'object') {
-        // VM context errors are often plain objects with message/stack properties
-        message = (e as any).message || (e as any).toString?.() || JSON.stringify(e)
-      }
+      const jsError = this.describeJavaScriptError(e)
+      const position = this.evalErrorPosition(
+        node,
+        jsError.lineNumber,
+        jsError.columnNumber,
+        replacements
+      )
 
-      this.addError(`JavaScript error: ${message}`, node.position, node.length)
-      return `[BCFD Error: ${message}]`
+      this.addError(`JavaScript error: ${jsError.message}`, position, node.length, {
+        detail: jsError.detail,
+        lineNumber: jsError.lineNumber,
+        columnNumber: jsError.columnNumber
+      })
+      return `[BCFD Error: ${jsError.message}]`
     }
   }
 
@@ -1514,8 +1514,107 @@ export class Interpreter {
     return { found: false, shouldSkip: false, endIndex: i }
   }
 
-  private addError(message: string, position: number, length: number): void {
-    this.errors.push({ message, position, length })
+  private addError(
+    message: string,
+    position: number,
+    length: number,
+    detail?: Pick<BCFDError, 'detail' | 'lineNumber' | 'columnNumber'>
+  ): void {
+    this.errors.push({ message, position, length, ...detail })
+  }
+
+  private addSourceContexts(input: string): void {
+    this.errors = this.errors.map((error) => ({
+      ...error,
+      sourceContext: error.sourceContext ?? sourceContext(input, error.position, error.length)
+    }))
+  }
+
+  private describeJavaScriptError(error: unknown): {
+    message: string
+    detail?: string
+    lineNumber?: number
+    columnNumber?: number
+  } {
+    if (error instanceof ScriptExecutionError) {
+      return {
+        message: error.message,
+        detail: error.details.stack,
+        lineNumber: error.details.lineNumber,
+        columnNumber: error.details.columnNumber
+      }
+    }
+
+    if (error instanceof Error) {
+      return {
+        message: error.message,
+        detail: error.stack
+      }
+    }
+
+    if (typeof error === 'string') {
+      return { message: error }
+    }
+
+    if (error && typeof error === 'object') {
+      const source = error as Record<string, unknown>
+      return {
+        message:
+          typeof source.message === 'string'
+            ? source.message
+            : (source.toString?.() ?? JSON.stringify(source)),
+        detail: typeof source.stack === 'string' ? source.stack : undefined,
+        lineNumber: typeof source.lineNumber === 'number' ? source.lineNumber : undefined,
+        columnNumber: typeof source.columnNumber === 'number' ? source.columnNumber : undefined
+      }
+    }
+
+    return { message: 'Unknown error' }
+  }
+
+  private evalErrorPosition(
+    node: { code: string; codePosition: number; position: number },
+    lineNumber?: number,
+    columnNumber?: number,
+    replacements: { position: number; length: number; replacement: string }[] = []
+  ): number {
+    if (lineNumber == null || lineNumber < 1) {
+      return node.position
+    }
+
+    const lines = node.code.split('\n')
+    const lineStart = lines
+      .slice(0, lineNumber - 1)
+      .reduce((total, line) => total + line.length + 1, 0)
+    const columnOffset = columnNumber != null && columnNumber > 0 ? columnNumber - 1 : 0
+    const resolvedOffset = lineStart + columnOffset
+    const originalOffset = this.originalEvalOffset(resolvedOffset, replacements)
+
+    return node.codePosition + Math.min(originalOffset, node.code.length)
+  }
+
+  private originalEvalOffset(
+    resolvedOffset: number,
+    replacements: { position: number; length: number; replacement: string }[]
+  ): number {
+    let delta = 0
+
+    for (const replacement of [...replacements].sort((a, b) => a.position - b.position)) {
+      const resolvedStart = replacement.position + delta
+      const resolvedEnd = resolvedStart + replacement.replacement.length
+
+      if (resolvedOffset < resolvedStart) {
+        return Math.max(0, resolvedOffset - delta)
+      }
+
+      if (resolvedOffset <= resolvedEnd) {
+        return replacement.position
+      }
+
+      delta += replacement.replacement.length - replacement.length
+    }
+
+    return Math.max(0, resolvedOffset - delta)
   }
 
   /**
@@ -1557,9 +1656,24 @@ export function formatErrors(errors: BCFDError[], input: string): string {
     .map((e) => {
       const line = getLineNumber(input, e.position)
       const col = getColumnNumber(input, e.position)
-      return `Error at line ${line}, column ${col}: ${e.message}`
+      const jsLocation =
+        e.lineNumber != null
+          ? ` (JS line ${e.lineNumber}${e.columnNumber != null ? `, column ${e.columnNumber}` : ''})`
+          : ''
+      const context = e.sourceContext ?? sourceContext(input, e.position, e.length)
+      return `Error at line ${line}, column ${col}${jsLocation}: ${e.message}\nNear: ${context}`
     })
     .join('\n')
+}
+
+function sourceContext(input: string, position: number, _length: number): string {
+  if (!input) return ''
+
+  const safePosition = Math.max(0, Math.min(position, input.length))
+  const lineStart = input.lastIndexOf('\n', safePosition - 1) + 1
+  const lineEndIndex = input.indexOf('\n', safePosition)
+  const lineEnd = lineEndIndex === -1 ? input.length : lineEndIndex
+  return input.slice(lineStart, lineEnd)
 }
 
 function getLineNumber(input: string, position: number): number {

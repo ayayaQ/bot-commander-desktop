@@ -379,6 +379,8 @@
         placeholder={$t('run-code-placeholder')}
         mode="js"
         minHeight="100px"
+        useStartupGlobals={true}
+        startupJsForLint={startupJs}
       />
     </div>
     {#if codeOutput}

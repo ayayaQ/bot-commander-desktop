@@ -83,14 +83,18 @@ export class Tokenizer {
       }
 
       // Extract content between $eval and $halt
-      const content = this.input.slice(this.position, haltIndex)
+      const contentStart = this.position
+      const content = this.input.slice(contentStart, haltIndex)
+      const trimmedContent = content.trim()
+      const leadingTrimLength = content.length - content.trimStart().length
       this.position = haltIndex + 5 // skip past $halt
 
       return {
         type: TokenType.EVAL,
-        value: content.trim(),
+        value: trimmedContent,
         position: startPos,
-        length: this.position - startPos
+        length: this.position - startPos,
+        valuePosition: contentStart + leadingTrimLength
       }
     }
 

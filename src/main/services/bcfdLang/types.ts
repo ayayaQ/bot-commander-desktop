@@ -29,6 +29,7 @@ export interface Token {
   value: string
   position: number // Start position in source
   length: number // Length of token
+  valuePosition?: number // Start position of value in source, for trimmed tokens
 }
 
 // ============================================================================
@@ -76,6 +77,7 @@ export interface FunctionCallNode extends BaseNode {
 export interface EvalBlockNode extends BaseNode {
   type: NodeType.EVAL_BLOCK
   code: string // Raw JavaScript code (with $expressions already resolved)
+  codePosition: number // Start position of code in source
   innerNodes: ASTNode[] // Parsed nodes within the eval block for pre-resolution
 }
 
@@ -138,6 +140,10 @@ export interface BCFDError {
   message: string
   position: number
   length: number
+  detail?: string
+  lineNumber?: number
+  columnNumber?: number
+  sourceContext?: string
 }
 
 export interface InterpreterResult {
@@ -167,8 +173,8 @@ export interface BCFDContext {
   interactionCommand?: import('../../types/types').BCFDInteractionCommand
   interactionOptions?: import('discord.js').CommandInteractionOptionResolver
 
-  // VM context for $eval blocks
-  vmContext?: import('vm').Context
+  // Script context for $eval blocks
+  vmContext?: import('../../utils/quickJsScriptContext').ScriptContext
 
   // Cooldown context
   commandId?: string

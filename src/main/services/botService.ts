@@ -43,7 +43,6 @@ import {
 } from '../types/types'
 import { findInteractionByCommandName, findInteractionByButtonId } from './interactionService'
 import { getBotStateContext, loadBotState, saveBotState } from '../utils/virtual'
-import vm from 'node:vm'
 import { session } from 'electron'
 import { getBotStatus } from './statusService'
 import {
@@ -62,7 +61,6 @@ let commands: { bcfdCommands: BCFDCommand[]; bcfdSlashCommands: BCFDSlashCommand
   bcfdCommands: [],
   bcfdSlashCommands: []
 }
-let context: vm.Context
 let stats: Stats
 
 type GuildSendableChannel =
@@ -112,7 +110,7 @@ export function getCommands() {
 }
 
 export function getContext() {
-  return context
+  return getBotStateContext()
 }
 
 export function getClient() {
@@ -155,8 +153,6 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
     if (client.user == null) return
 
     await loadBotState() // Load bot state when client is ready
-    context = getBotStateContext() // Use the bot state context
-
     // Use our bot status to set the presence of the bot
     applyBotStatus(getBotStatus())
 
@@ -223,8 +219,12 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
   })
 
   client.login(token).catch((err) => {
-    rendererConsole.error(`Login failed: ${err.message || err}`)
-    event.reply('fail', { error: err })
+    const message = `Login failed: ${err.message || err}`
+    rendererConsole.error(message)
+    client?.destroy()
+    client = null
+    connection = false
+    event.reply('connect-error', message)
   })
 }
 
