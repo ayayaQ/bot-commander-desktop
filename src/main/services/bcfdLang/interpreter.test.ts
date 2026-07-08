@@ -99,6 +99,93 @@ describe('BCFD interpreter', () => {
     expect(result.errors).toEqual([])
   })
 
+  it('renders mentioned member context variables', async () => {
+    const joinedTimestamp = 1700000000000
+    const createdTimestamp = 1600000000000
+    const boostedTimestamp = 1800000000000
+    const roles = [{ name: 'Admin' }, { name: 'Builder' }]
+    const mentionedMember = {
+      id: 'member-id',
+      displayName: 'Server Ada',
+      nickname: 'AdaNick',
+      joinedTimestamp,
+      premiumSinceTimestamp: boostedTimestamp,
+      displayHexColor: '#abcdef',
+      guild: { ownerId: 'owner-id' },
+      displayAvatarURL: () => 'member-avatar',
+      user: {
+        id: 'user-id',
+        tag: 'ada#0001',
+        createdTimestamp,
+        defaultAvatarURL: 'default-avatar'
+      },
+      roles: {
+        cache: {
+          size: roles.length,
+          map: (fn: (role: { name: string }) => string) => roles.map(fn)
+        }
+      }
+    } as any
+
+    const result = await new Interpreter().interpret(
+      [
+        '$mentionedMemberEffectiveName',
+        '$mentionedMemberNickname',
+        '$mentionedMemberID',
+        '$mentionedMemberHasTimeJoined',
+        '$mentionedMemberTimeJoined',
+        '$mentionedMemberTimeJoinedDiscord',
+        '$mentionedMemberEffectiveAvatar',
+        '$mentionedMemberEffectiveTag',
+        '$mentionedMemberEffectiveID',
+        '$mentionedMemberEffectiveTimeCreated',
+        '$mentionedMemberEffectiveTimeCreatedDiscord',
+        '$mentionedMemberEffectiveDefaultAvatar',
+        '$mentionedMemberTimeBoosted',
+        '$mentionedMemberTimeBoostedDiscord',
+        '$mentionedMemberHasBoosted',
+        '$mentionedMemberColor',
+        '$mentionedMemberRoles',
+        '$mentionedMemberRoleCount'
+      ].join('|'),
+      { mentionedMember }
+    )
+
+    expect(result.output).toBe(
+      [
+        'Server Ada',
+        'AdaNick',
+        'member-id',
+        'true',
+        new Date(joinedTimestamp).toLocaleString(),
+        '<t:1700000000>',
+        'member-avatar',
+        'ada#0001',
+        'user-id',
+        new Date(createdTimestamp).toLocaleString(),
+        '<t:1600000000>',
+        'default-avatar',
+        new Date(boostedTimestamp).toLocaleString(),
+        '<t:1800000000>',
+        'true',
+        '#abcdef',
+        'Admin, Builder',
+        '2'
+      ].join('|')
+    )
+    expect(result.errors).toEqual([])
+  })
+
+  it('uses empty and count defaults for missing mentioned member context', async () => {
+    const result = await new Interpreter().interpret(
+      '$mentionedMemberEffectiveName|$mentionedMemberRoles|$mentionedMemberRoleCount',
+      {}
+    )
+
+    expect(result.output).toBe('||0')
+    expect(result.errors).toEqual([])
+  })
+
   it('does not expose the Node process through constructor escapes', async () => {
     const result = await render(
       "$eval\nreturn String.constructor('return process')();\n$halt",

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { BCFDInteractionAction } from '../types/types'
+  import type { BCFDInteractionAction, BCFDSlashCommandOption } from '../types/types'
   import { createDefaultInteractionButton } from '../types/types'
   import { t, type TranslationKey } from '../stores/localisation'
   import CodeEditor from './CodeEditor.svelte'
@@ -19,7 +19,11 @@
     { id: 'sendPrivateMessage', name: 'send-private-message', field: 'sendPrivateMessage' },
     { id: 'sendChannelEmbed', name: 'send-channel-embed', field: 'sendChannelEmbed' },
     { id: 'sendPrivateEmbed', name: 'send-private-embed', field: 'sendPrivateEmbed' },
-    { id: 'roleAssigner', name: 'role-assigner', field: 'isRoleAssigner' }
+    { id: 'roleAssigner', name: 'role-assigner', field: 'isRoleAssigner' },
+    { id: 'kick', name: 'kick', field: 'isKick' },
+    { id: 'ban', name: 'ban', field: 'isBan' },
+    { id: 'voiceMute', name: 'voice-mute', field: 'isVoiceMute' },
+    { id: 'deleteX', name: 'delete-x-times', field: 'deleteX' }
   ]
 
   let dropdownOpen = $state(false)
@@ -43,7 +47,11 @@
   }
 
   function getAvailableActions(): ActionType[] {
-    return actionTypes.filter((a) => !activeActions.includes(a.id))
+    return actionTypes.filter((a) => !activeActions.includes(a.id) && (showModeration || !isModerationAction(a.id)))
+  }
+
+  function isModerationAction(actionId: string): boolean {
+    return ['kick', 'ban', 'voiceMute', 'deleteX'].includes(actionId)
   }
 
   // Nested button management
@@ -81,6 +89,8 @@
     nestingDepth?: number; // Track nesting level to prevent infinite nesting
     title?: string;
     errors?: boolean;
+    commandOptions?: BCFDSlashCommandOption[];
+    showModeration?: boolean;
   }
 
   let {
@@ -90,8 +100,12 @@
     showButtons = true,
     nestingDepth = 0,
     title = '',
-    errors = $bindable(false)
+    errors = $bindable(false),
+    commandOptions = [],
+    showModeration = false
   }: Props = $props();
+
+  let userOptions = $derived(commandOptions.filter((option) => option.type === 6))
   // Derive active actions from the action object
   let activeActions = $derived.by(() => {
     const actions: string[] = []
@@ -100,6 +114,10 @@
     if (action.sendChannelEmbed) actions.push('sendChannelEmbed')
     if (action.sendPrivateEmbed) actions.push('sendPrivateEmbed')
     if (action.isRoleAssigner) actions.push('roleAssigner')
+    if (action.isKick) actions.push('kick')
+    if (action.isBan) actions.push('ban')
+    if (action.isVoiceMute) actions.push('voiceMute')
+    if (action.deleteX) actions.push('deleteX')
     return actions
   })
 
@@ -123,17 +141,33 @@
   let roleToAssignError: TranslationKey | '' = $derived(
     action.isRoleAssigner && !action.roleToAssign?.trim() ? 'role-id-is-required' : ''
   )
+  let targetUserOptionError: TranslationKey | '' = $derived(
+    (action.isKick || action.isBan || action.isVoiceMute) &&
+      (!action.targetUserOptionName?.trim() ||
+        !userOptions.some((option) => option.name === action.targetUserOptionName))
+      ? 'target-user-option-required'
+      : ''
+  )
+  let deleteNumError: TranslationKey | '' = $derived(
+    action.deleteX && (!action.deleteNum || action.deleteNum < 1) ? 'delete-number-required' : ''
+  )
   let hasErrors = $derived(
     channelMessageError !== '' ||
     privateMessageError !== '' ||
     channelEmbedError !== '' ||
     privateEmbedError !== '' ||
     roleToAssignError !== '' ||
+    targetUserOptionError !== '' ||
+    deleteNumError !== '' ||
     (!action.sendChannelMessage &&
       !action.sendPrivateMessage &&
       !action.sendChannelEmbed &&
       !action.sendPrivateEmbed &&
-      !action.isRoleAssigner)
+      !action.isRoleAssigner &&
+      !action.isKick &&
+      !action.isBan &&
+      !action.isVoiceMute &&
+      !action.deleteX)
   )
 
   // Sync errors to parent via bindable prop
@@ -195,7 +229,7 @@
 
   <!-- Active Actions -->
   <div class="space-y-4">
-    {#if !action.sendChannelMessage && !action.sendPrivateMessage && !action.sendChannelEmbed && !action.sendPrivateEmbed && !action.isRoleAssigner}
+    {#if !action.sendChannelMessage && !action.sendPrivateMessage && !action.sendChannelEmbed && !action.sendPrivateEmbed && !action.isRoleAssigner && !action.isKick && !action.isBan && !action.isVoiceMute && !action.deleteX}
       <p class="text-error text-xs mt-2">{$t('no-actions-added-hint')}</p>
     {/if}
 
@@ -376,6 +410,76 @@
         {#if roleToAssignError}
           <p class="text-error text-xs mt-2">{$t(roleToAssignError)}</p>
         {/if}
+      </div>
+    {/if}
+
+    {#each [
+      { enabled: action.isKick, id: 'kick', label: 'kick' },
+      { enabled: action.isBan, id: 'ban', label: 'ban' },
+      { enabled: action.isVoiceMute, id: 'voiceMute', label: 'voice-mute' }
+    ] as moderationAction}
+      {#if moderationAction.enabled}
+        <div class="card bg-base-200 p-4">
+          <div class="flex justify-between items-center mb-2">
+            <span class="font-medium">{$t(moderationAction.label as TranslationKey)}</span>
+            <button
+              class="btn btn-sm btn-circle btn-primary"
+              onclick={() => removeAction(moderationAction.id)}
+            >
+              <span class="material-symbols-outlined">close</span>
+            </button>
+          </div>
+          <div class="form-control">
+            <!-- svelte-ignore a11y_label_has_associated_control -->
+            <label class="label"><span class="label-text">{$t('target-user-option')}</span></label>
+            <select
+              class="select"
+              class:border-error={targetUserOptionError}
+              bind:value={action.targetUserOptionName}
+              disabled={userOptions.length === 0}
+            >
+              <option value="">{$t('target-user-option')}</option>
+              {#each userOptions as option}
+                <option value={option.name}>{option.name}</option>
+              {/each}
+            </select>
+            {#if userOptions.length === 0}
+              <p class="text-warning text-xs mt-2">{$t('no-user-options-hint')}</p>
+            {/if}
+            {#if targetUserOptionError}
+              <p class="text-error text-xs mt-2">{$t(targetUserOptionError)}</p>
+            {/if}
+          </div>
+        </div>
+      {/if}
+    {/each}
+
+    {#if action.deleteX}
+      <div class="card bg-base-200 p-4">
+        <div class="flex justify-between items-center mb-2">
+          <span class="font-medium">{$t('delete-x-times')}</span>
+          <button
+            class="btn btn-sm btn-circle btn-primary"
+            onclick={() => removeAction('deleteX')}
+          >
+            <span class="material-symbols-outlined">close</span>
+          </button>
+        </div>
+        <div class="form-control">
+          <!-- svelte-ignore a11y_label_has_associated_control -->
+          <label class="label"><span class="label-text">{$t('delete-num')}</span></label>
+          <input
+            type="number"
+            class="input"
+            class:border-error={deleteNumError}
+            min="1"
+            max="100"
+            bind:value={action.deleteNum}
+          />
+          {#if deleteNumError}
+            <p class="text-error text-xs mt-2">{$t(deleteNumError)}</p>
+          {/if}
+        </div>
       </div>
     {/if}
   </div>

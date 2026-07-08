@@ -29,6 +29,7 @@ export type StringInfoContext = {
   guild?: Guild
   textChannel?: TextChannel
   mentionedUser?: User
+  mentionedMember?: GuildMember
   messageEvent?: OmitPartialGroupDMChannel<Message<boolean>> | Message<boolean>
   command?: BCFDCommand
   // Interaction-specific fields
@@ -55,6 +56,7 @@ export function contextForMessageEvent(
     guild: event.guild ?? undefined,
     textChannel: event.channel as TextChannel,
     mentionedUser: event.mentions.users.first(),
+    mentionedMember: event.mentions.members?.first(),
     messageEvent: event,
     command: command
   }
@@ -91,6 +93,7 @@ async function stringInfoAddNew(ctx: StringInfoContext): Promise<string> {
     guild: ctx.guild,
     textChannel: ctx.textChannel,
     mentionedUser: ctx.mentionedUser,
+    mentionedMember: ctx.mentionedMember,
     messageEvent: ctx.messageEvent,
     command: ctx.command,
     interactionCommand: ctx.interactionCommand,
@@ -137,6 +140,7 @@ async function stringInfoAddLegacy(ctx: StringInfoContext): Promise<string> {
     if (guildReplacements.has(command)) return guildReplacements.get(command)!(ctx)
     if (channelReplacements.has(command)) return channelReplacements.get(command)!(ctx)
     if (mentionedReplacements.has(command)) return mentionedReplacements.get(command)!(ctx)
+    if (mentionedMemberReplacements.has(command)) return mentionedMemberReplacements.get(command)!(ctx)
     if (generalReplacements.has(command)) return generalReplacements.get(command)!(ctx)
     return _match // Return the original match if no replacement is found
   })
@@ -312,6 +316,77 @@ const mentionedReplacements = new Map<string, (context: StringInfoContext) => st
   ['mentionedNamePlain', (ctx) => ctx.mentionedUser?.displayName ?? ''],
   ['mentionedDefaultAvatar', (ctx) => ctx.mentionedUser?.defaultAvatarURL ?? ''],
   ['mentionedIsBot', (ctx) => ctx.mentionedUser?.bot.toString() ?? '']
+])
+
+const mentionedMemberReplacements = new Map<string, (context: StringInfoContext) => string>([
+  [
+    'mentionedMemberIsOwner',
+    (ctx) => (ctx.mentionedMember?.guild.ownerId == ctx.mentionedMember?.id).toString()
+  ],
+  ['mentionedMemberEffectiveName', (ctx) => ctx.mentionedMember?.displayName ?? ''],
+  ['mentionedMemberNickname', (ctx) => ctx.mentionedMember?.nickname ?? ''],
+  ['mentionedMemberID', (ctx) => ctx.mentionedMember?.id ?? ''],
+  [
+    'mentionedMemberHasTimeJoined',
+    (ctx) => (ctx.mentionedMember ? (ctx.mentionedMember.joinedTimestamp != null).toString() : '')
+  ],
+  [
+    'mentionedMemberTimeJoined',
+    (ctx) =>
+      ctx.mentionedMember?.joinedTimestamp != null
+        ? new Date(ctx.mentionedMember.joinedTimestamp).toLocaleString()
+        : ''
+  ],
+  [
+    'mentionedMemberTimeJoinedDiscord',
+    (ctx) => discordTimestampFromMillis(ctx.mentionedMember?.joinedTimestamp)
+  ],
+  [
+    'mentionedMemberEffectiveAvatar',
+    (ctx) =>
+      ctx.mentionedMember?.displayAvatarURL({}) ?? ctx.mentionedMember?.user.defaultAvatarURL ?? ''
+  ],
+  ['mentionedMemberEffectiveTag', (ctx) => ctx.mentionedMember?.user.tag ?? ''],
+  ['mentionedMemberEffectiveID', (ctx) => ctx.mentionedMember?.user.id ?? ''],
+  [
+    'mentionedMemberEffectiveTimeCreated',
+    (ctx) =>
+      ctx.mentionedMember
+        ? new Date(ctx.mentionedMember.user.createdTimestamp).toLocaleString()
+        : ''
+  ],
+  [
+    'mentionedMemberEffectiveTimeCreatedDiscord',
+    (ctx) => discordTimestampFromMillis(ctx.mentionedMember?.user.createdTimestamp)
+  ],
+  [
+    'mentionedMemberEffectiveDefaultAvatar',
+    (ctx) => ctx.mentionedMember?.user.defaultAvatarURL ?? ''
+  ],
+  [
+    'mentionedMemberTimeBoosted',
+    (ctx) =>
+      ctx.mentionedMember?.premiumSinceTimestamp != null
+        ? new Date(ctx.mentionedMember.premiumSinceTimestamp).toLocaleString()
+        : ''
+  ],
+  [
+    'mentionedMemberTimeBoostedDiscord',
+    (ctx) => discordTimestampFromMillis(ctx.mentionedMember?.premiumSinceTimestamp)
+  ],
+  [
+    'mentionedMemberHasBoosted',
+    (ctx) => (ctx.mentionedMember?.premiumSinceTimestamp != null).toString()
+  ],
+  ['mentionedMemberColor', (ctx) => ctx.mentionedMember?.displayHexColor ?? ''],
+  [
+    'mentionedMemberRoles',
+    (ctx) => ctx.mentionedMember?.roles.cache.map((role) => role.name).join(', ') ?? ''
+  ],
+  [
+    'mentionedMemberRoleCount',
+    (ctx) => ctx.mentionedMember?.roles.cache.size.toString() ?? '0'
+  ]
 ])
 
 const generalReplacements = new Map<string, (context: StringInfoContext) => string>([

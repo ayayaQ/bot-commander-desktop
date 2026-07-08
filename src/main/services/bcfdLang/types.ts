@@ -164,6 +164,7 @@ export interface BCFDContext {
   guild?: import('discord.js').Guild
   textChannel?: import('discord.js').TextChannel
   mentionedUser?: import('discord.js').User
+  mentionedMember?: import('discord.js').GuildMember
   messageEvent?:
     | import('discord.js').OmitPartialGroupDMChannel<import('discord.js').Message<boolean>>
     | import('discord.js').Message<boolean>

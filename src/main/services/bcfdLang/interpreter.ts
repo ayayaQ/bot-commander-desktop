@@ -574,6 +574,75 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('mentionedGlobalName', (_args, ctx) => ctx.mentionedUser?.globalName ?? '')
 
   // --------------------------------------------------------------------------
+  // Mentioned Member Context Functions
+  // --------------------------------------------------------------------------
+  registry.set('mentionedMemberIsOwner', (_args, ctx) =>
+    (ctx.mentionedMember?.guild.ownerId === ctx.mentionedMember?.id).toString()
+  )
+  registry.set(
+    'mentionedMemberEffectiveName',
+    (_args, ctx) => ctx.mentionedMember?.displayName ?? ''
+  )
+  registry.set(
+    'mentionedMemberNickname',
+    (_args, ctx) => ctx.mentionedMember?.nickname ?? ''
+  )
+  registry.set('mentionedMemberID', (_args, ctx) => ctx.mentionedMember?.id ?? '')
+  registry.set('mentionedMemberHasTimeJoined', (_args, ctx) =>
+    ctx.mentionedMember ? (ctx.mentionedMember.joinedTimestamp != null).toString() : ''
+  )
+  registry.set('mentionedMemberTimeJoined', (_args, ctx) =>
+    ctx.mentionedMember?.joinedTimestamp != null
+      ? new Date(ctx.mentionedMember.joinedTimestamp).toLocaleString()
+      : ''
+  )
+  registry.set('mentionedMemberTimeJoinedDiscord', (_args, ctx) =>
+    discordTimestampFromMillis(ctx.mentionedMember?.joinedTimestamp)
+  )
+  registry.set(
+    'mentionedMemberEffectiveAvatar',
+    (_args, ctx) =>
+      ctx.mentionedMember?.displayAvatarURL({}) ?? ctx.mentionedMember?.user.defaultAvatarURL ?? ''
+  )
+  registry.set('mentionedMemberEffectiveTag', (_args, ctx) => ctx.mentionedMember?.user.tag ?? '')
+  registry.set('mentionedMemberEffectiveID', (_args, ctx) => ctx.mentionedMember?.user.id ?? '')
+  registry.set('mentionedMemberEffectiveTimeCreated', (_args, ctx) =>
+    ctx.mentionedMember
+      ? new Date(ctx.mentionedMember.user.createdTimestamp).toLocaleString()
+      : ''
+  )
+  registry.set('mentionedMemberEffectiveTimeCreatedDiscord', (_args, ctx) =>
+    discordTimestampFromMillis(ctx.mentionedMember?.user.createdTimestamp)
+  )
+  registry.set(
+    'mentionedMemberEffectiveDefaultAvatar',
+    (_args, ctx) => ctx.mentionedMember?.user.defaultAvatarURL ?? ''
+  )
+  registry.set('mentionedMemberTimeBoosted', (_args, ctx) =>
+    ctx.mentionedMember?.premiumSinceTimestamp != null
+      ? new Date(ctx.mentionedMember.premiumSinceTimestamp).toLocaleString()
+      : ''
+  )
+  registry.set('mentionedMemberTimeBoostedDiscord', (_args, ctx) =>
+    discordTimestampFromMillis(ctx.mentionedMember?.premiumSinceTimestamp)
+  )
+  registry.set('mentionedMemberHasBoosted', (_args, ctx) =>
+    (ctx.mentionedMember?.premiumSinceTimestamp != null).toString()
+  )
+  registry.set(
+    'mentionedMemberColor',
+    (_args, ctx) => ctx.mentionedMember?.displayHexColor ?? ''
+  )
+  registry.set(
+    'mentionedMemberRoles',
+    (_args, ctx) => ctx.mentionedMember?.roles.cache.map((r) => r.name).join(', ') ?? ''
+  )
+  registry.set(
+    'mentionedMemberRoleCount',
+    (_args, ctx) => ctx.mentionedMember?.roles.cache.size.toString() ?? '0'
+  )
+
+  // --------------------------------------------------------------------------
   // General/Utility Functions
   // --------------------------------------------------------------------------
   registry.set('randomInt', () => Math.floor(Math.random() * 100).toString())

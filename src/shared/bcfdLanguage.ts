@@ -274,6 +274,97 @@ export const bcfdItems: BCFDLanguageItem[] = [
     syntax: 'variable',
     description: 'Mentioned user global display name'
   },
+  {
+    name: 'mentionedMemberIsOwner',
+    syntax: 'variable',
+    description: 'Is mentioned member the server owner'
+  },
+  {
+    name: 'mentionedMemberEffectiveName',
+    syntax: 'variable',
+    description: 'Mentioned member display name'
+  },
+  {
+    name: 'mentionedMemberNickname',
+    syntax: 'variable',
+    description: 'Mentioned member nickname'
+  },
+  { name: 'mentionedMemberID', syntax: 'variable', description: 'Mentioned member ID' },
+  {
+    name: 'mentionedMemberHasTimeJoined',
+    syntax: 'variable',
+    description: 'Has mentioned member join time'
+  },
+  {
+    name: 'mentionedMemberTimeJoined',
+    syntax: 'variable',
+    description: 'Mentioned member join time'
+  },
+  {
+    name: 'mentionedMemberTimeJoinedDiscord',
+    syntax: 'variable',
+    description: 'Mentioned member join time as Discord timestamp'
+  },
+  {
+    name: 'mentionedMemberEffectiveAvatar',
+    syntax: 'variable',
+    description: 'Mentioned member effective avatar'
+  },
+  {
+    name: 'mentionedMemberEffectiveTag',
+    syntax: 'variable',
+    description: 'Mentioned member effective tag'
+  },
+  {
+    name: 'mentionedMemberEffectiveID',
+    syntax: 'variable',
+    description: 'Mentioned member effective ID'
+  },
+  {
+    name: 'mentionedMemberEffectiveTimeCreated',
+    syntax: 'variable',
+    description: 'Mentioned member account creation time'
+  },
+  {
+    name: 'mentionedMemberEffectiveTimeCreatedDiscord',
+    syntax: 'variable',
+    description: 'Mentioned member account creation time as Discord timestamp'
+  },
+  {
+    name: 'mentionedMemberEffectiveDefaultAvatar',
+    syntax: 'variable',
+    description: 'Mentioned member default avatar'
+  },
+  {
+    name: 'mentionedMemberTimeBoosted',
+    syntax: 'variable',
+    description: 'When mentioned member started boosting'
+  },
+  {
+    name: 'mentionedMemberTimeBoostedDiscord',
+    syntax: 'variable',
+    description: 'Mentioned member boost time as Discord timestamp'
+  },
+  {
+    name: 'mentionedMemberHasBoosted',
+    syntax: 'variable',
+    description: 'Is mentioned member boosting'
+  },
+  {
+    name: 'mentionedMemberColor',
+    syntax: 'variable',
+    description: 'Mentioned member display color'
+  },
+  {
+    name: 'mentionedMemberRoles',
+    syntax: 'variable',
+    description: 'Mentioned member roles'
+  },
+  {
+    name: 'mentionedMemberRoleCount',
+    syntax: 'variable',
+    description: 'Number of mentioned member roles'
+  },
 
   { name: 'randomInt', syntax: 'variable', description: 'Random integer 0-99' },
   { name: 'randomFloat', syntax: 'variable', description: 'Random float 0-1' },

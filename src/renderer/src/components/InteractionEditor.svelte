@@ -401,6 +401,8 @@
         bind:action={editedInteraction.rootAction}
         showEphemeral={true}
         showDefer={true}
+        showModeration={true}
+        commandOptions={editedInteraction.options}
         bind:errors={actionErrors}
       />
     </div>

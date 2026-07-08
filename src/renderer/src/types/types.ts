@@ -180,6 +180,12 @@ export type BCFDInteractionAction = {
   privateEmbed: BCFDEmbedMessageTemplate
   isRoleAssigner: boolean
   roleToAssign: string
+  isKick: boolean
+  isBan: boolean
+  isVoiceMute: boolean
+  targetUserOptionName: string
+  deleteX: boolean
+  deleteNum: number
   ephemeral: boolean // Response only visible to user
   deferReply: boolean // For long-running actions
   buttons: BCFDInteractionButton[] // Nested buttons for this action's response
@@ -240,6 +246,12 @@ export function createDefaultInteractionAction(): BCFDInteractionAction {
     },
     isRoleAssigner: false,
     roleToAssign: '',
+    isKick: false,
+    isBan: false,
+    isVoiceMute: false,
+    targetUserOptionName: '',
+    deleteX: false,
+    deleteNum: 0,
     ephemeral: false,
     deferReply: false,
     buttons: []

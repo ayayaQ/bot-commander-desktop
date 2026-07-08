@@ -147,7 +147,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
     partials: [Partials.Channel, Partials.Message, Partials.Reaction]
   })
 
-  client.once('ready', async () => {
+  client.once(Events.ClientReady, async () => {
     if (client == null) return
 
     if (client.user == null) return
@@ -424,6 +424,10 @@ async function executeInteractionCommand(
     await interaction.deferReply({ ephemeral: action.ephemeral })
   }
 
+  if (!(await executeInteractionModerationActions(action, interaction))) {
+    return
+  }
+
   // Build the response
   const response = await buildActionResponse(action, interaction, command)
 
@@ -479,6 +483,116 @@ async function executeInteractionCommand(
   } catch (error) {
     rendererConsole.error(`Error executing interaction command: ${error}`)
   }
+}
+
+function interactionActionHasTargetedModeration(action: BCFDInteractionAction): boolean {
+  return !!(action.isKick || action.isBan || action.isVoiceMute)
+}
+
+async function respondToInteractionFailure(
+  interaction: ChatInputCommandInteraction,
+  message: string
+) {
+  if (interaction.deferred || interaction.replied) {
+    await interaction.editReply({ content: message, embeds: [], components: [] })
+    return
+  }
+
+  await interaction.reply({ content: message, ephemeral: true })
+}
+
+async function executeInteractionModerationActions(
+  action: BCFDInteractionAction,
+  interaction: ChatInputCommandInteraction
+): Promise<boolean> {
+  if (!action.deleteX && !interactionActionHasTargetedModeration(action)) {
+    return true
+  }
+
+  if (!interaction.guild) {
+    await respondToInteractionFailure(interaction, 'Moderation actions can only be used in a server.')
+    return false
+  }
+
+  try {
+    if (action.deleteX) {
+      if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageMessages)) {
+        await respondToInteractionFailure(
+          interaction,
+          'You need Manage Messages permission to use this action.'
+        )
+        return false
+      }
+
+      if (!(interaction.channel instanceof TextChannel)) {
+        await respondToInteractionFailure(
+          interaction,
+          'Messages can only be bulk deleted from a text channel.'
+        )
+        return false
+      }
+
+      const deleteAmount = Math.min(Math.max(Number(action.deleteNum) || 0, 1), 100)
+      const messages = await interaction.channel.messages.fetch({ limit: deleteAmount })
+      await interaction.channel.bulkDelete(messages)
+    }
+
+    if (interactionActionHasTargetedModeration(action)) {
+      if (!action.targetUserOptionName) {
+        await respondToInteractionFailure(interaction, 'No target user option is configured.')
+        return false
+      }
+
+      const targetUser = interaction.options.getUser(action.targetUserOptionName)
+      if (!targetUser) {
+        await respondToInteractionFailure(interaction, 'No target user was provided.')
+        return false
+      }
+
+      if (action.isKick) {
+        if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.KickMembers)) {
+          await respondToInteractionFailure(
+            interaction,
+            'You need Kick Members permission to use this action.'
+          )
+          return false
+        }
+
+        await interaction.guild.members.kick(targetUser)
+      }
+
+      if (action.isBan) {
+        if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.BanMembers)) {
+          await respondToInteractionFailure(
+            interaction,
+            'You need Ban Members permission to use this action.'
+          )
+          return false
+        }
+
+        await interaction.guild.members.ban(targetUser)
+      }
+
+      if (action.isVoiceMute) {
+        if (!interaction.memberPermissions?.has(PermissionsBitField.Flags.MuteMembers)) {
+          await respondToInteractionFailure(
+            interaction,
+            'You need Mute Members permission to use this action.'
+          )
+          return false
+        }
+
+        const targetMember = await interaction.guild.members.fetch(targetUser.id)
+        await targetMember.voice.setMute(true, 'Muted by bot interaction command')
+      }
+    }
+  } catch (error) {
+    rendererConsole.error(`Error executing interaction moderation action: ${error}`)
+    await respondToInteractionFailure(interaction, 'Unable to complete the moderation action.')
+    return false
+  }
+
+  return true
 }
 
 async function executeButtonAction(
