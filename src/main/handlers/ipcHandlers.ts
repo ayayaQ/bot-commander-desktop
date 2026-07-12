@@ -73,6 +73,17 @@ import {
 } from '../services/chatService'
 import { addApiAuthHandlers } from './apiAuthHandlers'
 import { addCommandRepoHandlers } from './commandRepoHandlers'
+import {
+  cancelAgentRun,
+  createAgentSession,
+  deleteAgentSession,
+  loadAgentSessions,
+  resolveAgentApproval,
+  runAgentSession,
+  setActiveAgentSession,
+  setAgentEventSink,
+  updateAgentSession
+} from '../services/agentService'
 
 export function addWindowIPCHandlers(mainWindow: BrowserWindow) {
   ipcMain.on('minimize-window', () => {
@@ -114,6 +125,12 @@ export function addWindowIPCHandlers(mainWindow: BrowserWindow) {
 }
 
 export function addIPCHandlers() {
+  setAgentEventSink((payload) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send('agent:event', payload)
+    }
+  })
+
   ipcMain.on('connect', (event, token) => {
     Connect(event, token)
   })
@@ -583,6 +600,29 @@ export function addIPCHandlers() {
   ipcMain.handle('search-chats', (_, query: string) => {
     return searchChats(query)
   })
+
+  // Global agent harness
+  ipcMain.handle('agent:list', async () => loadAgentSessions())
+  ipcMain.handle('agent:create', async (_, title?: string) =>
+    createAgentSession(getSettings(), title)
+  )
+  ipcMain.handle('agent:delete', async (_, sessionId: string) =>
+    deleteAgentSession(sessionId)
+  )
+  ipcMain.handle('agent:update', async (_, sessionId: string, updates) =>
+    updateAgentSession(sessionId, updates)
+  )
+  ipcMain.handle('agent:set-active', async (_, sessionId: string | null) => {
+    await setActiveAgentSession(sessionId)
+    return true
+  })
+  ipcMain.handle('agent:send', async (_, sessionId: string, content: string) =>
+    runAgentSession(sessionId, content, getSettings())
+  )
+  ipcMain.handle('agent:approve', async (_, sessionId: string, toolCallId: string, approved: boolean) =>
+    resolveAgentApproval(sessionId, toolCallId, approved)
+  )
+  ipcMain.handle('agent:cancel', (_, sessionId: string) => cancelAgentRun(sessionId))
 
   // Register API auth handlers
   addApiAuthHandlers()

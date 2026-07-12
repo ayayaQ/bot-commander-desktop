@@ -1,0 +1,69 @@
+export type AgentMode = 'manual' | 'auto' | 'planning'
+export type AgentRunStatus = 'idle' | 'running' | 'waiting_approval' | 'completed' | 'error' | 'cancelled' | 'interrupted'
+
+export interface AgentToolCall {
+  id: string
+  name: string
+  arguments: Record<string, unknown>
+  status: 'running' | 'waiting_approval' | 'approved' | 'rejected' | 'completed' | 'error'
+  result?: unknown
+  error?: string
+  before?: unknown
+  after?: unknown
+  createdAt: string
+}
+
+export interface AgentMessage {
+  id: string
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  content: string
+  timestamp: string
+  thinkingContent?: string
+  toolCalls?: AgentToolCall[]
+}
+
+export interface AgentSession {
+  id: string
+  title: string
+  mode: AgentMode
+  model: string
+  reasoningEffort: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+  status: AgentRunStatus
+  messages: AgentMessage[]
+  createdAt: string
+  updatedAt: string
+  activeRunId?: string
+  tokenCount: number
+  error?: string
+}
+
+export interface AgentSessionsData {
+  sessions: AgentSession[]
+  activeSessionId: string | null
+}
+
+export interface AgentPatchOperation {
+  op: 'add' | 'replace' | 'remove'
+  path: string
+  value?: unknown
+}
+
+export interface AgentLintDiagnostic {
+  severity: 'warning' | 'error'
+  message: string
+  path?: string
+  position?: number
+  length?: number
+  name?: string
+}
+
+export interface AgentStreamEvent {
+  sessionId: string
+  runId?: string
+  type: 'session' | 'thinking' | 'message' | 'tool' | 'approval' | 'done' | 'error'
+  session?: AgentSession
+  delta?: string
+  message?: AgentMessage
+  toolCall?: AgentToolCall
+  error?: string
+}

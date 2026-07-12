@@ -66,6 +66,15 @@ const validInvokeChannels = [
   'add-message-to-chat',
   'update-message-in-chat',
   'update-chat-contexts',
+  // Agent harness
+  'agent:list',
+  'agent:create',
+  'agent:delete',
+  'agent:update',
+  'agent:set-active',
+  'agent:send',
+  'agent:approve',
+  'agent:cancel',
   // API auth
   'api-auth-register',
   'api-auth-login',
@@ -92,7 +101,8 @@ const validReceiveChannels = [
   'console:success',
   'ai-chat:thinking',
   'ai-chat:done',
-  'ai-chat:error'
+  'ai-chat:error',
+  'agent:event'
 ]
 
 contextBridge.exposeInMainWorld('electron', {

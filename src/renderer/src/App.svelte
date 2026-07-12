@@ -15,6 +15,7 @@
   import TitleBar from './components/TitleBar.svelte'
   import { bottomNavVisible } from './stores/navigation'
   import { apiAuthStore } from './stores/apiAuth'
+  import AgentPanel from './components/AgentPanel.svelte'
 
   let selectedMenu:
     | 'commands'
@@ -23,7 +24,8 @@
     | 'settings'
     | 'webhooks'
     | 'stats'
-    | 'debugger' = $state('commands')
+    | 'debugger'
+    | 'agent' = $state('commands')
 
   let leftPanelCollapsed = $state(false)
 
@@ -66,8 +68,8 @@
       {leftPanelCollapsed ? 'chevron_right' : 'chevron_left'}
     </span>
   </button>
-  <div class="basis-2/3 h-full overflow-y-auto flex flex-col shrink grow shadow-md">
-    <div class="grow">
+  <div class="basis-2/3 h-full overflow-hidden flex flex-col shrink grow shadow-md">
+    <div class="grow min-h-0 overflow-y-auto">
       {#if selectedMenu === 'commands'}
         <CommandList />
       {:else if selectedMenu === 'interactions'}
@@ -82,6 +84,8 @@
         <Stats />
       {:else if selectedMenu === 'debugger'}
         <StateViewer />
+      {:else if selectedMenu === 'agent'}
+        <AgentPanel />
       {/if}
     </div>
     {#if $bottomNavVisible}
@@ -116,6 +120,13 @@
             onclick={() => (selectedMenu = 'debugger')}
           >
             <span class="material-symbols-outlined">bug_report</span>
+          </button>
+          <button
+            class={selectedMenu === 'agent' ? 'dock-active' : ''}
+            onclick={() => (selectedMenu = 'agent')}
+            title="Agent"
+          >
+            <span class="material-symbols-outlined">terminal</span>
           </button>
           <button
             class={selectedMenu === 'help' ? 'dock-active' : ''}

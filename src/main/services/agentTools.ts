@@ -1,0 +1,478 @@
+import crypto from 'node:crypto'
+import type { BCFDCommand, BCFDInteractionAction, BCFDInteractionCommand } from '../types/types'
+import type { AgentLintDiagnostic, AgentPatchOperation } from '../../shared/agentTypes'
+import { lintBCFD } from '../../shared/bcfdLint'
+import { getCommands, setCommands } from './botService'
+import { getInteractions, setInteractions } from './interactionService'
+import { getSettings, setSettings } from './settingsService'
+import { saveCommands, saveInteractions, saveSettings } from './fileService'
+import {
+  getBotStateContext,
+  getStartupJs,
+  restartJsEngine,
+  saveBotState,
+  setStartupJs
+} from '../utils/virtual'
+
+export interface PreparedMutation {
+  name: string
+  arguments: Record<string, unknown>
+  before: unknown
+  after: unknown
+  target: { type: string; id?: string }
+}
+
+type ToolDefinition = {
+  type: 'function'
+  function: {
+    name: string
+    description: string
+    parameters: Record<string, unknown>
+  }
+}
+
+const objectSchema = (properties: Record<string, unknown>, required: string[] = []) => ({
+  type: 'object',
+  properties,
+  required,
+  additionalProperties: false
+})
+
+const patchSchema = {
+  type: 'array',
+  items: objectSchema(
+    {
+      op: { type: 'string', enum: ['add', 'replace', 'remove'] },
+      path: { type: 'string', description: 'JSON Pointer path such as /channelMessage' },
+      value: {}
+    },
+    ['op', 'path']
+  )
+}
+
+export const agentToolDefinitions: ToolDefinition[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'search_commands',
+      description: 'Search commands by name, description, or textual content. Returns compact matches and revision hashes.',
+      parameters: objectSchema({ query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 50 } }, ['query'])
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_command',
+      description: 'Read a complete command by ID.',
+      parameters: objectSchema({ id: { type: 'string' } }, ['id'])
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_interactions',
+      description: 'Search interactions by name, description, or textual content.',
+      parameters: objectSchema({ query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 50 } }, ['query'])
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_interaction',
+      description: 'Read a complete interaction by ID.',
+      parameters: objectSchema({ id: { type: 'string' } }, ['id'])
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'keyword_grep',
+      description: 'Search all editable text in commands, interactions, startup JS, developer prompt, and bot state.',
+      parameters: objectSchema({ query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 100 } }, ['query'])
+    }
+  },
+  { type: 'function', function: { name: 'read_bot_state', description: 'Read persistent bot state.', parameters: objectSchema({}) } },
+  { type: 'function', function: { name: 'read_startup_js', description: 'Read startup JavaScript.', parameters: objectSchema({}) } },
+  { type: 'function', function: { name: 'read_developer_prompt', description: 'Read the developer prompt used by bot AI functions.', parameters: objectSchema({}) } },
+  {
+    type: 'function',
+    function: {
+      name: 'create_command',
+      description: 'Create a command by merging the supplied object with command defaults. The app assigns the ID.',
+      parameters: objectSchema({ command: { type: 'object' } }, ['command'])
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'edit_command',
+      description: 'Patch a command. Use the revision returned by read_command.',
+      parameters: objectSchema({ id: { type: 'string' }, expectedRevision: { type: 'string' }, patches: patchSchema }, ['id', 'expectedRevision', 'patches'])
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_interaction',
+      description: 'Create an interaction by merging the supplied object with defaults. The app assigns the ID.',
+      parameters: objectSchema({ interaction: { type: 'object' } }, ['interaction'])
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'edit_interaction',
+      description: 'Patch an interaction. Use the revision returned by read_interaction.',
+      parameters: objectSchema({ id: { type: 'string' }, expectedRevision: { type: 'string' }, patches: patchSchema }, ['id', 'expectedRevision', 'patches'])
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'edit_bot_state',
+      description: 'Patch persistent bot state using JSON Pointer paths.',
+      parameters: objectSchema({ expectedRevision: { type: 'string' }, patches: patchSchema }, ['expectedRevision', 'patches'])
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'edit_startup_js',
+      description: 'Replace startup JavaScript and restart the script engine.',
+      parameters: objectSchema({ expectedRevision: { type: 'string' }, content: { type: 'string' } }, ['expectedRevision', 'content'])
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'edit_developer_prompt',
+      description: 'Replace the developer prompt while preserving other settings.',
+      parameters: objectSchema({ expectedRevision: { type: 'string' }, content: { type: 'string' } }, ['expectedRevision', 'content'])
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'lint_js',
+      description: 'Lint JavaScript source without executing it.',
+      parameters: objectSchema({ source: { type: 'string' } }, ['source'])
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'lint_bcfd',
+      description: 'Lint BCFD language source, including JavaScript blocks.',
+      parameters: objectSchema({ source: { type: 'string' } }, ['source'])
+    }
+  },
+  { type: 'function', function: { name: 'lint_command', description: 'Lint a complete persisted command.', parameters: objectSchema({ id: { type: 'string' } }, ['id']) } },
+  { type: 'function', function: { name: 'lint_interaction', description: 'Lint a complete persisted interaction.', parameters: objectSchema({ id: { type: 'string' } }, ['id']) } }
+]
+
+export const mutationToolNames = new Set([
+  'create_command', 'edit_command', 'create_interaction', 'edit_interaction',
+  'edit_bot_state', 'edit_startup_js', 'edit_developer_prompt'
+])
+
+export function revision(value: unknown): string {
+  return crypto.createHash('sha256').update(JSON.stringify(value) ?? 'undefined').digest('hex').slice(0, 16)
+}
+
+function clone<T>(value: T): T {
+  return structuredClone(value)
+}
+
+function textEntries(value: unknown, path = '', entries: Array<{ path: string; value: string }> = []) {
+  if (typeof value === 'string') entries.push({ path: path || '/', value })
+  else if (Array.isArray(value)) value.forEach((item, index) => textEntries(item, `${path}/${index}`, entries))
+  else if (value && typeof value === 'object') {
+    for (const [key, item] of Object.entries(value)) textEntries(item, `${path}/${key}`, entries)
+  }
+  return entries
+}
+
+function snippets(value: unknown, query: string): Array<{ path: string; snippet: string }> {
+  const needle = query.toLowerCase()
+  return textEntries(value)
+    .filter((entry) => entry.value.toLowerCase().includes(needle))
+    .slice(0, 8)
+    .map((entry) => ({ path: entry.path, snippet: entry.value.slice(0, 240) }))
+}
+
+function emptyEmbed() {
+  return { title: '', description: '', hexColor: '', imageURL: '', thumbnailURL: '', footer: '' }
+}
+
+function defaultCommand(): BCFDCommand {
+  return {
+    id: crypto.randomUUID(), actionArr: [false, false], channelMessage: '', command: '', commandDescription: '',
+    deleteAfter: false, deleteIf: false, deleteIfStrings: '', deleteNum: 0, deleteX: false,
+    ignoreErrorMessage: false, isBan: false, isKick: false, isNSFW: false, isReact: false,
+    isRequiredRole: false, requiredRole: '', isRoleAssigner: false, isSpecificChannel: false,
+    isSpecificMessage: false, isVoiceMute: false, isAdmin: false, phrase: false, privateMessage: '',
+    reaction: '', roleToAssign: '', sendChannelEmbed: false, sendPrivateEmbed: false,
+    specificChannel: '', specificMessage: '', startsWith: false, type: 0, channelEmbed: emptyEmbed(),
+    privateEmbed: emptyEmbed(), channelWhitelist: '', serverWhitelist: ''
+  }
+}
+
+function defaultAction(): BCFDInteractionAction {
+  return {
+    sendChannelMessage: false, channelMessage: '', sendPrivateMessage: false, privateMessage: '',
+    sendChannelEmbed: false, channelEmbed: emptyEmbed(), sendPrivateEmbed: false, privateEmbed: emptyEmbed(),
+    isRoleAssigner: false, roleToAssign: '', isKick: false, isBan: false, isVoiceMute: false,
+    targetUserOptionName: '', deleteX: false, deleteNum: 0, ephemeral: false, deferReply: false, buttons: []
+  }
+}
+
+function defaultInteraction(): BCFDInteractionCommand {
+  return { id: crypto.randomUUID(), commandName: '', commandDescription: '', options: [], rootAction: defaultAction(), isRegistered: false }
+}
+
+function assertCommand(value: unknown): asserts value is BCFDCommand {
+  const command = value as BCFDCommand
+  const validEmbed = (embed: any) => embed && ['title', 'description', 'hexColor', 'imageURL', 'thumbnailURL', 'footer']
+    .every((field) => typeof embed[field] === 'string')
+  if (!command || typeof command !== 'object' || typeof command.command !== 'string' ||
+      typeof command.commandDescription !== 'string' || !Array.isArray(command.actionArr) ||
+      !command.actionArr.every((item) => typeof item === 'boolean') ||
+      !validEmbed(command.channelEmbed) || !validEmbed(command.privateEmbed) ||
+      !Number.isInteger(command.type) || command.type < 0 || command.type > 5) {
+    throw new Error('Invalid command structure')
+  }
+}
+
+function assertInteraction(value: unknown): asserts value is BCFDInteractionCommand {
+  const interaction = value as BCFDInteractionCommand
+  if (!interaction || typeof interaction !== 'object' || typeof interaction.commandName !== 'string' ||
+      typeof interaction.commandDescription !== 'string' || !Array.isArray(interaction.options) || !interaction.rootAction) {
+    throw new Error('Invalid interaction structure')
+  }
+}
+
+function decodePointer(path: string): string[] {
+  if (!path.startsWith('/')) throw new Error(`Invalid JSON Pointer: ${path}`)
+  const parts = path.slice(1).split('/').map((part) => part.replace(/~1/g, '/').replace(/~0/g, '~'))
+  if (parts.some((part) => ['__proto__', 'prototype', 'constructor'].includes(part))) throw new Error('Unsafe patch path')
+  return parts
+}
+
+function applyPatches<T>(source: T, patches: AgentPatchOperation[]): T {
+  const result: any = clone(source)
+  for (const patch of patches) {
+    const parts = decodePointer(patch.path)
+    let parent = result
+    for (const part of parts.slice(0, -1)) {
+      if (parent?.[part] === undefined) throw new Error(`Patch path does not exist: ${patch.path}`)
+      parent = parent[part]
+    }
+    const key = parts.at(-1)!
+    if (patch.op === 'remove') {
+      if (Array.isArray(parent)) parent.splice(Number(key), 1)
+      else delete parent[key]
+    } else {
+      if (patch.op === 'replace' && !(key in parent)) throw new Error(`Patch path does not exist: ${patch.path}`)
+      if (Array.isArray(parent) && patch.op === 'add') parent.splice(key === '-' ? parent.length : Number(key), 0, clone(patch.value))
+      else parent[key] = clone(patch.value)
+    }
+  }
+  return result
+}
+
+function lintSource(source: string, mode: 'bcfd' | 'js', startupJs = ''): AgentLintDiagnostic[] {
+  return lintBCFD(source, { mode, startupJs }).map((item) => ({ ...item }))
+}
+
+async function lintTextFields(value: unknown): Promise<AgentLintDiagnostic[]> {
+  const startup = await getStartupJs()
+  return textEntries(value).flatMap((entry) =>
+    lintSource(entry.value, 'bcfd', startup).map((diagnostic) => ({ ...diagnostic, path: entry.path }))
+  )
+}
+
+async function lintCommandResource(command: BCFDCommand): Promise<AgentLintDiagnostic[]> {
+  const diagnostics = await lintTextFields(command)
+  if (!command.commandDescription.trim()) diagnostics.unshift({ severity: 'error', message: 'Command description is required', path: '/commandDescription' })
+  if ([0, 1, 5].includes(command.type) && !command.command.trim()) diagnostics.unshift({ severity: 'error', message: 'Command trigger is required for this command type', path: '/command' })
+  if (!Array.isArray(command.actionArr) || command.actionArr.length < 2) diagnostics.unshift({ severity: 'error', message: 'actionArr must contain channel and private message flags', path: '/actionArr' })
+  return diagnostics
+}
+
+async function lintInteractionResource(interaction: BCFDInteractionCommand): Promise<AgentLintDiagnostic[]> {
+  const diagnostics = await lintTextFields(interaction)
+  if (!/^[a-z0-9_-]{1,32}$/.test(interaction.commandName)) diagnostics.unshift({ severity: 'error', message: 'Interaction name must be 1-32 lowercase characters using letters, numbers, hyphens, or underscores', path: '/commandName' })
+  if (!interaction.commandDescription.trim() || interaction.commandDescription.length > 100) diagnostics.unshift({ severity: 'error', message: 'Interaction description must be 1-100 characters', path: '/commandDescription' })
+  const names = new Set<string>()
+  interaction.options.forEach((option, index) => {
+    if (names.has(option.name)) diagnostics.unshift({ severity: 'error', message: `Duplicate option name: ${option.name}`, path: `/options/${index}/name` })
+    names.add(option.name)
+  })
+  return diagnostics
+}
+
+export async function executeReadTool(name: string, args: Record<string, any>): Promise<unknown> {
+  const limit = Math.max(1, Math.min(Number(args.limit) || 20, 100))
+  if (name === 'search_commands') {
+    const query = String(args.query || '')
+    return getCommands().bcfdCommands.filter((item) => snippets(item, query).length).slice(0, limit)
+      .map((item) => ({ id: item.id, command: item.command, description: item.commandDescription, type: item.type, revision: revision(item), matches: snippets(item, query) }))
+  }
+  if (name === 'read_command') {
+    const item = getCommands().bcfdCommands.find((command) => command.id === args.id)
+    if (!item) throw new Error('Command not found')
+    return { resource: item, revision: revision(item) }
+  }
+  if (name === 'search_interactions') {
+    const query = String(args.query || '')
+    return getInteractions().filter((item) => snippets(item, query).length).slice(0, limit)
+      .map((item) => ({ id: item.id, name: item.commandName, description: item.commandDescription, revision: revision(item), matches: snippets(item, query) }))
+  }
+  if (name === 'read_interaction') {
+    const item = getInteractions().find((interaction) => interaction.id === args.id)
+    if (!item) throw new Error('Interaction not found')
+    return { resource: item, revision: revision(item) }
+  }
+  if (name === 'read_bot_state') {
+    const state = getBotStateContext().getVariable('botState') ?? {}
+    return { resource: state, revision: revision(state) }
+  }
+  if (name === 'read_startup_js') {
+    const content = await getStartupJs()
+    return { content, revision: revision(content) }
+  }
+  if (name === 'read_developer_prompt') {
+    const content = getSettings().developerPrompt || ''
+    return { content, revision: revision(content) }
+  }
+  if (name === 'keyword_grep') {
+    const query = String(args.query || '').toLowerCase()
+    const resources: Array<{ type: string; id?: string; value: unknown }> = [
+      ...getCommands().bcfdCommands.map((value) => ({ type: 'command', id: value.id, value })),
+      ...getInteractions().map((value) => ({ type: 'interaction', id: value.id, value })),
+      { type: 'startup-js', value: await getStartupJs() },
+      { type: 'developer-prompt', value: getSettings().developerPrompt || '' },
+      { type: 'bot-state', value: getBotStateContext().getVariable('botState') ?? {} }
+    ]
+    return resources.flatMap((resource) => textEntries(resource.value)
+      .filter((entry) => entry.value.toLowerCase().includes(query))
+      .map((entry) => ({ type: resource.type, id: resource.id, path: entry.path, snippet: entry.value.slice(0, 240) }))).slice(0, limit)
+  }
+  if (name === 'lint_js') return lintSource(String(args.source || ''), 'js')
+  if (name === 'lint_bcfd') return lintSource(String(args.source || ''), 'bcfd', await getStartupJs())
+  if (name === 'lint_command') {
+    const item = getCommands().bcfdCommands.find((command) => command.id === args.id)
+    if (!item) throw new Error('Command not found')
+    return lintCommandResource(item)
+  }
+  if (name === 'lint_interaction') {
+    const item = getInteractions().find((interaction) => interaction.id === args.id)
+    if (!item) throw new Error('Interaction not found')
+    return lintInteractionResource(item)
+  }
+  throw new Error(`Unknown read tool: ${name}`)
+}
+
+function requireRevision(actual: unknown, expected: unknown) {
+  if (revision(actual) !== expected) throw new Error('Stale resource revision; read the resource again before editing')
+}
+
+export async function prepareMutation(name: string, args: Record<string, any>): Promise<PreparedMutation> {
+  if (name === 'create_command') {
+    const input = args.command || {}
+    const after = {
+      ...defaultCommand(), ...input,
+      channelEmbed: { ...emptyEmbed(), ...(input.channelEmbed || {}) },
+      privateEmbed: { ...emptyEmbed(), ...(input.privateEmbed || {}) },
+      id: crypto.randomUUID()
+    }
+    assertCommand(after)
+    return { name, arguments: args, before: null, after, target: { type: 'command', id: after.id } }
+  }
+  if (name === 'edit_command') {
+    const before = getCommands().bcfdCommands.find((item) => item.id === args.id)
+    if (!before) throw new Error('Command not found')
+    requireRevision(before, args.expectedRevision)
+    const after = applyPatches(before, args.patches || [])
+    if (after.id !== before.id) throw new Error('Command IDs cannot be edited')
+    assertCommand(after)
+    return { name, arguments: args, before, after, target: { type: 'command', id: before.id } }
+  }
+  if (name === 'create_interaction') {
+    const input = args.interaction || {}
+    const after = { ...defaultInteraction(), ...input, rootAction: { ...defaultAction(), ...(input.rootAction || {}) }, id: crypto.randomUUID(), isRegistered: false }
+    assertInteraction(after)
+    return { name, arguments: args, before: null, after, target: { type: 'interaction', id: after.id } }
+  }
+  if (name === 'edit_interaction') {
+    const before = getInteractions().find((item) => item.id === args.id)
+    if (!before) throw new Error('Interaction not found')
+    requireRevision(before, args.expectedRevision)
+    const after = applyPatches(before, args.patches || [])
+    if (after.id !== before.id) throw new Error('Interaction IDs cannot be edited')
+    assertInteraction(after)
+    return { name, arguments: args, before, after, target: { type: 'interaction', id: before.id } }
+  }
+  if (name === 'edit_bot_state') {
+    const before = getBotStateContext().getVariable('botState') ?? {}
+    requireRevision(before, args.expectedRevision)
+    const after = applyPatches(before, args.patches || [])
+    if (!after || typeof after !== 'object' || Array.isArray(after)) throw new Error('Bot state must remain an object')
+    return { name, arguments: args, before, after, target: { type: 'bot-state' } }
+  }
+  if (name === 'edit_startup_js') {
+    const before = await getStartupJs()
+    requireRevision(before, args.expectedRevision)
+    const after = String(args.content ?? '')
+    return { name, arguments: args, before, after, target: { type: 'startup-js' } }
+  }
+  if (name === 'edit_developer_prompt') {
+    const before = getSettings().developerPrompt || ''
+    requireRevision(before, args.expectedRevision)
+    const after = String(args.content ?? '')
+    return { name, arguments: args, before, after, target: { type: 'developer-prompt' } }
+  }
+  throw new Error(`Unknown mutation tool: ${name}`)
+}
+
+export async function commitMutation(prepared: PreparedMutation): Promise<unknown> {
+  const args = prepared.arguments as Record<string, any>
+  if (prepared.name === 'create_command') {
+    const current = getCommands()
+    setCommands({ ...current, bcfdCommands: [...current.bcfdCommands, prepared.after as BCFDCommand] })
+    await saveCommands()
+  } else if (prepared.name === 'edit_command') {
+    const current = getCommands()
+    const existing = current.bcfdCommands.find((item) => item.id === args.id)
+    requireRevision(existing, args.expectedRevision)
+    setCommands({ ...current, bcfdCommands: current.bcfdCommands.map((item) => item.id === args.id ? prepared.after as BCFDCommand : item) })
+    await saveCommands()
+  } else if (prepared.name === 'create_interaction') {
+    setInteractions([...getInteractions(), prepared.after as BCFDInteractionCommand])
+    await saveInteractions()
+  } else if (prepared.name === 'edit_interaction') {
+    const existing = getInteractions().find((item) => item.id === args.id)
+    requireRevision(existing, args.expectedRevision)
+    setInteractions(getInteractions().map((item) => item.id === args.id ? prepared.after as BCFDInteractionCommand : item))
+    await saveInteractions()
+  } else if (prepared.name === 'edit_bot_state') {
+    const existing = getBotStateContext().getVariable('botState') ?? {}
+    requireRevision(existing, args.expectedRevision)
+    getBotStateContext().setVariable('botState', prepared.after)
+    await saveBotState()
+  } else if (prepared.name === 'edit_startup_js') {
+    requireRevision(await getStartupJs(), args.expectedRevision)
+    await setStartupJs(prepared.after as string)
+    await restartJsEngine()
+  } else if (prepared.name === 'edit_developer_prompt') {
+    requireRevision(getSettings().developerPrompt || '', args.expectedRevision)
+    setSettings({ ...getSettings(), developerPrompt: prepared.after as string })
+    await saveSettings()
+  }
+
+  let diagnostics: AgentLintDiagnostic[] = []
+  if (prepared.target.type === 'command') diagnostics = await lintCommandResource(prepared.after as BCFDCommand)
+  if (prepared.target.type === 'interaction') diagnostics = await lintInteractionResource(prepared.after as BCFDInteractionCommand)
+  if (prepared.target.type === 'startup-js') diagnostics = lintSource(prepared.after as string, 'js')
+  return { success: true, target: prepared.target, revision: revision(prepared.after), diagnostics }
+}
