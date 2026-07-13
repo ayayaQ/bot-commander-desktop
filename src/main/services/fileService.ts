@@ -15,6 +15,7 @@ import { getCommands, setCommands } from './botService'
 import { getSettings, setSettings } from './settingsService'
 import { getBotStatus, setBotStatus } from './statusService'
 import { getInteractions, setInteractions } from './interactionService'
+import { decodeBCFDCommand } from '../../shared/commandCodec'
 
 export async function loadCommands(): Promise<void> {
   const commandsPath = join(app.getPath('userData'), 'commands.json')
@@ -23,14 +24,13 @@ export async function loadCommands(): Promise<void> {
     let commands: { bcfdCommands: BCFDCommand[]; bcfdSlashCommands: BCFDSlashCommand[] } =
       JSON.parse(data)
 
-    // Migration: Add IDs to commands that don't have them
+    // Normalize legacy command shapes into the canonical payload-derived model.
     let needsSave = false
-    for (const cmd of commands.bcfdCommands) {
-      if (!cmd.id) {
-        cmd.id = crypto.randomUUID()
-        needsSave = true
-      }
-    }
+    commands.bcfdCommands = commands.bcfdCommands.map((cmd) => {
+      const decoded = decodeBCFDCommand(cmd, () => crypto.randomUUID())
+      needsSave ||= decoded.migrated
+      return decoded.command
+    })
 
     setCommands(commands)
 

@@ -1,32 +1,22 @@
 export type BCFDCommand = {
   id: string
-  actionArr: boolean[]
   channelMessage: string
   command: string
   commandDescription: string
   deleteAfter: boolean
-  deleteIf: boolean
   deleteIfStrings: string
   deleteNum: number
-  deleteX: boolean
   ignoreErrorMessage: boolean
   isBan: boolean
   isKick: boolean
   isNSFW: boolean
-  isReact: boolean
-  isRequiredRole: boolean
   requiredRole: string
-  isRoleAssigner: boolean
-  isSpecificChannel: boolean
-  isSpecificMessage: boolean
   isVoiceMute: boolean
   isAdmin: boolean
   phrase: boolean
   privateMessage: string
   reaction: string
   roleToAssign: string
-  sendChannelEmbed: boolean
-  sendPrivateEmbed: boolean
   specificChannel: string
   specificMessage: string
   startsWith: boolean
@@ -46,83 +36,8 @@ export type BCFDCommand = {
 
 export function validateBCFDCommand(jsonString: string): BCFDCommand | null {
   try {
-    const parsed = JSON.parse(jsonString)
-
-    console.log('Parsed command:', parsed)
-
-    const requiredFields = [
-      'actionArr',
-      'channelMessage',
-      'command',
-      'commandDescription',
-      'deleteAfter',
-      'deleteIf',
-      'deleteIfStrings',
-      'deleteNum',
-      'deleteX',
-      'ignoreErrorMessage',
-      'isBan',
-      'isKick',
-      'isNSFW',
-      'isReact',
-      'isRequiredRole',
-      'requiredRole',
-      'isRoleAssigner',
-      'isSpecificChannel',
-      'isSpecificMessage',
-      'isVoiceMute',
-      'isAdmin',
-      'phrase',
-      'privateMessage',
-      'reaction',
-      'roleToAssign',
-      'sendChannelEmbed',
-      'sendPrivateEmbed',
-      'specificChannel',
-      'specificMessage',
-      'type',
-      'channelEmbed',
-      'privateEmbed',
-      'startsWith'
-    ]
-
-    // id is optional (added at runtime, stripped on export)
-    const allowedFields = [
-      ...requiredFields,
-      'id',
-      'cooldown',
-      'cooldownType',
-      'cooldownMessage',
-      'channelMessageAsReply',
-      'channelEmbedAsReply',
-      'channelMessageTyping',
-      'channelEmbedTyping',
-      'channelWhitelist',
-      'serverWhitelist'
-    ]
-
-    // Check if all required fields exist
-    const hasAllFields = requiredFields.every((field) => field in parsed)
-
-    // Check if there are no extra fields (allowing optional id field)
-    const hasNoExtraFields = Object.keys(parsed).every((key) => allowedFields.includes(key))
-
-    // Validate embed templates
-    const embedFields = ['title', 'description', 'hexColor', 'imageURL', 'thumbnailURL', 'footer']
-    const hasValidEmbeds = embedFields.every(
-      (field) => field in parsed.channelEmbed && field in parsed.privateEmbed
-    )
-
-    if (hasAllFields && hasNoExtraFields && hasValidEmbeds) {
-      // Add id if missing
-      if (!parsed.id) {
-        parsed.id = crypto.randomUUID()
-      }
-      return parsed as BCFDCommand
-    }
-
-    return null
-  } catch (error) {
+    return decodeBCFDCommand(JSON.parse(jsonString)).command
+  } catch {
     return null
   }
 }
@@ -300,6 +215,7 @@ export type AppSettings = {
   useCustomApi: boolean
   useLegacyInterpreter: boolean
   disableReasoningApi: boolean
+  agentNotificationsEnabled: boolean
 }
 
 export type BotStatus = {
@@ -361,3 +277,4 @@ export interface OnboardingState {
   botHostedOnce: boolean
   dismissedTips: string[]
 }
+import { decodeBCFDCommand } from '../../../shared/commandCodec'

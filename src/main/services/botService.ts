@@ -41,6 +41,7 @@ import {
   BCFDInteractionAction,
   BCFDInteractionButton
 } from '../types/types'
+import { commandCapabilities } from '../../shared/commandCapabilities'
 import { findInteractionByCommandName, findInteractionByButtonId } from './interactionService'
 import { getBotStateContext, loadBotState, saveBotState } from '../utils/virtual'
 import { session } from 'electron'
@@ -826,7 +827,7 @@ async function requiredRole(
   command: BCFDCommand,
   message: OmitPartialGroupDMChannel<Message<boolean>>
 ): Promise<boolean> {
-  if (command.isRequiredRole) {
+  if (commandCapabilities.hasRequiredRole(command)) {
     // Check if the user has the required role
     if (!message.member?.roles.cache.has(command.requiredRole)) {
       // User does not have the required role, skip the command
@@ -843,7 +844,7 @@ async function deleteIf(
   command: BCFDCommand,
   message: OmitPartialGroupDMChannel<Message<boolean>>
 ): Promise<boolean> {
-  if (command.deleteIf) {
+  if (commandCapabilities.deletesIfMatched(command)) {
     let deleteStrings = command.deleteIfStrings.split('|')
     for (const deleteString of deleteStrings) {
       if (message.content.includes(deleteString)) {
@@ -860,7 +861,7 @@ async function deleteX(
   command: BCFDCommand,
   message: OmitPartialGroupDMChannel<Message<boolean>>
 ): Promise<boolean> {
-  if (command.deleteX) {
+  if (commandCapabilities.deletesMessages(command)) {
     // check if user has permission to manage messages
     if (
       !message.member?.permissions.has(PermissionsBitField.Flags.ManageMessages) ||
@@ -893,7 +894,7 @@ async function channelMessage(
   stringInfoMethod: () => Promise<string>,
   replyTarget?: OmitPartialGroupDMChannel<Message<boolean>>
 ): Promise<boolean> {
-  if (command.actionArr[0]) {
+  if (commandCapabilities.sendsChannelMessage(command)) {
     const typingChannel = command.channelMessageAsReply && replyTarget ? replyTarget.channel : channel
     const stopTyping = startTypingUntilStopped(typingChannel, command.channelMessageTyping)
 
@@ -919,7 +920,7 @@ async function privateMessage(
   user: User,
   stringInfoMethod: () => Promise<string>
 ): Promise<boolean> {
-  if (command.actionArr[1]) {
+  if (commandCapabilities.sendsPrivateMessage(command)) {
     // sends a private message to the user
     user.send(await stringInfoMethod())
   }
@@ -1010,7 +1011,7 @@ async function roleAssigner(
   member: GuildMember,
   stringInfoMethod: (field: string) => Promise<string>
 ): Promise<boolean> {
-  if (command.isRoleAssigner) {
+  if (commandCapabilities.assignsRole(command)) {
     let role = await stringInfoMethod(command.roleToAssign)
 
     // add the role to the member if they dont have it, and if they have it remove it
@@ -1039,7 +1040,7 @@ async function sendChannelEmbed(
   stringInfoMethod: (field: string) => Promise<string>,
   replyTarget?: OmitPartialGroupDMChannel<Message<boolean>>
 ): Promise<boolean> {
-  if (command.sendChannelEmbed) {
+  if (commandCapabilities.sendsChannelEmbed(command)) {
     const typingChannel = command.channelEmbedAsReply && replyTarget ? replyTarget.channel : channel
     const stopTyping = startTypingUntilStopped(typingChannel, command.channelEmbedTyping)
 
@@ -1094,7 +1095,7 @@ async function sendPrivateEmbed(
   user: User,
   stringInfoMethod: (field: string) => Promise<string>
 ): Promise<boolean> {
-  if (command.sendPrivateEmbed) {
+  if (commandCapabilities.sendsPrivateEmbed(command)) {
     // builds an embed with our embed template
     let embed = new EmbedBuilder()
 
@@ -1135,7 +1136,7 @@ async function react(
   command: BCFDCommand,
   message: OmitPartialGroupDMChannel<Message<boolean>>
 ): Promise<boolean> {
-  if (command.isReact) {
+  if (commandCapabilities.reacts(command)) {
     // add a reaction to the message
 
     // convert our command reaction to a reaction emote from the guild
@@ -1162,11 +1163,11 @@ async function onGuildMemberAdd(member: GuildMember) {
       if (!ids.includes(member.guild.id)) continue
     }
 
-    if (command.isRoleAssigner) {
+    if (commandCapabilities.assignsRole(command)) {
       roleAssigner(command, member, async (field) => field)
     }
 
-    const channel = command.isSpecificChannel
+    const channel = commandCapabilities.usesSpecificChannel(command)
       ? resolveSpecificGuildChannel(member.guild, command.specificChannel)
       : getFirstSendableGuildChannel(member.guild)
 
@@ -1191,7 +1192,7 @@ async function onGuildMemberRemove(member: GuildMember | PartialGuildMember) {
       if (!ids.includes(member.guild.id)) continue
     }
 
-    const channel = command.isSpecificChannel
+    const channel = commandCapabilities.usesSpecificChannel(command)
       ? resolveSpecificGuildChannel(member.guild, command.specificChannel)
       : getFirstSendableGuildChannel(member.guild)
 
@@ -1216,7 +1217,7 @@ async function onGuildBanAdd(ban: GuildBan) {
       if (!ids.includes(ban.guild.id)) continue
     }
 
-    const channel = command.isSpecificChannel
+    const channel = commandCapabilities.usesSpecificChannel(command)
       ? resolveSpecificGuildChannel(ban.guild, command.specificChannel)
       : getFirstSendableGuildChannel(ban.guild)
 
@@ -1297,7 +1298,7 @@ async function onMessageReactionAdd(
     }
 
     // Check required role
-    if (command.isRequiredRole) {
+    if (commandCapabilities.hasRequiredRole(command)) {
       if (!member.roles.cache.has(command.requiredRole)) {
         if (!command.ignoreErrorMessage) {
           user.send(`This reaction requires role: ${command.requiredRole}`)
@@ -1321,13 +1322,13 @@ async function onMessageReactionAdd(
     }
 
     // Resolve target channel (specific channel override or event channel)
-    const reactionTargetChannel = command.isSpecificChannel
+    const reactionTargetChannel = commandCapabilities.usesSpecificChannel(command)
       ? (resolveSpecificGuildChannel(message.guild, command.specificChannel) ??
         (message.channel as GuildSendableChannel))
       : (message.channel as GuildSendableChannel)
 
     // Handle channel message
-    if (command.actionArr[0]) {
+    if (commandCapabilities.sendsChannelMessage(command)) {
       channelMessage(
         command,
         reactionTargetChannel,
@@ -1341,7 +1342,7 @@ async function onMessageReactionAdd(
     }
 
     // Handle private message
-    if (command.actionArr[1]) {
+    if (commandCapabilities.sendsPrivateMessage(command)) {
       privateMessage(command, user, async () => {
         return await stringInfoAdd(
           contextForReactionEvent(command.privateMessage, reaction, command)
@@ -1350,7 +1351,7 @@ async function onMessageReactionAdd(
     }
 
     // Handle channel embed
-    if (command.sendChannelEmbed) {
+    if (commandCapabilities.sendsChannelEmbed(command)) {
       sendChannelEmbed(
         command,
         reactionTargetChannel,
@@ -1362,21 +1363,24 @@ async function onMessageReactionAdd(
     }
 
     // Handle private embed
-    if (command.sendPrivateEmbed) {
+    if (commandCapabilities.sendsPrivateEmbed(command)) {
       sendPrivateEmbed(command, user, async (field) => {
         return await stringInfoAdd(contextForReactionEvent(field, reaction, command))
       })
     }
 
     // Handle role assignment
-    if (command.isRoleAssigner) {
+    if (commandCapabilities.assignsRole(command)) {
       roleAssigner(command, member, async (field) => {
         return await stringInfoAdd(contextForReactionEvent(field, reaction, command))
       })
     }
 
     // Increment stats if messages were sent
-    if (command.actionArr[0] || command.actionArr[1]) {
+    if (
+      commandCapabilities.sendsChannelMessage(command) ||
+      commandCapabilities.sendsPrivateMessage(command)
+    ) {
       stats.incrementMessagesSent()
     }
   }
@@ -1462,7 +1466,7 @@ async function onMessageCreate(message: OmitPartialGroupDMChannel<Message<boolea
       continue
     }
 
-    const msgTargetChannel = command.isSpecificChannel
+    const msgTargetChannel = commandCapabilities.usesSpecificChannel(command)
       ? (resolveSpecificGuildChannel(message.guild, command.specificChannel) ?? message.channel)
       : message.channel
 
@@ -1521,7 +1525,10 @@ async function onMessageCreate(message: OmitPartialGroupDMChannel<Message<boolea
       message.delete()
     }
 
-    if (command.actionArr[0] || command.actionArr[1]) {
+    if (
+      commandCapabilities.sendsChannelMessage(command) ||
+      commandCapabilities.sendsPrivateMessage(command)
+    ) {
       stats.incrementMessagesSent()
     }
 

@@ -36,7 +36,6 @@ interface FieldDefinition {
 const embedFields = ['title', 'description', 'hexColor', 'imageURL', 'thumbnailURL', 'footer']
 
 const fieldDefinitions: Record<string, FieldDefinition> = {
-  actionArr: { label: 'Message Actions', kind: 'embed' },
   command: { label: 'Command', kind: 'string' },
   commandDescription: { label: 'Description', kind: 'string' },
   type: { label: 'Command Type', kind: 'number' },
@@ -108,12 +107,6 @@ function validateValue(field: string, value: CommandPatchValue): string | null {
   if (value === null) return `Field "${field}" cannot be null`
 
   if (definition.kind === 'embed') {
-    if (field === 'actionArr') {
-      if (!Array.isArray(value) || value.some((item) => typeof item !== 'boolean')) {
-        return 'Field "actionArr" must be an array of booleans'
-      }
-      return null
-    }
     if (!isPlainObject(value)) return `Field "${field}" must be an object`
     const invalidEmbedField = Object.keys(value).find((key) => !embedFields.includes(key))
     if (invalidEmbedField) return `Unknown embed field "${field}.${invalidEmbedField}"`
@@ -147,63 +140,10 @@ function setField(command: Record<string, unknown>, field: string, value: Comman
   command[field] = cloneValue(value)
 }
 
-function hasEmbedContent(embed: unknown): boolean {
-  if (!isPlainObject(embed)) return false
-  return embedFields.some((field) => String(embed[field] || '').trim().length > 0)
-}
-
-function ensureActionArr(command: Record<string, unknown>): boolean[] {
-  const current = Array.isArray(command.actionArr) ? command.actionArr : []
-  const actionArr = [!!current[0], !!current[1]]
-  command.actionArr = actionArr
-  return actionArr
-}
-
 function normalizeDerivedFields(
   command: Record<string, unknown>,
   touchedFields: Set<string>
 ): void {
-  const actionArr = ensureActionArr(command)
-
-  if (touchedFields.has('channelMessage')) {
-    actionArr[0] = String(command.channelMessage || '').trim().length > 0
-  }
-  if (touchedFields.has('privateMessage')) {
-    actionArr[1] = String(command.privateMessage || '').trim().length > 0
-  }
-  if (
-    touchedFields.has('channelEmbed') ||
-    [...touchedFields].some((field) => field.startsWith('channelEmbed.'))
-  ) {
-    command.sendChannelEmbed = hasEmbedContent(command.channelEmbed)
-  }
-  if (
-    touchedFields.has('privateEmbed') ||
-    [...touchedFields].some((field) => field.startsWith('privateEmbed.'))
-  ) {
-    command.sendPrivateEmbed = hasEmbedContent(command.privateEmbed)
-  }
-  if (touchedFields.has('specificChannel')) {
-    command.isSpecificChannel = String(command.specificChannel || '').trim().length > 0
-  }
-  if (touchedFields.has('reaction')) {
-    command.isReact = String(command.reaction || '').trim().length > 0
-  }
-  if (touchedFields.has('deleteIfStrings')) {
-    command.deleteIf = String(command.deleteIfStrings || '').trim().length > 0
-  }
-  if (touchedFields.has('deleteNum')) {
-    command.deleteX = typeof command.deleteNum === 'number' && command.deleteNum > 0
-  }
-  if (touchedFields.has('roleToAssign')) {
-    command.isRoleAssigner = String(command.roleToAssign || '').trim().length > 0
-  }
-  if (touchedFields.has('requiredRole')) {
-    command.isRequiredRole = String(command.requiredRole || '').trim().length > 0
-  }
-  if (touchedFields.has('specificMessage')) {
-    command.isSpecificMessage = String(command.specificMessage || '').trim().length > 0
-  }
   if (touchedFields.has('cooldown')) {
     const cooldown = typeof command.cooldown === 'number' ? command.cooldown : 0
     if (cooldown <= 0) {

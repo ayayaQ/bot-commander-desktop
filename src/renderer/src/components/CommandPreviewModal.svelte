@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte'
   import type { BCFDCommand } from '../types/types'
+  import { commandCapabilities } from '../../../shared/commandCapabilities'
   import { t } from '../stores/localisation'
   import CodeEditor from './CodeEditor.svelte'
 
@@ -47,22 +48,22 @@
 
   function getActiveActions(cmd: BCFDCommand): Array<{ type: string; name: string }> {
     const actions: Array<{ type: string; name: string }> = []
-    if (cmd.actionArr?.[0]) actions.push({ type: 'sendMessage', name: $t('send-message') })
-    if (cmd.actionArr?.[1]) actions.push({ type: 'sendPrivateMessage', name: $t('send-private-message') })
-    if (cmd.sendChannelEmbed) actions.push({ type: 'sendChannelEmbed', name: $t('send-channel-embed') })
-    if (cmd.sendPrivateEmbed) actions.push({ type: 'sendPrivateEmbed', name: $t('send-private-embed') })
-    if (cmd.isSpecificChannel) actions.push({ type: 'specificChannel', name: $t('send-in-specific-channel') })
+    if (commandCapabilities.sendsChannelMessage(cmd)) actions.push({ type: 'sendMessage', name: $t('send-message') })
+    if (commandCapabilities.sendsPrivateMessage(cmd)) actions.push({ type: 'sendPrivateMessage', name: $t('send-private-message') })
+    if (commandCapabilities.sendsChannelEmbed(cmd)) actions.push({ type: 'sendChannelEmbed', name: $t('send-channel-embed') })
+    if (commandCapabilities.sendsPrivateEmbed(cmd)) actions.push({ type: 'sendPrivateEmbed', name: $t('send-private-embed') })
+    if (commandCapabilities.usesSpecificChannel(cmd)) actions.push({ type: 'specificChannel', name: $t('send-in-specific-channel') })
     if (cmd.channelWhitelist?.trim()) actions.push({ type: 'channelWhitelist', name: $t('channel-whitelist') })
     if (cmd.serverWhitelist?.trim()) actions.push({ type: 'serverWhitelist', name: $t('server-whitelist') })
-    if (cmd.isReact) actions.push({ type: 'reaction', name: $t('react-to-message') })
-    if (cmd.deleteIf) actions.push({ type: 'deleteIf', name: $t('delete-if-contains') })
+    if (commandCapabilities.reacts(cmd)) actions.push({ type: 'reaction', name: $t('react-to-message') })
+    if (commandCapabilities.deletesIfMatched(cmd)) actions.push({ type: 'deleteIf', name: $t('delete-if-contains') })
     if (cmd.deleteAfter) actions.push({ type: 'deleteAfter', name: $t('delete-after') })
-    if (cmd.deleteX) actions.push({ type: 'deleteX', name: $t('delete-x-times') })
-    if (cmd.isRoleAssigner) actions.push({ type: 'roleAssigner', name: $t('role-assigner') })
+    if (commandCapabilities.deletesMessages(cmd)) actions.push({ type: 'deleteX', name: $t('delete-x-times') })
+    if (commandCapabilities.assignsRole(cmd)) actions.push({ type: 'roleAssigner', name: $t('role-assigner') })
     if (cmd.isKick) actions.push({ type: 'kick', name: $t('kick') })
     if (cmd.isBan) actions.push({ type: 'ban', name: $t('ban') })
     if (cmd.isVoiceMute) actions.push({ type: 'voiceMute', name: $t('voice-mute') })
-    if (cmd.isRequiredRole) actions.push({ type: 'requiredRole', name: $t('requires-role') })
+    if (commandCapabilities.hasRequiredRole(cmd)) actions.push({ type: 'requiredRole', name: $t('requires-role') })
     if (cmd.isAdmin) actions.push({ type: 'requireAdmin', name: $t('requires-admin') })
     if (cmd.isNSFW) actions.push({ type: 'nsfw', name: $t('is-nsfw') })
     return actions

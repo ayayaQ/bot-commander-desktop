@@ -8,6 +8,7 @@
   import AIChat from './AIChat.svelte'
   import { aiPanelOpen, clearChat } from '../stores/aiChat'
   import { bottomNavVisible } from '../stores/navigation'
+  import { commandCapabilities } from '../../../shared/commandCapabilities'
 
   interface Props {
     mode?: 'edit' | 'add';
@@ -66,11 +67,6 @@
     }
   }
 
-  function ensureActionArr(cmd: BCFDCommand) {
-    if (!Array.isArray(cmd.actionArr)) cmd.actionArr = [false, false]
-    if (cmd.actionArr.length < 2) cmd.actionArr = [!!cmd.actionArr[0], !!cmd.actionArr[1]]
-  }
-
   function applyAiCommandUpdate(updatedCommand: BCFDCommand) {
     // Apply field-by-field so we can run extra logic per property.
     for (const [key, value] of Object.entries(updatedCommand) as Array<
@@ -80,41 +76,6 @@
       if (key === 'id') continue
       ;(editedCommand as any)[key] = cloneValue(value)
     }
-
-    // Special operations / derived flags.
-    ensureActionArr(editedCommand)
-
-    if (updatedCommand.channelMessage?.trim()) {
-      editedCommand.actionArr[0] = true
-    }
-    if (updatedCommand.privateMessage?.trim()) {
-      editedCommand.actionArr[1] = true
-    }
-    if (updatedCommand.channelEmbed && isEmbedValid(updatedCommand.channelEmbed)) {
-      editedCommand.sendChannelEmbed = true
-    }
-    if (updatedCommand.privateEmbed && isEmbedValid(updatedCommand.privateEmbed)) {
-      editedCommand.sendPrivateEmbed = true
-    }
-    if (updatedCommand.specificChannel?.trim()) {
-      editedCommand.isSpecificChannel = true
-    }
-    if (updatedCommand.reaction?.trim()) {
-      editedCommand.isReact = true
-    }
-    if (updatedCommand.deleteIfStrings?.trim()) {
-      editedCommand.deleteIf = true
-    }
-    if (typeof updatedCommand.deleteNum === 'number' && updatedCommand.deleteNum > 0) {
-      editedCommand.deleteX = true
-    }
-    if (updatedCommand.roleToAssign?.trim()) {
-      editedCommand.isRoleAssigner = true
-    }
-    if (updatedCommand.requiredRole?.trim()) {
-      editedCommand.isRequiredRole = true
-    }
-    // cooldown is handled via initializeActiveActions below
 
     // Force reactivity after a batch of in-place assignments.
     editedCommand = { ...editedCommand }
@@ -208,19 +169,16 @@
     // Map action types to command properties
     switch (type) {
       case 'sendMessage':
-        editedCommand.actionArr[0] = value
-        break
       case 'sendPrivateMessage':
-        editedCommand.actionArr[1] = value
-        break
       case 'sendChannelEmbed':
-        editedCommand.sendChannelEmbed = value
-        break
       case 'sendPrivateEmbed':
-        editedCommand.sendPrivateEmbed = value
-        break
       case 'specificChannel':
-        editedCommand.isSpecificChannel = value
+      case 'reaction':
+      case 'deleteIf':
+      case 'deleteX':
+      case 'roleAssigner':
+      case 'requiredRole':
+        // Payload-backed action membership is editor-local until save.
         break
       case 'channelWhitelist':
         if (!value) editedCommand.channelWhitelist = ''
@@ -228,20 +186,8 @@
       case 'serverWhitelist':
         if (!value) editedCommand.serverWhitelist = ''
         break
-      case 'reaction':
-        editedCommand.isReact = value
-        break
-      case 'deleteIf':
-        editedCommand.deleteIf = value
-        break
       case 'deleteAfter':
         editedCommand.deleteAfter = value
-        break
-      case 'deleteX':
-        editedCommand.deleteX = value
-        break
-      case 'roleAssigner':
-        editedCommand.isRoleAssigner = value
         break
       case 'kick':
         editedCommand.isKick = value
@@ -251,9 +197,6 @@
         break
       case 'voiceMute':
         editedCommand.isVoiceMute = value
-        break
-      case 'requiredRole':
-        editedCommand.isRequiredRole = value
         break
       case 'requireAdmin':
         editedCommand.isAdmin = value
@@ -307,7 +250,6 @@
     return !!(
       embed.title?.trim() ||
       embed.description?.trim() ||
-      embed.hexColor?.trim() ||
       embed.imageURL?.trim() ||
       embed.thumbnailURL?.trim() ||
       embed.footer?.trim()
@@ -411,23 +353,21 @@
       editedCommand.type === TYPE_MEMBER_BAN
     ) {
       // reset the fields that are not needed for these types
-      editedCommand.isRequiredRole = false
       editedCommand.requiredRole = ''
       editedCommand.isAdmin = false
       editedCommand.phrase = false
       editedCommand.isNSFW = false
       editedCommand.deleteAfter = false
-      editedCommand.deleteX = false
       editedCommand.deleteNum = 0
-      editedCommand.deleteIf = false
       editedCommand.deleteIfStrings = ''
-      editedCommand.isReact = false
       editedCommand.reaction = ''
       editedCommand.isKick = false
       editedCommand.isBan = false
       editedCommand.isVoiceMute = false
       editedCommand.command = ''
     }
+
+    clearInactivePayloads()
 
     if (mode === 'edit') {
       dispatch('update', { command: editedCommand, index })
@@ -436,30 +376,51 @@
     }
   }
 
+  function hasActiveAction(type: string): boolean {
+    return activeActions.some((action) => action.type === type)
+  }
+
+  function emptyEmbed() {
+    return { title: '', description: '', hexColor: '', imageURL: '', thumbnailURL: '', footer: '' }
+  }
+
+  function clearInactivePayloads() {
+    if (!hasActiveAction('sendMessage')) editedCommand.channelMessage = ''
+    if (!hasActiveAction('sendPrivateMessage')) editedCommand.privateMessage = ''
+    if (!hasActiveAction('sendChannelEmbed')) editedCommand.channelEmbed = emptyEmbed()
+    if (!hasActiveAction('sendPrivateEmbed')) editedCommand.privateEmbed = emptyEmbed()
+    if (!hasActiveAction('specificChannel')) editedCommand.specificChannel = ''
+    if (!hasActiveAction('reaction')) editedCommand.reaction = ''
+    if (!hasActiveAction('deleteIf')) editedCommand.deleteIfStrings = ''
+    if (!hasActiveAction('deleteX')) editedCommand.deleteNum = 0
+    if (!hasActiveAction('roleAssigner')) editedCommand.roleToAssign = ''
+    if (!hasActiveAction('requiredRole')) editedCommand.requiredRole = ''
+  }
+
   function initializeActiveActions(cmd: BCFDCommand) {
     activeActions = []
-    if (cmd.actionArr[0]) activeActions.push({ type: 'sendMessage', name: $t('send-message') })
-    if (cmd.actionArr[1])
+    if (commandCapabilities.sendsChannelMessage(cmd)) activeActions.push({ type: 'sendMessage', name: $t('send-message') })
+    if (commandCapabilities.sendsPrivateMessage(cmd))
       activeActions.push({ type: 'sendPrivateMessage', name: $t('send-private-message') })
-    if (cmd.sendChannelEmbed)
+    if (commandCapabilities.sendsChannelEmbed(cmd))
       activeActions.push({ type: 'sendChannelEmbed', name: $t('send-channel-embed') })
-    if (cmd.sendPrivateEmbed)
+    if (commandCapabilities.sendsPrivateEmbed(cmd))
       activeActions.push({ type: 'sendPrivateEmbed', name: $t('send-private-embed') })
-    if (cmd.isSpecificChannel)
+    if (commandCapabilities.usesSpecificChannel(cmd))
       activeActions.push({ type: 'specificChannel', name: $t('send-in-specific-channel') })
     if (cmd.channelWhitelist?.trim())
       activeActions.push({ type: 'channelWhitelist', name: $t('channel-whitelist') })
     if (cmd.serverWhitelist?.trim())
       activeActions.push({ type: 'serverWhitelist', name: $t('server-whitelist') })
-    if (cmd.isReact) activeActions.push({ type: 'reaction', name: $t('react-to-message') })
-    if (cmd.deleteIf) activeActions.push({ type: 'deleteIf', name: $t('delete-if-contains') })
+    if (commandCapabilities.reacts(cmd)) activeActions.push({ type: 'reaction', name: $t('react-to-message') })
+    if (commandCapabilities.deletesIfMatched(cmd)) activeActions.push({ type: 'deleteIf', name: $t('delete-if-contains') })
     if (cmd.deleteAfter) activeActions.push({ type: 'deleteAfter', name: $t('delete-after') })
-    if (cmd.deleteX) activeActions.push({ type: 'deleteX', name: $t('delete-x-times') })
-    if (cmd.isRoleAssigner) activeActions.push({ type: 'roleAssigner', name: $t('role-assigner') })
+    if (commandCapabilities.deletesMessages(cmd)) activeActions.push({ type: 'deleteX', name: $t('delete-x-times') })
+    if (commandCapabilities.assignsRole(cmd)) activeActions.push({ type: 'roleAssigner', name: $t('role-assigner') })
     if (cmd.isKick) activeActions.push({ type: 'kick', name: $t('kick') })
     if (cmd.isBan) activeActions.push({ type: 'ban', name: $t('ban') })
     if (cmd.isVoiceMute) activeActions.push({ type: 'voiceMute', name: $t('voice-mute') })
-    if (cmd.isRequiredRole) activeActions.push({ type: 'requiredRole', name: $t('requires-role') })
+    if (commandCapabilities.hasRequiredRole(cmd)) activeActions.push({ type: 'requiredRole', name: $t('requires-role') })
     if (cmd.isAdmin) activeActions.push({ type: 'requireAdmin', name: $t('requires-admin') })
     if (cmd.isNSFW) activeActions.push({ type: 'nsfw', name: $t('is-nsfw') })
     if (cmd.cooldown && cmd.cooldown > 0)
@@ -475,32 +436,22 @@
       ? { ...command }
       : {
           id: crypto.randomUUID(),
-          actionArr: [false, false],
           channelMessage: '',
           command: '',
           commandDescription: '',
           deleteAfter: false,
-          deleteIf: false,
           deleteIfStrings: '',
           deleteNum: 0,
-          deleteX: false,
           ignoreErrorMessage: false,
           isBan: false,
           isKick: false,
           isNSFW: false,
-          isReact: false,
-          isRequiredRole: false,
-          isRoleAssigner: false,
-          isSpecificChannel: false,
-          isSpecificMessage: false,
           isVoiceMute: false,
           isAdmin: false,
           phrase: false,
           privateMessage: '',
           reaction: '',
           roleToAssign: '',
-          sendChannelEmbed: false,
-          sendPrivateEmbed: false,
           specificChannel: '',
           specificMessage: '',
           startsWith: false,

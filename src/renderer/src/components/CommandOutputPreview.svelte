@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { BCFDCommand } from '../types/types'
+  import { commandCapabilities } from '../../../shared/commandCapabilities'
   import { highlightBCFD } from '../utils/highlight'
 
   interface Props {
@@ -25,25 +26,25 @@
   function buildPreview(command: BCFDCommand) {
     const previews: Array<{ label: string; value: string }> = []
 
-    if (command.actionArr?.[0] && command.channelMessage) {
+    if (commandCapabilities.sendsChannelMessage(command)) {
       previews.push({ label: 'Channel', value: truncatePreview(command.channelMessage) })
     }
 
-    if (command.actionArr?.[1] && command.privateMessage) {
+    if (commandCapabilities.sendsPrivateMessage(command)) {
       previews.push({ label: 'DM', value: truncatePreview(command.privateMessage) })
     }
 
-    if (command.sendChannelEmbed) {
+    if (commandCapabilities.sendsChannelEmbed(command)) {
       const value = truncatePreview(embedPreview(command.channelEmbed) || 'Embed configured')
       previews.push({ label: 'Channel embed', value })
     }
 
-    if (command.sendPrivateEmbed) {
+    if (commandCapabilities.sendsPrivateEmbed(command)) {
       const value = truncatePreview(embedPreview(command.privateEmbed) || 'Embed configured')
       previews.push({ label: 'DM embed', value })
     }
 
-    if (command.isReact && command.reaction) {
+    if (commandCapabilities.reacts(command)) {
       previews.push({ label: 'Reaction', value: truncatePreview(command.reaction, 40) })
     }
 
@@ -51,11 +52,11 @@
       previews.push({ label: 'Cleanup', value: 'Deletes the command message after sending' })
     }
 
-    if (command.deleteX && command.deleteNum) {
+    if (commandCapabilities.deletesMessages(command)) {
       previews.push({ label: 'Cleanup', value: `Deletes ${command.deleteNum} message(s)` })
     }
 
-    if (command.deleteIf && command.deleteIfStrings) {
+    if (commandCapabilities.deletesIfMatched(command)) {
       previews.push({
         label: 'Cleanup',
         value: `Deletes if contains: ${truncatePreview(command.deleteIfStrings, 60)}`

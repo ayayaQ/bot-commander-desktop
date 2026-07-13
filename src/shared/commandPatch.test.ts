@@ -5,33 +5,23 @@ import type { BCFDCommand } from '../main/types/types'
 function baseCommand(): BCFDCommand {
   return {
     id: 'command-1',
-    actionArr: [false, false],
     channelMessage: '',
     command: '!test',
     commandDescription: 'Test command',
     deleteAfter: false,
-    deleteIf: false,
     deleteIfStrings: '',
     deleteNum: 0,
-    deleteX: false,
     ignoreErrorMessage: false,
     isBan: false,
     isKick: false,
     isNSFW: false,
-    isReact: false,
-    isRequiredRole: false,
     requiredRole: '',
-    isRoleAssigner: false,
-    isSpecificChannel: false,
-    isSpecificMessage: false,
     isVoiceMute: false,
     isAdmin: false,
     phrase: false,
     privateMessage: '',
     reaction: '',
     roleToAssign: '',
-    sendChannelEmbed: false,
-    sendPrivateEmbed: false,
     specificChannel: '',
     specificMessage: '',
     startsWith: false,
@@ -60,17 +50,15 @@ function change(field: string, value: CommandPatchChange['value']): CommandPatch
 }
 
 describe('applyCommandPatch', () => {
-  it('enables channel message actions when channelMessage is populated', () => {
+  it('updates a channel message without maintaining a parallel action flag', () => {
     const result = applyCommandPatch(baseCommand(), [change('channelMessage', 'Hello $namePlain')])
 
     expect(result.warnings).toEqual([])
     expect(result.command.channelMessage).toBe('Hello $namePlain')
-    expect(result.command.actionArr).toEqual([true, false])
     expect(result.diff.changes.map((item) => item.field)).toContain('channelMessage')
-    expect(result.diff.changes.map((item) => item.field)).toContain('actionArr')
   })
 
-  it('merges nested embed changes and enables the derived embed flag', () => {
+  it('merges nested embed changes without maintaining a parallel action flag', () => {
     const command = baseCommand()
     command.channelEmbed.title = 'Existing'
 
@@ -85,7 +73,6 @@ describe('applyCommandPatch', () => {
       thumbnailURL: '',
       footer: ''
     })
-    expect(result.command.sendChannelEmbed).toBe(true)
   })
 
   it('normalizes cooldown fields when cooldown is enabled or disabled', () => {

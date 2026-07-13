@@ -81,10 +81,21 @@ describe('fileService', () => {
   })
 
   it('migrates legacy commands by assigning missing ids and saving once', async () => {
+    const legacyCommand = {
+      commandDescription: 'Legacy',
+      type: 0,
+      channelMessage: '',
+      privateMessage: '',
+      channelEmbed: {},
+      privateEmbed: {}
+    }
     await fs.writeFile(
       join(userDataPath, 'commands.json'),
       JSON.stringify({
-        bcfdCommands: [{ command: '!legacy' }, { id: 'existing-id', command: '!newer' }],
+        bcfdCommands: [
+          { ...legacyCommand, command: '!legacy' },
+          { ...legacyCommand, id: 'existing-id', command: '!newer' }
+        ],
         bcfdSlashCommands: []
       })
     )
@@ -94,8 +105,8 @@ describe('fileService', () => {
 
     expect(mocks.setCommands).toHaveBeenCalledWith({
       bcfdCommands: [
-        { id: 'generated-id', command: '!legacy' },
-        { id: 'existing-id', command: '!newer' }
+        expect.objectContaining({ id: 'generated-id', command: '!legacy' }),
+        expect.objectContaining({ id: 'existing-id', command: '!newer' })
       ],
       bcfdSlashCommands: []
     })
