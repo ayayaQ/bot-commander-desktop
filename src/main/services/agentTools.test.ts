@@ -85,6 +85,13 @@ describe('agent resource tools', () => {
     expect(mutationToolNames.has('edit_memory')).toBe(true)
     expect(mutationToolNames.has('delete_memory')).toBe(true)
 
+    const documentationTool = agentToolDefinitions.find(
+      (tool) => tool.function.name === 'search_documentation'
+    )
+    expect((documentationTool?.function.parameters as any).properties.category.enum).toContain(
+      'interactions'
+    )
+
     const result = await executeReadTool('search_documentation', {
       query: '$rollnum',
       category: 'keywords',

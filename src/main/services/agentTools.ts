@@ -80,7 +80,10 @@ export const agentToolDefinitions: ToolDefinition[] = [
       description: 'Search bundled Bot Commander help for commands, fields, BCFD keywords and syntax, tutorials, interactions, setup, and webhooks. Returns the best matching content plus compact alternatives; short exact names or phrases work best.',
       parameters: objectSchema({
         query: { type: 'string' },
-        category: { type: 'string', enum: ['creating', 'commands', 'keywords', 'tutorial', 'webhooks'] },
+        category: {
+          type: 'string',
+          enum: ['creating', 'commands', 'interactions', 'keywords', 'tutorial', 'webhooks']
+        },
         limit: { type: 'integer', minimum: 1, maximum: 5 }
       }, ['query'])
     }

@@ -1,9 +1,9 @@
 {
   "schemaVersion": 2,
   "language": "en",
-  "sourceRevision": "6579f1ec547deda9fb8614e3f88c18f5db280d99",
-  "sourceContentHash": "ead445e7bdb4dd10c501717e7be0b3d9c883e85bad1fe4e5c019c5d6815484bd",
-  "tableOfContents": "creating\n\tCreating the bot\n\tInviting the bot\ncommands\n\tCommand Types\n\t\tMessage Receive\n\t\tPrivate Message\n\t\tMember Join\n\t\tMember Leave\n\t\tMember Ban\n\t\tReaction Add\n\tCommand and Description\n\t\tCommand\n\t\tCommand Description\n\tActions\n\t\tPhrase\n\t\tRequires Role\n\t\tRequires Administrator Privilege\n\t\tSend Channel Message\n\t\tSend Channel Message Embed\n\t\tSend in specific channel\n\t\tSend Private Message\n\t\tSend Private Message Embed\n\t\tReact to received message\n\t\tIgnore error messages\n\t\tRequire specific message ID\n\t\tDelete if contains\n\t\tDelete command message after\n\t\tDelete X messages\n\t\tNSFW only\n\t\tKick\n\t\tBan\n\t\tVoice Mute\n\t\tAssign/Remove Role\n\tcommands.json\n\t\tWhat is it?\n\t\tchannelMessage\n\t\tcommand\n\t\tcommandDescription\n\t\tdeleteAfter\n\t\tdeleteIfStrings\n\t\tdeleteNum\n\t\tignoreErrorMessage\n\t\tisBan\n\t\tisKick\n\t\tisNSFW\n\t\tisVoiceMute\n\t\tphrase\n\t\tprivateMessage\n\t\treaction\n\t\trequiredRole\n\t\troleToAssign\n\t\tspecificChannel\n\t\tspecificMessage\n\t\ttype\n\t\tchannelEmbed\n\t\tprivateEmbed\n\tModern Command Fields\n\t\tCooldown fields\n\t\tReply and typing fields\n\t\tchannelWhitelist and serverWhitelist\n\t\tstartsWith and phrase\n\t\tCanonical command JSON example\n\tInteraction Command Reference\n\t\tInteraction resource fields\n\t\tInteraction action fields\n\t\tInteraction button fields\n\t\tCanonical interaction JSON example\n\tContext, Permissions, and Errors\n\t\tTemplate context and failure behavior\nkeywords\n\tUser Info\n\t\t$name\n\t\t$avatar\n\t\t$defaultAvatar\n\t\t$namePlain\n\t\t$discriminator\n\t\t$tag\n\t\t$ID\n\t\t$serversSharedWithBot\n\t\t$timeCreated\n\t\t$isBot\n\t\t$globalName\n\tMember Info\n\t\t$memberIsOwner\n\t\t$memberEffectiveName\n\t\t$memberEffectiveAvatar\n\t\t$memberID\n\t\t$memberHasTimeJoined\n\t\t$memberTimeJoined\n\t\t$memberHasBoosted\n\t\t$memberTimeBoosted\n\t\t$memberNickname\n\t\t$memberEffectiveTag\n\t\t$memberEffectiveID\n\t\t$memberEffectiveTimeCreated\n\t\t$memberColor\n\t\t$memberRoles\n\t\t$memberRoleCount\n\tMentioned User Info\n\t\t$mentionedName\n\t\t$mentionedAvatar\n\t\t$mentionedDefaultAvatar\n\t\t$mentionedNamePlain\n\t\t$mentionedDiscriminator\n\t\t$mentionedTag\n\t\t$mentionedID\n\t\t$mentionedServersSharedWithBot\n\t\t$mentionedTimeCreated\n\t\t$mentionedIsBot\n\t\t$mentionedGlobalName\n\tBot Info\n\t\t$botName\n\t\t$botAvatar\n\t\t$botDefaultAvatar\n\t\t$botNamePlain\n\t\t$botDiscriminator\n\t\t$botTag\n\t\t$botID\n\t\t$botTimeCreated\n\tServer Info\n\t\t$server\n\t\t$serverCount\n\t\t$memberCount\n\t\t$allMemberCount\n\t\t$serverIcon\n\t\t$serverBanner\n\t\t$serverDescription\n\t\t$serverSplash\n\t\t$serverCreateTime\n\t\t$serverID\n\t\t$serverOwner\n\t\t$serverOwnerPlain\n\t\t$serverBoostCount\n\t\t$serverBoostTier\n\t\t$serverVanityCode\n\tChannel Info\n\t\t$channel\n\t\t$channelID\n\t\t$channelCreateDate\n\t\t$channelAsMention\n\t\t$channelTopic\n\t\t$channelIsNSFW\n\tChannel Management\n\t\t$createChannel(name, type)\n\t\t$createChannelIn(name, type, categoryID)\n\t\t$cloneChannel(channelID)\n\t\t$deleteChannel(channelID, reason)\n\t\t$setChannelName(channelID, name)\n\t\t$setChannelTopic(channelID, topic)\n\t\t$setChannelNSFW(channelID, enabled)\n\t\t$setChannelSlowmode(channelID, seconds)\n\t\t$setChannelPosition(channelID, position)\n\t\t$setChannelParent(channelID, categoryID)\n\t\t$findChannel(name)\n\t\t$getChannelName(channelID)\n\t\t$getChannelType(channelID)\n\t\t$getChannelParent(channelID)\n\t\t$channelCount\n\t\t$listChannels(type)\n\t\t$listChannelIDs(type)\n\t\t$lockChannel(channelID, roleID)\n\t\t$unlockChannel(channelID, roleID)\n\t\t$channelMention(channelID)\n\tMessage\n\t\t$message\n\t\t$messageAfterCommand\n\t\t$args(index)\n\t\t$argsCount\n\t\t$option(name)\n\tJavaScript\n\t\t$eval\n\t\t$halt\n\t\t$get(name)\n\t\t$set(name,value)\n\tString Manipulation\n\t\t$upper(text)\n\t\t$lower(text)\n\t\t$length(text)\n\t\t$replace(text,find,replacement)\n\t\t$substring(text,start,end)\n\t\t$trim(text)\n\t\t$repeat(text,count)\n\t\t$contains(text,search)\n\t\t$startsWith(text,prefix)\n\t\t$endsWith(text,suffix)\n\tMath\n\t\t$sub(a,b)\n\t\t$mul(n1,n2,...)\n\t\t$div(a,b)\n\t\t$mod(a,b)\n\t\t$round(n,decimals)\n\t\t$floor(n)\n\t\t$ceil(n)\n\t\t$abs(n)\n\t\t$toFixed(n,decimals)\n\t\t$min(n1,n2,...)\n\t\t$max(n1,n2,...)\n\t\t$clamp(n,min,max)\n\t\t$pow(base,exp)\n\t\t$sqrt(n)\n\t\t$log(n)\n\t\t$pi\n\t\t$isNumber(text)\n\tControl Flow\n\t\t$if(condition)\n\t\t$elseif(condition)\n\t\t$else\n\t\t$endif\n\tMisc\n\t\t$date\n\t\t$hour\n\t\t$minute\n\t\t$second\n\t\t$random{a|b|c}\n\t\t$sum{1|2|3}\n\t\t$commandCount\n\t\t$rollnum(min,max)\n\t\t$ping\n\t\t$inviteURL\n\t\t$setStatus{online|playing|Activity text}\n\t\t$randomInt\n\t\t$randomFloat\n\t\t$randomBoolean\n\t\t$chat(prompt)\n\tDiscord Timestamp Variants\n\t\tDiscord Timestamp Keywords\n\tMentioned Member Keywords\n\t\tMentioned Member Context\n\tAdditional Current Interpreter Keywords\n\t\tAdditional Keywords\ntutorial\n\tYour First Command\n\tUsing Keywords\n\tNew vs Legacy Interpreter\n\tSlash Commands\n\tInteractive Buttons\n\tConditional Responses\n\tEmbed Messages\n\tWelcome Messages\n\tPersisting State\n\tChannel Management\n\tAI-Powered Responses\n\tTrigger Modes\n\tModeration Commands\n\tRole Assignment\n\tReactions\n\tUsing JavaScript\nwebhooks\n\tUsing Webhooks",
+  "sourceRevision": "1f2ba5d05ebe3986c4ea32fd770b8e4a1f7fa189",
+  "sourceContentHash": "a323c402afa6d38cf4f37f29e4ab1fc57e391a483e57ee21627a421c248fae4b",
+  "tableOfContents": "creating\n\tCreating the bot\n\tInviting the bot\ncommands\n\tCommand Types\n\t\tMessage Receive\n\t\tPrivate Message\n\t\tMember Join\n\t\tMember Leave\n\t\tMember Ban\n\t\tReaction Add\n\tCommand and Description\n\t\tCommand\n\t\tCommand Description\n\tActions\n\t\tPhrase\n\t\tRequires Role\n\t\tRequires Administrator Privilege\n\t\tSend Channel Message\n\t\tSend Channel Message Embed\n\t\tSend in specific channel\n\t\tSend Private Message\n\t\tSend Private Message Embed\n\t\tReact to received message\n\t\tIgnore error messages\n\t\tRequire specific message ID\n\t\tDelete if contains\n\t\tDelete command message after\n\t\tDelete X messages\n\t\tNSFW only\n\t\tKick\n\t\tBan\n\t\tVoice Mute\n\t\tAssign/Remove Role\n\tcommands.json\n\t\tWhat is it?\n\t\tchannelMessage\n\t\tcommand\n\t\tcommandDescription\n\t\tdeleteAfter\n\t\tdeleteIfStrings\n\t\tdeleteNum\n\t\tignoreErrorMessage\n\t\tisBan\n\t\tisKick\n\t\tisNSFW\n\t\tisVoiceMute\n\t\tphrase\n\t\tprivateMessage\n\t\treaction\n\t\trequiredRole\n\t\troleToAssign\n\t\tspecificChannel\n\t\tspecificMessage\n\t\ttype\n\t\tchannelEmbed\n\t\tprivateEmbed\n\tModern Command Fields\n\t\tCooldown fields\n\t\tReply and typing fields\n\t\tchannelWhitelist and serverWhitelist\n\t\tstartsWith and phrase\n\t\tCanonical command JSON example\n\tContext, Permissions, and Errors\n\t\tTemplate context and failure behavior\ninteractions\n\tOverview and Registration\n\t\tWhat interactions are\n\t\tCreate and publish an interaction\n\t\tRegistration and propagation\n\tCommand Details and Options\n\t\tName and description\n\t\tCommand options\n\t\tUsing option values\n\tResponse Actions\n\t\tMessages and embeds\n\t\tEphemeral and deferred replies\n\t\tAssign or remove a role\n\t\tModeration actions\n\tButtons\n\t\tButton fields and styles\n\t\tButton actions and nesting\n\t\tInactive and outdated buttons\n\tCooldowns\n\t\tCooldown settings\n\tJSON Reference\n\t\tInteraction resource fields\n\t\tInteraction action fields\n\t\tInteraction button fields\n\t\tCanonical interaction JSON example\nkeywords\n\tUser Info\n\t\t$name\n\t\t$avatar\n\t\t$defaultAvatar\n\t\t$namePlain\n\t\t$discriminator\n\t\t$tag\n\t\t$ID\n\t\t$serversSharedWithBot\n\t\t$timeCreated\n\t\t$isBot\n\t\t$globalName\n\tMember Info\n\t\t$memberIsOwner\n\t\t$memberEffectiveName\n\t\t$memberEffectiveAvatar\n\t\t$memberID\n\t\t$memberHasTimeJoined\n\t\t$memberTimeJoined\n\t\t$memberHasBoosted\n\t\t$memberTimeBoosted\n\t\t$memberNickname\n\t\t$memberEffectiveTag\n\t\t$memberEffectiveID\n\t\t$memberEffectiveTimeCreated\n\t\t$memberColor\n\t\t$memberRoles\n\t\t$memberRoleCount\n\tMentioned User Info\n\t\t$mentionedName\n\t\t$mentionedAvatar\n\t\t$mentionedDefaultAvatar\n\t\t$mentionedNamePlain\n\t\t$mentionedDiscriminator\n\t\t$mentionedTag\n\t\t$mentionedID\n\t\t$mentionedServersSharedWithBot\n\t\t$mentionedTimeCreated\n\t\t$mentionedIsBot\n\t\t$mentionedGlobalName\n\tBot Info\n\t\t$botName\n\t\t$botAvatar\n\t\t$botDefaultAvatar\n\t\t$botNamePlain\n\t\t$botDiscriminator\n\t\t$botTag\n\t\t$botID\n\t\t$botTimeCreated\n\tServer Info\n\t\t$server\n\t\t$serverCount\n\t\t$memberCount\n\t\t$allMemberCount\n\t\t$serverIcon\n\t\t$serverBanner\n\t\t$serverDescription\n\t\t$serverSplash\n\t\t$serverCreateTime\n\t\t$serverID\n\t\t$serverOwner\n\t\t$serverOwnerPlain\n\t\t$serverBoostCount\n\t\t$serverBoostTier\n\t\t$serverVanityCode\n\tChannel Info\n\t\t$channel\n\t\t$channelID\n\t\t$channelCreateDate\n\t\t$channelAsMention\n\t\t$channelTopic\n\t\t$channelIsNSFW\n\tChannel Management\n\t\t$createChannel(name, type)\n\t\t$createChannelIn(name, type, categoryID)\n\t\t$cloneChannel(channelID)\n\t\t$deleteChannel(channelID, reason)\n\t\t$setChannelName(channelID, name)\n\t\t$setChannelTopic(channelID, topic)\n\t\t$setChannelNSFW(channelID, enabled)\n\t\t$setChannelSlowmode(channelID, seconds)\n\t\t$setChannelPosition(channelID, position)\n\t\t$setChannelParent(channelID, categoryID)\n\t\t$findChannel(name)\n\t\t$getChannelName(channelID)\n\t\t$getChannelType(channelID)\n\t\t$getChannelParent(channelID)\n\t\t$channelCount\n\t\t$listChannels(type)\n\t\t$listChannelIDs(type)\n\t\t$lockChannel(channelID, roleID)\n\t\t$unlockChannel(channelID, roleID)\n\t\t$channelMention(channelID)\n\tMessage\n\t\t$message\n\t\t$messageAfterCommand\n\t\t$args(index)\n\t\t$argsCount\n\t\t$option(name)\n\tJavaScript\n\t\t$eval\n\t\t$halt\n\t\t$get(name)\n\t\t$set(name,value)\n\tString Manipulation\n\t\t$upper(text)\n\t\t$lower(text)\n\t\t$length(text)\n\t\t$replace(text,find,replacement)\n\t\t$substring(text,start,end)\n\t\t$trim(text)\n\t\t$repeat(text,count)\n\t\t$contains(text,search)\n\t\t$startsWith(text,prefix)\n\t\t$endsWith(text,suffix)\n\tMath\n\t\t$sub(a,b)\n\t\t$mul(n1,n2,...)\n\t\t$div(a,b)\n\t\t$mod(a,b)\n\t\t$round(n,decimals)\n\t\t$floor(n)\n\t\t$ceil(n)\n\t\t$abs(n)\n\t\t$toFixed(n,decimals)\n\t\t$min(n1,n2,...)\n\t\t$max(n1,n2,...)\n\t\t$clamp(n,min,max)\n\t\t$pow(base,exp)\n\t\t$sqrt(n)\n\t\t$log(n)\n\t\t$pi\n\t\t$isNumber(text)\n\tControl Flow\n\t\t$if(condition)\n\t\t$elseif(condition)\n\t\t$else\n\t\t$endif\n\tMisc\n\t\t$date\n\t\t$hour\n\t\t$minute\n\t\t$second\n\t\t$random{a|b|c}\n\t\t$sum{1|2|3}\n\t\t$commandCount\n\t\t$rollnum(min,max)\n\t\t$ping\n\t\t$inviteURL\n\t\t$setStatus{online|playing|Activity text}\n\t\t$randomInt\n\t\t$randomFloat\n\t\t$randomBoolean\n\t\t$chat(prompt)\n\tDiscord Timestamp Variants\n\t\tDiscord Timestamp Keywords\n\tMentioned Member Keywords\n\t\tMentioned Member Context\n\tAdditional Current Interpreter Keywords\n\t\tAdditional Keywords\ntutorial\n\tYour First Command\n\tUsing Keywords\n\tNew vs Legacy Interpreter\n\tSlash Commands\n\tInteractive Buttons\n\tConditional Responses\n\tEmbed Messages\n\tWelcome Messages\n\tPersisting State\n\tChannel Management\n\tAI-Powered Responses\n\tTrigger Modes\n\tModeration Commands\n\tRole Assignment\n\tReactions\n\tUsing JavaScript\nwebhooks\n\tUsing Webhooks",
   "records": [
     {
       "id": "creating:creating-creatingbot",
@@ -676,54 +676,6 @@
       "sourceUrl": "https://ayayaq.com/DiscordBots-Help/commands.html"
     },
     {
-      "id": "commands:commands-interactionreference-resource",
-      "title": "Interaction resource fields",
-      "category": "commands",
-      "breadcrumbs": [
-        "Commands",
-        "Interaction Command Reference"
-      ],
-      "content": "## Interaction resource fields\n\n`commandName: string` must be 1-32 lowercase letters, numbers, hyphens, or underscores. `commandDescription: string` must be 1-100 characters.\n\n`options: array` defines slash-command inputs. Each option has `name`, `description`, numeric `type`, `required`, and optional `choices`.\n\nSupported option types are 3 String, 4 Integer, 5 Boolean, 6 User, 7 Channel, 8 Role, and 10 Number. Each choice has a display `name` and string or numeric `value`.\n\n`rootAction` is the response action. `guildId?: string` limits registration to one server; omit it for a global interaction. `isRegistered` is app-managed state and should not be set when creating an interaction.\n\nInteractions also support `cooldown`, `cooldownType`, and `cooldownMessage` with the same behavior as message commands.",
-      "searchableText": "Interaction resource fields\nCommands\nInteraction Command Reference\n## Interaction resource fields\n\n`commandName: string` must be 1-32 lowercase letters, numbers, hyphens, or underscores. `commandDescription: string` must be 1-100 characters.\n\n`options: array` defines slash-command inputs. Each option has `name`, `description`, numeric `type`, `required`, and optional `choices`.\n\nSupported option types are 3 String, 4 Integer, 5 Boolean, 6 User, 7 Channel, 8 Role, and 10 Number. Each choice has a display `name` and string or numeric `value`.\n\n`rootAction` is the response action. `guildId?: string` limits registration to one server; omit it for a global interaction. `isRegistered` is app-managed state and should not be set when creating an interaction.\n\nInteractions also support `cooldown`, `cooldownType`, and `cooldownMessage` with the same behavior as message commands.",
-      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/commands.html"
-    },
-    {
-      "id": "commands:commands-interactionreference-action",
-      "title": "Interaction action fields",
-      "category": "commands",
-      "breadcrumbs": [
-        "Commands",
-        "Interaction Command Reference"
-      ],
-      "content": "## Interaction action fields\n\nResponse toggles and templates are `sendChannelMessage`, `channelMessage`, `sendPrivateMessage`, `privateMessage`, `sendChannelEmbed`, `channelEmbed`, `sendPrivateEmbed`, and `privateEmbed`.\n\n`ephemeral: boolean` makes the interaction response visible only to its caller. `deferReply: boolean` acknowledges the interaction before long-running template work; the eventual reply keeps the configured ephemeral setting.\n\nModeration fields are `isKick`, `isBan`, `isVoiceMute`, and `targetUserOptionName`. The target name must match a User option. Both the caller and bot require the relevant Discord permission.\n\nOther actions include `isRoleAssigner`, `roleToAssign`, `deleteX`, and `deleteNum`. `buttons` contains button resources.",
-      "searchableText": "Interaction action fields\nCommands\nInteraction Command Reference\n## Interaction action fields\n\nResponse toggles and templates are `sendChannelMessage`, `channelMessage`, `sendPrivateMessage`, `privateMessage`, `sendChannelEmbed`, `channelEmbed`, `sendPrivateEmbed`, and `privateEmbed`.\n\n`ephemeral: boolean` makes the interaction response visible only to its caller. `deferReply: boolean` acknowledges the interaction before long-running template work; the eventual reply keeps the configured ephemeral setting.\n\nModeration fields are `isKick`, `isBan`, `isVoiceMute`, and `targetUserOptionName`. The target name must match a User option. Both the caller and bot require the relevant Discord permission.\n\nOther actions include `isRoleAssigner`, `roleToAssign`, `deleteX`, and `deleteNum`. `buttons` contains button resources.",
-      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/commands.html"
-    },
-    {
-      "id": "commands:commands-interactionreference-buttons",
-      "title": "Interaction button fields",
-      "category": "commands",
-      "breadcrumbs": [
-        "Commands",
-        "Interaction Command Reference"
-      ],
-      "content": "## Interaction button fields\n\nEach button has `customId`, `label`, numeric `style`, optional `emoji`, optional `url`, `disabled`, and a nested `action`.\n\nStyles are 1 Primary, 2 Secondary, 3 Success, 4 Danger, and 5 Link. Link buttons require `url` and do not use a custom action. Non-link buttons require a unique `customId`.",
-      "searchableText": "Interaction button fields\nCommands\nInteraction Command Reference\n## Interaction button fields\n\nEach button has `customId`, `label`, numeric `style`, optional `emoji`, optional `url`, `disabled`, and a nested `action`.\n\nStyles are 1 Primary, 2 Secondary, 3 Success, 4 Danger, and 5 Link. Link buttons require `url` and do not use a custom action. Non-link buttons require a unique `customId`.",
-      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/commands.html"
-    },
-    {
-      "id": "commands:commands-interactionreference-example",
-      "title": "Canonical interaction JSON example",
-      "category": "commands",
-      "breadcrumbs": [
-        "Commands",
-        "Interaction Command Reference"
-      ],
-      "content": "## Canonical interaction JSON example\n\n```\n{\n  \"id\": \"app-assigned\",\n  \"commandName\": \"greet\",\n  \"commandDescription\": \"Greet a member\",\n  \"options\": [\n    { \"name\": \"person\", \"description\": \"Who to greet\", \"type\": 6, \"required\": true }\n  ],\n  \"rootAction\": {\n    \"sendChannelMessage\": true,\n    \"channelMessage\": \"Hello $option(person)!\",\n    \"sendPrivateMessage\": false,\n    \"privateMessage\": \"\",\n    \"sendChannelEmbed\": false,\n    \"channelEmbed\": { \"title\": \"\", \"description\": \"\", \"hexColor\": \"\", \"imageURL\": \"\", \"thumbnailURL\": \"\", \"footer\": \"\" },\n    \"sendPrivateEmbed\": false,\n    \"privateEmbed\": { \"title\": \"\", \"description\": \"\", \"hexColor\": \"\", \"imageURL\": \"\", \"thumbnailURL\": \"\", \"footer\": \"\" },\n    \"isRoleAssigner\": false,\n    \"roleToAssign\": \"\",\n    \"isKick\": false,\n    \"isBan\": false,\n    \"isVoiceMute\": false,\n    \"targetUserOptionName\": \"\",\n    \"deleteX\": false,\n    \"deleteNum\": 0,\n    \"ephemeral\": false,\n    \"deferReply\": false,\n    \"buttons\": []\n  },\n  \"isRegistered\": false,\n  \"cooldown\": 0,\n  \"cooldownType\": \"\",\n  \"cooldownMessage\": \"\"\n}\n```\n\nThe app assigns `id` and manages `isRegistered`. Omit `guildId` for global registration or set it to one server ID for guild registration. Use the exact read tool before editing an existing interaction.",
-      "searchableText": "Canonical interaction JSON example\nCommands\nInteraction Command Reference\n## Canonical interaction JSON example\n\n```\n{\n  \"id\": \"app-assigned\",\n  \"commandName\": \"greet\",\n  \"commandDescription\": \"Greet a member\",\n  \"options\": [\n    { \"name\": \"person\", \"description\": \"Who to greet\", \"type\": 6, \"required\": true }\n  ],\n  \"rootAction\": {\n    \"sendChannelMessage\": true,\n    \"channelMessage\": \"Hello $option(person)!\",\n    \"sendPrivateMessage\": false,\n    \"privateMessage\": \"\",\n    \"sendChannelEmbed\": false,\n    \"channelEmbed\": { \"title\": \"\", \"description\": \"\", \"hexColor\": \"\", \"imageURL\": \"\", \"thumbnailURL\": \"\", \"footer\": \"\" },\n    \"sendPrivateEmbed\": false,\n    \"privateEmbed\": { \"title\": \"\", \"description\": \"\", \"hexColor\": \"\", \"imageURL\": \"\", \"thumbnailURL\": \"\", \"footer\": \"\" },\n    \"isRoleAssigner\": false,\n    \"roleToAssign\": \"\",\n    \"isKick\": false,\n    \"isBan\": false,\n    \"isVoiceMute\": false,\n    \"targetUserOptionName\": \"\",\n    \"deleteX\": false,\n    \"deleteNum\": 0,\n    \"ephemeral\": false,\n    \"deferReply\": false,\n    \"buttons\": []\n  },\n  \"isRegistered\": false,\n  \"cooldown\": 0,\n  \"cooldownType\": \"\",\n  \"cooldownMessage\": \"\"\n}\n```\n\nThe app assigns `id` and manages `isRegistered`. Omit `guildId` for global registration or set it to one server ID for guild registration. Use the exact read tool before editing an existing interaction.",
-      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/commands.html"
-    },
-    {
       "id": "commands:commands-contextanderrors-guide",
       "title": "Template context and failure behavior",
       "category": "commands",
@@ -734,6 +686,222 @@
       "content": "## Template context and failure behavior\n\nUser values require a caller, member values require server membership, mentioned values require a mention, and server or channel values require the corresponding Discord context. A value normally becomes empty when its context is unavailable.\n\nChannel management requires Manage Channels. Role assignment requires Manage Roles and the bot's role must be above the target role. Kick, ban, and voice mute require their matching Discord permissions and valid targets.\n\nFunctions that reject invalid arguments or Discord operations return text beginning with `[BCFD Error:`. Lint templates before saving, but also account for runtime permission and context failures.\n\nThe current interpreter uses exact, case-sensitive keyword names. The optional legacy interpreter can have older spelling and behavior; check the app's interpreter setting when maintaining older commands.",
       "searchableText": "Template context and failure behavior\nCommands\nContext, Permissions, and Errors\n## Template context and failure behavior\n\nUser values require a caller, member values require server membership, mentioned values require a mention, and server or channel values require the corresponding Discord context. A value normally becomes empty when its context is unavailable.\n\nChannel management requires Manage Channels. Role assignment requires Manage Roles and the bot's role must be above the target role. Kick, ban, and voice mute require their matching Discord permissions and valid targets.\n\nFunctions that reject invalid arguments or Discord operations return text beginning with `[BCFD Error:`. Lint templates before saving, but also account for runtime permission and context failures.\n\nThe current interpreter uses exact, case-sensitive keyword names. The optional legacy interpreter can have older spelling and behavior; check the app's interpreter setting when maintaining older commands.",
       "sourceUrl": "https://ayayaq.com/DiscordBots-Help/commands.html"
+    },
+    {
+      "id": "interactions:interactions-overview-about",
+      "title": "What interactions are",
+      "category": "interactions",
+      "breadcrumbs": [
+        "Interactions",
+        "Overview and Registration"
+      ],
+      "content": "## What interactions are\n\nInteractions are Discord slash commands. A user types `/`, chooses your command, fills in any options, and Discord sends the interaction to Bot Commander. The bot must be hosted for the command and its buttons to respond.\n\nFor a guided example, see the [Slash Commands](tutorial.html) and [Interactive Buttons](tutorial.html) tutorials.",
+      "searchableText": "What interactions are\nInteractions\nOverview and Registration\n## What interactions are\n\nInteractions are Discord slash commands. A user types `/`, chooses your command, fills in any options, and Discord sends the interaction to Bot Commander. The bot must be hosted for the command and its buttons to respond.\n\nFor a guided example, see the [Slash Commands](tutorial.html) and [Interactive Buttons](tutorial.html) tutorials.",
+      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/interactions.html"
+    },
+    {
+      "id": "interactions:interactions-overview-workflow",
+      "title": "Create and publish an interaction",
+      "category": "interactions",
+      "breadcrumbs": [
+        "Interactions",
+        "Overview and Registration"
+      ],
+      "content": "## Create and publish an interaction\n\n- Open the Interactions tab and create a new interaction.\n\n- Enter its command name, description, options, and root response action.\n\n- Save the interaction and host the bot.\n\n- Register the interaction, or use Sync All to make Discord match the app's interaction list.\n\n- Run the slash command in Discord and verify its response.",
+      "searchableText": "Create and publish an interaction\nInteractions\nOverview and Registration\n## Create and publish an interaction\n\n- Open the Interactions tab and create a new interaction.\n\n- Enter its command name, description, options, and root response action.\n\n- Save the interaction and host the bot.\n\n- Register the interaction, or use Sync All to make Discord match the app's interaction list.\n\n- Run the slash command in Discord and verify its response.",
+      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/interactions.html"
+    },
+    {
+      "id": "interactions:interactions-overview-registration",
+      "title": "Registration and propagation",
+      "category": "interactions",
+      "breadcrumbs": [
+        "Interactions",
+        "Overview and Registration"
+      ],
+      "content": "## Registration and propagation\n\nThe bot must be connected before an interaction can be registered, unregistered, or synced. Global interactions can take up to an hour to appear in Discord. A guild interaction uses `guildId` to register in one server and normally appears immediately.\n\nChanging `commandName`, `commandDescription`, or `options` changes Discord's command definition and requires registration again. Response actions, buttons, and cooldown behavior run locally and can be changed without re-registering the Discord command.\n\nSync All replaces the bot's registered global commands with the current interaction list, so removed interactions are also removed from Discord. The app manages `isRegistered`; it is a local status indicator, not confirmation from Discord on every launch.",
+      "searchableText": "Registration and propagation\nInteractions\nOverview and Registration\n## Registration and propagation\n\nThe bot must be connected before an interaction can be registered, unregistered, or synced. Global interactions can take up to an hour to appear in Discord. A guild interaction uses `guildId` to register in one server and normally appears immediately.\n\nChanging `commandName`, `commandDescription`, or `options` changes Discord's command definition and requires registration again. Response actions, buttons, and cooldown behavior run locally and can be changed without re-registering the Discord command.\n\nSync All replaces the bot's registered global commands with the current interaction list, so removed interactions are also removed from Discord. The app manages `isRegistered`; it is a local status indicator, not confirmation from Discord on every launch.",
+      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/interactions.html"
+    },
+    {
+      "id": "interactions:interactions-command-details",
+      "title": "Name and description",
+      "category": "interactions",
+      "breadcrumbs": [
+        "Interactions",
+        "Command Details and Options"
+      ],
+      "content": "## Name and description\n\n`commandName` is the text users type after `/`. It must be 1-32 characters and follow Discord's slash-command naming rules; lowercase letters, numbers, hyphens, and underscores are the safest choices. Do not include the slash. `commandDescription` is required and must be 1-100 characters.",
+      "searchableText": "Name and description\nInteractions\nCommand Details and Options\n## Name and description\n\n`commandName` is the text users type after `/`. It must be 1-32 characters and follow Discord's slash-command naming rules; lowercase letters, numbers, hyphens, and underscores are the safest choices. Do not include the slash. `commandDescription` is required and must be 1-100 characters.",
+      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/interactions.html"
+    },
+    {
+      "id": "interactions:interactions-command-options",
+      "title": "Command options",
+      "category": "interactions",
+      "breadcrumbs": [
+        "Interactions",
+        "Command Details and Options"
+      ],
+      "content": "## Command options\n\n`options` are typed inputs Discord collects before running the command. Each option has a unique `name`, a `description`, a numeric `type`, and a `required` setting. Required options must be completed before Discord will submit the command.\n\nSupported option types are 3 String, 4 Integer, 5 Boolean, 6 User, 7 Channel, 8 Role, and 10 Number. The optional `choices` array can restrict String, Integer, or Number options to named values when using JSON or agent editing.",
+      "searchableText": "Command options\nInteractions\nCommand Details and Options\n## Command options\n\n`options` are typed inputs Discord collects before running the command. Each option has a unique `name`, a `description`, a numeric `type`, and a `required` setting. Required options must be completed before Discord will submit the command.\n\nSupported option types are 3 String, 4 Integer, 5 Boolean, 6 User, 7 Channel, 8 Role, and 10 Number. The optional `choices` array can restrict String, Integer, or Number options to named values when using JSON or agent editing.",
+      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/interactions.html"
+    },
+    {
+      "id": "interactions:interactions-command-optiontemplate",
+      "title": "Using option values",
+      "category": "interactions",
+      "breadcrumbs": [
+        "Interactions",
+        "Command Details and Options"
+      ],
+      "content": "## Using option values\n\nUse `$option(name)` in any interaction response template, replacing `name` with the exact option name. User, Channel, and Role options produce the selected Discord ID, while other option types produce their submitted value.\n\n```\nHello $option(person)! Your topic is $option(topic).\n```",
+      "searchableText": "Using option values\nInteractions\nCommand Details and Options\n## Using option values\n\nUse `$option(name)` in any interaction response template, replacing `name` with the exact option name. User, Channel, and Role options produce the selected Discord ID, while other option types produce their submitted value.\n\n```\nHello $option(person)! Your topic is $option(topic).\n```",
+      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/interactions.html"
+    },
+    {
+      "id": "interactions:interactions-actions-messages",
+      "title": "Messages and embeds",
+      "category": "interactions",
+      "breadcrumbs": [
+        "Interactions",
+        "Response Actions"
+      ],
+      "content": "## Messages and embeds\n\nThe root action can send a channel message, channel embed, private message, private embed, or any useful combination. Channel responses become the Discord interaction reply. Private responses are sent separately by direct message and can fail if the user blocks DMs.\n\nEmbed templates support a title, description, hex color, image URL, thumbnail URL, and footer. At least one visible embed field must be filled in. Interaction templates support the same BCFD keywords and functions as other commands when the required user, server, or channel context is available.",
+      "searchableText": "Messages and embeds\nInteractions\nResponse Actions\n## Messages and embeds\n\nThe root action can send a channel message, channel embed, private message, private embed, or any useful combination. Channel responses become the Discord interaction reply. Private responses are sent separately by direct message and can fail if the user blocks DMs.\n\nEmbed templates support a title, description, hex color, image URL, thumbnail URL, and footer. At least one visible embed field must be filled in. Interaction templates support the same BCFD keywords and functions as other commands when the required user, server, or channel context is available.",
+      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/interactions.html"
+    },
+    {
+      "id": "interactions:interactions-actions-replysettings",
+      "title": "Ephemeral and deferred replies",
+      "category": "interactions",
+      "breadcrumbs": [
+        "Interactions",
+        "Response Actions"
+      ],
+      "content": "## Ephemeral and deferred replies\n\n`ephemeral` makes the channel response visible only to the person who ran the command or clicked the button. It does not change separate direct messages.\n\n`deferReply` acknowledges the interaction before longer template or Discord work finishes, avoiding Discord's short initial response deadline. The completed response keeps the configured ephemeral setting.",
+      "searchableText": "Ephemeral and deferred replies\nInteractions\nResponse Actions\n## Ephemeral and deferred replies\n\n`ephemeral` makes the channel response visible only to the person who ran the command or clicked the button. It does not change separate direct messages.\n\n`deferReply` acknowledges the interaction before longer template or Discord work finishes, avoiding Discord's short initial response deadline. The completed response keeps the configured ephemeral setting.",
+      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/interactions.html"
+    },
+    {
+      "id": "interactions:interactions-actions-roles",
+      "title": "Assign or remove a role",
+      "category": "interactions",
+      "breadcrumbs": [
+        "Interactions",
+        "Response Actions"
+      ],
+      "content": "## Assign or remove a role\n\n`isRoleAssigner` toggles `roleToAssign` on the member who ran the command or clicked the button. The bot needs Manage Roles, and its highest role must be above the target role. This action only works in a server.",
+      "searchableText": "Assign or remove a role\nInteractions\nResponse Actions\n## Assign or remove a role\n\n`isRoleAssigner` toggles `roleToAssign` on the member who ran the command or clicked the button. The bot needs Manage Roles, and its highest role must be above the target role. This action only works in a server.",
+      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/interactions.html"
+    },
+    {
+      "id": "interactions:interactions-actions-moderation",
+      "title": "Moderation actions",
+      "category": "interactions",
+      "breadcrumbs": [
+        "Interactions",
+        "Response Actions"
+      ],
+      "content": "## Moderation actions\n\n`isKick`, `isBan`, and `isVoiceMute` target the User option named by `targetUserOptionName`. The caller and bot need the matching Discord permission. `deleteX` and `deleteNum` bulk-delete up to 100 messages and require Manage Messages in a text channel.\n\nModeration and bulk deletion are supported only on the interaction's root action. Button actions can send responses, send DMs, toggle roles, and show more buttons.",
+      "searchableText": "Moderation actions\nInteractions\nResponse Actions\n## Moderation actions\n\n`isKick`, `isBan`, and `isVoiceMute` target the User option named by `targetUserOptionName`. The caller and bot need the matching Discord permission. `deleteX` and `deleteNum` bulk-delete up to 100 messages and require Manage Messages in a text channel.\n\nModeration and bulk deletion are supported only on the interaction's root action. Button actions can send responses, send DMs, toggle roles, and show more buttons.",
+      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/interactions.html"
+    },
+    {
+      "id": "interactions:interactions-buttons-fields",
+      "title": "Button fields and styles",
+      "category": "interactions",
+      "breadcrumbs": [
+        "Interactions",
+        "Buttons"
+      ],
+      "content": "## Button fields and styles\n\nEach button has a `label`, numeric `style`, optional `emoji`, `disabled` state, and either a `customId` with an action or a link `url`. Styles are 1 Primary, 2 Secondary, 3 Success, 4 Danger, and 5 Link.\n\nEvery non-link button needs a unique `customId` so Bot Commander can find its action. Link buttons require a valid URL, open that URL directly, and do not run a Bot Commander action.",
+      "searchableText": "Button fields and styles\nInteractions\nButtons\n## Button fields and styles\n\nEach button has a `label`, numeric `style`, optional `emoji`, `disabled` state, and either a `customId` with an action or a link `url`. Styles are 1 Primary, 2 Secondary, 3 Success, 4 Danger, and 5 Link.\n\nEvery non-link button needs a unique `customId` so Bot Commander can find its action. Link buttons require a valid URL, open that URL directly, and do not run a Bot Commander action.",
+      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/interactions.html"
+    },
+    {
+      "id": "interactions:interactions-buttons-actions",
+      "title": "Button actions and nesting",
+      "category": "interactions",
+      "breadcrumbs": [
+        "Interactions",
+        "Buttons"
+      ],
+      "content": "## Button actions and nesting\n\nA non-link button has its own reusable interaction action. It can reply with text or an embed, send a DM, toggle a role, and include another set of buttons. Ephemeral and deferred reply settings apply separately to each button action.\n\nEach response supports up to five buttons in one row. The editor allows three levels of nested button responses. Keep button labels and response paths short so users can understand where each click leads.",
+      "searchableText": "Button actions and nesting\nInteractions\nButtons\n## Button actions and nesting\n\nA non-link button has its own reusable interaction action. It can reply with text or an embed, send a DM, toggle a role, and include another set of buttons. Ephemeral and deferred reply settings apply separately to each button action.\n\nEach response supports up to five buttons in one row. The editor allows three levels of nested button responses. Keep button labels and response paths short so users can understand where each click leads.",
+      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/interactions.html"
+    },
+    {
+      "id": "interactions:interactions-buttons-inactive",
+      "title": "Inactive and outdated buttons",
+      "category": "interactions",
+      "breadcrumbs": [
+        "Interactions",
+        "Buttons"
+      ],
+      "content": "## Inactive and outdated buttons\n\nButtons work only while the bot is hosted and the interaction still contains their custom IDs. If a button on an older Discord message can no longer be found, Bot Commander replies that the button is no longer active. Disabled buttons remain visible but cannot be clicked.",
+      "searchableText": "Inactive and outdated buttons\nInteractions\nButtons\n## Inactive and outdated buttons\n\nButtons work only while the bot is hosted and the interaction still contains their custom IDs. If a button on an older Discord message can no longer be found, Bot Commander replies that the button is no longer active. Disabled buttons remain visible but cannot be clicked.",
+      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/interactions.html"
+    },
+    {
+      "id": "interactions:interactions-cooldowns-settings",
+      "title": "Cooldown settings",
+      "category": "interactions",
+      "breadcrumbs": [
+        "Interactions",
+        "Cooldowns"
+      ],
+      "content": "## Cooldown settings\n\n`cooldown` is the duration in seconds. Zero or an omitted value disables it. `cooldownType` can be User, Server, or Global to track usage per person, per server, or across every server.\n\n`cooldownMessage` is an optional BCFD template returned ephemerally when a user is blocked. Use `$cooldownRemaining()` to include the remaining seconds. Without a custom message, Bot Commander sends its standard remaining-time response.\n\nThe cooldown applies when the slash command runs and is recorded after its root action succeeds. Button clicks do not start or check the command cooldown.",
+      "searchableText": "Cooldown settings\nInteractions\nCooldowns\n## Cooldown settings\n\n`cooldown` is the duration in seconds. Zero or an omitted value disables it. `cooldownType` can be User, Server, or Global to track usage per person, per server, or across every server.\n\n`cooldownMessage` is an optional BCFD template returned ephemerally when a user is blocked. Use `$cooldownRemaining()` to include the remaining seconds. Without a custom message, Bot Commander sends its standard remaining-time response.\n\nThe cooldown applies when the slash command runs and is recorded after its root action succeeds. Button clicks do not start or check the command cooldown.",
+      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/interactions.html"
+    },
+    {
+      "id": "interactions:interactions-reference-resource",
+      "title": "Interaction resource fields",
+      "category": "interactions",
+      "breadcrumbs": [
+        "Interactions",
+        "JSON Reference"
+      ],
+      "content": "## Interaction resource fields\n\n`commandName`, `commandDescription`, and `options` define the Discord slash command. `rootAction` defines its local response. `guildId` optionally limits registration to one server. `cooldown`, `cooldownType`, and `cooldownMessage` control rate limits.\n\n`id` is assigned by the app and identifies the local resource. `isRegistered` is managed by the app. Preserve both fields when editing an existing interaction; new interactions should let the app assign them.",
+      "searchableText": "Interaction resource fields\nInteractions\nJSON Reference\n## Interaction resource fields\n\n`commandName`, `commandDescription`, and `options` define the Discord slash command. `rootAction` defines its local response. `guildId` optionally limits registration to one server. `cooldown`, `cooldownType`, and `cooldownMessage` control rate limits.\n\n`id` is assigned by the app and identifies the local resource. `isRegistered` is managed by the app. Preserve both fields when editing an existing interaction; new interactions should let the app assign them.",
+      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/interactions.html"
+    },
+    {
+      "id": "interactions:interactions-reference-action",
+      "title": "Interaction action fields",
+      "category": "interactions",
+      "breadcrumbs": [
+        "Interactions",
+        "JSON Reference"
+      ],
+      "content": "## Interaction action fields\n\nResponse toggles and templates are `sendChannelMessage`, `channelMessage`, `sendPrivateMessage`, `privateMessage`, `sendChannelEmbed`, `channelEmbed`, `sendPrivateEmbed`, and `privateEmbed`.\n\nOther fields are `isRoleAssigner`, `roleToAssign`, `isKick`, `isBan`, `isVoiceMute`, `targetUserOptionName`, `deleteX`, `deleteNum`, `ephemeral`, `deferReply`, and `buttons`.",
+      "searchableText": "Interaction action fields\nInteractions\nJSON Reference\n## Interaction action fields\n\nResponse toggles and templates are `sendChannelMessage`, `channelMessage`, `sendPrivateMessage`, `privateMessage`, `sendChannelEmbed`, `channelEmbed`, `sendPrivateEmbed`, and `privateEmbed`.\n\nOther fields are `isRoleAssigner`, `roleToAssign`, `isKick`, `isBan`, `isVoiceMute`, `targetUserOptionName`, `deleteX`, `deleteNum`, `ephemeral`, `deferReply`, and `buttons`.",
+      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/interactions.html"
+    },
+    {
+      "id": "interactions:interactions-reference-button",
+      "title": "Interaction button fields",
+      "category": "interactions",
+      "breadcrumbs": [
+        "Interactions",
+        "JSON Reference"
+      ],
+      "content": "## Interaction button fields\n\nButton resources contain `customId`, `label`, `style`, optional `emoji`, optional `url`, `disabled`, and a nested `action`. Button actions use the same action shape recursively.",
+      "searchableText": "Interaction button fields\nInteractions\nJSON Reference\n## Interaction button fields\n\nButton resources contain `customId`, `label`, `style`, optional `emoji`, optional `url`, `disabled`, and a nested `action`. Button actions use the same action shape recursively.",
+      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/interactions.html"
+    },
+    {
+      "id": "interactions:interactions-reference-example",
+      "title": "Canonical interaction JSON example",
+      "category": "interactions",
+      "breadcrumbs": [
+        "Interactions",
+        "JSON Reference"
+      ],
+      "content": "## Canonical interaction JSON example\n\n```\n{\n  \"id\": \"app-assigned\",\n  \"commandName\": \"greet\",\n  \"commandDescription\": \"Greet a member\",\n  \"options\": [\n    { \"name\": \"person\", \"description\": \"Who to greet\", \"type\": 6, \"required\": true }\n  ],\n  \"rootAction\": {\n    \"sendChannelMessage\": true,\n    \"channelMessage\": \"Hello $option(person)!\",\n    \"sendPrivateMessage\": false,\n    \"privateMessage\": \"\",\n    \"sendChannelEmbed\": false,\n    \"channelEmbed\": { \"title\": \"\", \"description\": \"\", \"hexColor\": \"\", \"imageURL\": \"\", \"thumbnailURL\": \"\", \"footer\": \"\" },\n    \"sendPrivateEmbed\": false,\n    \"privateEmbed\": { \"title\": \"\", \"description\": \"\", \"hexColor\": \"\", \"imageURL\": \"\", \"thumbnailURL\": \"\", \"footer\": \"\" },\n    \"isRoleAssigner\": false,\n    \"roleToAssign\": \"\",\n    \"isKick\": false,\n    \"isBan\": false,\n    \"isVoiceMute\": false,\n    \"targetUserOptionName\": \"\",\n    \"deleteX\": false,\n    \"deleteNum\": 0,\n    \"ephemeral\": false,\n    \"deferReply\": false,\n    \"buttons\": []\n  },\n  \"isRegistered\": false,\n  \"cooldown\": 0,\n  \"cooldownType\": \"\",\n  \"cooldownMessage\": \"\"\n}\n```\n\nOmit `guildId` for global registration or set it to one server ID for guild registration. Choices and nested buttons can be added to the corresponding arrays.",
+      "searchableText": "Canonical interaction JSON example\nInteractions\nJSON Reference\n## Canonical interaction JSON example\n\n```\n{\n  \"id\": \"app-assigned\",\n  \"commandName\": \"greet\",\n  \"commandDescription\": \"Greet a member\",\n  \"options\": [\n    { \"name\": \"person\", \"description\": \"Who to greet\", \"type\": 6, \"required\": true }\n  ],\n  \"rootAction\": {\n    \"sendChannelMessage\": true,\n    \"channelMessage\": \"Hello $option(person)!\",\n    \"sendPrivateMessage\": false,\n    \"privateMessage\": \"\",\n    \"sendChannelEmbed\": false,\n    \"channelEmbed\": { \"title\": \"\", \"description\": \"\", \"hexColor\": \"\", \"imageURL\": \"\", \"thumbnailURL\": \"\", \"footer\": \"\" },\n    \"sendPrivateEmbed\": false,\n    \"privateEmbed\": { \"title\": \"\", \"description\": \"\", \"hexColor\": \"\", \"imageURL\": \"\", \"thumbnailURL\": \"\", \"footer\": \"\" },\n    \"isRoleAssigner\": false,\n    \"roleToAssign\": \"\",\n    \"isKick\": false,\n    \"isBan\": false,\n    \"isVoiceMute\": false,\n    \"targetUserOptionName\": \"\",\n    \"deleteX\": false,\n    \"deleteNum\": 0,\n    \"ephemeral\": false,\n    \"deferReply\": false,\n    \"buttons\": []\n  },\n  \"isRegistered\": false,\n  \"cooldown\": 0,\n  \"cooldownType\": \"\",\n  \"cooldownMessage\": \"\"\n}\n```\n\nOmit `guildId` for global registration or set it to one server ID for guild registration. Choices and nested buttons can be added to the corresponding arrays.",
+      "sourceUrl": "https://ayayaq.com/DiscordBots-Help/interactions.html"
     },
     {
       "id": "keywords:keywords-userinfo-name",

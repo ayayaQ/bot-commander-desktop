@@ -9,7 +9,8 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url))
 const PROJECT_DIR = path.resolve(SCRIPT_DIR, '..')
 const sourceDir = path.resolve(PROJECT_DIR, process.argv[2] || '../DiscordBots-Help')
 const outputPath = path.join(PROJECT_DIR, 'src/main/generated/documentationIndex.json')
-const pages = ['creating', 'commands', 'keywords', 'tutorial', 'webhooks']
+const pages = ['creating', 'commands', 'interactions', 'keywords', 'tutorial', 'webhooks']
+const itemizedPages = new Set(['commands', 'interactions', 'keywords'])
 
 function nestedValue(value, key) {
   return key.split('.').reduce((current, part) => current?.[part], value)
@@ -152,7 +153,7 @@ async function generate() {
       const sectionContent = buttonSelection.next('.content')
       if (!sectionContent.length) return
 
-      if (page === 'commands' || page === 'keywords') {
+      if (itemizedPages.has(page)) {
         sectionContent.children('.keyword').each((itemIndex, item) => {
           const itemSelection = $(item)
           const titleElement = itemSelection.find('h2, h3').first()

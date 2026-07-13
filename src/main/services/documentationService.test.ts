@@ -49,6 +49,9 @@ describe('documentation service', () => {
     expect(documentationIndex.tableOfContents).toContain(
       'keywords\n\tUser Info\n\t\t$name\n\t\t$avatar'
     )
+    expect(documentationIndex.tableOfContents).toContain(
+      'interactions\n\tOverview and Registration\n\t\tWhat interactions are'
+    )
     expect(documentationIndex.tableOfContents).not.toContain('\tKeywords\n')
   })
 
@@ -89,7 +92,7 @@ describe('documentation service', () => {
     ).toEqual([])
   })
 
-  it('covers agent-editable modern command and interaction fields', () => {
+  it('covers agent-editable modern command fields in the commands category', () => {
     const commandText = documentationIndex.records
       .filter((record) => record.category === 'commands')
       .map((record) => record.searchableText)
@@ -103,7 +106,19 @@ describe('documentation service', () => {
       'channelMessageTyping',
       'channelEmbedTyping',
       'channelWhitelist',
-      'serverWhitelist',
+      'serverWhitelist'
+    ]
+
+    expect(fields.filter((field) => !commandText.includes(field))).toEqual([])
+    expect(commandText).not.toContain('targetUserOptionName')
+  })
+
+  it('covers agent-editable interaction fields in the interactions category', () => {
+    const interactionText = documentationIndex.records
+      .filter((record) => record.category === 'interactions')
+      .map((record) => record.searchableText)
+      .join('\n')
+    const fields = [
       'commandName',
       'commandDescription',
       'options',
@@ -118,7 +133,7 @@ describe('documentation service', () => {
       'style'
     ]
 
-    expect(fields.filter((field) => !commandText.includes(field))).toEqual([])
+    expect(fields.filter((field) => !interactionText.includes(field))).toEqual([])
   })
 
   it('returns compact searches and complete sections with code examples', () => {
@@ -136,9 +151,14 @@ describe('documentation service', () => {
     expect(searchDocumentation('$dateDiscord', 'keywords', 1).bestMatch?.id).toContain(
       'currentinterpreter'
     )
-    expect(searchDocumentation('targetUserOptionName', 'commands', 1).bestMatch?.title).toBe(
-      'Interaction action fields'
+    expect(searchDocumentation('targetUserOptionName', 'interactions', 1).bestMatch?.title).toBe(
+      'Moderation actions'
     )
+    expect(searchDocumentation('customId', 'interactions', 1).bestMatch).toMatchObject({
+      title: 'Button fields and styles',
+      category: 'interactions',
+      sourceUrl: 'https://ayayaq.com/DiscordBots-Help/interactions.html'
+    })
   })
 
   it('recovers from verbose partial queries and bounds result size', () => {

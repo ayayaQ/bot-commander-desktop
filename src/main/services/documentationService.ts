@@ -1,6 +1,12 @@
 import documentationIndex from '../generated/documentationIndex.json'
 
-export type DocumentationCategory = 'creating' | 'commands' | 'keywords' | 'tutorial' | 'webhooks'
+export type DocumentationCategory =
+  | 'creating'
+  | 'commands'
+  | 'interactions'
+  | 'keywords'
+  | 'tutorial'
+  | 'webhooks'
 
 interface DocumentationRecord {
   id: string
