@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
   }
   return {
     state,
+    consoleEntries: [] as any[],
     saveCommands: vi.fn(),
     saveInteractions: vi.fn(),
     saveSettings: vi.fn(),
@@ -50,6 +51,12 @@ vi.mock('../utils/virtual', () => ({
   })
 }))
 
+vi.mock('../utils/rendererConsole', () => ({
+  getRendererConsoleEntries: ({ limit = 100, types }: { limit?: number; types?: string[] } = {}) => mocks.consoleEntries
+    .filter((entry) => !types?.length || types.includes(entry.type))
+    .slice(-limit)
+}))
+
 describe('agent resource tools', () => {
   beforeEach(() => {
     mocks.state.commands = { bcfdCommands: [], bcfdSlashCommands: [] }
@@ -57,6 +64,7 @@ describe('agent resource tools', () => {
     mocks.state.settings = { developerPrompt: 'Initial prompt' }
     mocks.state.botState = { count: 1 }
     mocks.state.startupJs = 'const helper = 1'
+    mocks.consoleEntries = []
     vi.clearAllMocks()
   })
 

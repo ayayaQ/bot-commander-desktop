@@ -19,6 +19,10 @@ import {
   saveBotState,
   setStartupJs
 } from '../utils/virtual'
+import {
+  getRendererConsoleEntries,
+  type ConsoleMessageType
+} from '../utils/rendererConsole'
 
 export interface PreparedMutation {
   name: string
@@ -115,6 +119,21 @@ export const agentToolDefinitions: ToolDefinition[] = [
       name: 'keyword_grep',
       description: 'Search all editable text in commands, interactions, startup JS, developer prompt, and bot state.',
       parameters: objectSchema({ query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 100 } }, ['query'])
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_console',
+      description: 'Read recent console entries in chronological order, including their type and timestamp. Use the optional types filter to focus on errors, warnings, events, or other message types.',
+      parameters: objectSchema({
+        limit: { type: 'integer', minimum: 1, maximum: 200 },
+        types: {
+          type: 'array',
+          items: { type: 'string', enum: ['info', 'error', 'warning', 'event', 'success'] },
+          uniqueItems: true
+        }
+      })
     }
   },
   { type: 'function', function: { name: 'read_bot_state', description: 'Read persistent bot state.', parameters: objectSchema({}) } },
@@ -363,6 +382,12 @@ export async function executeReadTool(name: string, args: Record<string, any>): 
     const item = getInteractions().find((interaction) => interaction.id === args.id)
     if (!item) throw new Error('Interaction not found')
     return { resource: item, revision: revision(item) }
+  }
+  if (name === 'read_console') {
+    return getRendererConsoleEntries({
+      limit: args.limit,
+      types: Array.isArray(args.types) ? args.types as ConsoleMessageType[] : undefined
+    })
   }
   if (name === 'read_bot_state') {
     const state = getBotStateContext().getVariable('botState') ?? {}
