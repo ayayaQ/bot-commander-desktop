@@ -22,7 +22,8 @@ export const settingsStore = writable<AppSettings>({
   developerPrompt: '',
   useCustomApi: false,
   useLegacyInterpreter: false,
-  disableReasoningApi: false
+  disableReasoningApi: false,
+  agentNotificationsEnabled: true
 })
 
 export async function loadSettings() {

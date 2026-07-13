@@ -18,7 +18,8 @@ let settings: AppSettings = {
   developerPrompt: '',
   useCustomApi: false,
   useLegacyInterpreter: false, // Default to new interpreter
-  disableReasoningApi: false // Default to using reasoning API for thinking models
+  disableReasoningApi: false, // Default to using reasoning API for thinking models
+  agentNotificationsEnabled: true
 } // Default settings
 
 export function getSettings() {
@@ -114,6 +115,10 @@ export function setSettings(newSettings: AppSettings) {
 
   if (newSettings.disableReasoningApi === undefined) {
     newSettings.disableReasoningApi = false
+  }
+
+  if (newSettings.agentNotificationsEnabled === undefined) {
+    newSettings.agentNotificationsEnabled = true
   }
 
   settings = newSettings

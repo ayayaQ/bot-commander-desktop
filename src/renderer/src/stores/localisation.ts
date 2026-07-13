@@ -31,6 +31,9 @@ const en = {
   'show-token-description': 'Display API keys and tokens in plain text instead of hidden',
   'hide-output': 'Hide Output Preview',
   'hide-output-description': 'Hide the command output preview panel in the editor',
+  'agent-notifications': 'Agent notifications',
+  'agent-notifications-description':
+    'Show desktop alerts when an agent needs approval, finishes, or encounters an error',
   language: 'Language',
   about: 'About',
   'bot-state': 'Bot State',
@@ -411,6 +414,9 @@ const translations: Languages = {
     'hide-output': 'Ocultar vista previa de salida',
     'hide-output-description':
       'Ocultar el panel de vista previa de salida del comando en el editor',
+    'agent-notifications': 'Notificaciones del agente',
+    'agent-notifications-description':
+      'Mostrar alertas cuando un agente necesite aprobación, termine o encuentre un error',
     language: 'Idioma',
     about: 'Acerca de',
     'bot-state': 'Estado del bot',
@@ -784,6 +790,9 @@ const translations: Languages = {
     'show-token-description': 'APIキーとトークンを非表示ではなくプレーンテキストで表示',
     'hide-output': '出力プレビューを非表示',
     'hide-output-description': 'エディターでコマンド出力プレビューパネルを非表示にする',
+    'agent-notifications': 'エージェント通知',
+    'agent-notifications-description':
+      'エージェントが承認を必要としたとき、完了したとき、またはエラーが発生したときに通知する',
     language: '言語',
     about: '約',
     'bot-state': 'ボットの状態',
@@ -1151,6 +1160,8 @@ const translations: Languages = {
     'show-token-description': '以明文显示API密钥和令牌，而非隐藏',
     'hide-output': '隐藏输出预览',
     'hide-output-description': '在编辑器中隐藏命令输出预览面板',
+    'agent-notifications': '智能体通知',
+    'agent-notifications-description': '当智能体需要批准、完成任务或遇到错误时显示桌面通知',
     language: '语言',
     about: '关于',
     'bot-state': '机器人状态',
@@ -1511,6 +1522,9 @@ const translations: Languages = {
     'show-token-description': 'API 키와 토큰을 숨기지 않고 일반 텍스트로 표시',
     'hide-output': '출력 미리보기 숨기기',
     'hide-output-description': '에디터에서 명령 출력 미리보기 패널 숨기기',
+    'agent-notifications': '에이전트 알림',
+    'agent-notifications-description':
+      '에이전트가 승인을 요청하거나 작업을 완료하거나 오류가 발생하면 데스크톱 알림 표시',
     language: '언어',
     about: '정보',
     'bot-state': '봇 상태',
@@ -1875,6 +1889,9 @@ const translations: Languages = {
     'show-token-description': 'Отображать API-ключи и токены открытым текстом вместо скрытых',
     'hide-output': 'Скрыть предпросмотр вывода',
     'hide-output-description': 'Скрыть панель предпросмотра вывода команды в редакторе',
+    'agent-notifications': 'Уведомления агента',
+    'agent-notifications-description':
+      'Показывать уведомления, когда агенту требуется подтверждение, он завершает работу или возникает ошибка',
     language: 'Язык',
     about: 'О программе',
     'bot-state': 'Состояние бота',

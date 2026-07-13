@@ -16,6 +16,13 @@
   import { bottomNavVisible } from './stores/navigation'
   import { apiAuthStore } from './stores/apiAuth'
   import AgentPanel from './components/AgentPanel.svelte'
+  import {
+    agentNavigationStatus,
+    destroyAgentListeners,
+    initializeAgentSessions,
+    selectAgentSession,
+    setAgentViewActive
+  } from './stores/agent'
 
   let selectedMenu:
     | 'commands'
@@ -28,19 +35,46 @@
     | 'agent' = $state('commands')
 
   let leftPanelCollapsed = $state(false)
+  let windowFocused = $state(true)
 
   function selectTab(tab: string) {
     selectedMenu = tab as typeof selectedMenu
   }
 
-  onMount(async () => {
-    await loadSettings()
-    await loadBotStatus()
-    await onboardingStore.load()
-    // apply theme from the settings
-    document.documentElement.setAttribute('data-theme', $settingsStore.theme)
-    // check API auth status
-    apiAuthStore.ipc.checkAuth()
+  $effect(() => {
+    setAgentViewActive(selectedMenu === 'agent' && windowFocused)
+  })
+
+  onMount(() => {
+    const handleFocus = () => (windowFocused = true)
+    const handleBlur = () => (windowFocused = false)
+    const handleAgentNavigation = async (_event: unknown, sessionId: string) => {
+      await initializeAgentSessions()
+      selectedMenu = 'agent'
+      await selectAgentSession(sessionId)
+    }
+
+    windowFocused = document.hasFocus()
+    window.addEventListener('focus', handleFocus)
+    window.addEventListener('blur', handleBlur)
+    window.electron.ipcRenderer.on('agent:navigate', handleAgentNavigation)
+    void initializeAgentSessions()
+    void (async () => {
+      await loadSettings()
+      await loadBotStatus()
+      await onboardingStore.load()
+      // apply theme from the settings
+      document.documentElement.setAttribute('data-theme', $settingsStore.theme)
+      // check API auth status
+      apiAuthStore.ipc.checkAuth()
+    })()
+
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('blur', handleBlur)
+      window.electron.ipcRenderer.removeListener('agent:navigate', handleAgentNavigation)
+      destroyAgentListeners()
+    }
   })
 </script>
 
@@ -122,11 +156,29 @@
             <span class="material-symbols-outlined">bug_report</span>
           </button>
           <button
-            class={selectedMenu === 'agent' ? 'dock-active' : ''}
+            class="relative {selectedMenu === 'agent' ? 'dock-active' : ''}"
             onclick={() => (selectedMenu = 'agent')}
-            title="Agent"
+            title={$agentNavigationStatus.label}
+            aria-label={$agentNavigationStatus.label}
           >
             <span class="material-symbols-outlined">terminal</span>
+            {#if $agentNavigationStatus.kind === 'approval'}
+              <span
+                class="badge badge-warning badge-sm absolute right-2 top-1 min-w-5 px-1"
+                aria-hidden="true">{$agentNavigationStatus.count}</span
+              >
+            {:else if $agentNavigationStatus.kind === 'running'}
+              <span
+                class="absolute right-3 top-2 size-2 rounded-full bg-info animate-pulse"
+                aria-hidden="true"
+              ></span>
+            {:else if $agentNavigationStatus.kind === 'error'}
+              <span class="absolute right-3 top-2 size-2 rounded-full bg-error" aria-hidden="true"
+              ></span>
+            {:else if $agentNavigationStatus.kind === 'completed'}
+              <span class="absolute right-3 top-2 size-2 rounded-full bg-success" aria-hidden="true"
+              ></span>
+            {/if}
           </button>
           <button
             class={selectedMenu === 'help' ? 'dock-active' : ''}

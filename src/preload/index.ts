@@ -7,7 +7,8 @@ const validSendChannels = [
   'close-window',
   'connect',
   'disconnect',
-  'send-webhook'
+  'send-webhook',
+  'agent:view-state'
 ]
 
 const validInvokeChannels = [
@@ -102,7 +103,8 @@ const validReceiveChannels = [
   'ai-chat:thinking',
   'ai-chat:done',
   'ai-chat:error',
-  'agent:event'
+  'agent:event',
+  'agent:navigate'
 ]
 
 contextBridge.exposeInMainWorld('electron', {

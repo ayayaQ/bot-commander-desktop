@@ -1,5 +1,4 @@
-import { BrowserWindow, ipcMain, session, dialog, shell } from 'electron'
-import crypto from 'crypto'
+import { BrowserWindow, ipcMain, session, dialog, shell, Notification } from 'electron'
 import { OAuth2Scopes, PermissionsBitField, WebhookClient } from 'discord.js'
 import {
   getBotStateContext,
@@ -40,6 +39,8 @@ import {
   setInteractions,
   findInteractionById
 } from '../services/interactionService'
+import { decodeBCFDCommandArray } from '../../shared/commandCodec'
+import type { AgentStreamEvent } from '../../shared/agentTypes'
 import {
   registerSlashCommand,
   unregisterSlashCommand,
@@ -84,6 +85,43 @@ import {
   setAgentEventSink,
   updateAgentSession
 } from '../services/agentService'
+import {
+  getAgentNotificationDetails,
+  shouldShowAgentNotification
+} from '../services/agentNotification'
+
+const agentViewState = new Map<number, boolean>()
+
+function isAgentViewActivelyVisible(): boolean {
+  return BrowserWindow.getAllWindows().some(
+    (window) =>
+      agentViewState.get(window.webContents.id) === true && window.isVisible() && window.isFocused()
+  )
+}
+
+function showAgentNotification(payload: AgentStreamEvent): void {
+  if (
+    !shouldShowAgentNotification(payload, {
+      enabled: getSettings().agentNotificationsEnabled,
+      agentViewActive: isAgentViewActivelyVisible(),
+      supported: Notification.isSupported()
+    })
+  )
+    return
+  const details = getAgentNotificationDetails(payload)
+  if (!details) return
+
+  const notification = new Notification(details)
+  notification.on('click', () => {
+    const window = BrowserWindow.getAllWindows()[0]
+    if (!window) return
+    if (window.isMinimized()) window.restore()
+    window.show()
+    window.focus()
+    window.webContents.send('agent:navigate', payload.sessionId)
+  })
+  notification.show()
+}
 
 export function addWindowIPCHandlers(mainWindow: BrowserWindow) {
   ipcMain.on('minimize-window', () => {
@@ -129,6 +167,11 @@ export function addIPCHandlers() {
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send('agent:event', payload)
     }
+    showAgentNotification(payload)
+  })
+
+  ipcMain.on('agent:view-state', (event, active: boolean) => {
+    agentViewState.set(event.sender.id, active)
   })
 
   ipcMain.on('connect', (event, token) => {
@@ -405,13 +448,9 @@ export function addIPCHandlers() {
     if (!result.canceled && result.filePaths.length > 0) {
       try {
         const data = await fs.readFile(result.filePaths[0], 'utf-8')
-        const importedCommands = JSON.parse(data) as BCFDCommand[]
-        // Add IDs to imported commands that don't have them
-        for (const cmd of importedCommands) {
-          if (!cmd.id) {
-            cmd.id = crypto.randomUUID()
-          }
-        }
+        const importedCommands = decodeBCFDCommandArray(JSON.parse(data)).map(
+          ({ command }) => command
+        )
         return { success: true, commands: importedCommands }
       } catch (error) {
         console.error('Error importing commands:', error)
@@ -606,9 +645,7 @@ export function addIPCHandlers() {
   ipcMain.handle('agent:create', async (_, title?: string) =>
     createAgentSession(getSettings(), title)
   )
-  ipcMain.handle('agent:delete', async (_, sessionId: string) =>
-    deleteAgentSession(sessionId)
-  )
+  ipcMain.handle('agent:delete', async (_, sessionId: string) => deleteAgentSession(sessionId))
   ipcMain.handle('agent:update', async (_, sessionId: string, updates) =>
     updateAgentSession(sessionId, updates)
   )
@@ -619,8 +656,10 @@ export function addIPCHandlers() {
   ipcMain.handle('agent:send', async (_, sessionId: string, content: string) =>
     runAgentSession(sessionId, content, getSettings())
   )
-  ipcMain.handle('agent:approve', async (_, sessionId: string, toolCallId: string, approved: boolean) =>
-    resolveAgentApproval(sessionId, toolCallId, approved)
+  ipcMain.handle(
+    'agent:approve',
+    async (_, sessionId: string, toolCallId: string, approved: boolean) =>
+      resolveAgentApproval(sessionId, toolCallId, approved)
   )
   ipcMain.handle('agent:cancel', (_, sessionId: string) => cancelAgentRun(sessionId))
 

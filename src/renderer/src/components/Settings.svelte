@@ -29,6 +29,7 @@
   let useLegacyInterpreter: boolean = $state()
   let hideOutput: boolean = $state()
   let disableReasoningApi: boolean = $state()
+  let agentNotificationsEnabled: boolean = $state(true)
   let aiModels: Array<{
     id: string
     name: string
@@ -58,6 +59,10 @@
 
   function toggleHideOutput() {
     saveSettings({ ...$settingsStore, hideOutput })
+  }
+
+  function toggleAgentNotifications() {
+    saveSettings({ ...$settingsStore, agentNotificationsEnabled })
   }
 
   function updateOpenAIKey(event) {
@@ -158,6 +163,7 @@
     useLegacyInterpreter = $settingsStore.useLegacyInterpreter
     hideOutput = $settingsStore.hideOutput
     disableReasoningApi = $settingsStore.disableReasoningApi
+    agentNotificationsEnabled = $settingsStore.agentNotificationsEnabled
     refreshAiModels()
   })
 </script>
@@ -227,6 +233,21 @@
         <span class="label-text text-xs opacity-60">{$t('hide-output-description')}</span>
       </div>
       <input type="checkbox" class="toggle" bind:checked={hideOutput} onchange={toggleHideOutput} />
+    </label>
+  </div>
+
+  <div class="form-control">
+    <label class="label cursor-pointer">
+      <div class="flex flex-col">
+        <span class="label-text">{$t('agent-notifications')}</span>
+        <span class="label-text text-xs opacity-60">{$t('agent-notifications-description')}</span>
+      </div>
+      <input
+        type="checkbox"
+        class="toggle"
+        bind:checked={agentNotificationsEnabled}
+        onchange={toggleAgentNotifications}
+      />
     </label>
   </div>
 

@@ -13,6 +13,7 @@ function legacySettings(overrides: Partial<AppSettings> = {}): AppSettings {
     useCustomApi: undefined as unknown as boolean,
     useLegacyInterpreter: undefined as unknown as boolean,
     disableReasoningApi: undefined as unknown as boolean,
+    agentNotificationsEnabled: undefined as unknown as boolean,
     ...overrides
   }
 }
@@ -45,7 +46,8 @@ describe('settingsService', () => {
       developerPrompt: '',
       useCustomApi: false,
       useLegacyInterpreter: false,
-      disableReasoningApi: false
+      disableReasoningApi: false,
+      agentNotificationsEnabled: true
     })
   })
 

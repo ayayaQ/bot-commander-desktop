@@ -27,6 +27,7 @@ function settings(overrides: Partial<AppSettings> = {}): AppSettings {
     useCustomApi: false,
     useLegacyInterpreter: false,
     disableReasoningApi: false,
+    agentNotificationsEnabled: true,
     ...overrides
   }
 }
