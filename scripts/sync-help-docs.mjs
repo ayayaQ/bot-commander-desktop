@@ -101,6 +101,29 @@ function addRecord(records, { page, idKey, title, breadcrumbs, content }) {
   })
 }
 
+function generateTableOfContents(records) {
+  const root = new Map()
+
+  for (const record of records) {
+    const pathParts = [record.category, ...record.breadcrumbs.slice(1), record.title]
+    let current = root
+    for (const part of pathParts) {
+      if (!current.has(part)) current.set(part, new Map())
+      current = current.get(part)
+    }
+  }
+
+  const lines = []
+  function appendLines(nodes, depth) {
+    for (const [title, children] of nodes) {
+      lines.push(`${'\t'.repeat(depth)}${title}`)
+      appendLines(children, depth + 1)
+    }
+  }
+  appendLines(root, 0)
+  return lines.join('\n')
+}
+
 async function generate() {
   const sourceHash = crypto.createHash('sha256')
   const localeSource = await fs.readFile(path.join(sourceDir, 'locales/en.json'), 'utf8')
@@ -165,10 +188,11 @@ async function generate() {
   }
 
   const output = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     language: 'en',
     sourceRevision: sourceRevision(),
     sourceContentHash: sourceHash.digest('hex'),
+    tableOfContents: generateTableOfContents(records),
     records
   }
   await fs.mkdir(path.dirname(outputPath), { recursive: true })

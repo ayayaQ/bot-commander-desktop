@@ -8,6 +8,7 @@ describe('documentation service', () => {
     const records = documentationIndex.records
     const ids = records.map((record) => record.id)
 
+    expect(documentationIndex.schemaVersion).toBe(2)
     expect(documentationIndex.language).toBe('en')
     expect(documentationIndex.sourceRevision).toMatch(/^[a-f0-9]{40}$/)
     expect(documentationIndex.sourceContentHash).toMatch(/^[a-f0-9]{64}$/)
@@ -19,6 +20,36 @@ describe('documentation service', () => {
           record.content && record.sourceUrl.startsWith('https://ayayaq.com/DiscordBots-Help/')
       )
     ).toBe(true)
+  })
+
+  it('ships a deterministic compact table of contents in documentation order', () => {
+    const root = new Map<string, Map<string, unknown>>()
+    for (const record of documentationIndex.records) {
+      const path = [record.category, ...record.breadcrumbs.slice(1), record.title]
+      let current = root as Map<string, any>
+      for (const part of path) {
+        if (!current.has(part)) current.set(part, new Map())
+        current = current.get(part)
+      }
+    }
+
+    const lines: string[] = []
+    function appendLines(nodes: Map<string, any>, depth: number) {
+      for (const [title, children] of nodes) {
+        lines.push(`${'\t'.repeat(depth)}${title}`)
+        appendLines(children, depth + 1)
+      }
+    }
+    appendLines(root, 0)
+
+    expect(documentationIndex.tableOfContents).toBe(lines.join('\n'))
+    expect(documentationIndex.tableOfContents).toContain(
+      'creating\n\tCreating the bot\n\tInviting the bot'
+    )
+    expect(documentationIndex.tableOfContents).toContain(
+      'keywords\n\tUser Info\n\t\t$name\n\t\t$avatar'
+    )
+    expect(documentationIndex.tableOfContents).not.toContain('\tKeywords\n')
   })
 
   it('ranks exact keyword titles first and supports category filters', () => {

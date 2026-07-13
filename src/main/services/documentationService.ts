@@ -13,6 +13,7 @@ interface DocumentationRecord {
 }
 
 const records = documentationIndex.records as DocumentationRecord[]
+export const documentationTableOfContents = documentationIndex.tableOfContents
 const MAX_BEST_CONTENT_CHARS = 2_000
 const STOP_WORDS = new Set([
   'a',
