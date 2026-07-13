@@ -22,6 +22,18 @@ export interface AgentMessage {
   toolCalls?: AgentToolCall[]
 }
 
+export interface AgentRunMetrics {
+  runId: string
+  providerRounds: number
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  documentationCalls: number
+  uniqueDocumentationCalls: number
+  duplicateDocumentationCalls: number
+  documentationResultChars: number
+}
+
 export interface AgentSession {
   id: string
   title: string
@@ -34,6 +46,7 @@ export interface AgentSession {
   updatedAt: string
   activeRunId?: string
   tokenCount: number
+  lastRunMetrics?: AgentRunMetrics
   error?: string
 }
 

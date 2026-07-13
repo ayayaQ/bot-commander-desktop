@@ -60,6 +60,27 @@ describe('agent resource tools', () => {
     vi.clearAllMocks()
   })
 
+  it('searches and reads bundled documentation without a mutation', async () => {
+    const { agentToolDefinitions, executeReadTool, mutationToolNames } = await import('./agentTools')
+    const names = agentToolDefinitions.map((tool) => tool.function.name)
+
+    expect(names).toContain('search_documentation')
+    expect(names).toContain('read_documentation')
+    expect(mutationToolNames.has('search_documentation')).toBe(false)
+    expect(mutationToolNames.has('read_documentation')).toBe(false)
+
+    const result = await executeReadTool('search_documentation', {
+      query: '$rollnum',
+      category: 'keywords',
+      limit: 1
+    }) as any
+    expect(result.bestMatch.title).toBe('$rollnum(min,max)')
+    expect(result.bestMatch.content).toContain('random number')
+
+    await expect(executeReadTool('read_documentation', { id: result.bestMatch.id })).resolves
+      .toMatchObject({ title: '$rollnum(min,max)', category: 'keywords' })
+  })
+
   it('creates canonical commands and returns automatic lint diagnostics', async () => {
     const { commitMutation, executeReadTool, prepareMutation } = await import('./agentTools')
     const prepared = await prepareMutation('create_command', {

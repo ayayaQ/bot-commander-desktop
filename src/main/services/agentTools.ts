@@ -2,10 +2,16 @@ import crypto from 'node:crypto'
 import type { BCFDCommand, BCFDInteractionAction, BCFDInteractionCommand } from '../types/types'
 import type { AgentLintDiagnostic, AgentPatchOperation } from '../../shared/agentTypes'
 import { lintBCFD } from '../../shared/bcfdLint'
+import { decodeBCFDCommand } from '../../shared/commandCodec'
 import { getCommands, setCommands } from './botService'
 import { getInteractions, setInteractions } from './interactionService'
 import { getSettings, setSettings } from './settingsService'
 import { saveCommands, saveInteractions, saveSettings } from './fileService'
+import {
+  readDocumentation,
+  searchDocumentation,
+  type DocumentationCategory
+} from './documentationService'
 import {
   getBotStateContext,
   getStartupJs,
@@ -51,6 +57,26 @@ const patchSchema = {
 }
 
 export const agentToolDefinitions: ToolDefinition[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'search_documentation',
+      description: 'Search bundled Bot Commander help for commands, fields, BCFD keywords and syntax, tutorials, interactions, setup, and webhooks. Returns the best matching content plus compact alternatives; short exact names or phrases work best.',
+      parameters: objectSchema({
+        query: { type: 'string' },
+        category: { type: 'string', enum: ['creating', 'commands', 'keywords', 'tutorial', 'webhooks'] },
+        limit: { type: 'integer', minimum: 1, maximum: 5 }
+      }, ['query'])
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_documentation',
+      description: 'Read a complete bundled documentation section only when search_documentation marks its best match as truncated or more detail is genuinely required.',
+      parameters: objectSchema({ id: { type: 'string' } }, ['id'])
+    }
+  },
   {
     type: 'function',
     function: {
@@ -206,12 +232,11 @@ function emptyEmbed() {
 
 function defaultCommand(): BCFDCommand {
   return {
-    id: crypto.randomUUID(), actionArr: [false, false], channelMessage: '', command: '', commandDescription: '',
-    deleteAfter: false, deleteIf: false, deleteIfStrings: '', deleteNum: 0, deleteX: false,
-    ignoreErrorMessage: false, isBan: false, isKick: false, isNSFW: false, isReact: false,
-    isRequiredRole: false, requiredRole: '', isRoleAssigner: false, isSpecificChannel: false,
-    isSpecificMessage: false, isVoiceMute: false, isAdmin: false, phrase: false, privateMessage: '',
-    reaction: '', roleToAssign: '', sendChannelEmbed: false, sendPrivateEmbed: false,
+    id: crypto.randomUUID(), channelMessage: '', command: '', commandDescription: '',
+    deleteAfter: false, deleteIfStrings: '', deleteNum: 0,
+    ignoreErrorMessage: false, isBan: false, isKick: false, isNSFW: false,
+    requiredRole: '', isVoiceMute: false, isAdmin: false, phrase: false, privateMessage: '',
+    reaction: '', roleToAssign: '',
     specificChannel: '', specificMessage: '', startsWith: false, type: 0, channelEmbed: emptyEmbed(),
     privateEmbed: emptyEmbed(), channelWhitelist: '', serverWhitelist: ''
   }
@@ -235,8 +260,7 @@ function assertCommand(value: unknown): asserts value is BCFDCommand {
   const validEmbed = (embed: any) => embed && ['title', 'description', 'hexColor', 'imageURL', 'thumbnailURL', 'footer']
     .every((field) => typeof embed[field] === 'string')
   if (!command || typeof command !== 'object' || typeof command.command !== 'string' ||
-      typeof command.commandDescription !== 'string' || !Array.isArray(command.actionArr) ||
-      !command.actionArr.every((item) => typeof item === 'boolean') ||
+      typeof command.commandDescription !== 'string' ||
       !validEmbed(command.channelEmbed) || !validEmbed(command.privateEmbed) ||
       !Number.isInteger(command.type) || command.type < 0 || command.type > 5) {
     throw new Error('Invalid command structure')
@@ -295,7 +319,6 @@ async function lintCommandResource(command: BCFDCommand): Promise<AgentLintDiagn
   const diagnostics = await lintTextFields(command)
   if (!command.commandDescription.trim()) diagnostics.unshift({ severity: 'error', message: 'Command description is required', path: '/commandDescription' })
   if ([0, 1, 5].includes(command.type) && !command.command.trim()) diagnostics.unshift({ severity: 'error', message: 'Command trigger is required for this command type', path: '/command' })
-  if (!Array.isArray(command.actionArr) || command.actionArr.length < 2) diagnostics.unshift({ severity: 'error', message: 'actionArr must contain channel and private message flags', path: '/actionArr' })
   return diagnostics
 }
 
@@ -313,6 +336,14 @@ async function lintInteractionResource(interaction: BCFDInteractionCommand): Pro
 
 export async function executeReadTool(name: string, args: Record<string, any>): Promise<unknown> {
   const limit = Math.max(1, Math.min(Number(args.limit) || 20, 100))
+  if (name === 'search_documentation') {
+    return searchDocumentation(
+      String(args.query || ''),
+      args.category as DocumentationCategory | undefined,
+      args.limit
+    )
+  }
+  if (name === 'read_documentation') return readDocumentation(String(args.id || ''))
   if (name === 'search_commands') {
     const query = String(args.query || '')
     return getCommands().bcfdCommands.filter((item) => snippets(item, query).length).slice(0, limit)
@@ -380,12 +411,13 @@ function requireRevision(actual: unknown, expected: unknown) {
 export async function prepareMutation(name: string, args: Record<string, any>): Promise<PreparedMutation> {
   if (name === 'create_command') {
     const input = args.command || {}
-    const after = {
+    const candidate = {
       ...defaultCommand(), ...input,
       channelEmbed: { ...emptyEmbed(), ...(input.channelEmbed || {}) },
       privateEmbed: { ...emptyEmbed(), ...(input.privateEmbed || {}) },
       id: crypto.randomUUID()
     }
+    const after = decodeBCFDCommand(candidate, () => crypto.randomUUID()).command
     assertCommand(after)
     return { name, arguments: args, before: null, after, target: { type: 'command', id: after.id } }
   }
@@ -393,7 +425,8 @@ export async function prepareMutation(name: string, args: Record<string, any>): 
     const before = getCommands().bcfdCommands.find((item) => item.id === args.id)
     if (!before) throw new Error('Command not found')
     requireRevision(before, args.expectedRevision)
-    const after = applyPatches(before, args.patches || [])
+    const candidate = applyPatches(before, args.patches || [])
+    const after = decodeBCFDCommand(candidate, () => crypto.randomUUID()).command
     if (after.id !== before.id) throw new Error('Command IDs cannot be edited')
     assertCommand(after)
     return { name, arguments: args, before, after, target: { type: 'command', id: before.id } }

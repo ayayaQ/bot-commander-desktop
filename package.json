@@ -6,6 +6,7 @@
   "author": "ayayaQ",
   "homepage": "https://github.com/ayayaQ/bot-commander-desktop",
   "scripts": {
+    "docs:sync": "node scripts/sync-help-docs.mjs",
     "format": "prettier --plugin prettier-plugin-svelte --write .",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "svelte-check": "svelte-check --tsconfig ./tsconfig.json",
@@ -36,6 +37,7 @@
     "@tailwindcss/typography": "^0.5.19",
     "@types/node": "^25.6.2",
     "autoprefixer": "^10.4.23",
+    "cheerio": "^1.2.0",
     "daisyui": "^5.5.14",
     "electron": "^42.0.1",
     "electron-builder": "^26.0.2",
