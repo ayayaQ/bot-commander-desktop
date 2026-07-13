@@ -22,6 +22,7 @@ import type { AiRuntimeSettings } from './aiProviderService'
 import { getAiProvider, getSelectedAiModel, validateAiConfiguration } from './aiProviderService'
 import { documentationTableOfContents } from './documentationService'
 import {
+  agentToolTargetLabel,
   agentToolDefinitions,
   commitMutation,
   executeReadTool,
@@ -375,10 +376,12 @@ async function runTool(
   providerCall: ProviderToolCall,
   context: AgentRunContext
 ): Promise<{ toolCall: AgentToolCall; result: unknown }> {
+  const targetLabel = agentToolTargetLabel(providerCall.name, providerCall.arguments)
   const call: AgentToolCall = {
     id: providerCall.id || id('tool'),
     name: providerCall.name,
     arguments: providerCall.arguments,
+    ...(targetLabel ? { targetLabel } : {}),
     status: 'running',
     createdAt: now()
   }

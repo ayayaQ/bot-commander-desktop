@@ -5,6 +5,7 @@ export interface AgentToolCall {
   id: string
   name: string
   arguments: Record<string, unknown>
+  targetLabel?: string
   status: 'running' | 'waiting_approval' | 'approved' | 'rejected' | 'completed' | 'error'
   result?: unknown
   error?: string

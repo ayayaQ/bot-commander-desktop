@@ -89,6 +89,54 @@ describe('agent resource tools', () => {
       .toMatchObject({ title: '$rollnum(min,max)', category: 'keywords' })
   })
 
+  it('reads recent console entries with optional type filtering', async () => {
+    mocks.consoleEntries = [
+      { id: 1, type: 'info', message: 'Connected', timestamp: '2026-07-12T12:00:00.000Z' },
+      { id: 2, type: 'error', message: 'Command failed', timestamp: '2026-07-12T12:01:00.000Z' }
+    ]
+    const { agentToolDefinitions, executeReadTool, mutationToolNames } = await import('./agentTools')
+
+    expect(agentToolDefinitions.map((tool) => tool.function.name)).toContain('read_console')
+    expect(mutationToolNames.has('read_console')).toBe(false)
+    await expect(executeReadTool('read_console', { types: ['error'], limit: 10 })).resolves.toEqual([
+      mocks.consoleEntries[1]
+    ])
+  })
+
+  it('resolves stable labels for command and interaction resource tools', async () => {
+    mocks.state.commands.bcfdCommands = [
+      { id: 'command-1', command: '  ping\nnow ', commandDescription: 'Ping command', type: 0 },
+      { id: 'command-2', command: '', commandDescription: 'Join description', type: 2 },
+      { id: 'command-3', command: '', commandDescription: 'Description only', type: 0 }
+    ]
+    mocks.state.interactions = [
+      { id: 'interaction-1', commandName: ' status ', commandDescription: 'Status interaction' },
+      { id: 'interaction-2', commandName: '', commandDescription: 'Description only' }
+    ]
+    const { agentToolTargetLabel } = await import('./agentTools')
+
+    for (const name of ['read_command', 'edit_command', 'lint_command']) {
+      expect(agentToolTargetLabel(name, { id: 'command-1' })).toBe('ping now')
+    }
+    expect(agentToolTargetLabel('read_command', { id: 'command-2' })).toBe('Member Join')
+    expect(agentToolTargetLabel('read_command', { id: 'command-3' })).toBe('Description only')
+    expect(agentToolTargetLabel('create_command', {
+      command: { command: 'new-command', commandDescription: 'New command', type: 0 }
+    })).toBe('new-command')
+
+    for (const name of ['read_interaction', 'edit_interaction', 'lint_interaction']) {
+      expect(agentToolTargetLabel(name, { id: 'interaction-1' })).toBe('status')
+    }
+    expect(agentToolTargetLabel('read_interaction', { id: 'interaction-2' })).toBe(
+      'Description only'
+    )
+    expect(agentToolTargetLabel('create_interaction', {
+      interaction: { commandName: 'new-interaction', commandDescription: 'New interaction' }
+    })).toBe('new-interaction')
+    expect(agentToolTargetLabel('read_command', { id: 'missing' })).toBeUndefined()
+    expect(agentToolTargetLabel('read_bot_state', {})).toBeUndefined()
+  })
+
   it('creates canonical commands and returns automatic lint diagnostics', async () => {
     const { commitMutation, executeReadTool, prepareMutation } = await import('./agentTools')
     const prepared = await prepareMutation('create_command', {

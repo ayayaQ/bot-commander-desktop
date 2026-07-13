@@ -8,8 +8,17 @@ const QUERY_TOOLS = new Set([
 ])
 
 export function agentToolLabel(call: AgentToolCall): string {
-  if (!QUERY_TOOLS.has(call.name) || typeof call.arguments.query !== 'string') return call.name
+  const targetLabel = normalizeLabelText(call.targetLabel)
+  if (targetLabel) return `${call.name} '${targetLabel}'`
 
-  const query = call.arguments.query.replace(/\s+/g, ' ').trim()
+  if (!QUERY_TOOLS.has(call.name)) return call.name
+
+  const query = normalizeLabelText(call.arguments.query)
   return query ? `${call.name} for '${query}'` : call.name
+}
+
+function normalizeLabelText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const normalized = value.replace(/\s+/g, ' ').trim()
+  return normalized || undefined
 }

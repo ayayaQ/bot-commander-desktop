@@ -220,6 +220,53 @@ export const mutationToolNames = new Set([
   'edit_bot_state', 'edit_startup_js', 'edit_developer_prompt'
 ])
 
+const COMMAND_TARGET_TOOLS = new Set([
+  'read_command', 'edit_command', 'lint_command'
+])
+
+const INTERACTION_TARGET_TOOLS = new Set([
+  'read_interaction', 'edit_interaction', 'lint_interaction'
+])
+
+function meaningfulText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const normalized = value.replace(/\s+/g, ' ').trim()
+  return normalized || undefined
+}
+
+function commandTargetLabel(command: unknown): string | undefined {
+  if (!command || typeof command !== 'object') return undefined
+  const value = command as Partial<BCFDCommand>
+  if (value.type === 2) return 'Member Join'
+  if (value.type === 3) return 'Member Leave'
+  if (value.type === 4) return 'Member Ban'
+  return meaningfulText(value.command) || meaningfulText(value.commandDescription)
+}
+
+function interactionTargetLabel(interaction: unknown): string | undefined {
+  if (!interaction || typeof interaction !== 'object') return undefined
+  const value = interaction as Partial<BCFDInteractionCommand>
+  return meaningfulText(value.commandName) || meaningfulText(value.commandDescription)
+}
+
+export function agentToolTargetLabel(
+  name: string,
+  args: Record<string, unknown>
+): string | undefined {
+  if (name === 'create_command') return commandTargetLabel(args.command)
+  if (name === 'create_interaction') return interactionTargetLabel(args.interaction)
+
+  if (COMMAND_TARGET_TOOLS.has(name)) {
+    const command = getCommands().bcfdCommands.find((item) => item.id === args.id)
+    return commandTargetLabel(command)
+  }
+  if (INTERACTION_TARGET_TOOLS.has(name)) {
+    const interaction = getInteractions().find((item) => item.id === args.id)
+    return interactionTargetLabel(interaction)
+  }
+  return undefined
+}
+
 export function revision(value: unknown): string {
   return crypto.createHash('sha256').update(JSON.stringify(value) ?? 'undefined').digest('hex').slice(0, 16)
 }

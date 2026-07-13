@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   responsesCreate: vi.fn(),
   chatCreate: vi.fn(),
   executeReadTool: vi.fn(),
+  agentToolTargetLabel: vi.fn(),
   writeFile: vi.fn(),
   rename: vi.fn()
 }))
@@ -28,6 +29,7 @@ vi.mock('openai', () => ({
 }))
 
 vi.mock('./agentTools', () => ({
+  agentToolTargetLabel: mocks.agentToolTargetLabel,
   agentToolDefinitions: [],
   mutationToolNames: new Set(),
   commitMutation: vi.fn(),
@@ -147,6 +149,54 @@ describe('OpenAI agent provider adapter', () => {
       duplicateDocumentationCalls: 0
     })
     expect(stored.lastRunMetrics!.documentationResultChars).toBeGreaterThan(0)
+    const firstRequest = mocks.responsesCreate.mock.calls[0][0]
+    const systemPrompt = firstRequest.input[0].content
+    expect(systemPrompt).toContain('Bundled documentation table of contents:')
+    expect(systemPrompt).toContain('creating\n\tCreating the bot\n\tInviting the bot')
+    expect(systemPrompt).toContain('keywords\n\tUser Info\n\t\t$name\n\t\t$avatar')
+    expect(systemPrompt).toContain('the outline contains titles only')
+    service.setAgentEventSink(null)
+  })
+
+  it('persists the resolved target label on tool calls', async () => {
+    mocks.agentToolTargetLabel.mockReturnValueOnce('ping')
+    mocks.executeReadTool.mockResolvedValue({ resource: { command: 'ping' }, revision: 'abc123' })
+    mocks.responsesCreate
+      .mockResolvedValueOnce({
+        output_text: '',
+        output: [{
+          type: 'function_call', call_id: 'call_read', name: 'read_command',
+          arguments: '{"id":"command-1"}'
+        }],
+        usage: { input_tokens: 20, output_tokens: 5, total_tokens: 25 }
+      })
+      .mockResolvedValueOnce({
+        output_text: 'Read the command.',
+        output: [],
+        usage: { input_tokens: 30, output_tokens: 5, total_tokens: 35 }
+      })
+
+    const service = await import('./agentService')
+    const session = await service.createAgentSession({
+      aiProvider: 'openai', openaiApiKey: 'test', selectedAiModel: 'gpt-5.6-luna'
+    })
+    const completed = new Promise<void>((resolve) => {
+      service.setAgentEventSink((event) => {
+        if (event.type === 'done' && event.sessionId === session.id) resolve()
+      })
+    })
+
+    await service.runAgentSession(session.id, 'Read ping', {
+      aiProvider: 'openai', openaiApiKey: 'test'
+    })
+    await completed
+    const stored = (await service.loadAgentSessions()).sessions.find(
+      (item) => item.id === session.id
+    )!
+    const call = stored.messages.flatMap((message) => message.toolCalls || [])[0]
+
+    expect(mocks.agentToolTargetLabel).toHaveBeenCalledWith('read_command', { id: 'command-1' })
+    expect(call).toMatchObject({ name: 'read_command', targetLabel: 'ping', status: 'completed' })
     service.setAgentEventSink(null)
   })
 
