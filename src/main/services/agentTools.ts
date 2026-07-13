@@ -1,6 +1,10 @@
 import crypto from 'node:crypto'
 import type { BCFDCommand, BCFDInteractionAction, BCFDInteractionCommand } from '../types/types'
-import type { AgentLintDiagnostic, AgentPatchOperation } from '../../shared/agentTypes'
+import type {
+  AgentLintDiagnostic,
+  AgentMemory,
+  AgentPatchOperation
+} from '../../shared/agentTypes'
 import { lintBCFD } from '../../shared/bcfdLint'
 import { decodeBCFDCommand } from '../../shared/commandCodec'
 import { getCommands, setCommands } from './botService'
@@ -23,6 +27,14 @@ import {
   getRendererConsoleEntries,
   type ConsoleMessageType
 } from '../utils/rendererConsole'
+import {
+  agentMemoryRevision,
+  commitMemoryMutation,
+  loadAgentMemories,
+  prepareCreateMemory,
+  prepareDeleteMemory,
+  prepareUpdateMemory
+} from './agentMemoryService'
 
 export interface PreparedMutation {
   name: string
@@ -117,7 +129,7 @@ export const agentToolDefinitions: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'keyword_grep',
-      description: 'Search all editable text in commands, interactions, startup JS, developer prompt, and bot state.',
+      description: 'Search all editable text in commands, interactions, startup JS, developer prompt, memories, and bot state.',
       parameters: objectSchema({ query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 100 } }, ['query'])
     }
   },
@@ -139,6 +151,7 @@ export const agentToolDefinitions: ToolDefinition[] = [
   { type: 'function', function: { name: 'read_bot_state', description: 'Read persistent bot state.', parameters: objectSchema({}) } },
   { type: 'function', function: { name: 'read_startup_js', description: 'Read startup JavaScript.', parameters: objectSchema({}) } },
   { type: 'function', function: { name: 'read_developer_prompt', description: 'Read the developer prompt used by bot AI functions.', parameters: objectSchema({}) } },
+  { type: 'function', function: { name: 'list_memories', description: 'List persistent user preferences and standing instructions with IDs and current revisions. Read this before editing or deleting a memory.', parameters: objectSchema({}) } },
   {
     type: 'function',
     function: {
@@ -198,6 +211,37 @@ export const agentToolDefinitions: ToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'create_memory',
+      description: 'Create a concise persistent memory for a clear, durable user preference or standing instruction. Never store secrets, one-off task instructions, or facts already represented by bot resources.',
+      parameters: objectSchema({ content: { type: 'string', maxLength: 1000 } }, ['content'])
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'edit_memory',
+      description: 'Replace an existing memory. Use the ID and revision returned by list_memories.',
+      parameters: objectSchema({
+        id: { type: 'string' },
+        expectedRevision: { type: 'string' },
+        content: { type: 'string', maxLength: 1000 }
+      }, ['id', 'expectedRevision', 'content'])
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'delete_memory',
+      description: 'Delete a persistent memory. Use the ID and revision returned by list_memories.',
+      parameters: objectSchema({
+        id: { type: 'string' },
+        expectedRevision: { type: 'string' }
+      }, ['id', 'expectedRevision'])
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'lint_js',
       description: 'Lint JavaScript source without executing it.',
       parameters: objectSchema({ source: { type: 'string' } }, ['source'])
@@ -217,7 +261,8 @@ export const agentToolDefinitions: ToolDefinition[] = [
 
 export const mutationToolNames = new Set([
   'create_command', 'edit_command', 'create_interaction', 'edit_interaction',
-  'edit_bot_state', 'edit_startup_js', 'edit_developer_prompt'
+  'edit_bot_state', 'edit_startup_js', 'edit_developer_prompt',
+  'create_memory', 'edit_memory', 'delete_memory'
 ])
 
 const COMMAND_TARGET_TOOLS = new Set([
@@ -255,6 +300,10 @@ export function agentToolTargetLabel(
 ): string | undefined {
   if (name === 'create_command') return commandTargetLabel(args.command)
   if (name === 'create_interaction') return interactionTargetLabel(args.interaction)
+  if (name === 'create_memory' || name === 'edit_memory') {
+    const content = meaningfulText(args.content)
+    return content && content.length > 80 ? `${content.slice(0, 77)}...` : content
+  }
 
   if (COMMAND_TARGET_TOOLS.has(name)) {
     const command = getCommands().bcfdCommands.find((item) => item.id === args.id)
@@ -448,6 +497,7 @@ export async function executeReadTool(name: string, args: Record<string, any>): 
     const content = getSettings().developerPrompt || ''
     return { content, revision: revision(content) }
   }
+  if (name === 'list_memories') return loadAgentMemories()
   if (name === 'keyword_grep') {
     const query = String(args.query || '').toLowerCase()
     const resources: Array<{ type: string; id?: string; value: unknown }> = [
@@ -455,6 +505,11 @@ export async function executeReadTool(name: string, args: Record<string, any>): 
       ...getInteractions().map((value) => ({ type: 'interaction', id: value.id, value })),
       { type: 'startup-js', value: await getStartupJs() },
       { type: 'developer-prompt', value: getSettings().developerPrompt || '' },
+      ...(await loadAgentMemories()).memories.map((value) => ({
+        type: 'memory',
+        id: value.id,
+        value: value.content
+      })),
       { type: 'bot-state', value: getBotStateContext().getVariable('botState') ?? {} }
     ]
     return resources.flatMap((resource) => textEntries(resource.value)
@@ -537,6 +592,26 @@ export async function prepareMutation(name: string, args: Record<string, any>): 
     const after = String(args.content ?? '')
     return { name, arguments: args, before, after, target: { type: 'developer-prompt' } }
   }
+  if (name === 'create_memory') {
+    const mutation = await prepareCreateMemory(String(args.content ?? ''), 'agent')
+    return { name, arguments: args, before: mutation.before, after: mutation.after, target: { type: 'memory', id: mutation.after!.id } }
+  }
+  if (name === 'edit_memory') {
+    const mutation = await prepareUpdateMemory(
+      String(args.id || ''),
+      String(args.expectedRevision || ''),
+      String(args.content ?? ''),
+      'agent'
+    )
+    return { name, arguments: args, before: mutation.before, after: mutation.after, target: { type: 'memory', id: String(args.id || '') } }
+  }
+  if (name === 'delete_memory') {
+    const mutation = await prepareDeleteMemory(
+      String(args.id || ''),
+      String(args.expectedRevision || '')
+    )
+    return { name, arguments: args, before: mutation.before, after: mutation.after, target: { type: 'memory', id: String(args.id || '') } }
+  }
   throw new Error(`Unknown mutation tool: ${name}`)
 }
 
@@ -573,11 +648,37 @@ export async function commitMutation(prepared: PreparedMutation): Promise<unknow
     requireRevision(getSettings().developerPrompt || '', args.expectedRevision)
     setSettings({ ...getSettings(), developerPrompt: prepared.after as string })
     await saveSettings()
+  } else if (prepared.name === 'create_memory') {
+    await commitMemoryMutation({
+      kind: 'create',
+      before: null,
+      after: prepared.after as AgentMemory
+    })
+  } else if (prepared.name === 'edit_memory') {
+    await commitMemoryMutation({
+      kind: 'update',
+      before: prepared.before as AgentMemory,
+      after: prepared.after as AgentMemory,
+      expectedRevision: String(args.expectedRevision || '')
+    })
+  } else if (prepared.name === 'delete_memory') {
+    await commitMemoryMutation({
+      kind: 'delete',
+      before: prepared.before as AgentMemory,
+      after: null,
+      expectedRevision: String(args.expectedRevision || '')
+    })
   }
 
   let diagnostics: AgentLintDiagnostic[] = []
   if (prepared.target.type === 'command') diagnostics = await lintCommandResource(prepared.after as BCFDCommand)
   if (prepared.target.type === 'interaction') diagnostics = await lintInteractionResource(prepared.after as BCFDInteractionCommand)
   if (prepared.target.type === 'startup-js') diagnostics = lintSource(prepared.after as string, 'js')
-  return { success: true, target: prepared.target, revision: revision(prepared.after), diagnostics }
+  const nextRevision =
+    prepared.target.type === 'memory' && prepared.after
+      ? agentMemoryRevision(prepared.after as AgentMemory)
+      : prepared.after === null
+        ? undefined
+        : revision(prepared.after)
+  return { success: true, target: prepared.target, revision: nextRevision, diagnostics }
 }

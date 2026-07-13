@@ -86,6 +86,7 @@ function collectRemoved(value: unknown, path: string, changes: AgentFieldChange[
 export function diffAgentApproval(before: unknown, after: unknown): AgentFieldChange[] {
   const changes: AgentFieldChange[] = []
   if (before === null || before === undefined) collectCreated(after, '', changes)
+  else if (after === null || after === undefined) collectRemoved(before, '', changes)
   else collectDiff(before, after, '', changes)
   return changes
 }

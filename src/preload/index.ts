@@ -31,6 +31,10 @@ const validInvokeChannels = [
   // Settings & status
   'get-settings',
   'save-settings',
+  'memory:list',
+  'memory:create',
+  'memory:update',
+  'memory:delete',
   'fetch-ai-models',
   'get-bot-status',
   'save-bot-status',
@@ -104,7 +108,8 @@ const validReceiveChannels = [
   'ai-chat:done',
   'ai-chat:error',
   'agent:event',
-  'agent:navigate'
+  'agent:navigate',
+  'memory:changed'
 ]
 
 contextBridge.exposeInMainWorld('electron', {

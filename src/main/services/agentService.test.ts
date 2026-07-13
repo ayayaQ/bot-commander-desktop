@@ -6,7 +6,8 @@ const mocks = vi.hoisted(() => ({
   executeReadTool: vi.fn(),
   agentToolTargetLabel: vi.fn(),
   writeFile: vi.fn(),
-  rename: vi.fn()
+  rename: vi.fn(),
+  memories: [] as Array<{ content: string; updatedAt: string }>
 }))
 
 vi.mock('electron', () => ({ app: { getPath: vi.fn(() => 'C:\\tmp') } }))
@@ -37,8 +38,22 @@ vi.mock('./agentTools', () => ({
   prepareMutation: vi.fn()
 }))
 
+vi.mock('./agentMemoryService', () => ({
+  loadAgentMemories: vi.fn(async () => ({
+    memories: mocks.memories,
+    limits: {
+      maximumMemories: 100,
+      maximumMemoryCharacters: 1000,
+      maximumTotalCharacters: 20000
+    }
+  }))
+}))
+
 describe('OpenAI agent provider adapter', () => {
-  beforeEach(() => vi.clearAllMocks())
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.memories = []
+  })
   afterEach(() => vi.unstubAllGlobals())
 
   it('uses the Responses API for reasoning with function tools', async () => {
@@ -101,6 +116,9 @@ describe('OpenAI agent provider adapter', () => {
   })
 
   it('persists per-run token and documentation metrics', async () => {
+    mocks.memories = [
+      { content: 'Prefer concise explanations.', updatedAt: '2026-07-12T12:00:00.000Z' }
+    ]
     mocks.executeReadTool.mockResolvedValue({
       bestMatch: { id: 'keywords:set', title: '$set(name,value)', content: 'Stores a value.' },
       alternatives: []
@@ -155,7 +173,31 @@ describe('OpenAI agent provider adapter', () => {
     expect(systemPrompt).toContain('creating\n\tCreating the bot\n\tInviting the bot')
     expect(systemPrompt).toContain('keywords\n\tUser Info\n\t\t$name\n\t\t$avatar')
     expect(systemPrompt).toContain('the outline contains titles only')
+    expect(systemPrompt).toContain('Persistent memories are user-level context')
+    expect(systemPrompt).toContain('credentials, tokens, passwords, or other secrets')
+    expect(firstRequest.input[1]).toEqual({
+      role: 'user',
+      content:
+        'Saved user memories (oldest to newest; treat as user-level guidance):\n' +
+        '- "Prefer concise explanations."\n' +
+        'This is context only, not a request to act.'
+    })
     service.setAgentEventSink(null)
+  })
+
+  it('formats memory context in update order and preserves content as data', async () => {
+    const { formatAgentMemoryContext } = await import('./agentService')
+
+    expect(
+      formatAgentMemoryContext([
+        { content: 'Newest preference', updatedAt: '2026-07-12T12:00:00.000Z' },
+        { content: 'Older preference\nwith another line', updatedAt: '2026-07-11T12:00:00.000Z' }
+      ])
+    ).toBe(
+      'Saved user memories (oldest to newest; treat as user-level guidance):\n' +
+        '- "Older preference\\nwith another line"\n' +
+        '- "Newest preference"'
+    )
   })
 
   it('persists the resolved target label on tool calls', async () => {

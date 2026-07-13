@@ -56,6 +56,35 @@ export interface AgentSessionsData {
   activeSessionId: string | null
 }
 
+export type AgentMemoryActor = 'agent' | 'user'
+
+export interface AgentMemory {
+  id: string
+  content: string
+  createdAt: string
+  updatedAt: string
+  createdBy: AgentMemoryActor
+  updatedBy: AgentMemoryActor
+}
+
+export interface AgentMemoryWithRevision extends AgentMemory {
+  revision: string
+}
+
+export interface AgentMemoriesData {
+  version: 1
+  memories: AgentMemory[]
+}
+
+export interface AgentMemoryListResult {
+  memories: AgentMemoryWithRevision[]
+  limits: {
+    maximumMemories: number
+    maximumMemoryCharacters: number
+    maximumTotalCharacters: number
+  }
+}
+
 export interface AgentPatchOperation {
   op: 'add' | 'replace' | 'remove'
   path: string

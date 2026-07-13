@@ -10,6 +10,7 @@
   import HeaderBar from './HeaderBar.svelte'
   import ApiAuth from './ApiAuth.svelte'
   import ModelPicker from './ModelPicker.svelte'
+  import MemoryManagerModal from './MemoryManagerModal.svelte'
   import {
     modelSupportsReasoning,
     normalizeReasoningEffort,
@@ -38,6 +39,7 @@
   }> = $state([])
   let isLoadingModels = $state(false)
   let modelFetchError = $state('')
+  let memoryDialog: HTMLDialogElement = $state()
 
   function changeTheme(event) {
     let theme = event.target.value
@@ -224,6 +226,18 @@
       </div>
       <input type="checkbox" class="toggle" bind:checked={showToken} onchange={toggleShowToken} />
     </label>
+  </div>
+
+  <div class="form-control mt-2">
+    <div class="flex items-center justify-between gap-4 py-2">
+      <div class="flex flex-col">
+        <span class="label-text">{$t('memories')}</span>
+        <span class="label-text text-xs opacity-60">{$t('memories-description')}</span>
+      </div>
+      <button class="btn btn-sm btn-outline" onclick={() => memoryDialog.showModal()}>
+        {$t('manage-memories')}
+      </button>
+    </div>
   </div>
 
   <div class="form-control">
@@ -439,3 +453,5 @@
     >
   </p>
 </div>
+
+<MemoryManagerModal bind:dialog={memoryDialog} />

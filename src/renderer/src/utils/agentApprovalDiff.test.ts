@@ -30,4 +30,21 @@ describe('agent approval diff', () => {
     expect(changes).toHaveLength(1)
     expect(changes[0]).toMatchObject({ path: '/options', before: ['one'], after: ['one', 'two'] })
   })
+
+  it('shows deleted resource fields as removals', () => {
+    const changes = diffAgentApproval(
+      { id: 'memory-1', content: 'Prefer concise replies.', updatedBy: 'user' },
+      null
+    )
+
+    expect(changes).toEqual([
+      expect.objectContaining({ path: '/id', kind: 'removed', before: 'memory-1' }),
+      expect.objectContaining({
+        path: '/content',
+        kind: 'removed',
+        before: 'Prefer concise replies.'
+      }),
+      expect.objectContaining({ path: '/updatedBy', kind: 'removed', before: 'user' })
+    ])
+  })
 })

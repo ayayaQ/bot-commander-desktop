@@ -74,8 +74,16 @@ describe('agent resource tools', () => {
 
     expect(names).toContain('search_documentation')
     expect(names).toContain('read_documentation')
+    expect(names).toContain('list_memories')
+    expect(names).toContain('create_memory')
+    expect(names).toContain('edit_memory')
+    expect(names).toContain('delete_memory')
     expect(mutationToolNames.has('search_documentation')).toBe(false)
     expect(mutationToolNames.has('read_documentation')).toBe(false)
+    expect(mutationToolNames.has('list_memories')).toBe(false)
+    expect(mutationToolNames.has('create_memory')).toBe(true)
+    expect(mutationToolNames.has('edit_memory')).toBe(true)
+    expect(mutationToolNames.has('delete_memory')).toBe(true)
 
     const result = await executeReadTool('search_documentation', {
       query: '$rollnum',

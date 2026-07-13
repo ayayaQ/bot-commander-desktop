@@ -89,6 +89,14 @@ import {
   getAgentNotificationDetails,
   shouldShowAgentNotification
 } from '../services/agentNotification'
+import {
+  commitMemoryMutation,
+  loadAgentMemories,
+  prepareCreateMemory,
+  prepareDeleteMemory,
+  prepareUpdateMemory,
+  setAgentMemoryEventSink
+} from '../services/agentMemoryService'
 
 const agentViewState = new Map<number, boolean>()
 
@@ -168,6 +176,11 @@ export function addIPCHandlers() {
       window.webContents.send('agent:event', payload)
     }
     showAgentNotification(payload)
+  })
+  setAgentMemoryEventSink((memories) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send('memory:changed', memories)
+    }
   })
 
   ipcMain.on('agent:view-state', (event, active: boolean) => {
@@ -264,6 +277,21 @@ export function addIPCHandlers() {
     await saveSettings()
     return getSettings()
   })
+
+  ipcMain.handle('memory:list', () => loadAgentMemories())
+  ipcMain.handle('memory:create', async (_, content: string) =>
+    commitMemoryMutation(await prepareCreateMemory(content, 'user'))
+  )
+  ipcMain.handle(
+    'memory:update',
+    async (_, id: string, expectedRevision: string, content: string) =>
+      commitMemoryMutation(
+        await prepareUpdateMemory(id, expectedRevision, content, 'user')
+      )
+  )
+  ipcMain.handle('memory:delete', async (_, id: string, expectedRevision: string) =>
+    commitMemoryMutation(await prepareDeleteMemory(id, expectedRevision))
+  )
 
   ipcMain.handle('fetch-ai-models', async () => {
     const settings = getSettings()
