@@ -1,7 +1,8 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { Interpreter } from './interpreter'
 import type { BCFDContext, FunctionRegistry } from './types'
 import { createQuickJSScriptContext, type ScriptContext } from '../../utils/quickJsScriptContext'
+import { ActivityType } from 'discord.js'
 
 function testInterpreter(registry: FunctionRegistry): Interpreter {
   return new Interpreter(registry)
@@ -96,6 +97,58 @@ describe('BCFD interpreter', () => {
     )
 
     expect(result.output).toBe('TRUE|FALSE|TRUE')
+    expect(result.errors).toEqual([])
+  })
+
+  it('supports Android-canonical keyword spellings and legacy desktop aliases', async () => {
+    const user = { id: 'user-id', defaultAvatarURL: 'default-avatar' } as any
+    const result = await new Interpreter().interpret(
+      '$ID|$id|$defaultAvatar|$defaultavatar|$hour|$hours|$minute|$minutes|$second|$seconds',
+      { user }
+    )
+
+    const values = result.output.split('|')
+    expect(values.slice(0, 4)).toEqual([
+      'user-id',
+      'user-id',
+      'default-avatar',
+      'default-avatar'
+    ])
+    expect(values[4]).toBe(values[5])
+    expect(values[6]).toBe(values[7])
+    expect(values[8]).toBe(values[9])
+    expect(result.errors).toEqual([])
+  })
+
+  it('supports mutual-server counts and setStatus', async () => {
+    const setPresence = vi.fn()
+    const user = { id: 'user-id' } as any
+    const mentionedUser = { id: 'mentioned-id' } as any
+    const guilds = [
+      { members: { cache: { has: (id: string) => id === 'user-id' } } },
+      { members: { cache: { has: (_id: string) => true } } }
+    ]
+    const client = {
+      guilds: {
+        cache: {
+          filter: (predicate: (guild: (typeof guilds)[number]) => boolean) => ({
+            size: guilds.filter(predicate).length
+          })
+        }
+      },
+      user: { setPresence }
+    } as any
+
+    const result = await new Interpreter().interpret(
+      '$serversSharedWithBot|$mentionedServersSharedWithBot|$setStatus{idle|watching|Tests}',
+      { user, mentionedUser, client }
+    )
+
+    expect(result.output).toBe('2|1|')
+    expect(setPresence).toHaveBeenCalledWith({
+      status: 'idle',
+      activities: [{ name: 'Tests', type: ActivityType.Watching }]
+    })
     expect(result.errors).toEqual([])
   })
 

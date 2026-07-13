@@ -28,6 +28,7 @@ import { getSettings } from '../settingsService'
 import { getCommands } from '../botService'
 import { createAiChatCompletion, moderateTextWithOpenAI } from '../aiProviderService'
 import { ScriptExecutionError } from '../../utils/quickJsScriptContext'
+import { mutualGuildCount, setBotStatus } from './keywordHelpers'
 
 // ============================================================================
 // Channel Management Helpers
@@ -87,7 +88,9 @@ function createFunctionRegistry(): FunctionRegistry {
   )
   registry.set('discriminator', (_args, ctx) => ctx.user?.discriminator ?? '')
   registry.set('tag', (_args, ctx) => ctx.user?.tag ?? '')
-  registry.set('id', (_args, ctx) => ctx.user?.id ?? '')
+  const userID: BCFDFunction = (_args, ctx) => ctx.user?.id ?? ''
+  registry.set('ID', userID)
+  registry.set('id', userID) // Legacy desktop alias
   registry.set('isBot', (_args, ctx) => ctx.user?.bot.toString() ?? '')
   registry.set('globalName', (_args, ctx) => ctx.user?.globalName ?? '')
   registry.set('timeCreated', (_args, ctx) =>
@@ -96,7 +99,10 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('timeCreatedDiscord', (_args, ctx) =>
     discordTimestampFromMillis(ctx.user?.createdTimestamp)
   )
-  registry.set('defaultavatar', (_args, ctx) => ctx.user?.defaultAvatarURL ?? '')
+  const defaultAvatar: BCFDFunction = (_args, ctx) => ctx.user?.defaultAvatarURL ?? ''
+  registry.set('defaultAvatar', defaultAvatar)
+  registry.set('defaultavatar', defaultAvatar) // Legacy desktop alias
+  registry.set('serversSharedWithBot', (_args, ctx) => mutualGuildCount(ctx.client, ctx.user))
 
   // --------------------------------------------------------------------------
   // Member Context Functions
@@ -572,6 +578,9 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('mentionedDefaultAvatar', (_args, ctx) => ctx.mentionedUser?.defaultAvatarURL ?? '')
   registry.set('mentionedIsBot', (_args, ctx) => ctx.mentionedUser?.bot.toString() ?? '')
   registry.set('mentionedGlobalName', (_args, ctx) => ctx.mentionedUser?.globalName ?? '')
+  registry.set('mentionedServersSharedWithBot', (_args, ctx) =>
+    mutualGuildCount(ctx.client, ctx.mentionedUser)
+  )
 
   // --------------------------------------------------------------------------
   // Mentioned Member Context Functions
@@ -651,18 +660,24 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('commandCount', () => getCommands().bcfdCommands.length.toString())
   registry.set('date', () => new Date().toLocaleString())
   registry.set('dateDiscord', () => discordTimestampFromMillis(Date.now()))
-  registry.set('hours', () => {
+  const hour: BCFDFunction = () => {
     const h = new Date().getHours()
     return (h < 10 ? '0' : '') + h.toString()
-  })
-  registry.set('minutes', () => {
+  }
+  registry.set('hour', hour)
+  registry.set('hours', hour) // Legacy desktop alias
+  const minute: BCFDFunction = () => {
     const m = new Date().getMinutes()
     return (m < 10 ? '0' : '') + m.toString()
-  })
-  registry.set('seconds', () => {
+  }
+  registry.set('minute', minute)
+  registry.set('minutes', minute) // Legacy desktop alias
+  const second: BCFDFunction = () => {
     const s = new Date().getSeconds()
     return (s < 10 ? '0' : '') + s.toString()
-  })
+  }
+  registry.set('second', second)
+  registry.set('seconds', second) // Legacy desktop alias
   registry.set('message', (_args, ctx) => ctx.messageEvent?.content ?? '')
   registry.set(
     'messageAfterCommand',
@@ -878,6 +893,8 @@ function createFunctionRegistry(): FunctionRegistry {
     const value = ctx.vmContext.getVariable(args[0])
     return value !== undefined ? String(value) : ''
   })
+
+  registry.set('setStatus', (args, ctx) => setBotStatus(ctx.client, args))
 
   // --------------------------------------------------------------------------
   // String Manipulation Functions

@@ -20,6 +20,7 @@ import { getSettings } from './settingsService'
 import { createAiChatCompletion, moderateTextWithOpenAI } from './aiProviderService'
 import { interpret, BCFDContext as InterpreterContext } from './bcfdLang'
 import { rendererConsole } from '../utils/rendererConsole'
+import { mutualGuildCount, setBotStatus } from './bcfdLang/keywordHelpers'
 
 export type StringInfoContext = {
   message: string
@@ -192,11 +193,13 @@ const userReplacements = new Map<string, (context: StringInfoContext) => string>
   ['avatar', (ctx) => ctx.user?.avatarURL({}) ?? ctx.user?.defaultAvatarURL ?? ''],
   ['discriminator', (ctx) => ctx.user?.discriminator ?? ''],
   ['tag', (ctx) => ctx.user?.tag ?? ''],
-  ['id', (ctx) => ctx.user?.id ?? ''],
+  ['ID', (ctx) => ctx.user?.id ?? ''],
+  ['id', (ctx) => ctx.user?.id ?? ''], // Legacy desktop alias
   ['timeCreated', (ctx) => (ctx.user ? new Date(ctx.user?.createdTimestamp).toLocaleString() : '')],
   ['timeCreatedDiscord', (ctx) => discordTimestampFromMillis(ctx.user?.createdTimestamp)],
-  ['defaultavatar', (ctx) => ctx.user?.defaultAvatarURL ?? '']
-  // todo $serversSharedWithBot
+  ['defaultAvatar', (ctx) => ctx.user?.defaultAvatarURL ?? ''],
+  ['defaultavatar', (ctx) => ctx.user?.defaultAvatarURL ?? ''], // Legacy desktop alias
+  ['serversSharedWithBot', (ctx) => mutualGuildCount(ctx.client, ctx.user)]
 ])
 
 const memberReplacements = new Map<string, (context: StringInfoContext) => string>([
@@ -315,7 +318,8 @@ const mentionedReplacements = new Map<string, (context: StringInfoContext) => st
   ],
   ['mentionedNamePlain', (ctx) => ctx.mentionedUser?.displayName ?? ''],
   ['mentionedDefaultAvatar', (ctx) => ctx.mentionedUser?.defaultAvatarURL ?? ''],
-  ['mentionedIsBot', (ctx) => ctx.mentionedUser?.bot.toString() ?? '']
+  ['mentionedIsBot', (ctx) => ctx.mentionedUser?.bot.toString() ?? ''],
+  ['mentionedServersSharedWithBot', (ctx) => mutualGuildCount(ctx.client, ctx.mentionedUser)]
 ])
 
 const mentionedMemberReplacements = new Map<string, (context: StringInfoContext) => string>([
@@ -396,10 +400,19 @@ const generalReplacements = new Map<string, (context: StringInfoContext) => stri
   ['commandCount', (_ctx) => getCommands().bcfdCommands.length.toString()],
   ['date', (_ctx) => new Date().toLocaleString()],
   ['dateDiscord', (_ctx) => discordTimestampFromMillis(Date.now())],
+  ['hour', (_ctx) => (new Date().getHours() < 10 ? '0' : '') + new Date().getHours().toString()],
   ['hours', (_ctx) => (new Date().getHours() < 10 ? '0' : '') + new Date().getHours().toString()],
+  [
+    'minute',
+    (_ctx) => (new Date().getMinutes() < 10 ? '0' : '') + new Date().getMinutes().toString()
+  ],
   [
     'minutes',
     (_ctx) => (new Date().getMinutes() < 10 ? '0' : '') + new Date().getMinutes().toString()
+  ],
+  [
+    'second',
+    (_ctx) => (new Date().getSeconds() < 10 ? '0' : '') + new Date().getSeconds().toString()
   ],
   [
     'seconds',
@@ -440,6 +453,10 @@ export async function stringInfoAddGeneral(
     const result = Math.floor(Math.random() * (parseInt(y) - parseInt(x) + 1)) + parseInt(x)
     return result.toString()
   })
+
+  message = message.replace(/\$setStatus\{([^}]*)\}/g, (_match, rawArgs: string) =>
+    setBotStatus(ctx.client, rawArgs.split('|'))
+  )
 
   const sumRegex = /\$sum\{([^}]+)\}/g
 

@@ -25,7 +25,7 @@ export const bcfdItems: BCFDLanguageItem[] = [
   { name: 'avatar', syntax: 'variable', description: 'User avatar URL' },
   { name: 'discriminator', syntax: 'variable', description: 'User discriminator' },
   { name: 'tag', syntax: 'variable', description: 'User tag (e.g. User#1234)' },
-  { name: 'id', syntax: 'variable', description: 'User ID' },
+  { name: 'ID', syntax: 'variable', description: 'User ID' },
   { name: 'isBot', syntax: 'variable', description: 'Is user a bot' },
   { name: 'globalName', syntax: 'variable', description: 'User global display name' },
   { name: 'timeCreated', syntax: 'variable', description: 'User account creation time' },
@@ -34,7 +34,12 @@ export const bcfdItems: BCFDLanguageItem[] = [
     syntax: 'variable',
     description: 'User account creation time as Discord timestamp'
   },
-  { name: 'defaultavatar', syntax: 'variable', description: 'User default avatar URL' },
+  { name: 'defaultAvatar', syntax: 'variable', description: 'User default avatar URL' },
+  {
+    name: 'serversSharedWithBot',
+    syntax: 'variable',
+    description: 'Number of cached servers shared with the bot'
+  },
 
   { name: 'memberIsOwner', syntax: 'variable', description: 'Is member the server owner' },
   { name: 'memberEffectiveName', syntax: 'variable', description: 'Member display name' },
@@ -256,6 +261,11 @@ export const bcfdItems: BCFDLanguageItem[] = [
     description: 'Mentioned user discriminator'
   },
   { name: 'mentionedAvatar', syntax: 'variable', description: 'Mentioned user avatar' },
+  {
+    name: 'mentionedServersSharedWithBot',
+    syntax: 'variable',
+    description: 'Number of cached servers shared with the mentioned user'
+  },
   { name: 'mentionedTimeCreated', syntax: 'variable', description: 'Mentioned user creation time' },
   {
     name: 'mentionedTimeCreatedDiscord',
@@ -376,9 +386,9 @@ export const bcfdItems: BCFDLanguageItem[] = [
     syntax: 'variable',
     description: 'Current date/time as Discord timestamp'
   },
-  { name: 'hours', syntax: 'variable', description: 'Current hour (00-23)' },
-  { name: 'minutes', syntax: 'variable', description: 'Current minute (00-59)' },
-  { name: 'seconds', syntax: 'variable', description: 'Current second (00-59)' },
+  { name: 'hour', syntax: 'variable', description: 'Current hour (00-23)' },
+  { name: 'minute', syntax: 'variable', description: 'Current minute (00-59)' },
+  { name: 'second', syntax: 'variable', description: 'Current second (00-59)' },
   { name: 'message', syntax: 'variable', description: 'Full message content' },
   { name: 'messageAfterCommand', syntax: 'variable', description: 'Message after command' },
   { name: 'argsCount', syntax: 'variable', description: 'Number of arguments' },
@@ -532,6 +542,12 @@ export const bcfdItems: BCFDLanguageItem[] = [
     syntax: 'function-paren',
     description: 'Retrieve a variable',
     insertText: 'get(name)'
+  },
+  {
+    name: 'setStatus',
+    syntax: 'function-brace',
+    description: 'Set bot online status and activity',
+    insertText: 'setStatus{online|playing|Activity text}'
   },
   {
     name: 'chat',

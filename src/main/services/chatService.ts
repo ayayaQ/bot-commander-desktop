@@ -350,12 +350,12 @@ const BCFD_SYSTEM_PROMPT = `You are an expert Discord bot command editor. You he
 ## BCFD Template Language Overview:
 
 ### Variables (prefix with $):
-- User: $name (mention), $namePlain, $avatar, $id, $tag, $discriminator
+- User: $name (mention), $namePlain, $avatar, $ID, $tag, $discriminator, $defaultAvatar, $serversSharedWithBot
 - Bot: $botName, $botNamePlain, $ping, $serverCount, $botAvatar
 - Server: $server, $memberCount, $serverIcon, $serverDescription
 - Channel: $channel, $channelID, $channelAsMention
 - Message: $message, $messageAfterCommand, $args(index), $argsCount
-- Mentioned: $mentionedName, $mentionedID, $mentionedNamePlain
+- Mentioned: $mentionedName, $mentionedID, $mentionedNamePlain, $mentionedServersSharedWithBot
 
 ### Functions:
 - $random{opt1|opt2|opt3} - Random selection from pipe-separated options
@@ -364,7 +364,8 @@ const BCFD_SYSTEM_PROMPT = `You are an expert Discord bot command editor. You he
 - $args(index) - Get argument at position (0-based)
 - $argsCount - Total number of arguments
 - $chat(prompt) - AI response (requires API key)
-- $date, $hours, $minutes, $seconds - Date/time values
+- $date, $hour, $minute, $second - Date/time values
+- $setStatus{online|playing|Activity text} - Set bot status and activity
 
 ### Variable Storage Functions:
 **$set(name, value)** and **$get(name)** work with the global JavaScript context:
@@ -452,7 +453,7 @@ When answering questions without changes:
 - Give examples when appropriate`
 
 const PATCH_SCHEMA_FIELDS = editableCommandFields.filter(
-  (field) => field !== 'actionArr' && field !== 'channelEmbed' && field !== 'privateEmbed'
+  (field) => field !== 'channelEmbed' && field !== 'privateEmbed'
 )
 
 // Structured output schema for command updates

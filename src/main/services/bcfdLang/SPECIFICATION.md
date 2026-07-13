@@ -149,10 +149,11 @@ $endif
 | `$avatar`             | User's avatar URL                          | `https://...`           |
 | `$discriminator`      | User's discriminator                       | `1234`                  |
 | `$tag`                | User's tag                                 | `JohnDoe#1234`          |
-| `$id`                 | User's ID                                  | `123456789`             |
+| `$ID`                 | User's ID                                  | `123456789`             |
 | `$timeCreated`        | Account creation time                      | `1/1/2020, 12:00:00 PM` |
 | `$timeCreatedDiscord` | Account creation time as Discord timestamp | `<t:1577880000>`        |
-| `$defaultavatar`      | Default avatar URL                         | `https://...`           |
+| `$defaultAvatar`      | Default avatar URL                         | `https://...`           |
+| `$serversSharedWithBot` | Number of cached mutual servers          | `3`                     |
 
 ### Member Context
 
@@ -311,6 +312,7 @@ This server has $channelCount channels.
 | `$mentionedNamePlain`          | Mentioned user's display name                          |
 | `$mentionedDefaultAvatar`      | Mentioned user's default avatar                        |
 | `$mentionedIsBot`              | Is mentioned user a bot?                               |
+| `$mentionedServersSharedWithBot` | Number of cached mutual servers                      |
 
 ### Utility Functions
 
@@ -334,9 +336,9 @@ This server has $channelCount channels.
 | -------------- | -------------------------------------- |
 | `$date`        | Current date/time                      |
 | `$dateDiscord` | Current date/time as Discord timestamp |
-| `$hours`       | Current hour (00-23)                   |
-| `$minutes`     | Current minute (00-59)                 |
-| `$seconds`     | Current second (00-59)                 |
+| `$hour`        | Current hour (00-23)                   |
+| `$minute`      | Current minute (00-59)                 |
+| `$second`      | Current second (00-59)                 |
 
 ### Message Context
 
@@ -358,6 +360,12 @@ This server has $channelCount channels.
 | -------- | ------------------- | ------------------- |
 | `$set`   | `$set(name, value)` | Store a variable    |
 | `$get`   | `$get(name)`        | Retrieve a variable |
+
+### Bot Status Function
+
+`$setStatus{online|playing|Activity text}` updates the bot's online status and activity. Online
+status accepts `online`, `idle`, or `dnd`; activity type accepts `playing`, `watching`,
+`listening`, `competing`, or `reset`.
 
 ## Evaluation Order
 
