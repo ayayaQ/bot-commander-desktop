@@ -24,10 +24,22 @@
   let models: Array<{ id: string; name?: string; supportsReasoning?: boolean }> = $state([])
   let loadingModels = $state(false)
   let modelError = $state('')
+  let currentTime = $state(Date.now())
+  let spinnerFrameIndex = $state(0)
+
+  const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
   const running = $derived(
     $activeAgentSession?.status === 'running' || $activeAgentSession?.status === 'waiting_approval'
   )
+  const elapsedTime = $derived.by(() => {
+    if ($activeAgentSession?.status !== 'running') return '0:00'
+    const startedAt = [...$activeAgentSession.messages]
+      .reverse()
+      .find((message) => message.role === 'user')?.timestamp
+    if (!startedAt) return '0:00'
+    return formatElapsedTime(Math.max(0, currentTime - new Date(startedAt).getTime()))
+  })
 
   onMount(() => {
     void initializeAgentSessions().then(async () => {
@@ -37,6 +49,29 @@
     })
     void refreshModels()
   })
+
+  onMount(() => {
+    const timer = window.setInterval(() => {
+      currentTime = Date.now()
+    }, 1000)
+    const spinnerTimer = window.setInterval(() => {
+      if (running) spinnerFrameIndex = (spinnerFrameIndex + 1) % spinnerFrames.length
+    }, 80)
+    return () => {
+      window.clearInterval(timer)
+      window.clearInterval(spinnerTimer)
+    }
+  })
+
+  function formatElapsedTime(milliseconds: number): string {
+    const totalSeconds = Math.floor(milliseconds / 1000)
+    const hours = Math.floor(totalSeconds / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    const seconds = totalSeconds % 60
+    return hours > 0
+      ? `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+      : `${minutes}:${seconds.toString().padStart(2, '0')}`
+  }
 
   async function refreshModels() {
     loadingModels = true
@@ -268,8 +303,14 @@
             {/each}
             {#if $activeAgentSession.status === 'running'}
               <div class="flex items-center gap-2 text-sm opacity-60">
-                <span class="loading loading-spinner loading-sm"></span>
+                <span
+                  class="inline-block w-3 font-mono text-primary text-base leading-none"
+                  aria-hidden="true">{spinnerFrames[spinnerFrameIndex]}</span
+                >
                 <span>Agent is working</span>
+                <span class="tabular-nums" aria-label={`Elapsed time ${elapsedTime}`}
+                  >{elapsedTime}</span
+                >
               </div>
             {/if}
             {#if $activeAgentSession.error}
