@@ -199,8 +199,10 @@
           >
             <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
               <label class="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
-                <span class="text-xs font-medium uppercase text-base-content/50"
-                  >{$t('status')}</span
+                <span
+                  class="material-symbols-outlined text-base-content/50"
+                  title={$t('status')}
+                  aria-hidden="true">check_circle</span
                 >
                 <select
                   class="select select-sm select-bordered w-full sm:min-w-44"
@@ -213,9 +215,15 @@
                 </select>
               </label>
 
-              <div class="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
-                <span class="text-xs font-medium uppercase text-base-content/50"
-                  >{$t('sort-interactions')}</span
+              <div
+                class="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:gap-2"
+                role="group"
+                aria-label={$t('sort-interactions')}
+              >
+                <span
+                  class="material-symbols-outlined text-base-content/50"
+                  title={$t('sort-interactions')}
+                  aria-hidden="true">sort</span
                 >
                 <div class="join max-w-full overflow-x-auto">
                   <button

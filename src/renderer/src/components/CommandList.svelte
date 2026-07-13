@@ -167,12 +167,7 @@
         <div class="space-y-3">
           <label class="input input-bordered flex items-center gap-2 w-full">
             <span class="material-symbols-outlined text-base-content/60">search</span>
-            <input
-              type="text"
-              class="grow"
-              placeholder={$t('search')}
-              bind:value={searchQuery}
-            />
+            <input type="text" class="grow" placeholder={$t('search')} bind:value={searchQuery} />
             {#if searchQuery.trim()}
               <button
                 type="button"
@@ -190,7 +185,11 @@
           >
             <div class="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
               <label class="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
-                <span class="text-xs font-medium uppercase text-base-content/50">{$t('type')}</span>
+                <span
+                  class="material-symbols-outlined text-base-content/50"
+                  title={$t('type')}
+                  aria-hidden="true">category</span
+                >
                 <select
                   class="select select-sm select-bordered w-full sm:min-w-48"
                   bind:value={typeFilter}
@@ -202,9 +201,15 @@
                 </select>
               </label>
 
-              <div class="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
-                <span class="text-xs font-medium uppercase text-base-content/50"
-                  >{$t('sort-commands')}</span
+              <div
+                class="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:gap-2"
+                role="group"
+                aria-label={$t('sort-commands')}
+              >
+                <span
+                  class="material-symbols-outlined text-base-content/50"
+                  title={$t('sort-commands')}
+                  aria-hidden="true">sort</span
                 >
                 <div class="join max-w-full overflow-x-auto">
                   <button
