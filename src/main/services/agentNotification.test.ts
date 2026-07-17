@@ -16,6 +16,7 @@ function event(type: AgentStreamEvent['type'], status: AgentSession['status']): 
       messages: [],
       createdAt: '',
       updatedAt: '',
+      planReady: false,
       tokenCount: 0,
       error: 'Secret provider detail'
     }

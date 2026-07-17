@@ -1,5 +1,6 @@
 import { derived, get, writable } from 'svelte/store'
 import type {
+  AgentPlanDecision,
   AgentSession,
   AgentSessionsData,
   AgentStreamEvent,
@@ -7,7 +8,11 @@ import type {
 } from '../../../shared/agentTypes'
 import { deriveAgentNavigationStatus, type AgentTerminalAttention } from '../utils/agentAttention'
 
-const initial: AgentSessionsData = { sessions: [], activeSessionId: null }
+const initial: AgentSessionsData = {
+  sessions: [],
+  activeSessionId: null,
+  modelDefaultsByProvider: {}
+}
 export const agentSessions = writable<AgentSessionsData>(initial)
 export const activeAgentSession = derived(
   agentSessions,
@@ -114,6 +119,7 @@ export function setAgentViewActive(active: boolean) {
 export async function createAgentSession() {
   const session: AgentSession = await window.electron.ipcRenderer.invoke('agent:create')
   agentSessions.update((data) => ({
+    ...data,
     sessions: [session, ...data.sessions],
     activeSessionId: session.id
   }))
@@ -130,6 +136,7 @@ export async function deleteAgentSession(sessionId: string) {
   agentSessions.update((data) => {
     const sessions = data.sessions.filter((session) => session.id !== sessionId)
     return {
+      ...data,
       sessions,
       activeSessionId:
         data.activeSessionId === sessionId ? sessions[0]?.id || null : data.activeSessionId
@@ -146,6 +153,18 @@ export async function sendAgentMessage(content: string) {
   const session = get(activeAgentSession)
   if (!session) return
   await window.electron.ipcRenderer.invoke('agent:send', session.id, content)
+}
+
+export async function resolveAgentPlan(decision: AgentPlanDecision) {
+  const session = get(activeAgentSession)
+  if (!session) return
+  const result = await window.electron.ipcRenderer.invoke(
+    'agent:resolve-plan',
+    session.id,
+    decision
+  )
+  if (decision === 'continue') replaceSession(result as AgentSession)
+  return result
 }
 
 export async function resolveAgentApproval(toolCallId: string, approved: boolean) {

@@ -40,7 +40,7 @@ import {
   findInteractionById
 } from '../services/interactionService'
 import { decodeBCFDCommandArray } from '../../shared/commandCodec'
-import type { AgentStreamEvent } from '../../shared/agentTypes'
+import type { AgentPlanDecision, AgentStreamEvent } from '../../shared/agentTypes'
 import {
   registerSlashCommand,
   unregisterSlashCommand,
@@ -80,6 +80,7 @@ import {
   deleteAgentSession,
   loadAgentSessions,
   resolveAgentApproval,
+  resolveAgentPlan,
   runAgentSession,
   setActiveAgentSession,
   setAgentEventSink,
@@ -675,7 +676,7 @@ export function addIPCHandlers() {
   )
   ipcMain.handle('agent:delete', async (_, sessionId: string) => deleteAgentSession(sessionId))
   ipcMain.handle('agent:update', async (_, sessionId: string, updates) =>
-    updateAgentSession(sessionId, updates)
+    updateAgentSession(sessionId, updates, getAiProvider(getSettings()))
   )
   ipcMain.handle('agent:set-active', async (_, sessionId: string | null) => {
     await setActiveAgentSession(sessionId)
@@ -683,6 +684,11 @@ export function addIPCHandlers() {
   })
   ipcMain.handle('agent:send', async (_, sessionId: string, content: string) =>
     runAgentSession(sessionId, content, getSettings())
+  )
+  ipcMain.handle(
+    'agent:resolve-plan',
+    async (_, sessionId: string, decision: AgentPlanDecision) =>
+      resolveAgentPlan(sessionId, decision, getSettings())
   )
   ipcMain.handle(
     'agent:approve',

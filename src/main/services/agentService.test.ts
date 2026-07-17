@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   chatCreate: vi.fn(),
   executeReadTool: vi.fn(),
   agentToolTargetLabel: vi.fn(),
+  readFile: vi.fn(),
   writeFile: vi.fn(),
   rename: vi.fn(),
   memories: [] as Array<{ content: string; updatedAt: string }>
@@ -14,9 +15,7 @@ vi.mock('electron', () => ({ app: { getPath: vi.fn(() => 'C:\\tmp') } }))
 
 vi.mock('node:fs/promises', () => ({
   default: {
-    readFile: vi.fn(async () => {
-      throw Object.assign(new Error('missing'), { code: 'ENOENT' })
-    }),
+    readFile: mocks.readFile,
     writeFile: mocks.writeFile,
     rename: mocks.rename
   }
@@ -51,7 +50,9 @@ vi.mock('./agentMemoryService', () => ({
 
 describe('OpenAI agent provider adapter', () => {
   beforeEach(() => {
+    vi.resetModules()
     vi.clearAllMocks()
+    mocks.readFile.mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
     mocks.memories = []
   })
   afterEach(() => vi.unstubAllGlobals())
@@ -200,6 +201,125 @@ describe('OpenAI agent provider adapter', () => {
     )
   })
 
+  it('recognizes only a complete proposed plan block', async () => {
+    const { parseProposedPlan } = await import('./agentService')
+
+    expect(parseProposedPlan('<proposed_plan>\n# Build it\n</proposed_plan>')).toEqual({
+      content: '# Build it',
+      planReady: true
+    })
+    expect(parseProposedPlan('I still need one detail.')).toEqual({
+      content: 'I still need one detail.',
+      planReady: false
+    })
+    expect(parseProposedPlan('Preface\n<proposed_plan># Partial</proposed_plan>')).toMatchObject({
+      planReady: false
+    })
+    expect(parseProposedPlan('<proposed_plan> </proposed_plan>')).toMatchObject({
+      planReady: false
+    })
+    expect(
+      parseProposedPlan('<proposed_plan>First</proposed_plan><proposed_plan>Second</proposed_plan>')
+    ).toMatchObject({ planReady: false })
+  })
+
+  it('persists a completed plan and supports continuing planning', async () => {
+    mocks.responsesCreate.mockResolvedValueOnce({
+      output_text: '<proposed_plan>\n# Final plan\n\n- Make the change\n</proposed_plan>',
+      output: [],
+      usage: { input_tokens: 20, output_tokens: 10, total_tokens: 30 }
+    })
+    const service = await import('./agentService')
+    const session = await service.createAgentSession({
+      aiProvider: 'openai',
+      openaiApiKey: 'test',
+      selectedAiModel: 'gpt-5.6-luna'
+    })
+    await service.updateAgentSession(session.id, { mode: 'planning' }, 'openai')
+    const completed = new Promise<void>((resolve) => {
+      service.setAgentEventSink((event) => {
+        if (event.type === 'done' && event.sessionId === session.id) resolve()
+      })
+    })
+
+    await service.runAgentSession(session.id, 'Plan this change', {
+      aiProvider: 'openai',
+      openaiApiKey: 'test'
+    })
+    await completed
+    const planned = (await service.loadAgentSessions()).sessions.find(
+      (item) => item.id === session.id
+    )!
+    expect(planned).toMatchObject({ mode: 'planning', status: 'completed', planReady: true })
+    expect(planned.messages.at(-1)?.content).toBe('# Final plan\n\n- Make the change')
+
+    await service.resolveAgentPlan(session.id, 'continue', {
+      aiProvider: 'openai',
+      openaiApiKey: 'test'
+    })
+    const continued = (await service.loadAgentSessions()).sessions.find(
+      (item) => item.id === session.id
+    )!
+    expect(continued).toMatchObject({ mode: 'planning', status: 'completed', planReady: false })
+    expect(continued.messages).toHaveLength(planned.messages.length)
+    service.setAgentEventSink(null)
+  })
+
+  it.each(['auto', 'manual'] as const)(
+    'switches to %s and sends the fixed implementation request',
+    async (decision) => {
+      mocks.responsesCreate
+        .mockResolvedValueOnce({
+          output_text: '<proposed_plan># Final plan</proposed_plan>',
+          output: [],
+          usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 }
+        })
+        .mockResolvedValueOnce({
+          output_text: 'Implemented.',
+          output: [],
+          usage: { input_tokens: 15, output_tokens: 5, total_tokens: 20 }
+        })
+      const service = await import('./agentService')
+      const session = await service.createAgentSession({
+        aiProvider: 'openai',
+        openaiApiKey: 'test',
+        selectedAiModel: 'gpt-5.6-luna'
+      })
+      await service.updateAgentSession(session.id, { mode: 'planning' }, 'openai')
+      let completionCount = 0
+      let resolveFirstCompletion: (() => void) | undefined
+      let resolveSecondCompletion: (() => void) | undefined
+      const firstCompletion = new Promise<void>((resolve) => (resolveFirstCompletion = resolve))
+      const secondCompletion = new Promise<void>((resolve) => (resolveSecondCompletion = resolve))
+      service.setAgentEventSink((event) => {
+        if (event.type !== 'done' || event.sessionId !== session.id) return
+        completionCount += 1
+        if (completionCount === 1) resolveFirstCompletion?.()
+        if (completionCount === 2) resolveSecondCompletion?.()
+      })
+
+      await service.runAgentSession(session.id, 'Plan this change', {
+        aiProvider: 'openai',
+        openaiApiKey: 'test'
+      })
+      await firstCompletion
+      await service.resolveAgentPlan(session.id, decision, {
+        aiProvider: 'openai',
+        openaiApiKey: 'test'
+      })
+      await secondCompletion
+
+      const implemented = (await service.loadAgentSessions()).sessions.find(
+        (item) => item.id === session.id
+      )!
+      expect(implemented).toMatchObject({ mode: decision, status: 'completed', planReady: false })
+      expect(
+        implemented.messages.filter((message) => message.role === 'user').at(-1)?.content
+      ).toBe('Implement the plan.')
+      service.setAgentEventSink(null)
+    }
+  )
+
   it('persists the resolved target label on tool calls', async () => {
     mocks.agentToolTargetLabel.mockReturnValueOnce('ping')
     mocks.executeReadTool.mockResolvedValue({ resource: { command: 'ping' }, revision: 'abc123' })
@@ -240,6 +360,78 @@ describe('OpenAI agent provider adapter', () => {
     expect(mocks.agentToolTargetLabel).toHaveBeenCalledWith('read_command', { id: 'command-1' })
     expect(call).toMatchObject({ name: 'read_command', targetLabel: 'ping', status: 'completed' })
     service.setAgentEventSink(null)
+  })
+
+  it('remembers complete model defaults independently for each provider', async () => {
+    const service = await import('./agentService')
+    const openAiSession = await service.createAgentSession({
+      aiProvider: 'openai',
+      openaiApiKey: 'test',
+      selectedOpenAiModel: 'gpt-initial'
+    })
+
+    expect(openAiSession).toMatchObject({ model: 'gpt-initial', reasoningEffort: 'none' })
+
+    await service.updateAgentSession(openAiSession.id, { reasoningEffort: 'low' }, 'openai')
+    await service.updateAgentSession(openAiSession.id, { model: 'gpt-5.6-sol' }, 'openai')
+    await service.updateAgentSession(openAiSession.id, { title: 'Renamed session' }, 'openai')
+
+    const nextOpenAiSession = await service.createAgentSession({
+      aiProvider: 'openai',
+      openaiApiKey: 'test',
+      selectedOpenAiModel: 'gpt-chat-setting'
+    })
+    expect(nextOpenAiSession).toMatchObject({ model: 'gpt-5.6-sol', reasoningEffort: 'low' })
+
+    const openRouterSession = await service.createAgentSession({
+      aiProvider: 'openrouter',
+      openaiApiKey: 'moderation-test',
+      openrouterApiKey: 'test',
+      selectedOpenRouterModel: 'openai/router-initial'
+    })
+    expect(openRouterSession).toMatchObject({
+      model: 'openai/router-initial',
+      reasoningEffort: 'none'
+    })
+
+    await service.updateAgentSession(
+      openRouterSession.id,
+      { model: 'anthropic/router-agent', reasoningEffort: 'high' },
+      'openrouter'
+    )
+    await service.deleteAgentSession(openRouterSession.id)
+
+    const nextOpenRouterSession = await service.createAgentSession({
+      aiProvider: 'openrouter',
+      openaiApiKey: 'moderation-test',
+      openrouterApiKey: 'test',
+      selectedOpenRouterModel: 'openai/router-chat-setting'
+    })
+    expect(nextOpenRouterSession).toMatchObject({
+      model: 'anthropic/router-agent',
+      reasoningEffort: 'high'
+    })
+
+    const stored = await service.loadAgentSessions()
+    expect(stored.modelDefaultsByProvider).toEqual({
+      openai: { model: 'gpt-5.6-sol', reasoningEffort: 'low' },
+      openrouter: { model: 'anthropic/router-agent', reasoningEffort: 'high' }
+    })
+  })
+
+  it('migrates agent session data without remembered model defaults', async () => {
+    mocks.readFile.mockResolvedValueOnce(JSON.stringify({ sessions: [], activeSessionId: null }))
+    const service = await import('./agentService')
+
+    await expect(service.loadAgentSessions()).resolves.toEqual({
+      sessions: [],
+      activeSessionId: null,
+      modelDefaultsByProvider: {}
+    })
+    expect(mocks.writeFile).toHaveBeenCalledWith(
+      expect.stringContaining('agent-sessions.json.tmp'),
+      expect.stringContaining('"modelDefaultsByProvider": {}')
+    )
   })
 
   it('maps OpenRouter prompt and completion token usage', async () => {

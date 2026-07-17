@@ -5,7 +5,7 @@
   import { renderMarkdown } from '../utils/markdown'
   import { agentToolLabel } from '../utils/agentToolLabel'
   import { settingsStore } from '../stores/settings'
-  import type { AgentMode, AgentToolCall } from '../../../shared/agentTypes'
+  import type { AgentMode, AgentPlanDecision, AgentToolCall } from '../../../shared/agentTypes'
   import {
     activeAgentSession,
     agentSessions,
@@ -14,23 +14,33 @@
     deleteAgentSession,
     initializeAgentSessions,
     resolveAgentApproval,
+    resolveAgentPlan,
     selectAgentSession,
     sendAgentMessage,
     updateAgentSession
   } from '../stores/agent'
 
   let input = $state('')
+  let inputElement: HTMLTextAreaElement = $state()
   let messagesElement: HTMLDivElement = $state()
   let models: Array<{ id: string; name?: string; supportsReasoning?: boolean }> = $state([])
   let loadingModels = $state(false)
   let modelError = $state('')
   let currentTime = $state(Date.now())
   let spinnerFrameIndex = $state(0)
+  let resolvingPlan = $state(false)
+  let planActionError = $state('')
+  let planActionErrorSessionId = $state('')
 
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
   const running = $derived(
     $activeAgentSession?.status === 'running' || $activeAgentSession?.status === 'waiting_approval'
+  )
+  const awaitingPlanDecision = $derived(
+    $activeAgentSession?.planReady === true &&
+      $activeAgentSession.mode === 'planning' &&
+      $activeAgentSession.status === 'completed'
   )
   const elapsedTime = $derived.by(() => {
     if ($activeAgentSession?.status !== 'running') return '0:00'
@@ -86,7 +96,8 @@
   }
 
   async function submit() {
-    if (!input.trim() || running || !$activeAgentSession) return
+    if (!input.trim() || running || awaitingPlanDecision || resolvingPlan || !$activeAgentSession)
+      return
     const content = input.trim()
     input = ''
     await sendAgentMessage(content)
@@ -128,6 +139,25 @@
 
   async function setMode(mode: AgentMode) {
     if ($activeAgentSession) await updateAgentSession($activeAgentSession.id, { mode })
+  }
+
+  async function handlePlanDecision(decision: AgentPlanDecision) {
+    if (!$activeAgentSession || !awaitingPlanDecision || resolvingPlan) return
+    const sessionId = $activeAgentSession.id
+    resolvingPlan = true
+    planActionError = ''
+    planActionErrorSessionId = ''
+    try {
+      await resolveAgentPlan(decision)
+      await tick()
+      if (decision === 'continue') inputElement?.focus()
+      else scrollToBottom()
+    } catch (error) {
+      planActionError = error instanceof Error ? error.message : String(error)
+      planActionErrorSessionId = sessionId
+    } finally {
+      resolvingPlan = false
+    }
   }
 
   async function closeSession(event: MouseEvent, sessionId: string) {
@@ -195,7 +225,7 @@
                 ? 'btn-primary'
                 : 'btn-ghost'}"
               onclick={() => setMode(option[0] as AgentMode)}
-              disabled={running}>{option[1]}</button
+              disabled={running || resolvingPlan}>{option[1]}</button
             >
           {/each}
         </div>
@@ -209,13 +239,13 @@
             isLoading={loadingModels}
             onRefresh={refreshModels}
             onChange={(model) => updateAgentSession($activeAgentSession!.id, { model })}
-            disabled={running}
+            disabled={running || resolvingPlan}
           />
         </div>
         <select
           class="select select-bordered select-sm w-28"
           value={$activeAgentSession.reasoningEffort}
-          disabled={running}
+          disabled={running || resolvingPlan}
           onchange={(event) =>
             updateAgentSession($activeAgentSession!.id, {
               reasoningEffort: event.currentTarget.value as any
@@ -321,37 +351,67 @@
       </div>
 
       <footer class="p-4 border-t border-base-300 bg-base-100 shrink-0">
-        <div class="max-w-4xl mx-auto flex items-center gap-2">
-          <textarea
-            class="agent-input textarea textarea-bordered grow min-h-12 max-h-36 resize-none overflow-y-auto"
-            rows="1"
-            bind:value={input}
-            onkeydown={handleKeydown}
-            placeholder={$activeAgentSession.mode === 'planning'
-              ? 'Describe what you want planned...'
-              : 'Ask the agent...'}
-            disabled={running}
-          ></textarea>
-          {#if running}
-            <button
-              class="btn btn-square btn-error"
-              onclick={cancelAgentRun}
-              title="Stop run"
-              aria-label="Stop run"
-            >
-              <span class="material-symbols-outlined">stop</span>
-            </button>
-          {:else}
-            <button
-              class="btn btn-square btn-primary"
-              onclick={submit}
-              disabled={!input.trim()}
-              title="Send"
-              aria-label="Send"
-            >
-              <span class="material-symbols-outlined">arrow_upward</span>
-            </button>
+        <div class="max-w-4xl mx-auto space-y-3">
+          {#if awaitingPlanDecision}
+            <div class="border border-base-300 rounded-md bg-base-200 p-3">
+              <div class="text-sm font-semibold mb-3">Plan ready to implement</div>
+              <div class="flex flex-wrap gap-2">
+                <button
+                  class="btn btn-sm btn-primary"
+                  onclick={() => handlePlanDecision('auto')}
+                  disabled={resolvingPlan}>Implement in Auto</button
+                >
+                <button
+                  class="btn btn-sm btn-outline"
+                  onclick={() => handlePlanDecision('manual')}
+                  disabled={resolvingPlan}>Implement in Manual</button
+                >
+                <button
+                  class="btn btn-sm btn-ghost"
+                  onclick={() => handlePlanDecision('continue')}
+                  disabled={resolvingPlan}>Continue Planning</button
+                >
+              </div>
+            </div>
           {/if}
+          {#if planActionError && planActionErrorSessionId === $activeAgentSession.id}
+            <div class="alert alert-error text-sm">{planActionError}</div>
+          {/if}
+          <div class="flex items-center gap-2">
+            <textarea
+              class="agent-input textarea textarea-bordered grow min-h-12 max-h-36 resize-none overflow-y-auto"
+              rows="1"
+              bind:this={inputElement}
+              bind:value={input}
+              onkeydown={handleKeydown}
+              placeholder={awaitingPlanDecision
+                ? 'Choose how to proceed with the completed plan...'
+                : $activeAgentSession.mode === 'planning'
+                  ? 'Describe what you want planned...'
+                  : 'Ask the agent...'}
+              disabled={running || awaitingPlanDecision || resolvingPlan}
+            ></textarea>
+            {#if running}
+              <button
+                class="btn btn-square btn-error"
+                onclick={cancelAgentRun}
+                title="Stop run"
+                aria-label="Stop run"
+              >
+                <span class="material-symbols-outlined">stop</span>
+              </button>
+            {:else}
+              <button
+                class="btn btn-square btn-primary"
+                onclick={submit}
+                disabled={!input.trim() || awaitingPlanDecision || resolvingPlan}
+                title="Send"
+                aria-label="Send"
+              >
+                <span class="material-symbols-outlined">arrow_upward</span>
+              </button>
+            {/if}
+          </div>
         </div>
       </footer>
     </section>

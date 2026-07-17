@@ -1,5 +1,15 @@
 export type AgentMode = 'manual' | 'auto' | 'planning'
-export type AgentRunStatus = 'idle' | 'running' | 'waiting_approval' | 'completed' | 'error' | 'cancelled' | 'interrupted'
+export type AgentPlanDecision = 'auto' | 'manual' | 'continue'
+export type AgentProvider = 'openai' | 'openrouter'
+export type AgentReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+export type AgentRunStatus =
+  | 'idle'
+  | 'running'
+  | 'waiting_approval'
+  | 'completed'
+  | 'error'
+  | 'cancelled'
+  | 'interrupted'
 
 export interface AgentToolCall {
   id: string
@@ -40,20 +50,27 @@ export interface AgentSession {
   title: string
   mode: AgentMode
   model: string
-  reasoningEffort: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+  reasoningEffort: AgentReasoningEffort
   status: AgentRunStatus
   messages: AgentMessage[]
   createdAt: string
   updatedAt: string
   activeRunId?: string
+  planReady: boolean
   tokenCount: number
   lastRunMetrics?: AgentRunMetrics
   error?: string
 }
 
+export interface AgentModelDefaults {
+  model: string
+  reasoningEffort: AgentReasoningEffort
+}
+
 export interface AgentSessionsData {
   sessions: AgentSession[]
   activeSessionId: string | null
+  modelDefaultsByProvider: Partial<Record<AgentProvider, AgentModelDefaults>>
 }
 
 export type AgentMemoryActor = 'agent' | 'user'

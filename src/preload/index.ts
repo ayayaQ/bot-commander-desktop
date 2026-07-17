@@ -78,6 +78,7 @@ const validInvokeChannels = [
   'agent:update',
   'agent:set-active',
   'agent:send',
+  'agent:resolve-plan',
   'agent:approve',
   'agent:cancel',
   // API auth

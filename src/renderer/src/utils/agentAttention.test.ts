@@ -19,6 +19,7 @@ function session(
       : [],
     createdAt: '',
     updatedAt: '',
+    planReady: false,
     tokenCount: 0
   }
 }

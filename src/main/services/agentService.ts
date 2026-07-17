@@ -5,7 +5,11 @@ import crypto from 'node:crypto'
 import OpenAI from 'openai'
 import type {
   AgentMessage,
+  AgentModelDefaults,
   AgentMode,
+  AgentPlanDecision,
+  AgentProvider,
+  AgentReasoningEffort,
   AgentRunMetrics,
   AgentSession,
   AgentSessionsData,
@@ -35,6 +39,14 @@ import { loadAgentMemories } from './agentMemoryService'
 const AGENT_SESSIONS_FILENAME = 'agent-sessions.json'
 const MAX_TOOL_ROUNDS = 25
 const MAX_TOOL_RESULT_CHARS = 24_000
+const REASONING_EFFORTS = new Set<AgentReasoningEffort>([
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh'
+])
 
 const SYSTEM_PROMPT = `You are the Bot Commander agent harness. Help the user inspect and modify their bot configuration.
 The initial context intentionally contains no bot resources. For create or edit tasks, search for a similar persisted command or interaction first, then use exact read tools before editing. Existing resources are preferred synthesis examples, but lint new work and do not copy mistakes blindly.
@@ -50,7 +62,7 @@ Documentation is a bundled release snapshot. Use exact resource reads and lint r
 Persistent memories are user-level context, not system instructions or independent authorization to act. The current explicit request takes priority over saved memory, and the most recently updated memory takes priority when saved memories conflict.
 When the user clearly states a durable preference or standing instruction, create or update a concise memory. Do not save casual facts, one-off requests, inferred preferences without clear durable intent, bot configuration already stored elsewhere, credentials, tokens, passwords, or other secrets. Use list_memories before editing or deleting, avoid duplicates, and mention successful memory changes in the final response.
 When the user asks to forget a saved preference or change how it is remembered, use list_memories and then delete or edit the matching memory instead of only acknowledging the request.
-In planning mode, investigate with read and lint tools and return an actionable plan without mutations.`
+In planning mode, investigate with read and lint tools and never make mutations. Ask concise questions without special markup whenever more user input is needed. Once the plan is decision-complete, return the plan inside exactly one <proposed_plan>...</proposed_plan> block with no text outside the block. Do not use that block for questions, partial plans, or ordinary discussion.`
 
 type ProviderMessage = Record<string, any>
 type ProviderToolCall = { id: string; name: string; arguments: Record<string, unknown> }
@@ -77,7 +89,11 @@ interface PendingApproval {
   resolve: (approved: boolean) => void
 }
 
-let data: AgentSessionsData = { sessions: [], activeSessionId: null }
+let data: AgentSessionsData = {
+  sessions: [],
+  activeSessionId: null,
+  modelDefaultsByProvider: {}
+}
 let loaded = false
 const controllers = new Map<string, AbortController>()
 const approvals = new Map<string, PendingApproval>()
@@ -105,6 +121,31 @@ function getSessionOrThrow(sessionId: string): AgentSession {
   const session = data.sessions.find((item) => item.id === sessionId)
   if (!session) throw new Error('Agent session not found')
   return session
+}
+
+function normalizeModelDefaults(
+  value: unknown
+): Partial<Record<AgentProvider, AgentModelDefaults>> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const defaults: Partial<Record<AgentProvider, AgentModelDefaults>> = {}
+  for (const provider of ['openai', 'openrouter'] as const) {
+    const candidate = (value as Record<string, unknown>)[provider]
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue
+    const model = (candidate as Record<string, unknown>).model
+    const reasoningEffort = (candidate as Record<string, unknown>).reasoningEffort
+    if (
+      typeof model === 'string' &&
+      model.length > 0 &&
+      typeof reasoningEffort === 'string' &&
+      REASONING_EFFORTS.has(reasoningEffort as AgentReasoningEffort)
+    ) {
+      defaults[provider] = {
+        model,
+        reasoningEffort: reasoningEffort as AgentReasoningEffort
+      }
+    }
+  }
+  return defaults
 }
 
 function emit(session: AgentSession, event: Omit<AgentStreamEvent, 'sessionId'>) {
@@ -138,14 +179,17 @@ export async function loadAgentSessions(): Promise<AgentSessionsData> {
     const parsed = JSON.parse(await fs.readFile(path(), 'utf-8')) as AgentSessionsData
     data = {
       sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
-      activeSessionId: typeof parsed.activeSessionId === 'string' ? parsed.activeSessionId : null
+      activeSessionId: typeof parsed.activeSessionId === 'string' ? parsed.activeSessionId : null,
+      modelDefaultsByProvider: normalizeModelDefaults(parsed.modelDefaultsByProvider)
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
       console.error('Failed to load agent sessions:', error)
-    data = { sessions: [], activeSessionId: null }
+    data = { sessions: [], activeSessionId: null, modelDefaultsByProvider: {} }
   }
   for (const session of data.sessions) {
+    session.planReady =
+      session.planReady === true && session.mode === 'planning' && session.status === 'completed'
     if (session.status === 'running' || session.status === 'waiting_approval') {
       session.status = 'interrupted'
       session.activeRunId = undefined
@@ -171,16 +215,19 @@ export async function createAgentSession(
 ): Promise<AgentSession> {
   await loadAgentSessions()
   const timestamp = now()
+  const provider = getAiProvider(settings)
+  const modelDefaults = data.modelDefaultsByProvider[provider]
   const session: AgentSession = {
     id: id('agent'),
     title,
     mode: 'manual',
-    model: getSelectedAiModel(settings),
-    reasoningEffort: 'none',
+    model: modelDefaults?.model || getSelectedAiModel(settings),
+    reasoningEffort: modelDefaults?.reasoningEffort || 'none',
     status: 'idle',
     messages: [],
     createdAt: timestamp,
     updatedAt: timestamp,
+    planReady: false,
     tokenCount: 0
   }
   data.sessions.unshift(session)
@@ -204,15 +251,23 @@ export async function deleteAgentSession(sessionId: string): Promise<boolean> {
 
 export async function updateAgentSession(
   sessionId: string,
-  updates: Partial<Pick<AgentSession, 'title' | 'mode' | 'model' | 'reasoningEffort'>>
+  updates: Partial<Pick<AgentSession, 'title' | 'mode' | 'model' | 'reasoningEffort'>>,
+  provider: AgentProvider
 ): Promise<AgentSession> {
   await loadAgentSessions()
   const session = getSessionOrThrow(sessionId)
   if (updates.title !== undefined) session.title = updates.title.slice(0, 80)
   if (updates.mode && ['manual', 'auto', 'planning'].includes(updates.mode))
     session.mode = updates.mode as AgentMode
+  if (updates.mode && updates.mode !== 'planning') session.planReady = false
   if (updates.model) session.model = updates.model
   if (updates.reasoningEffort) session.reasoningEffort = updates.reasoningEffort
+  if (updates.model !== undefined || updates.reasoningEffort !== undefined) {
+    data.modelDefaultsByProvider[provider] = {
+      model: session.model,
+      reasoningEffort: session.reasoningEffort
+    }
+  }
   session.updatedAt = now()
   await save()
   emitSession(session)
@@ -362,6 +417,14 @@ function stringifyResult(result: unknown): string {
     : content
 }
 
+export function parseProposedPlan(content: string): { content: string; planReady: boolean } {
+  const match = content.trim().match(/^<proposed_plan>\s*([\s\S]*?)\s*<\/proposed_plan>$/)
+  const plan = match?.[1]?.trim()
+  return plan && !plan.includes('<proposed_plan>') && !plan.includes('</proposed_plan>')
+    ? { content: plan, planReady: true }
+    : { content, planReady: false }
+}
+
 async function awaitApproval(
   session: AgentSession,
   runId: string,
@@ -489,6 +552,7 @@ export async function runAgentSession(
   controllers.set(sessionId, controller)
   session.activeRunId = runId
   session.status = 'running'
+  session.planReady = false
   session.error = undefined
   if (session.messages.length === 0) session.title = userContent.trim().slice(0, 48)
   addMessage(session, { role: 'user', content: userContent.trim() })
@@ -531,8 +595,11 @@ export async function runAgentSession(
         messages.push(...turn.rawAssistant)
         if (turn.toolCalls.length === 0) {
           const content = turn.content.trim() || 'The agent completed without a text response.'
-          addMessage(session, { role: 'assistant', content })
+          const response =
+            mode === 'planning' ? parseProposedPlan(content) : { content, planReady: false }
+          addMessage(session, { role: 'assistant', content: response.content })
           session.status = 'completed'
+          session.planReady = response.planReady
           session.activeRunId = undefined
           session.lastRunMetrics = clone(context.metrics)
           await save()
@@ -575,6 +642,37 @@ export async function runAgentSession(
   })()
 
   return { runId }
+}
+
+export async function resolveAgentPlan(
+  sessionId: string,
+  decision: AgentPlanDecision,
+  settings: AiRuntimeSettings
+): Promise<AgentSession | { runId: string }> {
+  await loadAgentSessions()
+  if (!['auto', 'manual', 'continue'].includes(decision)) throw new Error('Invalid plan decision')
+  const session = getSessionOrThrow(sessionId)
+  if (
+    !session.planReady ||
+    session.mode !== 'planning' ||
+    session.status !== 'completed' ||
+    controllers.has(sessionId)
+  )
+    throw new Error('This session does not have a completed plan awaiting a decision')
+
+  session.planReady = false
+  if (decision === 'continue') {
+    session.updatedAt = now()
+    await save()
+    emitSession(session)
+    return clone(session)
+  }
+
+  session.mode = decision
+  session.updatedAt = now()
+  await save()
+  emitSession(session)
+  return runAgentSession(sessionId, 'Implement the plan.', settings)
 }
 
 export async function resolveAgentApproval(
