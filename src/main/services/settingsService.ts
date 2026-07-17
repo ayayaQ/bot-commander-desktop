@@ -11,14 +11,11 @@ let settings: AppSettings = {
   selectedAiModel: 'gpt-5.4-nano',
   selectedOpenAiModel: 'gpt-5.4-nano',
   selectedOpenRouterModel: 'openai/gpt-5.4-nano',
-  selectedCommandOpenAiModel: 'gpt-5.4-nano',
-  selectedCommandOpenRouterModel: 'openai/gpt-5.4-nano',
   aiReasoningEffort: 'none',
   openaiModel: 'gpt-5.4-nano',
   developerPrompt: '',
   useCustomApi: false,
   useLegacyInterpreter: false, // Default to new interpreter
-  disableReasoningApi: false, // Default to using reasoning API for thinking models
   agentNotificationsEnabled: true
 } // Default settings
 
@@ -27,6 +24,12 @@ export function getSettings() {
 }
 
 export function setSettings(newSettings: AppSettings) {
+  const supportedSettings = { ...newSettings } as AppSettings & Record<string, unknown>
+  delete supportedSettings['selectedCommandOpenAiModel']
+  delete supportedSettings['selectedCommandOpenRouterModel']
+  delete supportedSettings['disableReasoningApi']
+  newSettings = supportedSettings
+
   // if we are missing a setting, add its default value
   if (!newSettings.language) {
     newSettings.language = 'en'
@@ -83,20 +86,6 @@ export function setSettings(newSettings: AppSettings) {
       ? newSettings.selectedOpenRouterModel
       : newSettings.selectedOpenAiModel
 
-  if (!newSettings.selectedCommandOpenAiModel) {
-    newSettings.selectedCommandOpenAiModel =
-      newSettings.aiProvider === 'openai'
-        ? newSettings.selectedAiModel || newSettings.selectedOpenAiModel
-        : newSettings.selectedOpenAiModel || newSettings.openaiModel || 'gpt-5.4-nano'
-  }
-
-  if (!newSettings.selectedCommandOpenRouterModel) {
-    newSettings.selectedCommandOpenRouterModel =
-      newSettings.aiProvider === 'openrouter'
-        ? newSettings.selectedAiModel || newSettings.selectedOpenRouterModel
-        : newSettings.selectedOpenRouterModel || 'openai/gpt-5.4-nano'
-  }
-
   if (!newSettings.aiReasoningEffort) {
     newSettings.aiReasoningEffort = 'none'
   }
@@ -111,10 +100,6 @@ export function setSettings(newSettings: AppSettings) {
 
   if (newSettings.useLegacyInterpreter === undefined) {
     newSettings.useLegacyInterpreter = false
-  }
-
-  if (newSettings.disableReasoningApi === undefined) {
-    newSettings.disableReasoningApi = false
   }
 
   if (newSettings.agentNotificationsEnabled === undefined) {

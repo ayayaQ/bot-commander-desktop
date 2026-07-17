@@ -207,14 +207,11 @@ export type AppSettings = {
   selectedAiModel?: string
   selectedOpenAiModel?: string
   selectedOpenRouterModel?: string
-  selectedCommandOpenAiModel?: string
-  selectedCommandOpenRouterModel?: string
   aiReasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
   openaiModel: string
   developerPrompt: string
   useCustomApi: boolean
   useLegacyInterpreter: boolean
-  disableReasoningApi: boolean
   agentNotificationsEnabled: boolean
 }
 
@@ -225,37 +222,6 @@ export type BotStatus = {
   streamUrl: string
 }
 
-// AI Chat Context Types
-export interface ChatContext {
-  type: 'command' | 'startup-js' | 'bot-state' | 'all-commands'
-  id?: string // For command context, the command identifier
-  label: string
-  content?: string // The actual content to include
-}
-
-export interface SavedChat {
-  id: string
-  title: string
-  createdAt: string
-  updatedAt: string
-  messages: ChatMessageData[]
-  contexts: ChatContext[]
-  commandId?: string // The command this chat was opened with (if any)
-}
-
-export interface ChatMessageData {
-  id: string
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  timestamp: string
-  pendingChanges?: any | null
-  thinkingContent?: string
-}
-
-export interface ChatsData {
-  chats: SavedChat[]
-  activeChat: string | null
-}
 export interface WebhookPreset {
   id: string
   alias: string

@@ -15,14 +15,11 @@ export const settingsStore = writable<AppSettings>({
   selectedAiModel: 'gpt-5.4-nano',
   selectedOpenAiModel: 'gpt-5.4-nano',
   selectedOpenRouterModel: 'openai/gpt-5.4-nano',
-  selectedCommandOpenAiModel: 'gpt-5.4-nano',
-  selectedCommandOpenRouterModel: 'openai/gpt-5.4-nano',
   aiReasoningEffort: 'none',
   openaiModel: 'gpt-5.4-nano',
   developerPrompt: '',
   useCustomApi: false,
   useLegacyInterpreter: false,
-  disableReasoningApi: false,
   agentNotificationsEnabled: true
 })
 
@@ -72,35 +69,5 @@ export function withSelectedModelForProvider(
     selectedOpenAiModel: model,
     selectedAiModel: model,
     openaiModel: model
-  }
-}
-
-export function getSelectedCommandModelForProvider(
-  settings: AppSettings,
-  provider: AiProvider = settings.aiProvider || 'openai'
-): string {
-  if (provider === 'openrouter') {
-    return (
-      settings.selectedCommandOpenRouterModel || getSelectedModelForProvider(settings, provider)
-    )
-  }
-  return settings.selectedCommandOpenAiModel || getSelectedModelForProvider(settings, provider)
-}
-
-export function withSelectedCommandModelForProvider(
-  settings: AppSettings,
-  provider: AiProvider,
-  model: string
-): AppSettings {
-  if (provider === 'openrouter') {
-    return {
-      ...settings,
-      selectedCommandOpenRouterModel: model
-    }
-  }
-
-  return {
-    ...settings,
-    selectedCommandOpenAiModel: model
   }
 }

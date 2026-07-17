@@ -5,24 +5,16 @@
   import HeaderBar from './HeaderBar.svelte'
   import Dialog from './Dialog.svelte'
   import CodeEditor from './CodeEditor.svelte'
-  import AIChat from './AIChat.svelte'
-  import { aiPanelOpen, clearChat } from '../stores/aiChat'
   import { bottomNavVisible } from '../stores/navigation'
   import { commandCapabilities } from '../../../shared/commandCapabilities'
 
   interface Props {
-    mode?: 'edit' | 'add';
-    command?: BCFDCommand | null;
-    index?: number | null;
-    allCommands?: BCFDCommand[];
+    mode?: 'edit' | 'add'
+    command?: BCFDCommand | null
+    index?: number | null
   }
 
-  let {
-    mode = 'add',
-    command = null,
-    index = null,
-    allCommands = []
-  }: Props = $props();
+  let { mode = 'add', command = null, index = null }: Props = $props()
 
   const TYPE_MESSAGE_RECEIVED = 0
   const TYPE_PM_RECEIVED = 1
@@ -48,45 +40,6 @@
 
   let activeActions: Array<{ type: string; name: string }> = $state([])
   let triggerDropdown = $state(0)
-
-  function toggleAiPanel() {
-    aiPanelOpen.update((v) => !v)
-    if (!$aiPanelOpen) {
-      // Clear chat when closing
-      clearChat()
-    }
-  }
-
-  function cloneValue<T>(value: T): T {
-    // Avoid sharing object references between AI output and local editor state.
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-      return structuredClone(value)
-    } catch {
-      return JSON.parse(JSON.stringify(value)) as T
-    }
-  }
-
-  function applyAiCommandUpdate(updatedCommand: BCFDCommand) {
-    // Apply field-by-field so we can run extra logic per property.
-    for (const [key, value] of Object.entries(updatedCommand) as Array<
-      [keyof BCFDCommand, BCFDCommand[keyof BCFDCommand]]
-    >) {
-      // Keep the existing id stable for this editor session.
-      if (key === 'id') continue
-      ;(editedCommand as any)[key] = cloneValue(value)
-    }
-
-    // Force reactivity after a batch of in-place assignments.
-    editedCommand = { ...editedCommand }
-
-    // Re-initialize active actions based on updated command.
-    initializeActiveActions(editedCommand)
-  }
-
-  function handleAiCommandUpdate(updatedCommand: BCFDCommand) {
-    applyAiCommandUpdate(updatedCommand)
-  }
 
   // Maps each action type to the set of command types it supports,
   // based on what BotListener actually executes for each event type.
@@ -546,17 +499,6 @@
           {/each}
         </ul>
       </details>
-      <!-- AI Assistant button -->
-      <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('ai-assistant')}>
-        <button
-          type="button"
-          class="btn {$aiPanelOpen ? 'btn-secondary' : 'btn-primary'}"
-          onclick={toggleAiPanel}
-          class:btn-active={$aiPanelOpen}
-        >
-          <span class="material-symbols-outlined">smart_toy</span>
-        </button>
-      </span>
       <!-- import button -->
       <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('import')}>
         <button type="button" class="btn btn-primary" onclick={() => dialog.showModal()}>
@@ -581,12 +523,9 @@
     </div>
   </HeaderBar>
 
-  <!-- Split view container -->
+  <!-- Editor container -->
   <div class="flex flex-1 overflow-hidden" style="height: calc(100vh - 120px);">
-    <!-- Left side: Editor (scrollable) -->
-    <div
-      class="flex-1 overflow-y-auto {$aiPanelOpen ? 'w-1/2' : 'w-full'} transition-all duration-300"
-    >
+    <div class="flex-1 w-full overflow-y-auto">
       <div class="p-4">
         <div class="">
           <!-- <div class="break-words">{JSON.stringify(editedCommand)}</div> -->
@@ -1025,17 +964,5 @@
         </div>
       </div>
     </div>
-
-    <!-- Right side: AI Chat Panel -->
-    {#if $aiPanelOpen}
-      <div class="w-1/2 max-w-xl border-l border-base-300 flex flex-col">
-        <AIChat
-          command={editedCommand}
-          onCommandUpdate={handleAiCommandUpdate}
-          {allCommands}
-          on:close={toggleAiPanel}
-        />
-      </div>
-    {/if}
   </div>
 {/if}

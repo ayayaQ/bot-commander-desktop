@@ -56,21 +56,6 @@ const validInvokeChannels = [
   'save-webhook-presets',
   // Stats
   'get-stats',
-  // AI chat
-  'ai-command-chat',
-  'get-chats',
-  'get-chat',
-  'create-chat',
-  'delete-chat',
-  'clear-chat-messages',
-  'set-active-chat',
-  'get-recent-chats',
-  'search-chats',
-  'save-chat-message',
-  'update-chat-message',
-  'add-message-to-chat',
-  'update-message-in-chat',
-  'update-chat-contexts',
   // Agent harness
   'agent:list',
   'agent:create',
@@ -105,9 +90,6 @@ const validReceiveChannels = [
   'console:warning',
   'console:event',
   'console:success',
-  'ai-chat:thinking',
-  'ai-chat:done',
-  'ai-chat:error',
   'agent:event',
   'agent:navigate',
   'memory:changed'

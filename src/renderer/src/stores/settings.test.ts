@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AppSettings } from '../types/types'
-import {
-  getSelectedCommandModelForProvider,
-  getSelectedModelForProvider,
-  withSelectedCommandModelForProvider,
-  withSelectedModelForProvider
-} from './settings'
+import { getSelectedModelForProvider, withSelectedModelForProvider } from './settings'
 
 function settings(overrides: Partial<AppSettings> = {}): AppSettings {
   return {
@@ -19,14 +14,11 @@ function settings(overrides: Partial<AppSettings> = {}): AppSettings {
     selectedAiModel: 'gpt-5.4-nano',
     selectedOpenAiModel: 'gpt-5.4-nano',
     selectedOpenRouterModel: 'openai/gpt-5.4-nano',
-    selectedCommandOpenAiModel: 'gpt-5.4-mini',
-    selectedCommandOpenRouterModel: 'anthropic/claude-test',
     aiReasoningEffort: 'none',
     openaiModel: 'gpt-5.4-nano',
     developerPrompt: '',
     useCustomApi: false,
     useLegacyInterpreter: false,
-    disableReasoningApi: false,
     agentNotificationsEnabled: true,
     ...overrides
   }
@@ -53,12 +45,5 @@ describe('renderer settings helpers', () => {
       selectedOpenRouterModel: 'meta/llama-test',
       selectedOpenAiModel: 'gpt-5.4-nano'
     })
-  })
-
-  it('keeps command model selection separate from chat model selection', () => {
-    const updated = withSelectedCommandModelForProvider(settings(), 'openai', 'gpt-4.1-mini')
-
-    expect(getSelectedCommandModelForProvider(updated, 'openai')).toBe('gpt-4.1-mini')
-    expect(getSelectedModelForProvider(updated, 'openai')).toBe('gpt-5.4-nano')
   })
 })

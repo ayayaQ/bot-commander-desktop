@@ -143,14 +143,11 @@ export type AppSettings = {
   selectedAiModel?: string
   selectedOpenAiModel?: string
   selectedOpenRouterModel?: string
-  selectedCommandOpenAiModel?: string
-  selectedCommandOpenRouterModel?: string
   aiReasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
   openaiModel: string
   developerPrompt: string
   useCustomApi: boolean
   useLegacyInterpreter: boolean // Use old string replacement instead of new interpreter
-  disableReasoningApi: boolean // Disable streaming reasoning API for thinking models
   agentNotificationsEnabled: boolean
 }
 

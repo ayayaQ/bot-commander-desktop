@@ -12,7 +12,6 @@ function legacySettings(overrides: Partial<AppSettings> = {}): AppSettings {
     developerPrompt: '',
     useCustomApi: undefined as unknown as boolean,
     useLegacyInterpreter: undefined as unknown as boolean,
-    disableReasoningApi: undefined as unknown as boolean,
     agentNotificationsEnabled: undefined as unknown as boolean,
     ...overrides
   }
@@ -40,13 +39,10 @@ describe('settingsService', () => {
       selectedAiModel: 'gpt-5.4-nano',
       selectedOpenAiModel: 'gpt-5.4-nano',
       selectedOpenRouterModel: 'openai/gpt-5.4-nano',
-      selectedCommandOpenAiModel: 'gpt-5.4-nano',
-      selectedCommandOpenRouterModel: 'openai/gpt-5.4-nano',
       aiReasoningEffort: 'none',
       developerPrompt: '',
       useCustomApi: false,
       useLegacyInterpreter: false,
-      disableReasoningApi: false,
       agentNotificationsEnabled: true
     })
   })
@@ -67,8 +63,23 @@ describe('settingsService', () => {
       aiProvider: 'openrouter',
       selectedAiModel: 'meta/test-model',
       selectedOpenAiModel: 'gpt-4.1-mini',
-      selectedOpenRouterModel: 'meta/test-model',
-      selectedCommandOpenRouterModel: 'meta/test-model'
+      selectedOpenRouterModel: 'meta/test-model'
     })
+  })
+
+  it('discards retired command-assistant settings', async () => {
+    const { getSettings, setSettings } = await import('./settingsService')
+    const retiredSettings = {
+      ...legacySettings(),
+      selectedCommandOpenAiModel: 'gpt-4.1-mini',
+      selectedCommandOpenRouterModel: 'meta/test-model',
+      disableReasoningApi: true
+    } as AppSettings
+
+    setSettings(retiredSettings)
+
+    expect(getSettings()).not.toHaveProperty('selectedCommandOpenAiModel')
+    expect(getSettings()).not.toHaveProperty('selectedCommandOpenRouterModel')
+    expect(getSettings()).not.toHaveProperty('disableReasoningApi')
   })
 })

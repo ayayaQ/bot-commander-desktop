@@ -29,7 +29,6 @@
   let useCustomApi: boolean = $state()
   let useLegacyInterpreter: boolean = $state()
   let hideOutput: boolean = $state()
-  let disableReasoningApi: boolean = $state()
   let agentNotificationsEnabled: boolean = $state(true)
   let aiModels: Array<{
     id: string
@@ -137,10 +136,6 @@
     saveSettings({ ...$settingsStore, useLegacyInterpreter })
   }
 
-  function toggleDisableReasoningApi() {
-    saveSettings({ ...$settingsStore, disableReasoningApi })
-  }
-
   function openExternalLink(event) {
     event.preventDefault()
     const url = event.target.href
@@ -164,7 +159,6 @@
     useCustomApi = $settingsStore.useCustomApi
     useLegacyInterpreter = $settingsStore.useLegacyInterpreter
     hideOutput = $settingsStore.hideOutput
-    disableReasoningApi = $settingsStore.disableReasoningApi
     agentNotificationsEnabled = $settingsStore.agentNotificationsEnabled
     refreshAiModels()
   })
@@ -384,21 +378,6 @@
       placeholder={$t('enter-your-custom-developer-prompt')}
       rows="4"
     ></textarea>
-  </div>
-
-  <div class="form-control mt-4">
-    <label class="label cursor-pointer">
-      <div class="flex flex-col">
-        <span class="label-text">{$t('disable-reasoning-api')}</span>
-        <span class="label-text text-xs opacity-60">{$t('disable-reasoning-api-description')}</span>
-      </div>
-      <input
-        type="checkbox"
-        class="toggle"
-        bind:checked={disableReasoningApi}
-        onchange={toggleDisableReasoningApi}
-      />
-    </label>
   </div>
 
   {#if false}
