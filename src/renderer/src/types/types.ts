@@ -211,7 +211,7 @@ export type AppSettings = {
   openaiModel: string
   developerPrompt: string
   useCustomApi: boolean
-  useLegacyInterpreter: boolean
+  useLegacyInterpreter: boolean // Historical persisted key: true enables global eval scope
   agentNotificationsEnabled: boolean
 }
 

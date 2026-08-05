@@ -176,6 +176,7 @@ export interface BCFDContext {
 
   // Script context for $eval blocks
   vmContext?: import('../../utils/quickJsScriptContext').ScriptContext
+  wrapEvalInIIFE?: boolean
 
   // Cooldown context
   commandId?: string
@@ -183,9 +184,6 @@ export interface BCFDContext {
   cooldownType?: string
   userId?: string
   guildId?: string
-
-  // Settings
-  useLegacyMode?: boolean
 }
 
 // Registry of all available functions

@@ -15,7 +15,7 @@ let settings: AppSettings = {
   openaiModel: 'gpt-5.4-nano',
   developerPrompt: '',
   useCustomApi: false,
-  useLegacyInterpreter: false, // Default to new interpreter
+  useLegacyInterpreter: false, // Historical key: true enables global eval scope
   agentNotificationsEnabled: true
 } // Default settings
 

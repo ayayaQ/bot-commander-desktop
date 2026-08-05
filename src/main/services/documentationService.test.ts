@@ -170,7 +170,7 @@ describe('documentation service', () => {
   })
 
   it('marks long best matches as truncated and returns a short no-match response', () => {
-    const long = searchDocumentation('new legacy interpreter comparison', 'tutorial', 1)
+    const long = searchDocumentation('global isolated eval scope comparison', 'tutorial', 1)
     expect(long.bestMatch?.truncated).toBe(true)
     expect(long.bestMatch?.content.length).toBe(2_000)
 

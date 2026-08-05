@@ -423,7 +423,11 @@ function applyPatches<T>(source: T, patches: AgentPatchOperation[]): T {
 }
 
 function lintSource(source: string, mode: 'bcfd' | 'js', startupJs = ''): AgentLintDiagnostic[] {
-  return lintBCFD(source, { mode, startupJs }).map((item) => ({ ...item }))
+  return lintBCFD(source, {
+    mode,
+    startupJs,
+    wrapEvalInIIFE: mode === 'bcfd' ? !getSettings().useLegacyInterpreter : false
+  }).map((item) => ({ ...item }))
 }
 
 async function lintTextFields(value: unknown): Promise<AgentLintDiagnostic[]> {

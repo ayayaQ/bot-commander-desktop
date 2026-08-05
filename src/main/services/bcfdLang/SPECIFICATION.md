@@ -87,7 +87,11 @@ $halt
 - Code between `$eval` and `$halt` is executed in a sandboxed VM
 - All `$variable` and `$function(...)` expressions within the eval block are resolved BEFORE JavaScript execution
 - The `botState` object is available for persistent storage
-- Use `return` to output a value; otherwise the block produces empty string
+- Isolated eval scope is the default: the code is wrapped in a function, `return` inserts a value,
+  and declarations remain local to the block
+- Global eval scope runs the same resolved code without a function wrapper: top-level `return` is
+  invalid, successful blocks always produce an empty string, and top-level variables remain
+  available until the JavaScript engine restarts
 - These blocks are async-safe
 
 ### Variable Storage

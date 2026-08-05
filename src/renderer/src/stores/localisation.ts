@@ -182,9 +182,9 @@ const en = {
   'developer-prompt': 'Developer Prompt',
   'enter-your-custom-developer-prompt': 'Enter your custom developer prompt...',
   advanced: 'Advanced',
-  'use-legacy-interpreter': 'Use Legacy Interpreter',
-  'use-legacy-interpreter-description':
-    'Use the old regex-based template interpreter instead of the new AST-based one',
+  'use-global-eval-scope': 'Use global eval scope',
+  'use-global-eval-scope-description':
+    'Run $eval blocks in the shared global scope. return and eval output are disabled; variables remain available until the JavaScript engine restarts.',
   close: 'Close',
   // Interaction Commands
   interactions: 'Interactions',
@@ -401,9 +401,11 @@ const translations: Languages = {
     'agent-notifications-description':
       'Mostrar alertas cuando un agente necesite aprobación, termine o encuentre un error',
     memories: 'Memorias',
-    'memories-description': 'Preferencias e instrucciones persistentes compartidas por todas las sesiones del agente',
+    'memories-description':
+      'Preferencias e instrucciones persistentes compartidas por todas las sesiones del agente',
     'manage-memories': 'Administrar memorias',
-    'memory-local-warning': 'Las memorias se guardan localmente en texto plano y se envían con las solicitudes del agente. No guardes contraseñas, claves API, tokens ni otros secretos.',
+    'memory-local-warning':
+      'Las memorias se guardan localmente en texto plano y se envían con las solicitudes del agente. No guardes contraseñas, claves API, tokens ni otros secretos.',
     'add-memory': 'Añadir memoria',
     'memory-placeholder': 'Por ejemplo: Prefiere explicaciones concisas y ejemplos de TypeScript.',
     'no-memories': 'Aún no hay memorias guardadas.',
@@ -549,9 +551,9 @@ const translations: Languages = {
     'developer-prompt': 'Prompt del Desarrollador',
     'enter-your-custom-developer-prompt': 'Introduce tu prompt de desarrollador personalizado...',
     advanced: 'Avanzado',
-    'use-legacy-interpreter': 'Usar Intérprete Antiguo',
-    'use-legacy-interpreter-description':
-      'Usar el antiguo intérprete de plantillas basado en regex en lugar del nuevo basado en AST',
+    'use-global-eval-scope': 'Usar ámbito global de eval',
+    'use-global-eval-scope-description':
+      'Ejecuta los bloques $eval en el ámbito global compartido. return y la salida de eval están desactivados; las variables quedan disponibles hasta reiniciar el motor de JavaScript.',
     close: 'Cerrar',
     // Interaction Commands
     interactions: 'Interacciones',
@@ -759,7 +761,8 @@ const translations: Languages = {
     memories: 'メモリ',
     'memories-description': 'すべてのエージェントセッションで共有される永続的な設定と指示',
     'manage-memories': 'メモリを管理',
-    'memory-local-warning': 'メモリはローカルにプレーンテキストで保存され、エージェントのリクエストと共に送信されます。パスワード、APIキー、トークンなどの秘密情報は保存しないでください。',
+    'memory-local-warning':
+      'メモリはローカルにプレーンテキストで保存され、エージェントのリクエストと共に送信されます。パスワード、APIキー、トークンなどの秘密情報は保存しないでください。',
     'add-memory': 'メモリを追加',
     'memory-placeholder': '例：簡潔な説明とTypeScriptの例を優先する。',
     'no-memories': '保存されたメモリはまだありません。',
@@ -904,9 +907,9 @@ const translations: Languages = {
     'developer-prompt': '開発者プロンプト',
     'enter-your-custom-developer-prompt': 'カスタム開発者プロンプトを入力してください...',
     advanced: '詳細設定',
-    'use-legacy-interpreter': '旧インタープリターを使用',
-    'use-legacy-interpreter-description':
-      '新しいAST方式の代わりに古いregex方式のテンプレートインタープリターを使用',
+    'use-global-eval-scope': 'グローバル eval スコープを使用',
+    'use-global-eval-scope-description':
+      '$eval ブロックを共有グローバルスコープで実行します。return と eval の出力は無効になり、変数は JavaScript エンジンを再起動するまで保持されます。',
     close: '閉じる',
     // Interaction Commands
     interactions: 'インタラクション',
@@ -1110,7 +1113,8 @@ const translations: Languages = {
     memories: '记忆',
     'memories-description': '在所有智能体会话间共享的持久偏好和指令',
     'manage-memories': '管理记忆',
-    'memory-local-warning': '记忆以明文保存在本地，并随智能体请求发送。请勿保存密码、API 密钥、令牌或其他机密。',
+    'memory-local-warning':
+      '记忆以明文保存在本地，并随智能体请求发送。请勿保存密码、API 密钥、令牌或其他机密。',
     'add-memory': '添加记忆',
     'memory-placeholder': '例如：优先使用简洁说明和 TypeScript 示例。',
     'no-memories': '尚未保存任何记忆。',
@@ -1254,9 +1258,9 @@ const translations: Languages = {
     'developer-prompt': '开发者提示',
     'enter-your-custom-developer-prompt': '输入您的自定义开发者提示...',
     advanced: '高级',
-    'use-legacy-interpreter': '使用旧版解释器',
-    'use-legacy-interpreter-description':
-      '使用旧的基于正则表达式的模板解释器，而非新的基于AST的解释器',
+    'use-global-eval-scope': '使用全局 eval 作用域',
+    'use-global-eval-scope-description':
+      '在共享全局作用域中运行 $eval 块。return 和 eval 输出将不可用；变量会保留到 JavaScript 引擎重启为止。',
     close: '关闭',
     // Interaction Commands
     interactions: '交互',
@@ -1457,7 +1461,8 @@ const translations: Languages = {
     memories: '메모리',
     'memories-description': '모든 에이전트 세션에서 공유되는 영구 환경설정 및 지침',
     'manage-memories': '메모리 관리',
-    'memory-local-warning': '메모리는 로컬에 일반 텍스트로 저장되고 에이전트 요청과 함께 전송됩니다. 비밀번호, API 키, 토큰 또는 기타 비밀을 저장하지 마세요.',
+    'memory-local-warning':
+      '메모리는 로컬에 일반 텍스트로 저장되고 에이전트 요청과 함께 전송됩니다. 비밀번호, API 키, 토큰 또는 기타 비밀을 저장하지 마세요.',
     'add-memory': '메모리 추가',
     'memory-placeholder': '예: 간결한 설명과 TypeScript 예제를 선호합니다.',
     'no-memories': '저장된 메모리가 아직 없습니다.',
@@ -1602,9 +1607,9 @@ const translations: Languages = {
     'developer-prompt': '개발자 프롬프트',
     'enter-your-custom-developer-prompt': '사용자 정의 개발자 프롬프트를 입력하세요...',
     advanced: '고급',
-    'use-legacy-interpreter': '레거시 인터프리터 사용',
-    'use-legacy-interpreter-description':
-      '새로운 AST 기반 대신 이전 정규식 기반 템플릿 인터프리터 사용',
+    'use-global-eval-scope': '전역 eval 범위 사용',
+    'use-global-eval-scope-description':
+      '$eval 블록을 공유 전역 범위에서 실행합니다. return과 eval 출력은 비활성화되며 변수는 JavaScript 엔진을 다시 시작할 때까지 유지됩니다.',
     close: '닫기',
     // Interaction Commands
     interactions: '인터랙션',
@@ -1806,7 +1811,8 @@ const translations: Languages = {
     memories: 'Память',
     'memories-description': 'Постоянные предпочтения и инструкции для всех сессий агента',
     'manage-memories': 'Управление памятью',
-    'memory-local-warning': 'Записи хранятся локально открытым текстом и отправляются с запросами агента. Не сохраняйте пароли, API-ключи, токены и другие секреты.',
+    'memory-local-warning':
+      'Записи хранятся локально открытым текстом и отправляются с запросами агента. Не сохраняйте пароли, API-ключи, токены и другие секреты.',
     'add-memory': 'Добавить запись',
     'memory-placeholder': 'Например: Предпочитать краткие объяснения и примеры TypeScript.',
     'no-memories': 'Сохранённых записей пока нет.',
@@ -1951,9 +1957,9 @@ const translations: Languages = {
     'developer-prompt': 'Запрос разработчика',
     'enter-your-custom-developer-prompt': 'Введите свой пользовательский запрос разработчика...',
     advanced: 'Дополнительно',
-    'use-legacy-interpreter': 'Использовать старый интерпретатор',
-    'use-legacy-interpreter-description':
-      'Использовать старый интерпретатор шаблонов на основе regex вместо нового на основе AST',
+    'use-global-eval-scope': 'Использовать глобальную область eval',
+    'use-global-eval-scope-description':
+      'Выполняет блоки $eval в общей глобальной области. return и вывод eval отключены; переменные сохраняются до перезапуска движка JavaScript.',
     close: 'Закрыть',
     // Interaction Commands
     interactions: 'Взаимодействия',

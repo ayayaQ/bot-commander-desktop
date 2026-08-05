@@ -3,6 +3,7 @@
   import { bcfdItems, type BCFDLanguageItem } from '../../../shared/bcfdLanguage'
   import { lintBCFD, type BCFDLintDiagnostic } from '../../../shared/bcfdLint'
   import { highlightBCFD, highlightJavaScript } from '../utils/highlight'
+  import { settingsStore } from '../stores/settings'
 
   interface Props {
     value?: string
@@ -296,7 +297,8 @@
   function updateDiagnostics() {
     diagnostics = lintBCFD(value, {
       mode,
-      startupJs: shouldUseStartupGlobals() ? currentStartupJsForLinting() : undefined
+      startupJs: shouldUseStartupGlobals() ? currentStartupJsForLinting() : undefined,
+      wrapEvalInIIFE: mode === 'bcfd' ? !$settingsStore.useLegacyInterpreter : false
     })
   }
 

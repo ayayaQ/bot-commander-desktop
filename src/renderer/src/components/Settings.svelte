@@ -27,7 +27,7 @@
   let aiReasoningEffort: ReasoningEffort = $state('none')
   let developerPrompt: string = $state()
   let useCustomApi: boolean = $state()
-  let useLegacyInterpreter: boolean = $state()
+  let useGlobalEvalScope: boolean = $state()
   let hideOutput: boolean = $state()
   let agentNotificationsEnabled: boolean = $state(true)
   let aiModels: Array<{
@@ -132,8 +132,8 @@
     saveSettings({ ...$settingsStore, useCustomApi })
   }
 
-  function toggleLegacyInterpreter() {
-    saveSettings({ ...$settingsStore, useLegacyInterpreter })
+  function toggleGlobalEvalScope() {
+    saveSettings({ ...$settingsStore, useLegacyInterpreter: useGlobalEvalScope })
   }
 
   function openExternalLink(event) {
@@ -157,7 +157,7 @@
     aiReasoningEffort = $settingsStore.aiReasoningEffort || 'none'
     developerPrompt = $settingsStore.developerPrompt
     useCustomApi = $settingsStore.useCustomApi
-    useLegacyInterpreter = $settingsStore.useLegacyInterpreter
+    useGlobalEvalScope = $settingsStore.useLegacyInterpreter
     hideOutput = $settingsStore.hideOutput
     agentNotificationsEnabled = $settingsStore.agentNotificationsEnabled
     refreshAiModels()
@@ -403,15 +403,14 @@
   <div class="form-control">
     <label class="label cursor-pointer">
       <div class="flex flex-col">
-        <span class="label-text">{$t('use-legacy-interpreter')}</span>
-        <span class="label-text text-xs opacity-60">{$t('use-legacy-interpreter-description')}</span
-        >
+        <span class="label-text">{$t('use-global-eval-scope')}</span>
+        <span class="label-text text-xs opacity-60">{$t('use-global-eval-scope-description')}</span>
       </div>
       <input
         type="checkbox"
         class="toggle"
-        bind:checked={useLegacyInterpreter}
-        onchange={toggleLegacyInterpreter}
+        bind:checked={useGlobalEvalScope}
+        onchange={toggleGlobalEvalScope}
       />
     </label>
   </div>

@@ -2,6 +2,17 @@ import { describe, expect, it } from 'vitest'
 import { lintBCFD } from './bcfdLint'
 
 describe('lintBCFD', () => {
+  it('validates top-level return according to the eval scope', () => {
+    expect(lintBCFD('$eval return "ok"; $halt')).toEqual([])
+
+    expect(lintBCFD('$eval return "nope"; $halt', { wrapEvalInIIFE: false })).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        message: expect.stringContaining("'return' outside of function")
+      })
+    ])
+  })
+
   it('warns for unknown variables and functions', () => {
     const diagnostics = lintBCFD('$notReal and $alsoNotReal(values)')
 

@@ -14,6 +14,7 @@ interface BCFDLintOptions {
   startupJs?: string
   additionalGlobals?: string[]
   lintJavaScript?: boolean
+  wrapEvalInIIFE?: boolean
 }
 
 type JavaScriptNode = {
@@ -478,10 +479,10 @@ function sanitizeJavaScriptForParsing(input: string, start: number, end: number)
   return chars.join('')
 }
 
-function parseJavaScript(input: string): JavaScriptNode | null {
+function parseJavaScript(input: string, allowReturnOutsideFunction = false): JavaScriptNode | null {
   return parse(input, {
     ecmaVersion: 'latest',
-    allowReturnOutsideFunction: true,
+    allowReturnOutsideFunction,
     sourceType: 'script'
   }) as unknown as JavaScriptNode
 }
@@ -1005,7 +1006,10 @@ function lintJavaScript(
   let ast: JavaScriptNode
 
   try {
-    ast = parseJavaScript(source) as JavaScriptNode
+    ast = parseJavaScript(
+      source,
+      options.mode !== 'js' && options.wrapEvalInIIFE !== false
+    ) as JavaScriptNode
   } catch (error) {
     const position = start + syntaxErrorPosition(error)
     addJavaScriptDiagnostic(

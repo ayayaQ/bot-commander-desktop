@@ -1307,23 +1307,13 @@ export class Interpreter {
 
     try {
       // Execute the JavaScript code with timeout protection.
+      const wrapEvalInIIFE = ctx.wrapEvalInIIFE !== false
       const result = ctx.vmContext.evaluate(resolvedCode, {
         timeoutMs: 1000,
-        wrapReturn: true
+        wrapReturn: wrapEvalInIIFE
       })
-
-      // Clean up temporary variables
-      for (const tempVarName of Object.keys(tempVars)) {
-        ctx.vmContext.deleteVariable(tempVarName)
-      }
-
-      return result !== undefined ? String(result) : ''
+      return wrapEvalInIIFE && result !== undefined ? String(result) : ''
     } catch (e) {
-      // Clean up temporary variables even on error
-      for (const tempVarName of Object.keys(tempVars)) {
-        ctx.vmContext.deleteVariable(tempVarName)
-      }
-
       const jsError = this.describeJavaScriptError(e)
       const position = this.evalErrorPosition(
         node,
@@ -1338,6 +1328,10 @@ export class Interpreter {
         columnNumber: jsError.columnNumber
       })
       return `[BCFD Error: ${jsError.message}]`
+    } finally {
+      for (const tempVarName of Object.keys(tempVars)) {
+        ctx.vmContext.deleteVariable(tempVarName)
+      }
     }
   }
 

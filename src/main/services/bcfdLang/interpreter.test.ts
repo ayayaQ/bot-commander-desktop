@@ -100,6 +100,41 @@ describe('BCFD interpreter', () => {
     expect(result.errors).toEqual([])
   })
 
+  it('uses the shared global scope and discards eval output when IIFE wrapping is disabled', async () => {
+    const result = await render(
+      '$eval\nvar globalEvalValue = $namePlain;\n"ignored output";\n$halt',
+      registry,
+      { vmContext: scriptContext, wrapEvalInIIFE: false }
+    )
+
+    expect(result.output).toBe('')
+    expect(result.errors).toEqual([])
+    expect(scriptContext.getVariable('globalEvalValue')).toBe('Ada')
+    const laterResult = await render(
+      '$eval\nvar globalEvalObserved = globalEvalValue;\n$halt',
+      registry,
+      { vmContext: scriptContext, wrapEvalInIIFE: false }
+    )
+    expect(laterResult.output).toBe('')
+    expect(laterResult.errors).toEqual([])
+    expect(scriptContext.getVariable('globalEvalObserved')).toBe('Ada')
+    expect(scriptContext.getVariableNames().filter((key) => key.startsWith('__bcfd_'))).toEqual([])
+    scriptContext.deleteVariable('globalEvalValue')
+    scriptContext.deleteVariable('globalEvalObserved')
+  })
+
+  it('rejects top-level return when IIFE wrapping is disabled', async () => {
+    const result = await render('$eval\nreturn "nope";\n$halt', registry, {
+      vmContext: scriptContext,
+      wrapEvalInIIFE: false
+    })
+
+    expect(result.output).toContain('[BCFD Error:')
+    expect(result.errors).toEqual([
+      expect.objectContaining({ message: expect.stringContaining('JavaScript error:') })
+    ])
+  })
+
   it('supports Android-canonical keyword spellings and legacy desktop aliases', async () => {
     const user = { id: 'user-id', defaultAvatarURL: 'default-avatar' } as any
     const result = await new Interpreter().interpret(
