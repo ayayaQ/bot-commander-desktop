@@ -48,6 +48,15 @@ describe('lintBCFD', () => {
     expect(diagnostics).toEqual([])
   })
 
+  it('does not warn for expanded utility, role, and channel functions', () => {
+    const diagnostics = lintBCFD(
+      '$wordCount(one two) $calculate(2 + 2) $cropText(text, 3, ...) $day $getTimestamp(ms) ' +
+        '$roleCount $findRole(Admin) $roleGrant(1, +2) $channelPosition(3)'
+    )
+
+    expect(diagnostics).toEqual([])
+  })
+
   it('finds unknown names nested inside function arguments', () => {
     const diagnostics = lintBCFD('$contains($notReal, value)')
 

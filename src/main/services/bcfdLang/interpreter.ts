@@ -70,6 +70,128 @@ function discordTimestampFromMillis(timestamp?: number | null): string {
   return timestamp == null ? '' : `<t:${Math.floor(timestamp / 1000)}>`
 }
 
+const BOOLEAN_VALUES = new Map<string, boolean>([
+  ['true', true],
+  ['false', false]
+])
+
+function parseBooleanValue(value: string): boolean | null {
+  return BOOLEAN_VALUES.get(value.trim().toLowerCase()) ?? null
+}
+
+function formatCalculatedNumber(value: number): string {
+  if (!Number.isFinite(value)) throw new Error('result must be finite')
+  return value.toString()
+}
+
+class MathExpressionParser {
+  private position = 0
+  private depth = 0
+
+  constructor(private readonly source: string) {}
+
+  parse(): number {
+    if (this.source.length > 512) throw new Error('expression is too long')
+    const value = this.parseAdditive()
+    this.skipWhitespace()
+    if (this.position !== this.source.length)
+      throw new Error(`unexpected token at position ${this.position + 1}`)
+    return value
+  }
+
+  private parseAdditive(): number {
+    let value = this.parseMultiplicative()
+    while (true) {
+      this.skipWhitespace()
+      if (this.consume('+')) value += this.parseMultiplicative()
+      else if (this.consume('-')) value -= this.parseMultiplicative()
+      else return value
+    }
+  }
+
+  private parseMultiplicative(): number {
+    let value = this.parseUnary()
+    while (true) {
+      this.skipWhitespace()
+      if (this.source.startsWith('**', this.position)) return value
+      if (this.consume('*')) value *= this.parseUnary()
+      else if (this.consume('/')) {
+        const divisor = this.parseUnary()
+        if (divisor === 0) throw new Error('division by zero')
+        value /= divisor
+      } else if (this.consume('%')) {
+        const divisor = this.parseUnary()
+        if (divisor === 0) throw new Error('division by zero')
+        value %= divisor
+      } else return value
+    }
+  }
+
+  private parseUnary(): number {
+    this.skipWhitespace()
+    if (this.consume('+')) return this.parseUnary()
+    if (this.consume('-')) return -this.parseUnary()
+    return this.parsePower()
+  }
+
+  private parsePower(): number {
+    const base = this.parsePrimary()
+    this.skipWhitespace()
+    if (!this.source.startsWith('**', this.position)) return base
+    this.position += 2
+    return Math.pow(base, this.parseUnary())
+  }
+
+  private parsePrimary(): number {
+    this.skipWhitespace()
+    if (this.consume('(')) {
+      this.depth++
+      if (this.depth > 64) throw new Error('expression nesting is too deep')
+      const value = this.parseAdditive()
+      this.skipWhitespace()
+      if (!this.consume(')')) throw new Error('missing closing parenthesis')
+      this.depth--
+      return value
+    }
+
+    const start = this.position
+    let sawDigit = false
+    while (this.position < this.source.length && /[0-9]/.test(this.source[this.position])) {
+      sawDigit = true
+      this.position++
+    }
+    if (this.source[this.position] === '.') {
+      this.position++
+      while (this.position < this.source.length && /[0-9]/.test(this.source[this.position])) {
+        sawDigit = true
+        this.position++
+      }
+    }
+    if (!sawDigit) throw new Error(`expected a number at position ${start + 1}`)
+    return Number(this.source.slice(start, this.position))
+  }
+
+  private skipWhitespace(): void {
+    while (this.position < this.source.length && /\s/u.test(this.source[this.position]))
+      this.position++
+  }
+
+  private consume(value: string): boolean {
+    if (!this.source.startsWith(value, this.position)) return false
+    this.position += value.length
+    return true
+  }
+}
+
+function parseRoleColor(value: string): number | null {
+  const trimmed = value.trim()
+  const hex = trimmed.replace(/^#/, '')
+  if (/^[0-9a-fA-F]{6}$/.test(hex)) return parseInt(hex, 16)
+  if (!/^\d+$/.test(trimmed)) return null
+  const numeric = Number(trimmed)
+  return Number.isInteger(numeric) && numeric >= 0 && numeric <= 0xffffff ? numeric : null
+}
+
 // ============================================================================
 // Function Registry - All built-in functions
 // ============================================================================
@@ -489,6 +611,29 @@ function createFunctionRegistry(): FunctionRegistry {
     return ctx.guild.channels.cache.get(channelID)?.parentId ?? ''
   })
 
+  registry.set('channelExists', (args, ctx) => {
+    const channelID = args[0]?.trim()
+    return (!!channelID && !!ctx.client?.channels.cache.has(channelID)).toString()
+  })
+
+  registry.set('channelPosition', (args, ctx) => {
+    const channelID = args[0]?.trim() || ctx.textChannel?.id
+    if (!channelID || !ctx.guild) return ''
+    const channel = ctx.guild.channels.cache.get(channelID)
+    return channel && 'rawPosition' in channel ? ((channel as any).rawPosition + 1).toString() : ''
+  })
+
+  registry.set('getSlowmode', (args, ctx) => {
+    if (!ctx.guild) return '[BCFD Error: getSlowmode requires a guild context]'
+    const channelID = args[0]?.trim()
+    if (!channelID) return '[BCFD Error: getSlowmode requires a channel ID]'
+    const channel = ctx.guild.channels.cache.get(channelID)
+    if (!channel) return '[BCFD Error: getSlowmode channel not found]'
+    if (!('rateLimitPerUser' in channel))
+      return '[BCFD Error: getSlowmode not supported on this channel type]'
+    return String((channel as any).rateLimitPerUser ?? 0)
+  })
+
   // $channelCount - total number of channels in the guild
   registry.set('channelCount', (_args, ctx) => ctx.guild?.channels.cache.size.toString() ?? '0')
 
@@ -558,6 +703,140 @@ function createFunctionRegistry(): FunctionRegistry {
   })
 
   // --------------------------------------------------------------------------
+  // Role Functions
+  // --------------------------------------------------------------------------
+
+  const orderedRoles = (ctx: BCFDContext) =>
+    ctx.guild
+      ? Array.from(ctx.guild.roles.cache.values()).sort(
+          (left, right) => right.rawPosition - left.rawPosition
+        )
+      : []
+
+  const findRole = (query: string, ctx: BCFDContext) => {
+    if (!ctx.guild) return undefined
+    const trimmed = query.trim()
+    const roleID = trimmed.match(/^<@&(\d+)>$/)?.[1] ?? (/^\d+$/.test(trimmed) ? trimmed : '')
+    if (roleID) return ctx.guild.roles.cache.get(roleID)
+    const lowered = trimmed.toLowerCase()
+    return ctx.guild.roles.cache.find((role) => role.name.toLowerCase() === lowered)
+  }
+
+  registry.set('roleCount', (_args, ctx) => ctx.guild?.roles.cache.size.toString() ?? '0')
+  registry.set('roleExists', (args, ctx) => (!!findRole(args[0] ?? '', ctx)).toString())
+  registry.set('findRole', (args, ctx) => findRole(args[0] ?? '', ctx)?.id ?? '')
+  registry.set('roleName', (args, ctx) => findRole(args[0] ?? '', ctx)?.name ?? '')
+  registry.set('roleNames', (_args, ctx) =>
+    orderedRoles(ctx)
+      .map((role) => role.name)
+      .join(', ')
+  )
+  registry.set('getRoleColor', (args, ctx) => {
+    const role = findRole(args[0] ?? '', ctx)
+    return role ? role.color.toString(16).padStart(6, '0').toUpperCase() : ''
+  })
+  registry.set('rolePosition', (args, ctx) => {
+    const role = findRole(args[0] ?? '', ctx)
+    if (!role) return ''
+    const position = orderedRoles(ctx).findIndex((candidate) => candidate.id === role.id)
+    return position < 0 ? '' : (position + 1).toString()
+  })
+  registry.set('hasRole', async (args, ctx) => {
+    if (!ctx.guild) return '[BCFD Error: hasRole requires a guild context]'
+    const userID = args[0]?.trim()
+    const role = findRole(args[1] ?? '', ctx)
+    if (!userID || !role) return 'false'
+    const member = await ctx.guild.members.fetch(userID).catch(() => null)
+    if (!member) return 'false'
+    return (role.id === ctx.guild.id || member.roles.cache.has(role.id)).toString()
+  })
+  registry.set('userRoles', async (args, ctx) => {
+    if (!ctx.guild) return '[BCFD Error: userRoles requires a guild context]'
+    const userID = args[0]?.trim()
+    if (!userID) return '[BCFD Error: userRoles requires a user ID]'
+    const member = await ctx.guild.members.fetch(userID).catch(() => null)
+    if (!member) return ''
+    return Array.from(member.roles.cache.values())
+      .filter((role) => role.id !== ctx.guild!.id)
+      .sort((left, right) => right.rawPosition - left.rawPosition)
+      .map((role) => role.name)
+      .join(', ')
+  })
+  registry.set('roleGrant', async (args, ctx) => {
+    if (!ctx.guild) return '[BCFD Error: roleGrant requires a guild context]'
+    if (!ctx.guild.members.me?.permissions.has(PermissionsBitField.Flags.ManageRoles))
+      return '[BCFD Error: roleGrant requires Manage Roles permission]'
+    const userID = args[0]?.trim()
+    if (!userID || args.length < 2)
+      return '[BCFD Error: roleGrant requires a user ID and signed role IDs]'
+    const member = await ctx.guild.members.fetch(userID).catch(() => null)
+    if (!member) return '[BCFD Error: roleGrant member not found]'
+    if (!member.manageable) return '[BCFD Error: roleGrant member is not manageable]'
+
+    const additions: string[] = []
+    const removals: string[] = []
+    const seen = new Set<string>()
+    for (const operation of args.slice(1)) {
+      const trimmed = operation.trim()
+      const match = trimmed.match(/^([+-])(\d+)$/)
+      if (!match) return '[BCFD Error: roleGrant roles must use +roleID or -roleID]'
+      const [, sign, roleID] = match
+      if (seen.has(roleID)) return '[BCFD Error: roleGrant contains a duplicate role ID]'
+      seen.add(roleID)
+      const role = ctx.guild.roles.cache.get(roleID)
+      if (!role) return `[BCFD Error: roleGrant role ${roleID} not found]`
+      if (role.id === ctx.guild.id || role.managed || !role.editable)
+        return `[BCFD Error: roleGrant role ${roleID} is not manageable]`
+      if (sign === '+') additions.push(roleID)
+      else removals.push(roleID)
+    }
+
+    try {
+      if (additions.length > 0) await member.roles.add(additions)
+      if (removals.length > 0) await member.roles.remove(removals)
+      return 'true'
+    } catch (error) {
+      return `[BCFD Error: roleGrant failed: ${error instanceof Error ? error.message : 'Unknown error'}]`
+    }
+  })
+  registry.set('createRole', async (args, ctx) => {
+    if (!ctx.guild) return '[BCFD Error: createRole requires a guild context]'
+    if (!ctx.guild.members.me?.permissions.has(PermissionsBitField.Flags.ManageRoles))
+      return '[BCFD Error: createRole requires Manage Roles permission]'
+    const name = args[0]?.trim() ?? ''
+    if (name.length < 1 || name.length > 100)
+      return '[BCFD Error: createRole name must be 1-100 characters]'
+    const color = parseRoleColor(args[1] ?? '')
+    if (color === null) return '[BCFD Error: createRole requires a valid color]'
+    const hoist = args[2] == null || args[2].trim() === '' ? false : parseBooleanValue(args[2])
+    const mentionable =
+      args[3] == null || args[3].trim() === '' ? false : parseBooleanValue(args[3])
+    if (hoist === null || mentionable === null)
+      return '[BCFD Error: createRole hoisted and mentionable must be boolean values]'
+    try {
+      const role = await ctx.guild.roles.create({ name, color, hoist, mentionable })
+      return role.id
+    } catch (error) {
+      return `[BCFD Error: createRole failed: ${error instanceof Error ? error.message : 'Unknown error'}]`
+    }
+  })
+  registry.set('deleteRole', async (args, ctx) => {
+    if (!ctx.guild) return '[BCFD Error: deleteRole requires a guild context]'
+    if (!ctx.guild.members.me?.permissions.has(PermissionsBitField.Flags.ManageRoles))
+      return '[BCFD Error: deleteRole requires Manage Roles permission]'
+    const role = findRole(args[0] ?? '', ctx)
+    if (!role) return '[BCFD Error: deleteRole role not found]'
+    if (role.id === ctx.guild.id || role.managed || !role.editable)
+      return '[BCFD Error: deleteRole role is not manageable]'
+    try {
+      await role.delete()
+      return 'true'
+    } catch (error) {
+      return `[BCFD Error: deleteRole failed: ${error instanceof Error ? error.message : 'Unknown error'}]`
+    }
+  })
+
+  // --------------------------------------------------------------------------
   // Mentioned User Context Functions
   // --------------------------------------------------------------------------
   registry.set('mentionedName', (_args, ctx) => `<@${ctx.mentionedUser?.id ?? ''}>`)
@@ -592,10 +871,7 @@ function createFunctionRegistry(): FunctionRegistry {
     'mentionedMemberEffectiveName',
     (_args, ctx) => ctx.mentionedMember?.displayName ?? ''
   )
-  registry.set(
-    'mentionedMemberNickname',
-    (_args, ctx) => ctx.mentionedMember?.nickname ?? ''
-  )
+  registry.set('mentionedMemberNickname', (_args, ctx) => ctx.mentionedMember?.nickname ?? '')
   registry.set('mentionedMemberID', (_args, ctx) => ctx.mentionedMember?.id ?? '')
   registry.set('mentionedMemberHasTimeJoined', (_args, ctx) =>
     ctx.mentionedMember ? (ctx.mentionedMember.joinedTimestamp != null).toString() : ''
@@ -616,9 +892,7 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('mentionedMemberEffectiveTag', (_args, ctx) => ctx.mentionedMember?.user.tag ?? '')
   registry.set('mentionedMemberEffectiveID', (_args, ctx) => ctx.mentionedMember?.user.id ?? '')
   registry.set('mentionedMemberEffectiveTimeCreated', (_args, ctx) =>
-    ctx.mentionedMember
-      ? new Date(ctx.mentionedMember.user.createdTimestamp).toLocaleString()
-      : ''
+    ctx.mentionedMember ? new Date(ctx.mentionedMember.user.createdTimestamp).toLocaleString() : ''
   )
   registry.set('mentionedMemberEffectiveTimeCreatedDiscord', (_args, ctx) =>
     discordTimestampFromMillis(ctx.mentionedMember?.user.createdTimestamp)
@@ -638,10 +912,7 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('mentionedMemberHasBoosted', (_args, ctx) =>
     (ctx.mentionedMember?.premiumSinceTimestamp != null).toString()
   )
-  registry.set(
-    'mentionedMemberColor',
-    (_args, ctx) => ctx.mentionedMember?.displayHexColor ?? ''
-  )
+  registry.set('mentionedMemberColor', (_args, ctx) => ctx.mentionedMember?.displayHexColor ?? '')
   registry.set(
     'mentionedMemberRoles',
     (_args, ctx) => ctx.mentionedMember?.roles.cache.map((r) => r.name).join(', ') ?? ''
@@ -660,6 +931,17 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('commandCount', () => getCommands().bcfdCommands.length.toString())
   registry.set('date', () => new Date().toLocaleString())
   registry.set('dateDiscord', () => discordTimestampFromMillis(Date.now()))
+  registry.set('day', () => new Date().getDate().toString())
+  registry.set('month', () => (new Date().getMonth() + 1).toString())
+  registry.set('year', () => new Date().getFullYear().toString())
+  registry.set('getTimestamp', (args) => {
+    const unit = args[0]?.trim().toLowerCase() || 's'
+    const now = Date.now()
+    if (unit === 's') return Math.floor(now / 1000).toString()
+    if (unit === 'ms') return now.toString()
+    if (unit === 'ns') return (BigInt(now) * 1000000n).toString()
+    return '[BCFD Error: getTimestamp unit must be s, ms, or ns]'
+  })
   const hour: BCFDFunction = () => {
     const h = new Date().getHours()
     return (h < 10 ? '0' : '') + h.toString()
@@ -688,6 +970,10 @@ function createFunctionRegistry(): FunctionRegistry {
     const after = ctx.messageEvent?.content.substring(ctx.command?.command.length ?? 0).trim() ?? ''
     const args = after.split(' ').filter((s) => s.length > 0)
     return args.length.toString()
+  })
+  registry.set('wordCount', (args) => {
+    const text = args[0]?.trim() ?? ''
+    return text === '' ? '0' : text.split(/\s+/u).length.toString()
   })
 
   // --------------------------------------------------------------------------
@@ -724,6 +1010,16 @@ function createFunctionRegistry(): FunctionRegistry {
   // --------------------------------------------------------------------------
   // Math Functions
   // --------------------------------------------------------------------------
+
+  registry.set('calculate', (args) => {
+    const expression = args[0]?.trim() ?? ''
+    if (!expression) return '[BCFD Error: calculate requires an expression]'
+    try {
+      return formatCalculatedNumber(new MathExpressionParser(expression).parse())
+    } catch (error) {
+      return `[BCFD Error: calculate ${error instanceof Error ? error.message : 'failed'}]`
+    }
+  })
 
   // $sub(a, b) - subtraction
   registry.set('sub', (args) => {
@@ -900,6 +1196,53 @@ function createFunctionRegistry(): FunctionRegistry {
   // String Manipulation Functions
   // --------------------------------------------------------------------------
 
+  registry.set('cropText', (args) => {
+    const characters = Array.from(args[0] ?? '')
+    const max = Number(args[1]?.trim())
+    if (!Number.isInteger(max) || max < 0)
+      return '[BCFD Error: cropText max must be a non-negative integer]'
+    if (characters.length <= max) return characters.join('')
+    return characters.slice(0, max).join('') + (args[2] ?? '')
+  })
+
+  registry.set('linesCount', (args) => {
+    const text = args[0] ?? ''
+    return text === '' ? '0' : text.split(/\r\n|\r|\n/u).length.toString()
+  })
+
+  registry.set('toTitleCase', (args) =>
+    (args[0] ?? '').replace(/\S+/gu, (word) => {
+      const characters = Array.from(word.toLocaleLowerCase())
+      return characters.length === 0
+        ? ''
+        : characters[0].toLocaleUpperCase() + characters.slice(1).join('')
+    })
+  )
+
+  registry.set('numberSeparator', (args) => {
+    const value = args[0]?.trim() ?? ''
+    if (!/^[+-]?\d+$/.test(value)) return '[BCFD Error: numberSeparator requires an integer]'
+    const sign = value[0] === '+' || value[0] === '-' ? value[0] : ''
+    const digits = sign ? value.slice(1) : value
+    const separator = args[1] ?? ','
+    return sign + digits.replace(/\B(?=(\d{3})+(?!\d))/g, separator)
+  })
+
+  registry.set('randomString', (args) => {
+    const length = Number(args[0]?.trim())
+    if (!Number.isInteger(length) || length < 0 || length > 10)
+      return '[BCFD Error: randomString length must be an integer from 0 to 10]'
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+    let result = ''
+    for (let index = 0; index < length; index++)
+      result += alphabet[Math.floor(Math.random() * alphabet.length)]
+    return result
+  })
+
+  registry.set('isBoolean', (args) => (parseBooleanValue(args[0] ?? '') !== null).toString())
+  registry.set('isInteger', (args) => /^[+-]?\d+$/.test(args[0]?.trim() ?? '').toString())
+  registry.set('isValidHex', (args) => /^#?[0-9a-fA-F]{6}$/.test(args[0]?.trim() ?? '').toString())
+
   // $upper(text) - convert to uppercase
   registry.set('upper', (args) => args[0]?.toUpperCase() ?? '')
 
@@ -940,13 +1283,13 @@ function createFunctionRegistry(): FunctionRegistry {
   })
 
   // $contains(text, search) - check if text contains search string
-  registry.set('contains', (args) => ((args[0] ?? '').includes(args[1] ?? '')).toString())
+  registry.set('contains', (args) => (args[0] ?? '').includes(args[1] ?? '').toString())
 
   // $startsWith(text, prefix) - check if text starts with prefix
-  registry.set('startsWith', (args) => ((args[0] ?? '').startsWith(args[1] ?? '')).toString())
+  registry.set('startsWith', (args) => (args[0] ?? '').startsWith(args[1] ?? '').toString())
 
   // $endsWith(text, suffix) - check if text ends with suffix
-  registry.set('endsWith', (args) => ((args[0] ?? '').endsWith(args[1] ?? '')).toString())
+  registry.set('endsWith', (args) => (args[0] ?? '').endsWith(args[1] ?? '').toString())
 
   // $chat(prompt) - async AI chat (returns Promise)
   registry.set('chat', async (args) => {

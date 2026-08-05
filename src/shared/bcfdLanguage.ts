@@ -584,6 +584,155 @@ export const bcfdItems: BCFDLanguageItem[] = [
     syntax: 'function-paren',
     description: 'Get remaining cooldown seconds',
     insertText: 'cooldownRemaining(level)'
+  },
+  {
+    name: 'wordCount',
+    syntax: 'function-paren',
+    description: 'Count whitespace-separated words',
+    insertText: 'wordCount(text)'
+  },
+  {
+    name: 'calculate',
+    syntax: 'function-paren',
+    description: 'Safely evaluate an arithmetic expression',
+    insertText: 'calculate(expression)'
+  },
+  {
+    name: 'cropText',
+    syntax: 'function-paren',
+    description: 'Crop text and append an optional ending',
+    insertText: 'cropText(text, max, ending)'
+  },
+  {
+    name: 'isBoolean',
+    syntax: 'function-paren',
+    description: 'Check whether text is true or false',
+    insertText: 'isBoolean(text)'
+  },
+  {
+    name: 'isInteger',
+    syntax: 'function-paren',
+    description: 'Check whether text is an integer',
+    insertText: 'isInteger(text)'
+  },
+  {
+    name: 'isValidHex',
+    syntax: 'function-paren',
+    description: 'Check whether text is a six-digit color hex',
+    insertText: 'isValidHex(text)'
+  },
+  {
+    name: 'linesCount',
+    syntax: 'function-paren',
+    description: 'Count lines in text',
+    insertText: 'linesCount(text)'
+  },
+  {
+    name: 'numberSeparator',
+    syntax: 'function-paren',
+    description: 'Group integer digits with a separator',
+    insertText: 'numberSeparator(number, separator)'
+  },
+  {
+    name: 'randomString',
+    syntax: 'function-paren',
+    description: 'Generate up to ten random letters and digits',
+    insertText: 'randomString(length)'
+  },
+  {
+    name: 'toTitleCase',
+    syntax: 'function-paren',
+    description: 'Convert text to title case',
+    insertText: 'toTitleCase(text)'
+  },
+  { name: 'day', syntax: 'variable', description: 'Current local day of the month' },
+  { name: 'month', syntax: 'variable', description: 'Current local month number' },
+  { name: 'year', syntax: 'variable', description: 'Current local year' },
+  {
+    name: 'getTimestamp',
+    syntax: 'function-paren',
+    description: 'Current Unix timestamp in seconds, milliseconds, or nanoseconds',
+    insertText: 'getTimestamp(unit)'
+  },
+  { name: 'roleCount', syntax: 'variable', description: 'Number of roles in the server' },
+  {
+    name: 'roleExists',
+    syntax: 'function-paren',
+    description: 'Check whether a role exists',
+    insertText: 'roleExists(roleID)'
+  },
+  {
+    name: 'findRole',
+    syntax: 'function-paren',
+    description: 'Find a role by name, ID, or mention',
+    insertText: 'findRole(query)'
+  },
+  {
+    name: 'roleName',
+    syntax: 'function-paren',
+    description: 'Get a role name',
+    insertText: 'roleName(roleID)'
+  },
+  { name: 'roleNames', syntax: 'variable', description: 'Server roles from highest to lowest' },
+  {
+    name: 'getRoleColor',
+    syntax: 'function-paren',
+    description: 'Get a role color as six-digit hex',
+    insertText: 'getRoleColor(roleID)'
+  },
+  {
+    name: 'rolePosition',
+    syntax: 'function-paren',
+    description: 'Get a role position with highest as one',
+    insertText: 'rolePosition(roleID)'
+  },
+  {
+    name: 'hasRole',
+    syntax: 'function-paren',
+    description: 'Check whether a server member has a role',
+    insertText: 'hasRole(userID, roleID)'
+  },
+  {
+    name: 'userRoles',
+    syntax: 'function-paren',
+    description: 'Get a server member role names',
+    insertText: 'userRoles(userID)'
+  },
+  {
+    name: 'roleGrant',
+    syntax: 'function-paren',
+    description: 'Add or remove signed role IDs for a member',
+    insertText: 'roleGrant(userID, +roleID, -roleID)'
+  },
+  {
+    name: 'createRole',
+    syntax: 'function-paren',
+    description: 'Create a server role and return its ID',
+    insertText: 'createRole(name, color, hoisted, mentionable)'
+  },
+  {
+    name: 'deleteRole',
+    syntax: 'function-paren',
+    description: 'Delete a manageable server role',
+    insertText: 'deleteRole(roleID)'
+  },
+  {
+    name: 'channelExists',
+    syntax: 'function-paren',
+    description: 'Check whether a channel exists in a connected server',
+    insertText: 'channelExists(channelID)'
+  },
+  {
+    name: 'channelPosition',
+    syntax: 'function-paren',
+    description: 'Get a one-based channel position',
+    insertText: 'channelPosition(channelID)'
+  },
+  {
+    name: 'getSlowmode',
+    syntax: 'function-paren',
+    description: 'Get channel slowmode in seconds',
+    insertText: 'getSlowmode(channelID)'
   }
 ]
 

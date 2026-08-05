@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { Interpreter } from './interpreter'
 import type { BCFDContext, FunctionRegistry } from './types'
 import { createQuickJSScriptContext, type ScriptContext } from '../../utils/quickJsScriptContext'
-import { ActivityType } from 'discord.js'
+import { ActivityType, Collection } from 'discord.js'
 
 function testInterpreter(registry: FunctionRegistry): Interpreter {
   return new Interpreter(registry)
@@ -143,16 +143,138 @@ describe('BCFD interpreter', () => {
     )
 
     const values = result.output.split('|')
-    expect(values.slice(0, 4)).toEqual([
-      'user-id',
-      'user-id',
-      'default-avatar',
-      'default-avatar'
-    ])
+    expect(values.slice(0, 4)).toEqual(['user-id', 'user-id', 'default-avatar', 'default-avatar'])
     expect(values[4]).toBe(values[5])
     expect(values[6]).toBe(values[7])
     expect(values[8]).toBe(values[9])
     expect(result.errors).toEqual([])
+  })
+
+  it('supports the BDFD-inspired utility and time functions', async () => {
+    const result = await new Interpreter().interpret(
+      [
+        '$wordCount(  one   two three  )',
+        '$calculate(2 + 3 * 4)',
+        '$calculate(2 ** 3 ** 2)',
+        '$cropText(😀abc, 2, …)',
+        '$linesCount(one\r\ntwo\nthree)',
+        '$toTitleCase(hELLo wORLD)',
+        '$numberSeparator(-1234567, _)',
+        '$isBoolean(TRUE)',
+        '$isBoolean(yes)',
+        '$isInteger(-42)',
+        '$isInteger(4.2)',
+        '$isValidHex(#E67E22)',
+        '$isValidHex(red)'
+      ].join('|'),
+      {}
+    )
+
+    expect(result.output).toBe(
+      '3|14|512|😀a…|3|Hello World|-1_234_567|true|false|true|false|true|false'
+    )
+    expect(result.errors).toEqual([])
+
+    const dynamic = await new Interpreter().interpret(
+      '$day|$month|$year|$getTimestamp(s)|$getTimestamp(ms)|$getTimestamp(ns)|$randomString(10)',
+      {}
+    )
+    const [day, month, year, seconds, milliseconds, nanoseconds, random] = dynamic.output.split('|')
+    expect(Number(day)).toBeGreaterThanOrEqual(1)
+    expect(Number(month)).toBeGreaterThanOrEqual(1)
+    expect(year).toMatch(/^\d{4}$/)
+    expect(seconds).toMatch(/^\d{10,}$/)
+    expect(milliseconds).toMatch(/^\d{13,}$/)
+    expect(nanoseconds).toMatch(/^\d{19,}$/)
+    expect(random).toMatch(/^[A-Za-z0-9]{10}$/)
+  })
+
+  it('handles role and channel lookups and role mutations', async () => {
+    const add = vi.fn(async () => undefined)
+    const remove = vi.fn(async () => undefined)
+    const deleteRole = vi.fn(async () => undefined)
+    const roles = new Collection<string, any>()
+    roles.set('10', {
+      id: '10',
+      name: '@everyone',
+      rawPosition: 0,
+      color: 0,
+      managed: false,
+      editable: false
+    })
+    roles.set('20', {
+      id: '20',
+      name: 'Member',
+      rawPosition: 1,
+      color: 0x123456,
+      managed: false,
+      editable: true,
+      delete: deleteRole
+    })
+    roles.set('30', {
+      id: '30',
+      name: 'Admin',
+      rawPosition: 2,
+      color: 0xe67e22,
+      managed: false,
+      editable: true,
+      delete: deleteRole
+    })
+    const memberRoles = new Collection<string, any>([
+      ['10', roles.get('10')],
+      ['20', roles.get('20')]
+    ])
+    const member = { manageable: true, roles: { cache: memberRoles, add, remove } }
+    const create = vi.fn(async () => ({ id: 'created-role' }))
+    const channels = new Collection<string, any>([
+      ['channel-id', { id: 'channel-id', rawPosition: 4, rateLimitPerUser: 12 }]
+    ])
+    const guild = {
+      id: '10',
+      roles: { cache: roles, create },
+      members: {
+        me: { permissions: { has: () => true } },
+        fetch: vi.fn(async () => member)
+      },
+      channels: { cache: channels }
+    } as any
+    const client = { channels: { cache: channels } } as any
+
+    const lookup = await new Interpreter().interpret(
+      [
+        '$roleCount',
+        '$roleExists(30)',
+        '$findRole(admin)',
+        '$roleName(20)',
+        '$roleNames',
+        '$getRoleColor(30)',
+        '$rolePosition(30)',
+        '$hasRole(user-id, 20)',
+        '$userRoles(user-id)',
+        '$channelExists(channel-id)',
+        '$channelPosition(channel-id)',
+        '$getSlowmode(channel-id)'
+      ].join('|'),
+      { guild, client }
+    )
+    expect(lookup.output).toBe(
+      '3|true|30|Member|Admin, Member, @everyone|E67E22|1|true|Member|true|5|12'
+    )
+
+    const mutation = await new Interpreter().interpret(
+      '$roleGrant(user-id, +30, -20)|$createRole(Blue, #123456, true, false)|$deleteRole(20)',
+      { guild, client }
+    )
+    expect(mutation.output).toBe('true|created-role|true')
+    expect(add).toHaveBeenCalledWith(['30'])
+    expect(remove).toHaveBeenCalledWith(['20'])
+    expect(create).toHaveBeenCalledWith({
+      name: 'Blue',
+      color: 0x123456,
+      hoist: true,
+      mentionable: false
+    })
+    expect(deleteRole).toHaveBeenCalled()
   })
 
   it('supports mutual-server counts and setStatus', async () => {

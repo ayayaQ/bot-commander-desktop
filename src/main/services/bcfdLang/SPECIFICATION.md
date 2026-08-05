@@ -146,18 +146,18 @@ $endif
 
 ### User Context
 
-| Function              | Description                                | Example Output          |
-| --------------------- | ------------------------------------------ | ----------------------- |
-| `$name`               | User as mention                            | `<@123456789>`          |
-| `$namePlain`          | User's display name                        | `JohnDoe`               |
-| `$avatar`             | User's avatar URL                          | `https://...`           |
-| `$discriminator`      | User's discriminator                       | `1234`                  |
-| `$tag`                | User's tag                                 | `JohnDoe#1234`          |
-| `$ID`                 | User's ID                                  | `123456789`             |
-| `$timeCreated`        | Account creation time                      | `1/1/2020, 12:00:00 PM` |
-| `$timeCreatedDiscord` | Account creation time as Discord timestamp | `<t:1577880000>`        |
-| `$defaultAvatar`      | Default avatar URL                         | `https://...`           |
-| `$serversSharedWithBot` | Number of cached mutual servers          | `3`                     |
+| Function                | Description                                | Example Output          |
+| ----------------------- | ------------------------------------------ | ----------------------- |
+| `$name`                 | User as mention                            | `<@123456789>`          |
+| `$namePlain`            | User's display name                        | `JohnDoe`               |
+| `$avatar`               | User's avatar URL                          | `https://...`           |
+| `$discriminator`        | User's discriminator                       | `1234`                  |
+| `$tag`                  | User's tag                                 | `JohnDoe#1234`          |
+| `$ID`                   | User's ID                                  | `123456789`             |
+| `$timeCreated`          | Account creation time                      | `1/1/2020, 12:00:00 PM` |
+| `$timeCreatedDiscord`   | Account creation time as Discord timestamp | `<t:1577880000>`        |
+| `$defaultAvatar`        | Default avatar URL                         | `https://...`           |
+| `$serversSharedWithBot` | Number of cached mutual servers            | `3`                     |
 
 ### Member Context
 
@@ -231,12 +231,12 @@ These functions create, modify, and manage Discord channels. The bot requires `M
 
 #### Creation
 
-| Function                | Syntax                                          | Description                                                                 |
-| ----------------------- | ----------------------------------------------- | --------------------------------------------------------------------------- |
-| `$createChannel`        | `$createChannel(name, type)`                    | Create a channel (type defaults to "text"). Returns channel ID              |
-| `$createPrivateChannel` | `$createPrivateChannel(name, type)`             | Create a channel visible to the caller and admins. Returns channel ID        |
-| `$createChannelIn`      | `$createChannelIn(name, type, categoryID)`      | Create a channel under a category. Returns channel ID                        |
-| `$cloneChannel`         | `$cloneChannel(channelID)`                      | Clone a channel (copies all properties). Returns new channel ID             |
+| Function                | Syntax                                     | Description                                                           |
+| ----------------------- | ------------------------------------------ | --------------------------------------------------------------------- |
+| `$createChannel`        | `$createChannel(name, type)`               | Create a channel (type defaults to "text"). Returns channel ID        |
+| `$createPrivateChannel` | `$createPrivateChannel(name, type)`        | Create a channel visible to the caller and admins. Returns channel ID |
+| `$createChannelIn`      | `$createChannelIn(name, type, categoryID)` | Create a channel under a category. Returns channel ID                 |
+| `$cloneChannel`         | `$cloneChannel(channelID)`                 | Clone a channel (copies all properties). Returns new channel ID       |
 
 #### Deletion
 
@@ -263,6 +263,9 @@ These functions create, modify, and manage Discord channels. The bot requires `M
 | `$getChannelName`   | `$getChannelName(channelID)`   | Get a channel's name by ID                                     |
 | `$getChannelType`   | `$getChannelType(channelID)`   | Get channel type as friendly string                            |
 | `$getChannelParent` | `$getChannelParent(channelID)` | Get parent category ID (empty if none)                         |
+| `$channelExists`    | `$channelExists(channelID)`    | Whether a channel is present in the client's channel cache     |
+| `$channelPosition`  | `$channelPosition(channelID)`  | One-based position of a server channel                         |
+| `$getSlowmode`      | `$getSlowmode(channelID)`      | Slowmode delay in seconds                                      |
 | `$channelCount`     | `$channelCount`                | Total number of channels in the server                         |
 
 #### Listing
@@ -302,47 +305,91 @@ Voice channels: $listChannels(voice)
 This server has $channelCount channels.
 ```
 
+### Role Functions
+
+Role lookup accepts a numeric role ID, a role mention, or a case-insensitive role name. Role
+positions are one-based and ordered from highest to lowest. Mutating functions require the bot's
+`ManageRoles` permission and Discord's normal role-hierarchy checks.
+
+| Function        | Syntax                                           | Description                                                     |
+| --------------- | ------------------------------------------------ | --------------------------------------------------------------- |
+| `$roleCount`    | `$roleCount`                                     | Number of roles, including `@everyone`                          |
+| `$roleExists`   | `$roleExists(role)`                              | Whether the role exists                                         |
+| `$findRole`     | `$findRole(role)`                                | Resolve a role and return its ID                                |
+| `$roleName`     | `$roleName(role)`                                | Resolve a role and return its name                              |
+| `$roleNames`    | `$roleNames`                                     | Role names from highest to lowest                               |
+| `$getRoleColor` | `$getRoleColor(role)`                            | Six-character uppercase hexadecimal color                       |
+| `$rolePosition` | `$rolePosition(role)`                            | One-based position from highest to lowest                       |
+| `$hasRole`      | `$hasRole(userID, role)`                         | Whether a server member has the role                            |
+| `$userRoles`    | `$userRoles(userID)`                             | Member role names from highest to lowest, excluding `@everyone` |
+| `$roleGrant`    | `$roleGrant(userID, +roleID, -roleID, ...)`      | Add and remove validated roles; returns `true`                  |
+| `$createRole`   | `$createRole(name, color, hoisted, mentionable)` | Create a role and return its ID                                 |
+| `$deleteRole`   | `$deleteRole(role)`                              | Delete a role; returns `true`                                   |
+
+`$createRole` accepts a six-digit hexadecimal color (with an optional `#`) or a decimal Discord
+color value from `0` through `16777215`. The boolean options default to `false`. `$roleGrant`
+validates the complete operation before applying it and rejects duplicate IDs, managed roles,
+`@everyone`, and roles the bot cannot manage.
+
 ### Mentioned User Context
 
-| Function                       | Description                                            |
-| ------------------------------ | ------------------------------------------------------ |
-| `$mentionedName`               | Mentioned user as mention                              |
-| `$mentionedID`                 | Mentioned user's ID                                    |
-| `$mentionedTag`                | Mentioned user's tag                                   |
-| `$mentionedDiscriminator`      | Mentioned user's discriminator                         |
-| `$mentionedAvatar`             | Mentioned user's avatar                                |
-| `$mentionedTimeCreated`        | Mentioned user's account creation                      |
-| `$mentionedTimeCreatedDiscord` | Mentioned user's account creation as Discord timestamp |
-| `$mentionedNamePlain`          | Mentioned user's display name                          |
-| `$mentionedDefaultAvatar`      | Mentioned user's default avatar                        |
-| `$mentionedIsBot`              | Is mentioned user a bot?                               |
-| `$mentionedServersSharedWithBot` | Number of cached mutual servers                      |
+| Function                         | Description                                            |
+| -------------------------------- | ------------------------------------------------------ |
+| `$mentionedName`                 | Mentioned user as mention                              |
+| `$mentionedID`                   | Mentioned user's ID                                    |
+| `$mentionedTag`                  | Mentioned user's tag                                   |
+| `$mentionedDiscriminator`        | Mentioned user's discriminator                         |
+| `$mentionedAvatar`               | Mentioned user's avatar                                |
+| `$mentionedTimeCreated`          | Mentioned user's account creation                      |
+| `$mentionedTimeCreatedDiscord`   | Mentioned user's account creation as Discord timestamp |
+| `$mentionedNamePlain`            | Mentioned user's display name                          |
+| `$mentionedDefaultAvatar`        | Mentioned user's default avatar                        |
+| `$mentionedIsBot`                | Is mentioned user a bot?                               |
+| `$mentionedServersSharedWithBot` | Number of cached mutual servers                        |
 
 ### Utility Functions
 
-| Function         | Syntax                                | Description                         |
-| ---------------- | ------------------------------------- | ----------------------------------- |
-| `$random`        | `$random{a\|b\|c}`                    | Random selection from options       |
-| `$rollnum`       | `$rollnum(min, max)`                  | Random integer in range (inclusive) |
-| `$sum`           | `$sum(n1, n2, ...)` or `$sum{n1\|n2}` | Sum of numbers                      |
-| `$args`          | `$args(index)`                        | Get argument at index               |
-| `$argsCount`     | `$argsCount`                          | Number of arguments                 |
-| `$randomInt`     | `$randomInt`                          | Random 0-99                         |
-| `$randomFloat`   | `$randomFloat`                        | Random 0.0-1.0                      |
-| `$randomBoolean` | `$randomBoolean`                      | Random true/false                   |
-| `$contains`      | `$contains(text, search)`             | True if text contains search        |
-| `$startsWith`    | `$startsWith(text, prefix)`           | True if text starts with prefix     |
-| `$endsWith`      | `$endsWith(text, suffix)`             | True if text ends with suffix       |
+| Function           | Syntax                                 | Description                                     |
+| ------------------ | -------------------------------------- | ----------------------------------------------- |
+| `$random`          | `$random{a\|b\|c}`                     | Random selection from options                   |
+| `$rollnum`         | `$rollnum(min, max)`                   | Random integer in range (inclusive)             |
+| `$sum`             | `$sum(n1, n2, ...)` or `$sum{n1\|n2}`  | Sum of numbers                                  |
+| `$args`            | `$args(index)`                         | Get argument at index                           |
+| `$argsCount`       | `$argsCount`                           | Number of arguments                             |
+| `$randomInt`       | `$randomInt`                           | Random 0-99                                     |
+| `$randomFloat`     | `$randomFloat`                         | Random 0.0-1.0                                  |
+| `$randomBoolean`   | `$randomBoolean`                       | Random true/false                               |
+| `$contains`        | `$contains(text, search)`              | True if text contains search                    |
+| `$startsWith`      | `$startsWith(text, prefix)`            | True if text starts with prefix                 |
+| `$endsWith`        | `$endsWith(text, suffix)`              | True if text ends with suffix                   |
+| `$wordCount`       | `$wordCount(text)`                     | Count whitespace-separated words                |
+| `$calculate`       | `$calculate(expression)`               | Evaluate bounded arithmetic safely              |
+| `$cropText`        | `$cropText(text, length, suffix)`      | Crop Unicode text; suffix is optional           |
+| `$linesCount`      | `$linesCount(text)`                    | Count LF, CRLF, or CR-separated lines           |
+| `$numberSeparator` | `$numberSeparator(integer, separator)` | Group integer digits; separator defaults to `,` |
+| `$randomString`    | `$randomString(length)`                | Random alphanumeric string (0-10 characters)    |
+| `$toTitleCase`     | `$toTitleCase(text)`                   | Capitalize each word and lowercase the rest     |
+| `$isBoolean`       | `$isBoolean(value)`                    | Recognize `true` or `false` (case-insensitive)  |
+| `$isInteger`       | `$isInteger(value)`                    | Validate a signed base-10 integer               |
+| `$isValidHex`      | `$isValidHex(value)`                   | Validate a six-digit hex color                  |
+
+`$calculate` supports parentheses, unary `+`/`-`, `+`, `-`, `*`, `/`, `%`, and right-associative
+`**`. It does not execute JavaScript or resolve names, and rejects expressions longer than 512
+characters, nesting beyond 64 levels, non-finite results, and division by zero.
 
 ### Date/Time Functions
 
-| Function       | Description                            |
-| -------------- | -------------------------------------- |
-| `$date`        | Current date/time                      |
-| `$dateDiscord` | Current date/time as Discord timestamp |
-| `$hour`        | Current hour (00-23)                   |
-| `$minute`      | Current minute (00-59)                 |
-| `$second`      | Current second (00-59)                 |
+| Function              | Description                                                                     |
+| --------------------- | ------------------------------------------------------------------------------- |
+| `$date`               | Current date/time                                                               |
+| `$dateDiscord`        | Current date/time as Discord timestamp                                          |
+| `$day`                | Current local day of month (1-31)                                               |
+| `$month`              | Current local month (1-12)                                                      |
+| `$year`               | Current local four-digit year                                                   |
+| `$getTimestamp(unit)` | Unix time in seconds (`s`, default), milliseconds (`ms`), or nanoseconds (`ns`) |
+| `$hour`               | Current hour (00-23)                                                            |
+| `$minute`             | Current minute (00-59)                                                          |
+| `$second`             | Current second (00-59)                                                          |
 
 ### Message Context
 
