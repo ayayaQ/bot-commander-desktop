@@ -13,12 +13,20 @@ const mocks = vi.hoisted(() => ({
   setBotStatus: vi.fn(),
   getInteractions: vi.fn(),
   setInteractions: vi.fn(),
-  randomUUID: vi.fn()
+  randomUUID: vi.fn(),
+  isEncryptionAvailable: vi.fn(),
+  encryptString: vi.fn(),
+  decryptString: vi.fn()
 }))
 
 vi.mock('electron', () => ({
   app: {
     getPath: mocks.appGetPath
+  },
+  safeStorage: {
+    isEncryptionAvailable: mocks.isEncryptionAvailable,
+    encryptString: mocks.encryptString,
+    decryptString: mocks.decryptString
   }
 }))
 
@@ -57,6 +65,9 @@ describe('fileService', () => {
     userDataPath = await fs.mkdtemp(join(tmpdir(), 'bcfd-file-service-'))
     mocks.appGetPath.mockReturnValue(userDataPath)
     mocks.randomUUID.mockReturnValue('generated-id')
+    mocks.isEncryptionAvailable.mockReturnValue(true)
+    mocks.encryptString.mockImplementation((value) => Buffer.from(`encrypted:${value}`))
+    mocks.decryptString.mockImplementation((value) => value.toString().replace('encrypted:', ''))
     mocks.getCommands.mockImplementation(
       () => mocks.setCommands.mock.calls.at(-1)?.[0] ?? { bcfdCommands: [], bcfdSlashCommands: [] }
     )
@@ -130,5 +141,41 @@ describe('fileService', () => {
       botHostedOnce: false,
       dismissedTips: []
     })
+  })
+
+  it('encrypts API keys at rest', async () => {
+    mocks.getSettings.mockReturnValue({
+      theme: 'light',
+      openaiApiKey: 'openai-secret',
+      openrouterApiKey: 'openrouter-secret'
+    })
+    const { saveSettings } = await import('./fileService')
+
+    await saveSettings()
+
+    const stored = await fs.readFile(join(userDataPath, 'settings.json'), 'utf-8')
+    expect(stored).not.toContain('openai-secret')
+    expect(stored).not.toContain('openrouter-secret')
+    expect(JSON.parse(stored)).toMatchObject({
+      openaiApiKey: expect.stringMatching(/^bcfd-encrypted:v1:/),
+      openrouterApiKey: expect.stringMatching(/^bcfd-encrypted:v1:/)
+    })
+  })
+
+  it('migrates plaintext API keys after loading them', async () => {
+    await fs.writeFile(
+      join(userDataPath, 'settings.json'),
+      JSON.stringify({ theme: 'light', openaiApiKey: 'old-secret', openrouterApiKey: '' })
+    )
+    const { loadSettings } = await import('./fileService')
+
+    await loadSettings()
+
+    expect(mocks.setSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ openaiApiKey: 'old-secret' })
+    )
+    const stored = await fs.readFile(join(userDataPath, 'settings.json'), 'utf-8')
+    expect(stored).not.toContain('old-secret')
+    expect(JSON.parse(stored).openaiApiKey).toMatch(/^bcfd-encrypted:v1:/)
   })
 })

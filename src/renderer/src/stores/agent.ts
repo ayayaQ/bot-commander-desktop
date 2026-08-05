@@ -60,7 +60,7 @@ function updateTool(sessionId: string, toolCall: AgentToolCall) {
   }))
 }
 
-function handleEvent(_event: unknown, payload: AgentStreamEvent) {
+function handleEvent(payload: AgentStreamEvent) {
   if (payload.session) replaceSession(payload.session)
   if (payload.message) {
     agentSessions.update((data) => ({

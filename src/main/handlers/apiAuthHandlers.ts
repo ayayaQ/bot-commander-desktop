@@ -1,4 +1,5 @@
-import { ipcMain, session, app } from 'electron'
+import { session, app } from 'electron'
+import { trustedIpcMain as ipcMain } from './ipcSecurity'
 
 // API base URL - production when packaged, localhost for development
 const API_BASE_URL = app.isPackaged
@@ -6,7 +7,7 @@ const API_BASE_URL = app.isPackaged
   : process.env.API_URL || 'http://localhost:8080'
 
 // Cookie configuration
-const COOKIE_URL = 'http://localhost'
+const COOKIE_URL = 'https://bcfd.ayayaq.com'
 const JWT_COOKIE_NAME = 'api-jwt'
 const USERNAME_COOKIE_NAME = 'api-username'
 const COOKIE_EXPIRY_DAYS = 30
@@ -18,14 +19,20 @@ async function setAuthCookies(jwt: string, username: string) {
     url: COOKIE_URL,
     name: JWT_COOKIE_NAME,
     value: jwt,
-    expirationDate
+    expirationDate,
+    httpOnly: true,
+    secure: true,
+    sameSite: 'strict'
   })
 
   await session.defaultSession.cookies.set({
     url: COOKIE_URL,
     name: USERNAME_COOKIE_NAME,
     value: username,
-    expirationDate
+    expirationDate,
+    httpOnly: true,
+    secure: true,
+    sameSite: 'strict'
   })
 }
 
@@ -35,8 +42,11 @@ async function clearAuthCookies() {
 }
 
 async function getStoredAuth(): Promise<{ jwt: string | null; username: string | null }> {
-  const jwtCookies = await session.defaultSession.cookies.get({ name: JWT_COOKIE_NAME })
-  const usernameCookies = await session.defaultSession.cookies.get({ name: USERNAME_COOKIE_NAME })
+  const jwtCookies = await session.defaultSession.cookies.get({ url: COOKIE_URL, name: JWT_COOKIE_NAME })
+  const usernameCookies = await session.defaultSession.cookies.get({
+    url: COOKIE_URL,
+    name: USERNAME_COOKIE_NAME
+  })
 
   return {
     jwt: jwtCookies[0]?.value ?? null,

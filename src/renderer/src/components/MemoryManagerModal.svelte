@@ -125,7 +125,7 @@
     }).format(new Date(value))
   }
 
-  function handleChanged(_event: unknown, next: AgentMemoryListResult) {
+  function handleChanged(next: AgentMemoryListResult) {
     applyResult(next)
   }
 

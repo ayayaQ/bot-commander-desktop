@@ -95,6 +95,11 @@ const validReceiveChannels = [
   'memory:changed'
 ]
 
+const listenerWrappers = new Map<
+  string,
+  Map<(...args: unknown[]) => void, (...args: unknown[]) => void>
+>()
+
 contextBridge.exposeInMainWorld('electron', {
   ipcRenderer: {
     send(channel: string, ...args: unknown[]) {
@@ -110,11 +115,23 @@ contextBridge.exposeInMainWorld('electron', {
     },
     on(channel: string, func: (...args: unknown[]) => void) {
       if (validReceiveChannels.includes(channel)) {
-        ipcRenderer.on(channel, func)
+        // Do not expose Electron's IpcRendererEvent: it contains a privileged sender reference.
+        const wrappers = listenerWrappers.get(channel) ?? new Map()
+        const previous = wrappers.get(func)
+        if (previous) ipcRenderer.removeListener(channel, previous)
+        const listener = (_event: Electron.IpcRendererEvent, ...args: unknown[]) => func(...args)
+        wrappers.set(func, listener)
+        listenerWrappers.set(channel, wrappers)
+        ipcRenderer.on(channel, listener)
       }
     },
     removeListener(channel: string, func: (...args: unknown[]) => void) {
-      ipcRenderer.removeListener(channel, func)
+      const wrappers = listenerWrappers.get(channel)
+      const listener = wrappers?.get(func)
+      if (!listener) return
+      ipcRenderer.removeListener(channel, listener)
+      wrappers?.delete(func)
+      if (wrappers?.size === 0) listenerWrappers.delete(channel)
     }
   }
 })

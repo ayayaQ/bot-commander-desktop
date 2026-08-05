@@ -48,7 +48,7 @@
   onMount(() => {
     const handleFocus = () => (windowFocused = true)
     const handleBlur = () => (windowFocused = false)
-    const handleAgentNavigation = async (_event: unknown, sessionId: string) => {
+    const handleAgentNavigation = async (sessionId: string) => {
       await initializeAgentSessions()
       selectedMenu = 'agent'
       await selectAgentSession(sessionId)

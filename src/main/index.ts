@@ -1,11 +1,13 @@
-import { app, shell, BrowserWindow, Tray, Menu } from 'electron'
+import { app, shell, BrowserWindow, Tray, Menu, session } from 'electron'
 import { join } from 'path'
+import { pathToFileURL } from 'url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import iconPng from '../../resources/icon.png?asset'
 import iconIco from '../../resources/icon.ico?asset'
 import { getStatsInstance, Stats } from './utils/stats'
 import { initializeBotState, saveBotState } from './utils/virtual'
 import { addIPCHandlers, addWindowIPCHandlers } from './handlers/ipcHandlers'
+import { configureTrustedRenderer } from './handlers/ipcSecurity'
 import { loadBotStatus, loadCommands, loadSettings, loadInteractions } from './services/fileService'
 
 // Extend the Electron.App interface to include our custom property
@@ -58,12 +60,31 @@ function createWindow(): void {
 
   addWindowIPCHandlers(mainWindow)
 
+  const rendererUrl =
+    is.dev && process.env['ELECTRON_RENDERER_URL']
+      ? process.env['ELECTRON_RENDERER_URL']
+      : pathToFileURL(join(__dirname, '../renderer/index.html')).href
+  configureTrustedRenderer(mainWindow.webContents, rendererUrl)
+
+  mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
+    const expected = new URL(rendererUrl)
+    const requested = new URL(navigationUrl)
+    const allowed =
+      expected.protocol === 'file:'
+        ? requested.href === expected.href
+        : requested.origin === expected.origin
+
+    if (!allowed) event.preventDefault()
+  })
+
   mainWindow.on('ready-to-show', () => {
     mainWindow?.show()
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    if (isSafeExternalUrl(details.url)) {
+      void shell.openExternal(details.url)
+    }
     return { action: 'deny' }
   })
 
@@ -82,6 +103,14 @@ function createWindow(): void {
       mainWindow?.hide()
     }
   })
+}
+
+function isSafeExternalUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === 'https:'
+  } catch {
+    return false
+  }
 }
 
 function createTray() {
@@ -111,6 +140,12 @@ app.whenReady().then(async () => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
 
+  // The help view embeds remote HTTPS content. This app does not need any web permissions.
+  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
+    callback(false)
+  })
+  session.defaultSession.setPermissionCheckHandler(() => false)
+
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
   // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
@@ -128,9 +163,8 @@ app.whenReady().then(async () => {
 
   await initializeBotState() // Initialize bot state
 
-  addIPCHandlers()
-
   createWindow()
+  addIPCHandlers()
   if (process.platform !== 'darwin') {
     createTray()
   }

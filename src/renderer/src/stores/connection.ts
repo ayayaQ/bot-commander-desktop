@@ -41,8 +41,8 @@ function createConnectionStore() {
 export const connectionStore = createConnectionStore()
 
 function addConnectionListener() {
-  ;window.electron.ipcRenderer.on('connect', (event, data) => {
-    console.log('Connected to server', data, event)
+  ;window.electron.ipcRenderer.on('connect', (data) => {
+    console.log('Connected to server', data)
 
     connectionStore.update((state) => ({
       ...state,
@@ -53,7 +53,7 @@ function addConnectionListener() {
       avatar: data.avatar
     }))
   })
-  ;window.electron.ipcRenderer.on('connect-error', (_event, message: string) => {
+  ;window.electron.ipcRenderer.on('connect-error', (message: string) => {
     connectionStore.update((state) => ({
       ...state,
       connected: false,
@@ -61,8 +61,8 @@ function addConnectionListener() {
       error: message
     }))
   })
-  ;window.electron.ipcRenderer.on('disconnect', (event) => {
-    console.log('Disconnected from server', event)
+  ;window.electron.ipcRenderer.on('disconnect', () => {
+    console.log('Disconnected from server')
   })
 }
 

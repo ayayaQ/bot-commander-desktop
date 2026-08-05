@@ -47,23 +47,23 @@ export function initConsoleListeners() {
   const electron = window.electron
 
   if (electron?.ipcRenderer) {
-    electron.ipcRenderer.on('console:info', (_event: any, message: string) => {
+    electron.ipcRenderer.on('console:info', (message: string) => {
       consoleStore.info(message)
     })
 
-    electron.ipcRenderer.on('console:error', (_event: any, message: string) => {
+    electron.ipcRenderer.on('console:error', (message: string) => {
       consoleStore.error(message)
     })
 
-    electron.ipcRenderer.on('console:warning', (_event: any, message: string) => {
+    electron.ipcRenderer.on('console:warning', (message: string) => {
       consoleStore.warning(message)
     })
 
-    electron.ipcRenderer.on('console:event', (_event: any, message: string) => {
+    electron.ipcRenderer.on('console:event', (message: string) => {
       consoleStore.event(message)
     })
 
-    electron.ipcRenderer.on('console:success', (_event: any, message: string) => {
+    electron.ipcRenderer.on('console:success', (message: string) => {
       consoleStore.success(message)
     })
   }

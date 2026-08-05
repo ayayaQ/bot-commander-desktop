@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { app, safeStorage } from 'electron'
 import { join } from 'path'
 import fs from 'fs/promises'
 import crypto from 'crypto'
@@ -16,6 +16,53 @@ import { getSettings, setSettings } from './settingsService'
 import { getBotStatus, setBotStatus } from './statusService'
 import { getInteractions, setInteractions } from './interactionService'
 import { decodeBCFDCommand } from '../../shared/commandCodec'
+
+const ENCRYPTED_SECRET_PREFIX = 'bcfd-encrypted:v1:'
+
+function isSecureCredentialStorageAvailable(): boolean {
+  if (!safeStorage.isEncryptionAvailable()) return false
+  // Electron's Linux fallback stores values in plaintext when no secret service is available.
+  return process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'
+}
+
+function encryptSecret(value: string | undefined): string {
+  if (!value) return ''
+  if (!isSecureCredentialStorageAvailable()) {
+    throw new Error('Secure credential storage is unavailable on this system')
+  }
+  return ENCRYPTED_SECRET_PREFIX + safeStorage.encryptString(value).toString('base64')
+}
+
+function decryptSecret(value: unknown): string {
+  if (typeof value !== 'string' || !value) return ''
+  if (!value.startsWith(ENCRYPTED_SECRET_PREFIX)) return value
+  if (!isSecureCredentialStorageAvailable()) {
+    throw new Error('Secure credential storage is unavailable on this system')
+  }
+  return safeStorage.decryptString(
+    Buffer.from(value.slice(ENCRYPTED_SECRET_PREFIX.length), 'base64')
+  )
+}
+
+function serializeSettings(settings: AppSettings): string {
+  return JSON.stringify(
+    {
+      ...settings,
+      openaiApiKey: encryptSecret(settings.openaiApiKey),
+      openrouterApiKey: encryptSecret(settings.openrouterApiKey)
+    },
+    null,
+    2
+  )
+}
+
+function parseSettings(settings: AppSettings): AppSettings {
+  return {
+    ...settings,
+    openaiApiKey: decryptSecret(settings.openaiApiKey),
+    openrouterApiKey: decryptSecret(settings.openrouterApiKey)
+  }
+}
 
 export async function loadCommands(): Promise<void> {
   const commandsPath = join(app.getPath('userData'), 'commands.json')
@@ -60,7 +107,7 @@ export async function saveCommands(): Promise<void> {
 export async function saveSettings(): Promise<void> {
   const settingsPath = join(app.getPath('userData'), 'settings.json')
   try {
-    await fs.writeFile(settingsPath, JSON.stringify(getSettings(), null, 2))
+    await fs.writeFile(settingsPath, serializeSettings(getSettings()))
   } catch (error) {
     console.error('Error saving settings:', error)
   }
@@ -95,8 +142,18 @@ export async function loadSettings(): Promise<void> {
   const settingsPath = join(app.getPath('userData'), 'settings.json')
   try {
     const data = await fs.readFile(settingsPath, 'utf-8')
-    let settings = JSON.parse(data) as AppSettings
+    const storedSettings = JSON.parse(data) as AppSettings
+    const settings = parseSettings(storedSettings)
     setSettings(settings)
+
+    // Upgrade previously plaintext API keys as soon as they are read successfully.
+    if (
+      [storedSettings.openaiApiKey, storedSettings.openrouterApiKey].some(
+        (secret) => typeof secret === 'string' && secret.length > 0 && !secret.startsWith(ENCRYPTED_SECRET_PREFIX)
+      )
+    ) {
+      await fs.writeFile(settingsPath, serializeSettings(settings))
+    }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       // File doesn't exist, create it with default settings

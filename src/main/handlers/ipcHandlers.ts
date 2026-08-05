@@ -1,4 +1,5 @@
-import { BrowserWindow, ipcMain, session, dialog, shell, Notification } from 'electron'
+import { BrowserWindow, session, dialog, shell, Notification } from 'electron'
+import { trustedIpcMain as ipcMain } from './ipcSecurity'
 import { OAuth2Scopes, PermissionsBitField, WebhookClient } from 'discord.js'
 import {
   getBotStateContext,
@@ -320,7 +321,10 @@ export function addIPCHandlers() {
   })
 
   ipcMain.handle('get-token', async () => {
-    const cookies = await session.defaultSession.cookies.get({ name: 'token' })
+    const cookies = await session.defaultSession.cookies.get({
+      url: 'https://discord.com',
+      name: 'token'
+    })
     return cookies[0]?.value ?? ''
   })
 
@@ -471,6 +475,9 @@ export function addIPCHandlers() {
   // Open external URLs in default browser
   ipcMain.handle('open-external-url', async (_event, url: string) => {
     try {
+      if (!isSafeExternalUrl(url)) {
+        return { success: false, error: 'Only HTTPS URLs can be opened externally' }
+      }
       await shell.openExternal(url)
       return { success: true }
     } catch (error) {
@@ -523,4 +530,12 @@ export function addIPCHandlers() {
 
   // Register command repository handlers
   addCommandRepoHandlers()
+}
+
+function isSafeExternalUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === 'https:'
+  } catch {
+    return false
+  }
 }

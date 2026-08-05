@@ -14,7 +14,7 @@
     isMaximized = await window.electron.ipcRenderer.invoke('is-window-maximized')
     ;window.electron.ipcRenderer.on(
       'window-state-changed',
-      (_event: any, maximized: boolean) => {
+      (maximized: boolean) => {
         isMaximized = maximized
       }
     )

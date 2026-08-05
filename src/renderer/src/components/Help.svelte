@@ -11,7 +11,13 @@
   </HeaderBar>
 
   <div class="help-container flex-1">
-    <iframe src={helpUrl} title="Bot Commander Help" width="100%" height="100%" frameborder="0"
+    <iframe
+      src={helpUrl}
+      title="Bot Commander Help"
+      width="100%"
+      height="100%"
+      frameborder="0"
+      sandbox="allow-scripts allow-same-origin allow-forms"
     ></iframe>
   </div>
 </div>

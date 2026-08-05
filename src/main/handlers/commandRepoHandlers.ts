@@ -1,4 +1,5 @@
-import { ipcMain, session, app } from 'electron'
+import { session, app } from 'electron'
+import { trustedIpcMain as ipcMain } from './ipcSecurity'
 import type { BCFDCommand } from '../types/types'
 
 // API base URL - production when packaged, localhost for development
@@ -7,11 +8,11 @@ const API_BASE_URL = app.isPackaged
   : process.env.API_URL || 'http://localhost:8080'
 
 // Cookie configuration
-//const COOKIE_URL = 'http://localhost'
+const COOKIE_URL = 'https://bcfd.ayayaq.com'
 const JWT_COOKIE_NAME = 'api-jwt'
 
 async function getStoredJwt(): Promise<string | null> {
-  const jwtCookies = await session.defaultSession.cookies.get({ name: JWT_COOKIE_NAME })
+  const jwtCookies = await session.defaultSession.cookies.get({ url: COOKIE_URL, name: JWT_COOKIE_NAME })
   return jwtCookies[0]?.value ?? null
 }
 

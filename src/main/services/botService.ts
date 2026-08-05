@@ -133,7 +133,10 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
     url: 'https://discord.com',
     name: 'token',
     value: token,
-    expirationDate: Date.now() + 1000 * 60 * 60 * 24 * 30
+    expirationDate: Date.now() / 1000 + 60 * 60 * 24 * 30,
+    httpOnly: true,
+    secure: true,
+    sameSite: 'strict'
   })
 
   client = new Client({
