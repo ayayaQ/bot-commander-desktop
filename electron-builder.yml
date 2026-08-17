@@ -7,7 +7,7 @@ electronFuses:
   enableNodeCliInspectArguments: false
   enableEmbeddedAsarIntegrityValidation: true
   onlyLoadAppFromAsar: true
-  loadBrowserProcessSpecificV8Snapshot: true
+  loadBrowserProcessSpecificV8Snapshot: false
 directories:
   buildResources: build
 files:
