@@ -41,6 +41,10 @@ function cleanMarkdown(value) {
     .trim()
 }
 
+function updateSourceHash(sourceHash, value) {
+  sourceHash.update(value.replace(/\r\n?/g, '\n'))
+}
+
 function renderNode($, node) {
   if (node.type === 'text') return node.data || ''
   if (node.type !== 'tag') return ''
@@ -128,13 +132,13 @@ function generateTableOfContents(records) {
 async function generate() {
   const sourceHash = crypto.createHash('sha256')
   const localeSource = await fs.readFile(path.join(sourceDir, 'locales/en.json'), 'utf8')
-  sourceHash.update(localeSource)
+  updateSourceHash(sourceHash, localeSource)
   const translations = JSON.parse(localeSource)
   const records = []
 
   for (const page of pages) {
     const html = await fs.readFile(path.join(sourceDir, `${page}.html`), 'utf8')
-    sourceHash.update(html)
+    updateSourceHash(sourceHash, html)
     const $ = cheerio.load(html)
     $('[data-i18n]').each((_, element) => {
       const key = $(element).attr('data-i18n')
