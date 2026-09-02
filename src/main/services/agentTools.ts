@@ -35,6 +35,12 @@ import {
   prepareDeleteMemory,
   prepareUpdateMemory
 } from './agentMemoryService'
+import type { ResourceChangeKind, ResourceChangeSource } from '../../shared/mcpTypes'
+import {
+  emitResourceChanged,
+  resourceRevision,
+  withResourceMutationLock
+} from './resourceChangeService'
 
 export interface PreparedMutation {
   name: string
@@ -44,7 +50,7 @@ export interface PreparedMutation {
   target: { type: string; id?: string }
 }
 
-type ToolDefinition = {
+export type ToolDefinition = {
   type: 'function'
   function: {
     name: string
@@ -320,7 +326,7 @@ export function agentToolTargetLabel(
 }
 
 export function revision(value: unknown): string {
-  return crypto.createHash('sha256').update(JSON.stringify(value) ?? 'undefined').digest('hex').slice(0, 16)
+  return resourceRevision(value)
 }
 
 function clone<T>(value: T): T {
@@ -622,7 +628,7 @@ export async function prepareMutation(name: string, args: Record<string, any>): 
   throw new Error(`Unknown mutation tool: ${name}`)
 }
 
-export async function commitMutation(prepared: PreparedMutation): Promise<unknown> {
+async function commitMutationUnlocked(prepared: PreparedMutation): Promise<unknown> {
   const args = prepared.arguments as Record<string, any>
   if (prepared.name === 'create_command') {
     const current = getCommands()
@@ -688,4 +694,48 @@ export async function commitMutation(prepared: PreparedMutation): Promise<unknow
         ? undefined
         : revision(prepared.after)
   return { success: true, target: prepared.target, revision: nextRevision, diagnostics }
+}
+
+function mutationResourceKind(prepared: PreparedMutation): ResourceChangeKind {
+  if (prepared.target.type === 'command') return 'commands'
+  if (prepared.target.type === 'interaction') return 'interactions'
+  if (prepared.target.type === 'bot-state') return 'bot-state'
+  if (prepared.target.type === 'startup-js') return 'startup-js'
+  if (prepared.target.type === 'developer-prompt') return 'settings'
+  return 'memories'
+}
+
+async function changedResourceValue(kind: ResourceChangeKind): Promise<unknown> {
+  if (kind === 'commands') return getCommands()
+  if (kind === 'interactions') return getInteractions()
+  if (kind === 'bot-state') return getBotStateContext().getVariable('botState') ?? {}
+  if (kind === 'startup-js') return getStartupJs()
+  if (kind === 'settings') return getSettings()
+  return loadAgentMemories()
+}
+
+export async function commitMutation(
+  prepared: PreparedMutation,
+  source: ResourceChangeSource = 'agent'
+): Promise<unknown> {
+  const kind = mutationResourceKind(prepared)
+  return withResourceMutationLock(kind, async () => {
+    const result = await commitMutationUnlocked(prepared)
+    emitResourceChanged(
+      kind,
+      source,
+      await changedResourceValue(kind),
+      prepared.target.id
+    )
+    return result
+  })
+}
+
+export async function executeAgentTool(
+  name: string,
+  args: Record<string, unknown>,
+  source: ResourceChangeSource = 'agent'
+): Promise<unknown> {
+  if (!mutationToolNames.has(name)) return executeReadTool(name, args)
+  return commitMutation(await prepareMutation(name, args), source)
 }

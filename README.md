@@ -149,3 +149,9 @@ $ npm run build:mac
 # For Linux
 $ npm run build:linux
 ```
+
+## External agent access (optional)
+
+Open **Settings → External agent access**, enable the authenticated loopback MCP server, and copy the generated token. The server is disabled by default, binds only to `127.0.0.1`, and stores its token with the operating system's secure credential storage. Keep clients in read-only mode unless you explicitly want an agent to edit the app.
+
+Set `BOT_COMMANDER_MCP_TOKEN` in the environment that launches your MCP client, then use the endpoint shown in Settings (`http://127.0.0.1:43721/mcp` by default). Add the generated snippet to Codex's `config.toml` or Claude Code's `.mcp.json`; Bot Commander does not write client configuration files automatically. Read-write access exposes the same command, interaction, bot-state, startup-JavaScript, developer-prompt, and memory mutations used by the in-app agent, so keep client-side write approvals enabled.

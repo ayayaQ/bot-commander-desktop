@@ -9,6 +9,7 @@ import { initializeBotState, saveBotState } from './utils/virtual'
 import { addIPCHandlers, addWindowIPCHandlers } from './handlers/ipcHandlers'
 import { configureTrustedRenderer } from './handlers/ipcSecurity'
 import { loadBotStatus, loadCommands, loadSettings, loadInteractions } from './services/fileService'
+import { initializeMcpServer, stopMcpServer } from './services/mcpServerService'
 
 // Extend the Electron.App interface to include our custom property
 declare global {
@@ -162,6 +163,7 @@ app.whenReady().then(async () => {
   await stats.loadFromFile(statsFilePath)
 
   await initializeBotState() // Initialize bot state
+  await initializeMcpServer()
 
   createWindow()
   addIPCHandlers()
@@ -173,6 +175,7 @@ app.whenReady().then(async () => {
     event.preventDefault() // Prevent the app from quitting immediately
     await saveStats() // Save stats before quitting
     await saveBotState() // Save bot state before quitting
+    await stopMcpServer()
     app.exit(0) // Now quit the app
   })
 

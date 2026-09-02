@@ -24,6 +24,7 @@ const validInvokeChannels = [
   'import-commands',
   // Interactions
   'get-interactions',
+  'get-interactions-revision',
   'save-interactions',
   'register-slash-command',
   'unregister-slash-command',
@@ -31,6 +32,12 @@ const validInvokeChannels = [
   // Settings & status
   'get-settings',
   'save-settings',
+  'mcp:get-status',
+  'mcp:get-activity',
+  'mcp:update-config',
+  'mcp:copy-token',
+  'mcp:rotate-token',
+  'mcp:clear-activity',
   'memory:list',
   'memory:create',
   'memory:update',
@@ -92,7 +99,10 @@ const validReceiveChannels = [
   'console:success',
   'agent:event',
   'agent:navigate',
-  'memory:changed'
+  'memory:changed',
+  'resource:changed',
+  'mcp:status',
+  'mcp:activity'
 ]
 
 const listenerWrappers = new Map<

@@ -16,6 +16,7 @@
     type CommandSortMode,
     type CommandTypeFilter
   } from '../utils/commandListSearch'
+  import type { ResourceChangedEvent } from '../../../shared/mcpTypes'
 
   const emptyKaomojis = ['(´。＿。｀)', '(╥_╥)', '(｡•́︿•̀｡)', '(っ˘̩╭╮˘̩)っ', '(ᵕ—ᴗ—)']
   const noResultsKaomojis = ['(￣ω￣;)', '(・・;)', '(¬_¬)', '(-_-;)', '(°ロ°)']
@@ -32,40 +33,58 @@
   let showRepository = $state(false)
   let shareDialog: HTMLDialogElement = $state()
   let commandToShare: BCFDCommand | null = $state(null)
+  let commandsRevision = $state('')
+  let externalConflict = $state(false)
 
-  onMount(async () => {
-    await loadCommands()
+  onMount(() => {
+    const handleResourceChanged = (event: ResourceChangedEvent) => {
+      if (event.kind !== 'commands' || event.source === 'renderer') return
+      if (isEditing) externalConflict = true
+      else void loadCommands()
+    }
+    window.electron.ipcRenderer.on('resource:changed', handleResourceChanged)
+    void loadCommands()
+    return () =>
+      window.electron.ipcRenderer.removeListener('resource:changed', handleResourceChanged)
   })
 
   async function loadCommands() {
     const result = await window.electron.ipcRenderer.invoke('get-commands')
     commands = result.bcfdCommands
+    commandsRevision = result.revision || ''
+    externalConflict = false
   }
 
   async function saveCommands() {
-    await window.electron.ipcRenderer.invoke('save-commands', {
-      bcfdCommands: $state.snapshot(commands)
+    const result = await window.electron.ipcRenderer.invoke('save-commands', {
+      bcfdCommands: $state.snapshot(commands),
+      expectedRevision: commandsRevision
     })
+    commandsRevision = result.revision || commandsRevision
   }
 
   function addCommand() {
     isEditing = true
     editingCommand = null
+    externalConflict = false
   }
 
   function editCommand(command: BCFDCommand) {
     isEditing = true
     editingCommand = command
     editingIndex = commands.findIndex((cmd) => cmd === command)
+    externalConflict = false
   }
 
   async function handleAdd(event: CustomEvent<BCFDCommand>) {
+    if (externalConflict) return
     commands = [...commands, event.detail]
     await saveCommands()
     isEditing = false
   }
 
   async function handleUpdate(event: CustomEvent<{ command: BCFDCommand; index: number | null }>) {
+    if (externalConflict) return
     const { command: updatedCommand, index } = event.detail
     commands = commands.map((cmd, i) => (i === index ? updatedCommand : cmd))
     await saveCommands()
@@ -77,6 +96,13 @@
   async function deleteCommand(command: BCFDCommand) {
     commands = commands.filter((cmd) => cmd !== command)
     await saveCommands()
+  }
+
+  async function reloadAfterConflict() {
+    isEditing = false
+    editingCommand = null
+    editingIndex = null
+    await loadCommands()
   }
 
   async function exportCommands() {
@@ -126,13 +152,22 @@
   {#if showRepository}
     <CommandRepository on:import={handleRepoImport} on:close={() => (showRepository = false)} />
   {:else if isEditing}
+    {#if externalConflict}
+      <div class="alert alert-warning m-4">
+        <span>This command data changed externally. Reload before saving to avoid overwriting it.</span>
+        <button class="btn btn-sm" onclick={reloadAfterConflict}>Reload</button>
+      </div>
+    {/if}
     <CommandEditor
       mode={editingCommand ? 'edit' : 'add'}
       command={editingCommand}
       index={editingIndex}
       on:add={handleAdd}
       on:update={handleUpdate}
-      on:cancel={() => (isEditing = false)}
+      on:cancel={() => {
+        isEditing = false
+        externalConflict = false
+      }}
     />
   {:else}
     <HeaderBar>

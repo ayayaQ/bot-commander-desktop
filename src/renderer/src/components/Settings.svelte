@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import {
     getSelectedModelForProvider,
+    loadSettings,
     saveSettings,
     settingsStore,
     withSelectedModelForProvider
@@ -11,11 +12,13 @@
   import ApiAuth from './ApiAuth.svelte'
   import ModelPicker from './ModelPicker.svelte'
   import MemoryManagerModal from './MemoryManagerModal.svelte'
+  import McpSettingsCard from './McpSettingsCard.svelte'
   import {
     modelSupportsReasoning,
     normalizeReasoningEffort,
     type ReasoningEffort
   } from '../utils/aiModelCapabilities'
+  import type { ResourceChangedEvent } from '../../../shared/mcpTypes'
 
   let selectedTheme: string = $state()
   let showToken: boolean = $state()
@@ -39,6 +42,28 @@
   let isLoadingModels = $state(false)
   let modelFetchError = $state('')
   let memoryDialog: HTMLDialogElement = $state()
+
+  function syncLocalSettings() {
+    selectedTheme = $settingsStore.theme
+    showToken = $settingsStore.showToken
+    selectedLanguage = $settingsStore.language
+    aiProvider = $settingsStore.aiProvider || 'openai'
+    openaiApiKey = $settingsStore.openaiApiKey
+    openrouterApiKey = $settingsStore.openrouterApiKey || ''
+    selectedAiModel = getSelectedModelForProvider($settingsStore, aiProvider)
+    aiReasoningEffort = $settingsStore.aiReasoningEffort || 'none'
+    developerPrompt = $settingsStore.developerPrompt
+    useCustomApi = $settingsStore.useCustomApi
+    useGlobalEvalScope = $settingsStore.useLegacyInterpreter
+    hideOutput = $settingsStore.hideOutput
+    agentNotificationsEnabled = $settingsStore.agentNotificationsEnabled
+  }
+
+  async function handleResourceChanged(event: ResourceChangedEvent) {
+    if (event.kind !== 'settings' || event.source === 'renderer') return
+    await loadSettings()
+    syncLocalSettings()
+  }
 
   function changeTheme(event) {
     let theme = event.target.value
@@ -147,20 +172,12 @@
   )
 
   onMount(() => {
-    selectedTheme = $settingsStore.theme
-    showToken = $settingsStore.showToken
-    selectedLanguage = $settingsStore.language
-    aiProvider = $settingsStore.aiProvider || 'openai'
-    openaiApiKey = $settingsStore.openaiApiKey
-    openrouterApiKey = $settingsStore.openrouterApiKey || ''
-    selectedAiModel = getSelectedModelForProvider($settingsStore, aiProvider)
-    aiReasoningEffort = $settingsStore.aiReasoningEffort || 'none'
-    developerPrompt = $settingsStore.developerPrompt
-    useCustomApi = $settingsStore.useCustomApi
-    useGlobalEvalScope = $settingsStore.useLegacyInterpreter
-    hideOutput = $settingsStore.hideOutput
-    agentNotificationsEnabled = $settingsStore.agentNotificationsEnabled
-    refreshAiModels()
+    syncLocalSettings()
+    void refreshAiModels()
+    window.electron.ipcRenderer.on('resource:changed', handleResourceChanged)
+    return () => {
+      window.electron.ipcRenderer.removeListener('resource:changed', handleResourceChanged)
+    }
   })
 </script>
 
@@ -279,6 +296,10 @@
   </div>
 
   <div class="divider"></div>
+  <h2 class="text-2xl font-bold mb-4">Agent integrations</h2>
+  <McpSettingsCard />
+
+  <div class="divider"></div>
   <h2 class="text-2xl font-bold mb-4">AI Provider</h2>
 
   <div class="form-control">
@@ -376,8 +397,7 @@
       value={developerPrompt}
       oninput={updateDeveloperPrompt}
       placeholder={$t('enter-your-custom-developer-prompt')}
-      rows="4"
-    ></textarea>
+      rows="4"></textarea>
   </div>
 
   {#if false}

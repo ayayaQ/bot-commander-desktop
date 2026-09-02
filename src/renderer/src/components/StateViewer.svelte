@@ -4,17 +4,20 @@
   import HeaderBar from './HeaderBar.svelte'
   import CodeEditor from './CodeEditor.svelte'
   import TipCard from './TipCard.svelte'
+  import type { ResourceChangedEvent } from '../../../shared/mcpTypes'
 
   // Startup JS logic
   let startupJs = $state('')
   let startupJsSaved = $state(true)
   let startupJsLoading = $state(false)
+  let startupJsConflict = $state(false)
 
   async function loadStartupJs() {
     startupJsLoading = true
     try {
       startupJs = await window.electron.ipcRenderer.invoke('get-startup-js')
       startupJsSaved = true
+      startupJsConflict = false
     } catch (e) {
       showErrorToast('Failed to load startup JS')
     } finally {
@@ -23,6 +26,7 @@
   }
 
   async function saveStartupJs() {
+    if (startupJsConflict) return
     try {
       await window.electron.ipcRenderer.invoke('set-startup-js', startupJs)
       startupJsSaved = true
@@ -34,6 +38,19 @@
   function onStartupJsChange(e: CustomEvent<string>) {
     startupJs = e.detail
     startupJsSaved = false
+  }
+
+  function handleResourceChanged(event: ResourceChangedEvent) {
+    if (event.kind === 'bot-state' && event.source !== 'renderer') {
+      updateBotState()
+      return
+    }
+    if (event.kind !== 'startup-js' || event.source === 'renderer') return
+    if (startupJsSaved) {
+      void loadStartupJs()
+    } else {
+      startupJsConflict = true
+    }
   }
 
   async function restartJsEngine() {
@@ -231,11 +248,13 @@
   onMount(() => {
     updateBotState()
     loadStartupJs()
+    window.electron.ipcRenderer.on('resource:changed', handleResourceChanged)
     interval = setInterval(updateBotState, 1000) // Update every second
   })
 
   onDestroy(() => {
     clearInterval(interval)
+    window.electron.ipcRenderer.removeListener('resource:changed', handleResourceChanged)
   })
 </script>
 
@@ -278,7 +297,7 @@
         <button
           class="btn btn-primary"
           onclick={saveStartupJs}
-          disabled={startupJsSaved || startupJsLoading}
+          disabled={startupJsSaved || startupJsLoading || startupJsConflict}
         >
           <span class="material-symbols-outlined">save</span>{$t('save')}
         </button>
@@ -295,6 +314,13 @@
     {/if}
     {#if startupJsLoading}
       <div class="text-sm text-gray-500 mt-1">Loading...</div>
+    {/if}
+    {#if startupJsConflict}
+      <div class="alert alert-warning mt-2 text-sm">
+        Startup JavaScript changed outside this editor. Reload before saving so you do not overwrite
+        it.
+        <button class="btn btn-sm" onclick={loadStartupJs}>Reload</button>
+      </div>
     {/if}
     {#if !startupJsSaved && !startupJsLoading}
       <div class="text-sm text-warning mt-1">Unsaved changes</div>

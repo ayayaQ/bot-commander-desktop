@@ -14,6 +14,7 @@
     type InteractionSortMode,
     type InteractionStatusFilter
   } from '../utils/interactionListSearch'
+  import type { ResourceChangedEvent } from '../../../shared/mcpTypes'
 
   const emptyKaomojis = ['(´。＿。｀)', '(╥_╥)', '(｡•́︿•̀｡)', '(っ˘̩╭╮˘̩)っ', '(ᵕ—ᴗ—)']
   const noResultsKaomojis = ['(￣ω￣;)', '(・・;)', '(¬_¬)', '(-_-;)', '(°ロ°)']
@@ -28,32 +29,52 @@
   let statusFilter: InteractionStatusFilter = $state('all')
   let sortMode: InteractionSortMode = $state('manual')
   let isSyncing = $state(false)
+  let interactionsRevision = $state('')
+  let externalConflict = $state(false)
 
-  onMount(async () => {
-    await loadInteractions()
+  onMount(() => {
+    const handleResourceChanged = (event: ResourceChangedEvent) => {
+      if (event.kind !== 'interactions' || event.source === 'renderer') return
+      if (isEditing) externalConflict = true
+      else void loadInteractions()
+    }
+    window.electron.ipcRenderer.on('resource:changed', handleResourceChanged)
+    void loadInteractions()
+    return () =>
+      window.electron.ipcRenderer.removeListener('resource:changed', handleResourceChanged)
   })
 
   async function loadInteractions() {
     interactions = await window.electron.ipcRenderer.invoke('get-interactions')
+    interactionsRevision = await window.electron.ipcRenderer.invoke('get-interactions-revision')
+    externalConflict = false
   }
 
   async function saveInteractions() {
-    await window.electron.ipcRenderer.invoke('save-interactions', $state.snapshot(interactions))
+    const result = await window.electron.ipcRenderer.invoke(
+      'save-interactions',
+      $state.snapshot(interactions),
+      interactionsRevision
+    )
+    interactionsRevision = result.revision || interactionsRevision
   }
 
   function addInteraction() {
     isEditing = true
     editingInteraction = null
     editingIndex = null
+    externalConflict = false
   }
 
   function editInteraction(interaction: BCFDInteractionCommand) {
     isEditing = true
     editingInteraction = interaction
     editingIndex = interactions.findIndex((i) => i.id === interaction.id)
+    externalConflict = false
   }
 
   async function handleAdd(event: CustomEvent<BCFDInteractionCommand>) {
+    if (externalConflict) return
     interactions = [...interactions, event.detail]
     await saveInteractions()
     isEditing = false
@@ -62,6 +83,7 @@
   async function handleUpdate(
     event: CustomEvent<{ interaction: BCFDInteractionCommand; index: number | null }>
   ) {
+    if (externalConflict) return
     const { interaction: updatedInteraction, index } = event.detail
     interactions = interactions.map((i, idx) => (idx === index ? updatedInteraction : i))
     await saveInteractions()
@@ -73,6 +95,13 @@
   async function deleteInteraction(interaction: BCFDInteractionCommand) {
     interactions = interactions.filter((i) => i.id !== interaction.id)
     await saveInteractions()
+  }
+
+  async function reloadAfterConflict() {
+    isEditing = false
+    editingInteraction = null
+    editingIndex = null
+    await loadInteractions()
   }
 
   async function syncAllCommands() {
@@ -135,13 +164,22 @@
 />
 <div class="">
   {#if isEditing}
+    {#if externalConflict}
+      <div class="alert alert-warning m-4">
+        <span>This interaction data changed externally. Reload before saving to avoid overwriting it.</span>
+        <button class="btn btn-sm" onclick={reloadAfterConflict}>Reload</button>
+      </div>
+    {/if}
     <InteractionEditor
       mode={editingInteraction ? 'edit' : 'add'}
       interaction={editingInteraction}
       index={editingIndex}
       on:add={handleAdd}
       on:update={handleUpdate}
-      on:cancel={() => (isEditing = false)}
+      on:cancel={() => {
+        isEditing = false
+        externalConflict = false
+      }}
     />
   {:else}
     <HeaderBar>
