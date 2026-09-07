@@ -7,6 +7,7 @@
   import CodeEditor from './CodeEditor.svelte'
   import { bottomNavVisible } from '../stores/navigation'
   import { commandCapabilities } from '../../../shared/commandCapabilities'
+  import { cloneCommandDraft, commandDraftSignature } from '../utils/commandDraft'
 
   interface Props {
     mode?: 'edit' | 'add'
@@ -33,6 +34,17 @@
 
   const dispatch = createEventDispatcher()
   let dialog: HTMLDialogElement = $state()
+  let discardDialog: HTMLDialogElement = $state()
+  let initialDraftSignature = ''
+
+  function handleCancel() {
+    if (commandDraftSignature(editedCommand, activeActions) !== initialDraftSignature) {
+      discardDialog.showModal()
+    } else {
+      dispatch('cancel')
+    }
+  }
+
   let importText: string = $state('')
   let showImportError = $state(false)
 
@@ -386,7 +398,7 @@
 
   onMount(() => {
     editedCommand = command
-      ? { ...command }
+      ? cloneCommandDraft(command)
       : {
           id: crypto.randomUUID(),
           channelMessage: '',
@@ -433,10 +445,24 @@
     if (mode === 'edit' && command) {
       initializeActiveActions(command)
     }
+    initialDraftSignature = commandDraftSignature(editedCommand, activeActions)
   })
 </script>
 
 {#if editedCommand}
+  <Dialog bind:dialog={discardDialog}>
+    <h3 class="font-bold text-lg">{$t('discard-command-changes')}</h3>
+    <p class="py-4">{$t('discard-command-changes-help')}</p>
+    <div class="modal-action">
+      <button type="button" class="btn btn-ghost" onclick={() => discardDialog.close()}>
+        {$t('keep-editing')}
+      </button>
+      <button type="button" class="btn btn-error" onclick={() => dispatch('cancel')}>
+        {$t('discard-changes')}
+      </button>
+    </div>
+  </Dialog>
+
   <Dialog bind:dialog onclose={() => console.log('closed')}>
     <p>
       {$t('import-json-command')}:
@@ -517,7 +543,11 @@
         >
       </span>
       <!-- cancel button-->
-      <button type="button" class="btn btn-secondary" onclick={() => dispatch('cancel')}
+      <button
+        type="button"
+        class="btn btn-secondary"
+        aria-label={$t('cancel')}
+        onclick={handleCancel}
         ><span class="material-symbols-outlined">close</span></button
       >
     </div>
