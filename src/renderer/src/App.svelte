@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { initializeInteractionPublication } from './stores/interactionPublication'
   import CommandList from './components/CommandList.svelte'
   import InteractionList from './components/InteractionList.svelte'
   import Help from './components/Help.svelte'
@@ -46,6 +47,7 @@
   })
 
   onMount(() => {
+    const destroyPublicationListener = initializeInteractionPublication()
     const handleFocus = () => (windowFocused = true)
     const handleBlur = () => (windowFocused = false)
     const handleAgentNavigation = async (sessionId: string) => {
@@ -74,6 +76,7 @@
       window.removeEventListener('blur', handleBlur)
       window.electron.ipcRenderer.removeListener('agent:navigate', handleAgentNavigation)
       destroyAgentListeners()
+      destroyPublicationListener()
     }
   })
 </script>

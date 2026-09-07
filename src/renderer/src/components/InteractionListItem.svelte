@@ -1,14 +1,18 @@
 <script lang="ts">
   import type { BCFDInteractionCommand } from '../types/types'
   import { t } from '../stores/localisation'
+  import {
+    interactionPublication,
+    publicationRequestPending
+  } from '../stores/interactionPublication'
   import { connectionStore } from '../stores/connection'
 
   interface Props {
-    interaction: BCFDInteractionCommand;
-    editInteraction: (interaction: BCFDInteractionCommand) => void;
-    deleteInteraction: (interaction: BCFDInteractionCommand) => void;
-    registerCommand: (interaction: BCFDInteractionCommand) => void;
-    unregisterCommand: (interaction: BCFDInteractionCommand) => void;
+    interaction: BCFDInteractionCommand
+    editInteraction: (interaction: BCFDInteractionCommand) => void
+    deleteInteraction: (interaction: BCFDInteractionCommand) => void
+    registerCommand: (interaction: BCFDInteractionCommand) => void
+    unregisterCommand: (interaction: BCFDInteractionCommand) => void
   }
 
   let {
@@ -17,10 +21,13 @@
     deleteInteraction,
     registerCommand,
     unregisterCommand
-  }: Props = $props();
+  }: Props = $props()
 
   let showDeleteDialog = $state(false)
-  let isRegistering = $state(false)
+  let busy = $derived($interactionPublication.busy || $publicationRequestPending)
+  let isRegistering = $derived($interactionPublication.pendingIds.includes(interaction.id))
+  let failed = $derived($interactionPublication.failedIds.includes(interaction.id))
+  let stale = $derived($interactionPublication.staleIds.includes(interaction.id))
 
   function handleDelete(event: MouseEvent) {
     if (event.shiftKey) {
@@ -36,16 +43,9 @@
   }
 
   async function handleRegister() {
-    isRegistering = true
-    try {
-      if (interaction.isRegistered) {
-        await unregisterCommand(interaction)
-      } else {
-        await registerCommand(interaction)
-      }
-    } finally {
-      isRegistering = false
-    }
+    if (busy) return
+    if (interaction.isRegistered) await unregisterCommand(interaction)
+    else await registerCommand(interaction)
   }
 </script>
 
@@ -59,7 +59,13 @@
         <div class="flex-1">
           <div class="flex items-center gap-2">
             <h3 class="text-lg font-semibold">/{interaction.commandName || 'Unnamed'}</h3>
-            {#if interaction.isRegistered}
+            {#if isRegistering}
+              <span class="badge badge-ghost badge-sm">{$t('sync-in-progress')}</span>
+            {:else if failed}
+              <span class="badge badge-warning badge-sm">{$t('sync-failed')}</span>
+            {:else if stale}
+              <span class="badge badge-warning badge-sm">{$t('sync-needs-sync')}</span>
+            {:else if interaction.isRegistered}
               <span class="badge badge-success badge-sm">{$t('registered')}</span>
             {:else}
               <span class="badge badge-warning badge-sm">{$t('not-registered')}</span>
@@ -85,18 +91,28 @@
 
       <div class="flex gap-2">
         <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('edit')}>
-          <button class="btn btn-sm btn-ghost" onclick={() => editInteraction(interaction)}>
+          <button
+            class="btn btn-sm btn-ghost"
+            onclick={() => editInteraction(interaction)}
+            disabled={busy}
+            aria-label={$t('edit')}
+          >
             <span class="material-symbols-outlined">edit</span>
           </button>
         </span>
         <span
           class="tooltip tooltip-primary tooltip-bottom"
-          data-tip={interaction.isRegistered ? $t('unregister') : $t('register')}
+          data-tip={interaction.isRegistered
+            ? $t('sync-unregister-command')
+            : $t('sync-register-command')}
         >
           <button
             class="btn btn-sm btn-ghost"
             onclick={handleRegister}
-            disabled={isRegistering || !$connectionStore.connected}
+            disabled={busy || !$connectionStore.connected}
+            aria-label={interaction.isRegistered
+              ? $t('sync-unregister-command')
+              : $t('sync-register-command')}
           >
             {#if isRegistering}
               <span class="loading loading-spinner loading-xs"></span>
@@ -108,7 +124,12 @@
           </button>
         </span>
         <span class="tooltip tooltip-error tooltip-bottom" data-tip={$t('delete')}>
-          <button class="btn btn-sm btn-ghost text-error" onclick={handleDelete}>
+          <button
+            class="btn btn-sm btn-ghost text-error"
+            onclick={handleDelete}
+            disabled={busy}
+            aria-label={$t('delete')}
+          >
             <span class="material-symbols-outlined">delete</span>
           </button>
         </span>
@@ -127,7 +148,8 @@
       </p>
       <div class="modal-action">
         <button class="btn" onclick={() => (showDeleteDialog = false)}>{$t('cancel')}</button>
-        <button class="btn btn-error" onclick={confirmDelete}>{$t('delete')}</button>
+        <button class="btn btn-error" onclick={confirmDelete} disabled={busy}>{$t('delete')}</button
+        >
       </div>
     </div>
     <form method="dialog" class="modal-backdrop">

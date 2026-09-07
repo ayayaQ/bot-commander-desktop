@@ -25,6 +25,7 @@ const validInvokeChannels = [
   // Interactions
   'get-interactions',
   'get-interactions-revision',
+  'get-interaction-publication',
   'save-interactions',
   'register-slash-command',
   'unregister-slash-command',
@@ -101,6 +102,7 @@ const validReceiveChannels = [
   'agent:navigate',
   'memory:changed',
   'resource:changed',
+  'interactions:publication',
   'mcp:status',
   'mcp:activity'
 ]

@@ -7,6 +7,12 @@
   import { fade } from 'svelte/transition'
   import { t } from '../stores/localisation'
   import { connectionStore } from '../stores/connection'
+  import InteractionPublishStatus from './InteractionPublishStatus.svelte'
+  import {
+    interactionPublication,
+    publicationRequestPending,
+    publishInteractions
+  } from '../stores/interactionPublication'
   import TipCard from './TipCard.svelte'
   import {
     getVisibleInteractions,
@@ -28,7 +34,7 @@
   let searchQuery = $state('')
   let statusFilter: InteractionStatusFilter = $state('all')
   let sortMode: InteractionSortMode = $state('manual')
-  let isSyncing = $state(false)
+  let isSyncing = $derived($interactionPublication.busy || $publicationRequestPending)
   let interactionsRevision = $state('')
   let externalConflict = $state(false)
 
@@ -60,6 +66,7 @@
   }
 
   function addInteraction() {
+    if (isSyncing) return
     isEditing = true
     editingInteraction = null
     editingIndex = null
@@ -67,6 +74,7 @@
   }
 
   function editInteraction(interaction: BCFDInteractionCommand) {
+    if (isSyncing) return
     isEditing = true
     editingInteraction = interaction
     editingIndex = interactions.findIndex((i) => i.id === interaction.id)
@@ -74,7 +82,7 @@
   }
 
   async function handleAdd(event: CustomEvent<BCFDInteractionCommand>) {
-    if (externalConflict) return
+    if (externalConflict || isSyncing) return
     interactions = [...interactions, event.detail]
     await saveInteractions()
     isEditing = false
@@ -83,7 +91,7 @@
   async function handleUpdate(
     event: CustomEvent<{ interaction: BCFDInteractionCommand; index: number | null }>
   ) {
-    if (externalConflict) return
+    if (externalConflict || isSyncing) return
     const { interaction: updatedInteraction, index } = event.detail
     interactions = interactions.map((i, idx) => (idx === index ? updatedInteraction : i))
     await saveInteractions()
@@ -93,6 +101,7 @@
   }
 
   async function deleteInteraction(interaction: BCFDInteractionCommand) {
+    if (isSyncing) return
     interactions = interactions.filter((i) => i.id !== interaction.id)
     await saveInteractions()
   }
@@ -104,42 +113,16 @@
     await loadInteractions()
   }
 
-  async function syncAllCommands() {
-    isSyncing = true
-    try {
-      const result = await window.electron.ipcRenderer.invoke('sync-all-slash-commands')
-      if (result.success) {
-        await loadInteractions()
-      } else {
-        alert('Error syncing commands: ' + result.error)
-      }
-    } finally {
-      isSyncing = false
-    }
+  function syncAllCommands() {
+    return publishInteractions('sync')
   }
 
-  async function registerCommand(interaction: BCFDInteractionCommand) {
-    const result = await window.electron.ipcRenderer.invoke(
-      'register-slash-command',
-      interaction.id
-    )
-    if (result.success) {
-      await loadInteractions()
-    } else {
-      alert('Error registering command: ' + result.error)
-    }
+  function registerCommand(interaction: BCFDInteractionCommand) {
+    return publishInteractions('register', interaction.id)
   }
 
-  async function unregisterCommand(interaction: BCFDInteractionCommand) {
-    const result = await window.electron.ipcRenderer.invoke(
-      'unregister-slash-command',
-      interaction.id
-    )
-    if (result.success) {
-      await loadInteractions()
-    } else {
-      alert('Error unregistering command: ' + result.error)
-    }
+  function unregisterCommand(interaction: BCFDInteractionCommand) {
+    return publishInteractions('unregister', interaction.id)
   }
 
   function resetInteractionSearch() {
@@ -162,11 +145,14 @@
   title={$t('interactions')}
   body={$t('tip-interactions-body')}
 />
+<InteractionPublishStatus />
 <div class="">
   {#if isEditing}
     {#if externalConflict}
       <div class="alert alert-warning m-4">
-        <span>This interaction data changed externally. Reload before saving to avoid overwriting it.</span>
+        <span
+          >This interaction data changed externally. Reload before saving to avoid overwriting it.</span
+        >
         <button class="btn btn-sm" onclick={reloadAfterConflict}>Reload</button>
       </div>
     {/if}
@@ -187,16 +173,6 @@
         <div class="flex justify-between items-center mb-4">
           <h2 class="text-2xl font-bold">{$t('interactions')}</h2>
           <div class="flex gap-2 items-center">
-            {#if !$connectionStore.connected}
-              <span
-                class="tooltip tooltip-warning tooltip-bottom"
-                data-tip="Bot must be connected to sync commands"
-              >
-                <div class="flex items-center justify-center select-none">
-                  <span class="material-symbols-outlined text-warning">info</span>
-                </div>
-              </span>
-            {/if}
             <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('sync-all')}>
               <button
                 class="btn btn-secondary"
@@ -211,7 +187,7 @@
                 {$t('sync-all')}
               </button>
             </span>
-            <button class="btn btn-primary" onclick={addInteraction}>
+            <button class="btn btn-primary" onclick={addInteraction} disabled={isSyncing}>
               <span class="material-symbols-outlined">add</span>{$t('add-interaction')}
             </button>
           </div>
