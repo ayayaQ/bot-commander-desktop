@@ -5,6 +5,10 @@ const DEFAULT_LANGUAGE = 'en'
 
 // English translations as the source of truth
 const en = {
+  'discard-command-changes': 'Discard unsaved command changes?',
+  'discard-command-changes-help': 'Your changes will be lost. The saved command will stay unchanged.',
+  'keep-editing': 'Keep editing',
+  'discard-changes': 'Discard changes',
   'version-value': '1.7.0',
   'send-webhook': 'Send Discord Webhook',
   'no-presets': 'No Presets',
@@ -370,6 +374,10 @@ type Languages = {
 const translations: Languages = {
   en,
   es: {
+    'discard-command-changes': '¿Descartar los cambios sin guardar del comando?',
+    'discard-command-changes-help': 'Se perderán tus cambios. El comando guardado seguirá igual.',
+    'keep-editing': 'Seguir editando',
+    'discard-changes': 'Descartar cambios',
     'version-value': '1.7.0',
     'send-webhook': 'Enviar Webhook de Discord',
     'no-presets': 'Sin preajustes',
@@ -729,6 +737,10 @@ const translations: Languages = {
     'no-actions-configured': 'No hay acciones configuradas para este comando.'
   },
   ja: {
+    'discard-command-changes': 'コマンドの未保存の変更を破棄しますか？',
+    'discard-command-changes-help': '変更は失われます。保存済みのコマンドは変更されません。',
+    'keep-editing': '編集を続ける',
+    'discard-changes': '変更を破棄',
     'version-value': '1.7.0',
     'send-webhook': 'Discord Webhookを送信',
     'no-presets': 'プリセットなし',
@@ -1082,6 +1094,10 @@ const translations: Languages = {
     'no-actions-configured': 'このコマンドにはアクションが設定されていません。'
   },
   zh: {
+    'discard-command-changes': '放弃未保存的命令更改？',
+    'discard-command-changes-help': '你的更改将丢失。已保存的命令将保持不变。',
+    'keep-editing': '继续编辑',
+    'discard-changes': '放弃更改',
     'version-value': '1.7.0',
     'send-webhook': '发送Discord Webhook',
     'no-presets': '无预设',
@@ -1429,6 +1445,10 @@ const translations: Languages = {
     'no-actions-configured': '此命令没有配置任何操作。'
   },
   ko: {
+    'discard-command-changes': '저장하지 않은 명령어 변경 사항을 버릴까요?',
+    'discard-command-changes-help': '변경 사항이 사라집니다. 저장된 명령어는 그대로 유지됩니다.',
+    'keep-editing': '계속 편집',
+    'discard-changes': '변경 사항 버리기',
     'version-value': '1.7.0',
     'send-webhook': 'Discord Webhook 보내기',
     'no-presets': '프리셋 없음',
@@ -1779,6 +1799,11 @@ const translations: Languages = {
     'no-actions-configured': '이 명령어에 구성된 작업이 없습니다.'
   },
   ru: {
+    'discard-command-changes': 'Отменить несохранённые изменения команды?',
+    'discard-command-changes-help':
+      'Ваши изменения будут потеряны. Сохранённая команда останется без изменений.',
+    'keep-editing': 'Продолжить редактирование',
+    'discard-changes': 'Отменить изменения',
     'version-value': '1.7.0',
     'send-webhook': 'Отправить Discord Webhook',
     'no-presets': 'Нет пресетов',
