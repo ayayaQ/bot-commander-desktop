@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { join } from 'node:path'
+
+const memoryPath = join('/user-data', 'agent-memories.json')
 
 const mocks = vi.hoisted(() => ({
   files: new Map<string, string>(),
@@ -66,7 +69,7 @@ describe('agentMemoryService', () => {
     expect(deleted.memories).toEqual([])
     expect(events).toEqual([1, 1, 0])
     expect(mocks.writes.every((path) => path.endsWith('.tmp'))).toBe(true)
-    expect(JSON.parse(mocks.files.get('/user-data/agent-memories.json')!)).toMatchObject({
+    expect(JSON.parse(mocks.files.get(memoryPath)!)).toMatchObject({
       version: 1,
       memories: []
     })
@@ -103,7 +106,7 @@ describe('agentMemoryService', () => {
 
   it('loads valid records and ignores malformed records', async () => {
     mocks.files.set(
-      '/user-data/agent-memories.json',
+      memoryPath,
       JSON.stringify({
         version: 1,
         memories: [

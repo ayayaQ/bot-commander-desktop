@@ -35,19 +35,16 @@ import {
   getOnboarding,
   saveOnboarding
 } from '../services/fileService'
-import {
-  getInteractions,
-  setInteractions,
-  findInteractionById
-} from '../services/interactionService'
+import { getInteractions, setInteractions } from '../services/interactionService'
 import { decodeBCFDCommandArray } from '../../shared/commandCodec'
 import type { AgentPlanDecision, AgentStreamEvent } from '../../shared/agentTypes'
 import type { McpConfig } from '../../shared/mcpTypes'
+import { createInteractionPublishBackend } from '../services/slashCommandRegistry'
 import {
-  registerSlashCommand,
-  unregisterSlashCommand,
-  syncAllSlashCommands
-} from '../services/slashCommandRegistry'
+  InteractionPublisher,
+  applyPublicationResults,
+  PublicationFailure
+} from '../services/interactionPublisher'
 import { getSettings, setSettings } from '../services/settingsService'
 import { fetchAiModels, getAiProvider } from '../services/aiProviderService'
 import { getBotStatus, setBotStatus } from '../services/statusService'
@@ -94,6 +91,28 @@ import {
   setResourceChangeEventSink,
   withResourceMutationLock
 } from '../services/resourceChangeService'
+
+const interactionPublisher = new InteractionPublisher({
+  read: getInteractions,
+  backend: createInteractionPublishBackend,
+  commit: (results, isCurrent) =>
+    withResourceMutationLock('interactions', async () => {
+      if (!isCurrent()) throw new PublicationFailure({ code: 'connection-changed' })
+      const previous = getInteractions()
+      const updated = structuredClone(previous)
+      const applied = applyPublicationResults(updated, results)
+      if (!applied.length) return applied
+      setInteractions(updated)
+      try {
+        await saveInteractions()
+      } catch (error) {
+        setInteractions(previous)
+        throw error
+      }
+      emitResourceChanged('interactions', 'system', updated)
+      return applied
+    })
+})
 
 const agentViewState = new Map<number, boolean>()
 
@@ -168,6 +187,11 @@ export function addWindowIPCHandlers(mainWindow: BrowserWindow) {
 }
 
 export function addIPCHandlers() {
+  interactionPublisher.setEventSink((state) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send('interactions:publication', state)
+    }
+  })
   setResourceChangeEventSink((payload) => {
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send('resource:changed', payload)
@@ -266,54 +290,14 @@ export function addIPCHandlers() {
       })
   )
 
-  ipcMain.handle('register-slash-command', async (_, commandId: string) => {
-    const interaction = findInteractionById(commandId)
-    if (!interaction) {
-      return { success: false, error: 'Command not found' }
-    }
-
-    try {
-      await registerSlashCommand(interaction)
-      interaction.isRegistered = true
-      await saveInteractions()
-      emitResourceChanged('interactions', 'renderer', getInteractions(), commandId)
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: (error as Error).message }
-    }
-  })
-
-  ipcMain.handle('unregister-slash-command', async (_, commandId: string) => {
-    const interaction = findInteractionById(commandId)
-    if (!interaction) {
-      return { success: false, error: 'Command not found' }
-    }
-
-    try {
-      await unregisterSlashCommand(interaction)
-      interaction.isRegistered = false
-      await saveInteractions()
-      emitResourceChanged('interactions', 'renderer', getInteractions(), commandId)
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: (error as Error).message }
-    }
-  })
-
-  ipcMain.handle('sync-all-slash-commands', async () => {
-    const interactions = getInteractions()
-
-    try {
-      await syncAllSlashCommands(interactions)
-      // Mark all as registered
-      interactions.forEach((i) => (i.isRegistered = true))
-      await saveInteractions()
-      emitResourceChanged('interactions', 'renderer', getInteractions())
-      return { success: true, synced: interactions.length }
-    } catch (error) {
-      return { success: false, error: (error as Error).message }
-    }
-  })
+  ipcMain.handle('get-interaction-publication', () => interactionPublisher.getState())
+  ipcMain.handle('register-slash-command', (_, commandId: string) =>
+    interactionPublisher.publish('register', commandId)
+  )
+  ipcMain.handle('unregister-slash-command', (_, commandId: string) =>
+    interactionPublisher.publish('unregister', commandId)
+  )
+  ipcMain.handle('sync-all-slash-commands', () => interactionPublisher.publish('sync'))
 
   ipcMain.handle('get-settings', () => {
     return getSettings()

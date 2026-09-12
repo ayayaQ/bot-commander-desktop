@@ -186,6 +186,7 @@ export async function saveInteractions(): Promise<void> {
     await fs.writeFile(interactionsPath, JSON.stringify(getInteractions(), null, 2))
   } catch (error) {
     console.error('Error saving interactions:', error)
+    throw error
   }
 }
 

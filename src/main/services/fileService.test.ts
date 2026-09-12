@@ -80,6 +80,18 @@ describe('fileService', () => {
     await fs.rm(userDataPath, { recursive: true, force: true })
   })
 
+  it('propagates interaction save failures so publishing cannot report persisted success', async () => {
+    const { saveInteractions } = await import('./fileService')
+    // An existing directory at the file path makes the write fail on every platform.
+    await fs.mkdir(join(userDataPath, 'interactions.json'))
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      await expect(saveInteractions()).rejects.toThrow()
+    } finally {
+      log.mockRestore()
+    }
+  })
+
   it('creates an empty commands file on first run', async () => {
     const { loadCommands } = await import('./fileService')
 

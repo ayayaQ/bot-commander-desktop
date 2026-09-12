@@ -3,6 +3,43 @@ import { writable, derived } from 'svelte/store'
 // Default language
 const DEFAULT_LANGUAGE = 'en'
 
+const publicationTranslations = {
+  // Match Android recovery copy; other locales use the English fallback pending review.
+  'sync-in-progress': 'Waiting for Discord…',
+  'sync-failed': 'Sync failed',
+  'sync-failed-help':
+    'Some changes could not be confirmed. Check the details below, fix any server or permission issues, then try again.',
+  'sync-bot-required':
+    'Start your bot using Login and wait until it is online, then try syncing again.',
+  'sync-server-missing':
+    'Cannot find this server. Check the server ID and invite your bot to that server, then try again.',
+  'sync-server-label': 'Server {id}',
+  'sync-duplicate-names':
+    'Multiple commands have the same name in this server. Rename duplicates before syncing.',
+  'sync-permissions-help':
+    'Discord denied access. Check that your bot is in this server and has permission to manage its commands, then try again.',
+  'sync-network-help': 'Could not reach Discord. Check your internet connection and try again.',
+  'sync-discord-help':
+    'Could not confirm this request with Discord. Check the details and try again.',
+  'sync-save-failed':
+    'Discord received changes, but their status could not be saved on this computer. Check that the app can save files, then sync again.',
+  'sync-scope-save-failed':
+    'Could not read or save the managed server list on this computer. Check that the app can save files, then sync again.',
+  'sync-connection-changed':
+    'The bot connection changed while publishing. Wait until your bot is online, then sync again to confirm its commands.',
+  'sync-command-missing': 'This command no longer exists. Refresh the list and try again.',
+  'sync-changed-during-publish':
+    'Discord received the submitted version, but some commands changed while publishing. Sync again to publish the latest changes.',
+  'sync-global-scope': 'All servers',
+  'sync-completed': 'Commands synced with Discord.',
+  'sync-registered': 'Command registered with Discord.',
+  'sync-unregistered': 'Command removed from Discord.',
+  'sync-discord-confirmed': 'Confirmed by Discord',
+  'sync-needs-sync': 'Changes to sync',
+  'sync-register-command': 'Register command with Discord',
+  'sync-unregister-command': 'Remove command from Discord'
+}
+
 // English translations as the source of truth
 const en = {
   'discard-command-changes': 'Discard unsaved command changes?',
@@ -198,6 +235,7 @@ const en = {
   'no-interactions': 'No Interactions',
   'add-interaction-hint': 'Add an interaction to get started',
   'sync-all': 'Sync All',
+  ...publicationTranslations,
   registered: 'Registered',
   'not-registered': 'Not Registered',
   register: 'Register',
@@ -374,6 +412,7 @@ type Languages = {
 const translations: Languages = {
   en,
   es: {
+    ...publicationTranslations,
     'discard-command-changes': '¿Descartar los cambios sin guardar del comando?',
     'discard-command-changes-help': 'Se perderán tus cambios. El comando guardado seguirá igual.',
     'keep-editing': 'Seguir editando',
@@ -737,6 +776,7 @@ const translations: Languages = {
     'no-actions-configured': 'No hay acciones configuradas para este comando.'
   },
   ja: {
+    ...publicationTranslations,
     'discard-command-changes': 'コマンドの未保存の変更を破棄しますか？',
     'discard-command-changes-help': '変更は失われます。保存済みのコマンドは変更されません。',
     'keep-editing': '編集を続ける',
@@ -1094,6 +1134,7 @@ const translations: Languages = {
     'no-actions-configured': 'このコマンドにはアクションが設定されていません。'
   },
   zh: {
+    ...publicationTranslations,
     'discard-command-changes': '放弃未保存的命令更改？',
     'discard-command-changes-help': '你的更改将丢失。已保存的命令将保持不变。',
     'keep-editing': '继续编辑',
@@ -1445,6 +1486,7 @@ const translations: Languages = {
     'no-actions-configured': '此命令没有配置任何操作。'
   },
   ko: {
+    ...publicationTranslations,
     'discard-command-changes': '저장하지 않은 명령어 변경 사항을 버릴까요?',
     'discard-command-changes-help': '변경 사항이 사라집니다. 저장된 명령어는 그대로 유지됩니다.',
     'keep-editing': '계속 편집',
@@ -1799,6 +1841,7 @@ const translations: Languages = {
     'no-actions-configured': '이 명령어에 구성된 작업이 없습니다.'
   },
   ru: {
+    ...publicationTranslations,
     'discard-command-changes': 'Отменить несохранённые изменения команды?',
     'discard-command-changes-help':
       'Ваши изменения будут потеряны. Сохранённая команда останется без изменений.',

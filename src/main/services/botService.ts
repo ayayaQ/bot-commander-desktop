@@ -332,7 +332,10 @@ async function onInteractionCreate(interaction: Interaction) {
 
 async function handleSlashCommand(interaction: ChatInputCommandInteraction) {
   // First check for new interaction commands
-  const interactionCommand = findInteractionByCommandName(interaction.commandName)
+  const interactionCommand = findInteractionByCommandName(
+    interaction.commandName,
+    interaction.commandGuildId
+  )
 
   if (interactionCommand) {
     // Cooldown check
