@@ -14,8 +14,11 @@ export function setInteractions(newInteractions: BCFDInteractionCommand[]): void
   interactions = newInteractions
 }
 
-export function findInteractionByCommandName(name: string): BCFDInteractionCommand | undefined {
-  return interactions.find((i) => i.commandName === name)
+export function findInteractionByCommandName(
+  name: string,
+  commandGuildId: string | null
+): BCFDInteractionCommand | undefined {
+  return interactions.find((i) => i.commandName === name && (i.guildId || null) === commandGuildId)
 }
 
 // Helper function to recursively search for a button in an action's nested buttons

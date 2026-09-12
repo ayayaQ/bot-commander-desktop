@@ -30,6 +30,7 @@ function deferred() {
 function setup(initial = [command('hello')]) {
   let current = initial
   const backend: InteractionPublishBackend = {
+    managedGuildIds: vi.fn().mockResolvedValue([]),
     replace: vi.fn().mockResolvedValue(undefined),
     register: vi.fn().mockResolvedValue(undefined),
     unregister: vi.fn().mockResolvedValue(undefined),
@@ -60,6 +61,7 @@ describe('interaction publication', () => {
     const gate = deferred()
     vi.mocked(backend.replace).mockReturnValue(gate.promise)
     const publishing = publisher.publish('sync')
+    await Promise.resolve()
     expect(publisher.getState()).toMatchObject({
       busy: true,
       pendingIds: ['hello'],
@@ -129,6 +131,7 @@ describe('interaction publication', () => {
     const gate = deferred()
     vi.mocked(backend.replace).mockReturnValue(gate.promise)
     const publishing = publisher.publish('sync')
+    await Promise.resolve()
     current[0].commandDescription = 'New description'
     replaceCurrent([current[0]])
     expect(vi.mocked(backend.replace).mock.calls[0][1][0].commandDescription).toBe('Test')
@@ -155,6 +158,7 @@ describe('interaction publication', () => {
     const gate = deferred()
     vi.mocked(backend.replace).mockReturnValue(gate.promise)
     const publishing = publisher.publish('sync')
+    await Promise.resolve()
     vi.mocked(backend.isCurrent).mockReturnValue(false)
     gate.resolve()
     await publishing
@@ -183,5 +187,40 @@ describe('interaction publication', () => {
     await publisher.publish('sync')
     publisher.getState().targets[0].commandIds.push('unrelated')
     expect(publisher.getState().targets[0].commandIds).toEqual(['hello'])
+  })
+
+  it('clears remembered servers with no remaining local commands', async () => {
+    const { publisher, backend } = setup([])
+    vi.mocked(backend.managedGuildIds).mockResolvedValue(['old-server'])
+    expect((await publisher.publish('sync')).success).toBe(true)
+    expect(backend.replace).toHaveBeenCalledWith('old-server', [])
+    expect(publisher.getState().targets).toContainEqual({
+      guildId: 'old-server',
+      commandIds: [],
+      error: undefined
+    })
+  })
+
+  it('clears the old server and publishes the new target after a command moves', async () => {
+    const { publisher, backend } = setup([command('hello', 'new-server')])
+    vi.mocked(backend.managedGuildIds).mockResolvedValue(['old-server'])
+    await publisher.publish('sync')
+    expect(backend.replace).toHaveBeenCalledWith('old-server', [])
+    expect(backend.replace).toHaveBeenCalledWith('new-server', [
+      expect.objectContaining({ id: 'hello' })
+    ])
+  })
+
+  it('reports failed cleanup even when the failed server has no local command IDs', async () => {
+    const { publisher, backend, current } = setup([command('hello', 'new-server')])
+    vi.mocked(backend.managedGuildIds).mockResolvedValue(['old-server'])
+    vi.mocked(backend.replace).mockImplementation(async (guildId) => {
+      if (guildId === 'old-server') throw new Error('Cleanup failed')
+    })
+    expect((await publisher.publish('sync')).success).toBe(false)
+    expect(current[0].isRegistered).toBe(true)
+    expect(
+      publisher.getState().targets.find((t) => t.guildId === 'old-server')?.error
+    ).toBeDefined()
   })
 })

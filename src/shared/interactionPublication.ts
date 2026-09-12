@@ -8,6 +8,7 @@ export type PublicationErrorCode =
   | 'network'
   | 'discord'
   | 'save-failed'
+  | 'scope-save-failed'
   | 'connection-changed'
   | 'command-missing'
 

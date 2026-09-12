@@ -8,6 +8,7 @@ import {
 import { resourceRevision } from './resourceChangeService'
 
 export interface InteractionPublishBackend {
+  managedGuildIds(): Promise<string[]>
   replace(guildId: string, commands: BCFDInteractionCommand[]): Promise<void>
   register(command: BCFDInteractionCommand): Promise<void>
   unregister(command: BCFDInteractionCommand): Promise<void>
@@ -101,7 +102,10 @@ export class InteractionPublisher {
       const backend = this.dependencies.backend()
       const groups = new Map<string, BCFDInteractionCommand[]>()
       // Preserve Sync All's ability to submit an empty global command list.
-      if (operation === 'sync') groups.set('', [])
+      if (operation === 'sync') {
+        groups.set('', [])
+        for (const guildId of await backend.managedGuildIds()) groups.set(guildId, [])
+      }
       for (const command of submitted) {
         const scope = command.guildId || ''
         groups.set(scope, [...(groups.get(scope) || []), command])

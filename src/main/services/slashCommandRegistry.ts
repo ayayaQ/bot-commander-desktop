@@ -1,4 +1,7 @@
 import { REST, Routes, ApplicationCommandOptionType } from 'discord.js'
+import { app } from 'electron'
+import { join } from 'node:path'
+import { InteractionPublicationScopes } from './interactionPublicationScopes'
 import { getClient } from './botService'
 import { PublicationFailure, type InteractionPublishBackend } from './interactionPublisher'
 import { BCFDInteractionCommand, BCFDSlashCommandOption } from '../types/types'
@@ -38,6 +41,19 @@ export function createInteractionPublishBackend(): InteractionPublishBackend {
   }
   const rest = new REST({ version: '10' }).setToken(client.token)
   const applicationId = client.user.id
+  const scopes = new InteractionPublicationScopes(
+    join(app.getPath('userData'), 'interaction-publication-scopes.json')
+  )
+  const persistScopes = async <T>(operation: () => Promise<T>): Promise<T> => {
+    try {
+      return await operation()
+    } catch {
+      throw new PublicationFailure({ code: 'scope-save-failed' })
+    }
+  }
+  const remember = async (guildId: string) => {
+    if (guildId) await persistScopes(() => scopes.remember(applicationId, guildId))
+  }
   const route = (guildId: string) =>
     guildId
       ? Routes.applicationGuildCommands(applicationId, guildId)
@@ -48,18 +64,31 @@ export function createInteractionPublishBackend(): InteractionPublishBackend {
     }
   }
   return {
+    managedGuildIds: () => persistScopes(() => scopes.get(applicationId)),
     isCurrent: () => getClient() === client && client.isReady(),
     async replace(guildId, commands) {
       requireGuild(guildId)
+      await remember(guildId)
+      if (getClient() !== client || !client.isReady()) {
+        throw new PublicationFailure({ code: 'connection-changed' })
+      }
       await rest.put(route(guildId), { body: commands.map(buildSlashCommandPayload) })
+      if (guildId && !commands.length) {
+        await persistScopes(() => scopes.forget(applicationId, guildId))
+      }
     },
     async register(command) {
       requireGuild(command.guildId || '')
+      await remember(command.guildId || '')
+      if (getClient() !== client || !client.isReady()) {
+        throw new PublicationFailure({ code: 'connection-changed' })
+      }
       await rest.post(route(command.guildId || ''), { body: buildSlashCommandPayload(command) })
     },
     async unregister(command) {
       const guildId = command.guildId || ''
       requireGuild(guildId)
+      await remember(guildId)
       const remote = (await rest.get(route(guildId))) as Array<{
         id: string
         name: string
@@ -67,6 +96,9 @@ export function createInteractionPublishBackend(): InteractionPublishBackend {
       }>
       const found = remote.find((item) => item.type === 1 && item.name === command.commandName)
       if (found) {
+        if (getClient() !== client || !client.isReady()) {
+          throw new PublicationFailure({ code: 'connection-changed' })
+        }
         await rest.delete(
           guildId
             ? Routes.applicationGuildCommand(applicationId, guildId, found.id)

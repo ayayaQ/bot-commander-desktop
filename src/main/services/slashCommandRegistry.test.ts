@@ -6,7 +6,18 @@ const mocks = vi.hoisted(() => ({
   put: vi.fn(),
   post: vi.fn(),
   get: vi.fn(),
-  delete: vi.fn()
+  delete: vi.fn(),
+  getScopes: vi.fn(),
+  rememberScope: vi.fn(),
+  forgetScope: vi.fn()
+}))
+vi.mock('electron', () => ({ app: { getPath: () => '/test-user-data' } }))
+vi.mock('./interactionPublicationScopes', () => ({
+  InteractionPublicationScopes: class {
+    get = mocks.getScopes
+    remember = mocks.rememberScope
+    forget = mocks.forgetScope
+  }
 }))
 vi.mock('./botService', () => ({ getClient: mocks.getClient }))
 vi.mock('discord.js', async (importOriginal) => {
@@ -44,6 +55,9 @@ const command = {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.getScopes.mockResolvedValue([])
+  mocks.rememberScope.mockResolvedValue(undefined)
+  mocks.forgetScope.mockResolvedValue(undefined)
   mocks.getClient.mockReturnValue({
     isReady: () => true,
     token: 'test-token',
@@ -95,5 +109,51 @@ describe('Discord publication backend', () => {
     mocks.getClient.mockReturnValue(null)
     expect(backend.isCurrent()).toBe(false)
     expect(() => createInteractionPublishBackend()).toThrow('bot-required')
+  })
+
+  it('remembers a server before publishing, even when Discord fails', async () => {
+    mocks.put.mockImplementationOnce(async () => {
+      expect(mocks.rememberScope).toHaveBeenCalledWith('app', 'server')
+      throw new Error('Response lost')
+    })
+    await expect(createInteractionPublishBackend().replace('server', [command])).rejects.toThrow(
+      'Response lost'
+    )
+    expect(mocks.forgetScope).not.toHaveBeenCalled()
+  })
+
+  it('tracks individual registrations and forgets a server only after confirmed empty replacement', async () => {
+    const backend = createInteractionPublishBackend()
+    await backend.register(command)
+    expect(mocks.rememberScope).toHaveBeenCalledWith('app', 'server')
+    mocks.put.mockImplementationOnce(async () => {
+      expect(mocks.forgetScope).not.toHaveBeenCalled()
+    })
+    await backend.replace('server', [])
+    expect(mocks.forgetScope).toHaveBeenCalledWith('app', 'server')
+  })
+
+  it('does not contact Discord when the scope cannot be persisted', async () => {
+    mocks.rememberScope.mockRejectedValueOnce(new Error('Disk full'))
+    await expect(createInteractionPublishBackend().register(command)).rejects.toMatchObject({
+      feedback: { code: 'scope-save-failed' }
+    })
+    expect(mocks.post).not.toHaveBeenCalled()
+  })
+
+  it('reads managed scopes for the captured application only', async () => {
+    mocks.getScopes.mockResolvedValue(['server'])
+    expect(await createInteractionPublishBackend().managedGuildIds()).toEqual(['server'])
+    expect(mocks.getScopes).toHaveBeenCalledWith('app')
+  })
+
+  it('does not publish after the connection changes while saving the scope', async () => {
+    mocks.rememberScope.mockImplementationOnce(async () => {
+      mocks.getClient.mockReturnValue(null)
+    })
+    await expect(createInteractionPublishBackend().register(command)).rejects.toMatchObject({
+      feedback: { code: 'connection-changed' }
+    })
+    expect(mocks.post).not.toHaveBeenCalled()
   })
 })

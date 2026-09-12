@@ -16,6 +16,7 @@
     network: 'sync-network-help',
     discord: 'sync-discord-help',
     'save-failed': 'sync-save-failed',
+    'scope-save-failed': 'sync-scope-save-failed',
     'connection-changed': 'sync-connection-changed',
     'command-missing': 'sync-command-missing'
   }
