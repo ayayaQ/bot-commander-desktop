@@ -159,7 +159,8 @@ describe('fileService', () => {
     mocks.getSettings.mockReturnValue({
       theme: 'light',
       openaiApiKey: 'openai-secret',
-      openrouterApiKey: 'openrouter-secret'
+      openrouterApiKey: 'openrouter-secret',
+      spamProtectionEnabled: true
     })
     const { saveSettings } = await import('./fileService')
 
@@ -170,7 +171,8 @@ describe('fileService', () => {
     expect(stored).not.toContain('openrouter-secret')
     expect(JSON.parse(stored)).toMatchObject({
       openaiApiKey: expect.stringMatching(/^bcfd-encrypted:v1:/),
-      openrouterApiKey: expect.stringMatching(/^bcfd-encrypted:v1:/)
+      openrouterApiKey: expect.stringMatching(/^bcfd-encrypted:v1:/),
+      spamProtectionEnabled: true
     })
   })
 

@@ -48,6 +48,35 @@ Want to try a ready-to-use build? See the [releases](https://github.com/ayayaQ/b
 
 ---
 
+## Spam Protection
+
+Add an OpenRouter API key in **Settings**, then enable **Spam Protection** beside the login controls.
+The setting is off by default and applies to all servers while this desktop bot is running. The bot
+needs Message Content Intent and **Manage Messages** permission in each protected channel. Owners
+and members with Administrator, Manage Messages, or Moderate Members permission are exempt.
+
+Protection uses `~typesafe/jev-latest` through OpenRouter's Decisions API, independently of your chat
+provider/model. It deletes only the incoming message when the model reports at least 95% spam
+probability and prevents that message from triggering commands. It checks scams, phishing,
+unsolicited advertising, and repetitive flooding. This threshold is a model judgment, not a
+measured accuracy guarantee.
+
+Message text and up to 10 preceding messages from the same author in the same server over 30 seconds
+are sent to OpenRouter; API charges apply. History is bounded, kept in memory, and cleared when
+protection stops. Message bodies and credentials are not written to moderation logs.
+
+Checks wait at most three seconds, including queue time. API failures, missing permissions, and
+queue overload leave messages unchanged; check the **Console** for errors and deletion activity.
+Rate limits pause checks temporarily. Invalid credentials or exhausted credits pause checks until
+you update Settings or toggle protection. Switching protection off cancels pending checks, but a
+Discord deletion already submitted cannot be recalled.
+
+This version checks new text messages only. It skips DMs, bots, webhooks, and attachment-only
+messages; edits cancel pending checks and are not reclassified. Earlier messages in a burst are
+never deleted. The moving model alias and alpha Decisions endpoint may change upstream.
+
+---
+
 ## BCFD Template Language
 
 Command responses use the **BCFD Template Language** — a simple string interpolation syntax that lets you embed dynamic values without writing code.

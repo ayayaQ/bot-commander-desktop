@@ -318,7 +318,7 @@
     <label class="label">
       <span class="label-text">{$t('openai-api-key')}</span>
       {#if aiProvider === 'openrouter'}
-        <span class="label-text-alt">Required for moderation</span>
+        <span class="label-text-alt">Required for AI response moderation</span>
       {/if}
     </label>
     <input
@@ -330,21 +330,19 @@
     />
   </div>
 
-  {#if aiProvider === 'openrouter'}
-    <div class="form-control">
-      <!-- svelte-ignore a11y_label_has_associated_control -->
-      <label class="label">
-        <span class="label-text">OpenRouter API Key</span>
-      </label>
-      <input
-        type={showToken ? 'text' : 'password'}
-        class="input w-full"
-        value={openrouterApiKey}
-        oninput={updateOpenRouterKey}
-        placeholder="Enter your OpenRouter API key..."
-      />
-    </div>
-  {/if}
+  <div class="form-control">
+    <!-- svelte-ignore a11y_label_has_associated_control -->
+    <label class="label">
+      <span class="label-text">OpenRouter API Key</span>
+    </label>
+    <input
+      type={showToken ? 'text' : 'password'}
+      class="input w-full"
+      value={openrouterApiKey}
+      oninput={updateOpenRouterKey}
+      placeholder="Enter your OpenRouter API key..."
+    />
+  </div>
 
   <div class="form-control">
     <!-- svelte-ignore a11y_label_has_associated_control -->

@@ -1,3 +1,4 @@
+import { stopSpamProtection } from './services/botService'
 import { app, shell, BrowserWindow, Tray, Menu, session } from 'electron'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
@@ -196,6 +197,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   app.isQuitting = true
+  stopSpamProtection()
 })
 
 function saveStatsPeriodicaly() {

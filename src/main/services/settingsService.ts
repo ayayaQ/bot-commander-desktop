@@ -8,6 +8,7 @@ let settings: AppSettings = {
   aiProvider: 'openai',
   openaiApiKey: '',
   openrouterApiKey: '',
+  spamProtectionEnabled: false,
   selectedAiModel: 'gpt-5.4-nano',
   selectedOpenAiModel: 'gpt-5.4-nano',
   selectedOpenRouterModel: 'openai/gpt-5.4-nano',
@@ -21,6 +22,13 @@ let settings: AppSettings = {
 
 export function getSettings() {
   return settings
+}
+
+const listeners = new Set<(next: AppSettings, previous: AppSettings) => void>()
+
+export function onSettingsChanged(listener: (next: AppSettings, previous: AppSettings) => void) {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
 }
 
 export function setSettings(newSettings: AppSettings) {
@@ -106,5 +114,8 @@ export function setSettings(newSettings: AppSettings) {
     newSettings.agentNotificationsEnabled = true
   }
 
+  newSettings.spamProtectionEnabled = newSettings.spamProtectionEnabled === true
+  const previous = settings
   settings = newSettings
+  for (const listener of listeners) listener(settings, previous)
 }

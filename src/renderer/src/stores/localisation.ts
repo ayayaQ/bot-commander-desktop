@@ -3,6 +3,14 @@ import { writable, derived } from 'svelte/store'
 // Default language
 const DEFAULT_LANGUAGE = 'en'
 
+const spamProtectionTranslations = {
+  'spam-protection': 'Spam Protection',
+  'spam-protection-help':
+    'Automatically deletes likely spam and flooding in all servers, except from owners and moderators. Sends message text and recent context to OpenRouter (paid usage). Requires Manage Messages. See Console for activity and errors.',
+  'spam-protection-key-required': 'Add an OpenRouter API key in Settings to enable protection.',
+  'spam-protection-save-failed': 'Could not save Spam Protection. Try again.'
+}
+
 const publicationTranslations = {
   // Match Android recovery copy; other locales use the English fallback pending review.
   'sync-in-progress': 'Waiting for Discord…',
@@ -236,6 +244,7 @@ const en = {
   'add-interaction-hint': 'Add an interaction to get started',
   'sync-all': 'Sync All',
   ...publicationTranslations,
+  ...spamProtectionTranslations,
   registered: 'Registered',
   'not-registered': 'Not Registered',
   register: 'Register',
@@ -413,6 +422,7 @@ const translations: Languages = {
   en,
   es: {
     ...publicationTranslations,
+    ...spamProtectionTranslations,
     'discard-command-changes': '¿Descartar los cambios sin guardar del comando?',
     'discard-command-changes-help': 'Se perderán tus cambios. El comando guardado seguirá igual.',
     'keep-editing': 'Seguir editando',
@@ -777,6 +787,7 @@ const translations: Languages = {
   },
   ja: {
     ...publicationTranslations,
+    ...spamProtectionTranslations,
     'discard-command-changes': 'コマンドの未保存の変更を破棄しますか？',
     'discard-command-changes-help': '変更は失われます。保存済みのコマンドは変更されません。',
     'keep-editing': '編集を続ける',
@@ -1135,6 +1146,7 @@ const translations: Languages = {
   },
   zh: {
     ...publicationTranslations,
+    ...spamProtectionTranslations,
     'discard-command-changes': '放弃未保存的命令更改？',
     'discard-command-changes-help': '你的更改将丢失。已保存的命令将保持不变。',
     'keep-editing': '继续编辑',
@@ -1487,6 +1499,7 @@ const translations: Languages = {
   },
   ko: {
     ...publicationTranslations,
+    ...spamProtectionTranslations,
     'discard-command-changes': '저장하지 않은 명령어 변경 사항을 버릴까요?',
     'discard-command-changes-help': '변경 사항이 사라집니다. 저장된 명령어는 그대로 유지됩니다.',
     'keep-editing': '계속 편집',
@@ -1842,6 +1855,7 @@ const translations: Languages = {
   },
   ru: {
     ...publicationTranslations,
+    ...spamProtectionTranslations,
     'discard-command-changes': 'Отменить несохранённые изменения команды?',
     'discard-command-changes-help':
       'Ваши изменения будут потеряны. Сохранённая команда останется без изменений.',

@@ -55,6 +55,20 @@ import {
 import { getStatsInstance, Stats } from '../utils/stats'
 import { getCooldownManager } from './cooldownManager'
 import { rendererConsole } from '../utils/rendererConsole'
+import { getSettings, onSettingsChanged } from './settingsService'
+import { classifySpamWithOpenRouter } from './aiProviderService'
+import { SpamProtectionService } from './spamProtectionService'
+
+const spamProtection = new SpamProtectionService({
+  getSettings,
+  classify: classifySpamWithOpenRouter,
+  logger: rendererConsole
+})
+onSettingsChanged((next, previous) => spamProtection.settingsChanged(next, previous))
+
+export function stopSpamProtection() {
+  spamProtection.stop()
+}
 
 let client: Client | null = null
 let connection: boolean = false
@@ -121,6 +135,7 @@ export function getClient() {
 export function Connect(event: Electron.IpcMainEvent, token: string) {
   if (connection) {
     if (client) {
+      spamProtection.stop()
       client.destroy()
       client = null
       connection = false
@@ -139,6 +154,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
     sameSite: 'strict'
   })
 
+  spamProtection.start()
   client = new Client({
     intents: [
       IntentsBitField.Flags.Guilds,
@@ -183,7 +199,15 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
     if (!message.author.bot) {
       rendererConsole.event(`Message received`)
     }
-    onMessageCreate(message)
+    void onMessageCreate(message).catch(() => {
+      rendererConsole.error('Could not process an incoming message')
+    })
+  })
+
+  client.on(Events.MessageUpdate, (_, message) => spamProtection.invalidate(message.id))
+  client.on(Events.MessageDelete, (message) => spamProtection.invalidate(message.id))
+  client.on(Events.MessageBulkDelete, (messages) => {
+    for (const id of messages.keys()) spamProtection.invalidate(id)
   })
 
   // when a user joins a guild
@@ -225,6 +249,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
   client.login(token).catch((err) => {
     const message = `Login failed: ${err.message || err}`
     rendererConsole.error(message)
+    spamProtection.stop()
     client?.destroy()
     client = null
     connection = false
@@ -233,6 +258,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
 }
 
 export function Disconnect(event: Electron.IpcMainEvent) {
+  spamProtection.stop()
   if (client) {
     saveBotState() // Save bot state before disconnecting
     client.destroy()
@@ -1397,6 +1423,9 @@ async function onMessageCreate(message: OmitPartialGroupDMChannel<Message<boolea
   if (message.channel.type === ChannelType.DM) {
     stats.incrementPrivateMessagesReceived()
   }
+
+  const messageClient = client
+  if ((await spamProtection.check(message)) !== 'allow' || client !== messageClient) return
 
   let firstItem = message.content.split(' ')[0]
   let messageWordCount = message.content.split(' ').length
