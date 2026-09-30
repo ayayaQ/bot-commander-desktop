@@ -7,6 +7,7 @@
     type PlaygroundResult
   } from '../../../shared/playground'
   import { runPlayground } from '../playground/client'
+  import type { BCFDInteractionCommand, BCFDSlashCommandOption } from '../types/types'
 
   type ConversationTurn = {
     id: number
@@ -18,7 +19,9 @@
   }
 
   let commands: CanonicalBCFDCommand[] = $state([])
-  let selectedCommand = $state('all')
+  let interactions: BCFDInteractionCommand[] = $state([])
+  let selectedCommand = $state('message:all')
+  let interactionOptions: Record<string, string | number | boolean> = $state({})
   const initialFixture = createPlaygroundFixture()
   let fixture: PlaygroundFixture = $state(initialFixture)
   let senderId = $state(initialFixture.members[0].id)
@@ -38,9 +41,12 @@
   const activeMembers = $derived(fixture.members.filter((member) => member.status === 'active'))
   const sender = $derived(fixture.members.find((member) => member.id === senderId))
   const selected = $derived(
-    selectedCommand === 'all'
+    selectedCommand === 'message:all'
       ? commands
-      : commands.filter((_, index) => String(index) === selectedCommand)
+      : commands.filter((_, index) => `message:${index}` === selectedCommand)
+  )
+  const selectedInteraction = $derived(
+    interactions.find((interaction) => `interaction:${interaction.id}` === selectedCommand)
   )
   const messageCommandCount = $derived(commands.filter((command) => command.type === 0).length)
 
@@ -57,11 +63,16 @@
     loading = true
     loadError = ''
     try {
-      const result = await window.electron.ipcRenderer.invoke('get-commands')
+      const [result, loadedInteractions] = await Promise.all([
+        window.electron.ipcRenderer.invoke('get-commands'),
+        window.electron.ipcRenderer.invoke('get-interactions')
+      ])
       const loaded = decodeBCFDCommandArray(result.bcfdCommands).map((entry) => entry.command)
       if (currentLoad !== loadGeneration) return
       commands = loaded
-      selectedCommand = 'all'
+      interactions = loadedInteractions
+      selectedCommand = 'message:all'
+      interactionOptions = {}
     } catch (error) {
       if (currentLoad !== loadGeneration) return
       loadError = error instanceof Error ? error.message : 'Could not read saved commands.'
@@ -82,6 +93,7 @@
     fixture = createPlaygroundFixture()
     senderId = fixture.members[0].id
     botStateDraft = '{}'
+    interactionOptions = {}
     message = ''
     validationError = ''
     composer?.focus()
@@ -125,15 +137,38 @@
     return /^#[\da-f]{6}$/i.test(normalized) ? normalized : '#818cf8'
   }
 
+  function optionValue(option: BCFDSlashCommandOption): string | number | boolean {
+    const current = interactionOptions[option.name]
+    if (option.type === 5) return current === true
+    if (option.type === 4 || option.type === 10) {
+      if (current === '' || current === undefined) return ''
+      return Number(current)
+    }
+    return current ?? ''
+  }
+
+  function optionLabel(option: BCFDSlashCommandOption): string {
+    const labels: Record<number, string> = {
+      3: 'Text',
+      4: 'Integer',
+      5: 'True / false',
+      6: 'Fake user',
+      7: 'Channel ID',
+      8: 'Role ID',
+      10: 'Number'
+    }
+    return `${option.name}${option.required ? ' *' : ''} · ${labels[option.type] ?? 'Value'}`
+  }
+
   async function sendMessage(event?: SubmitEvent) {
     event?.preventDefault()
     if (
       busy ||
       loading ||
-      !message.trim() ||
+      (!selectedInteraction && !message.trim()) ||
       !sender ||
       sender.status !== 'active' ||
-      !selected.length
+      (!selected.length && !selectedInteraction)
     ) {
       return
     }
@@ -151,10 +186,13 @@
     }
     const currentGeneration = generation
     const id = ++nextTurnId
-    const input = message
+    const input = selectedInteraction ? `/${selectedInteraction.commandName}` : message
     const senderName = sender.name
     const requestFixture = { ...$state.snapshot(fixture), botState: state }
     const requestCommands = $state.snapshot(selected)
+    const requestInteraction = selectedInteraction
+      ? $state.snapshot(selectedInteraction)
+      : undefined
     turns = [
       ...turns,
       {
@@ -164,15 +202,24 @@
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }
     ]
-    message = ''
+    if (!selectedInteraction) message = ''
     busy = true
     void scrollToLatest()
     try {
       const result = await runPlayground({
         commands: requestCommands,
+        interactions: requestInteraction ? [requestInteraction] : [],
         fixture: requestFixture,
         senderId,
-        message: input
+        message: input,
+        interaction: requestInteraction
+          ? {
+              commandId: requestInteraction.id,
+              options: Object.fromEntries(
+                requestInteraction.options.map((option) => [option.name, optionValue(option)])
+              )
+            }
+          : undefined
       })
       if (currentGeneration !== generation) return
       fixture = result.fixture
@@ -190,6 +237,56 @@
         void scrollToLatest()
         void tick().then(() => composer?.focus())
       }
+    }
+  }
+
+  async function clickFakeButton(
+    commandId: string,
+    path: string[],
+    options: Record<string, string | number | boolean>
+  ) {
+    if (busy) return
+    const interaction = interactions.find((candidate) => candidate.id === commandId)
+    if (!interaction) return
+    const currentGeneration = generation
+    const id = ++nextTurnId
+    const senderName = sender?.name ?? 'Unknown'
+    turns = [
+      ...turns,
+      {
+        id,
+        sender: senderName,
+        message: `Clicked ${path[path.length - 1]}`,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }
+    ]
+    busy = true
+    try {
+      const result = await runPlayground({
+        commands: [],
+        interactions: [$state.snapshot(interaction)],
+        fixture: $state.snapshot(fixture),
+        senderId,
+        message: '',
+        interaction: {
+          commandId,
+          options: $state.snapshot(options),
+          buttonPath: path
+        }
+      })
+      if (currentGeneration !== generation) return
+      fixture = result.fixture
+      turns = turns.map((turn) => (turn.id === id ? { ...turn, result } : turn))
+    } catch (error) {
+      if (currentGeneration !== generation) return
+      turns = turns.map((turn) =>
+        turn.id === id
+          ? { ...turn, error: error instanceof Error ? error.message : 'Button simulation failed.' }
+          : turn
+      )
+    } finally {
+      if (currentGeneration === generation) busy = false
+      void scrollToLatest()
     }
   }
 </script>
@@ -226,7 +323,7 @@
 
   <p class="subset-notice">
     Limited offline subset: scripts, AI, botState writes, cooldowns, and message deletion do not
-    run.
+    run. Saved slash commands and their fake button replies are supported.
   </p>
 
   <div class="test-controls">
@@ -235,16 +332,23 @@
       <select
         class="select select-sm w-full"
         bind:value={selectedCommand}
-        disabled={busy || loading || !commands.length}
+        disabled={busy || loading || (!commands.length && !interactions.length)}
       >
-        <option value="all">All saved commands ({commands.length})</option>
-        {#each commands as command, index}
-          <option value={String(index)}>
-            {command.command || '(unnamed command)'}{command.type !== 0
-              ? ' · event type unsupported'
-              : ''}
-          </option>
-        {/each}
+        <optgroup label="Message commands">
+          <option value="message:all">All saved message commands ({commands.length})</option>
+          {#each commands as command, index}
+            <option value={`message:${index}`}>
+              {command.command || '(unnamed command)'}{command.type !== 0
+                ? ' · event type unsupported'
+                : ''}
+            </option>
+          {/each}
+        </optgroup>
+        <optgroup label="Slash commands">
+          {#each interactions as interaction}
+            <option value={`interaction:${interaction.id}`}>/{interaction.commandName}</option>
+          {/each}
+        </optgroup>
       </select>
     </label>
     <button
@@ -257,9 +361,7 @@
       <span class="material-symbols-outlined text-base" aria-hidden="true">refresh</span>
       Reload
     </button>
-    <span class="command-count"
-      >{messageCommandCount} message {messageCommandCount === 1 ? 'command' : 'commands'}</span
-    >
+    <span class="command-count">{messageCommandCount} message · {interactions.length} slash</span>
   </div>
 
   <details class="scope-details">
@@ -267,8 +369,8 @@
     <div class="scope-content">
       <p>
         <strong>This is an approximation, not the live Discord runtime.</strong> Supports message-command
-        matching, selected filters, basic BCFD identity/message variables, $if conditions, replies, DMs,
-        embeds, reactions, and local role/kick/ban/voice-mute effects.
+        matching, saved slash commands, typed slash options, fake button follow-ups, basic BCFD identity/message/option
+        values, $if conditions, replies, DMs, embeds, reactions, and local role/kick/ban/voice-mute effects.
       </p>
       <p>
         Eval, AI/network operations, cooldowns, all message deletion, specific-channel routing,
@@ -277,8 +379,9 @@
         trace for each command's limits.
       </p>
       <p>
-        Moderation uses an administrator-only approximation. Discord permissions, role hierarchy,
-        and network validation are not modeled. Role assignment toggles the sender's role.
+        Moderation uses an administrator-only approximation. Discord permission combinations, role
+        hierarchy, publication, autocomplete, and network/API failures are not modeled. Role
+        assignment toggles the invoking sender's role. Link buttons are displayed but never opened.
       </p>
       <fieldset disabled={busy} class="context-fields">
         <legend>Fake context · used on the next message</legend>
@@ -336,9 +439,10 @@
     </div>
   {:else if loading}
     <div class="loading-notice" role="status">Reading saved commands…</div>
-  {:else if !commands.length}
+  {:else if !commands.length && !interactions.length}
     <div class="alert compact-alert" role="status">
-      No saved commands yet. Create a command in the Commands tab, then come back to test it here.
+      No saved commands yet. Create a message or interaction command, then come back to test it
+      here.
     </div>
   {/if}
 
@@ -402,6 +506,7 @@
                   <div class="destination">
                     {output.reply ? '↳ Reply · ' : ''}{displayMentions(output.destination)}
                   </div>
+                  {#if output.ephemeral}<span class="ephemeral-tag">EPHEMERAL</span>{/if}
                   {#if output.text}<p class="message-content">
                       {displayMentions(output.text)}
                     </p>{/if}
@@ -425,6 +530,26 @@
                       {#if output.embed.footer}<p class="embed-footer">
                           {displayMentions(output.embed.footer)}
                         </p>{/if}
+                    </div>
+                  {/if}
+                  {#if output.buttons?.length}
+                    <div class="fake-buttons" aria-label="Simulated interaction buttons">
+                      {#each output.buttons as button}
+                        <button
+                          type="button"
+                          class="btn btn-xs"
+                          disabled={busy || button.disabled || button.style === 5}
+                          onclick={() =>
+                            clickFakeButton(
+                              output.interactionCommandId ?? '',
+                              button.path,
+                              output.interactionOptions ?? {}
+                            )}
+                          title={button.style === 5
+                            ? 'External link buttons are disabled offline'
+                            : `Simulate ${button.label}`}>{button.label}</button
+                        >
+                      {/each}
                     </div>
                   {/if}
                 </div>
@@ -525,38 +650,97 @@
             All fake members were removed. Reset the playground to continue.
           </p>{/if}
         {#if validationError}<p class="run-error" role="alert">{validationError}</p>{/if}
-        <div class="composer-input">
-          <textarea
-            bind:this={composer}
-            bind:value={message}
-            rows="2"
-            maxlength="4000"
-            aria-label="Message to simulate"
-            placeholder={`Message #${fixture.channelName || 'playground'}`}
-            disabled={busy || loading || !commands.length || !activeMembers.length}
-            onkeydown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
-                event.preventDefault()
-                void sendMessage()
-              }
-            }}></textarea>
+        {#if selectedInteraction}
+          <div class="interaction-options">
+            <div class="interaction-heading">
+              <strong>/{selectedInteraction.commandName}</strong>
+              <span>{selectedInteraction.commandDescription}</span>
+            </div>
+            {#if !selectedInteraction.options.length}
+              <p class="option-empty">This slash command has no options.</p>
+            {/if}
+            {#each selectedInteraction.options as option}
+              <label>
+                <span>{optionLabel(option)}</span>
+                {#if option.choices?.length}
+                  <select class="select select-sm" bind:value={interactionOptions[option.name]}>
+                    <option value="">{option.required ? 'Choose…' : 'Not provided'}</option>
+                    {#each option.choices as choice}
+                      <option value={choice.value}>{choice.name}</option>
+                    {/each}
+                  </select>
+                {:else if option.type === 5}
+                  <input
+                    class="checkbox checkbox-sm"
+                    type="checkbox"
+                    checked={interactionOptions[option.name] === true}
+                    onchange={(event) =>
+                      (interactionOptions[option.name] = event.currentTarget.checked)}
+                  />
+                {:else if option.type === 6}
+                  <select class="select select-sm" bind:value={interactionOptions[option.name]}>
+                    <option value=""
+                      >{option.required ? 'Choose a fake member…' : 'Not provided'}</option
+                    >
+                    {#each activeMembers as member}<option value={member.id}>{member.name}</option
+                      >{/each}
+                  </select>
+                {:else}
+                  <input
+                    class="input input-sm"
+                    type={option.type === 4 || option.type === 10 ? 'number' : 'text'}
+                    step={option.type === 4 ? '1' : 'any'}
+                    bind:value={interactionOptions[option.name]}
+                    placeholder={option.description}
+                  />
+                {/if}
+              </label>
+            {/each}
+          </div>
+        {:else}
+          <div class="composer-input">
+            <textarea
+              bind:this={composer}
+              bind:value={message}
+              rows="2"
+              maxlength="4000"
+              aria-label="Message to simulate"
+              placeholder={`Message #${fixture.channelName || 'playground'}`}
+              disabled={busy || loading || !commands.length || !activeMembers.length}
+              onkeydown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+                  event.preventDefault()
+                  void sendMessage()
+                }
+              }}></textarea>
+            <button
+              class="btn btn-primary btn-sm"
+              type="submit"
+              disabled={busy ||
+                loading ||
+                (!selected.length && !selectedInteraction) ||
+                (!selectedInteraction && !message.trim()) ||
+                !activeMembers.length}
+              aria-label="Send simulated message"
+            >
+              {#if busy}<span class="loading loading-spinner loading-xs"></span>{:else}<span
+                  class="material-symbols-outlined text-base"
+                  aria-hidden="true">send</span
+                >{/if}
+              Send
+            </button>
+          </div>
+        {/if}
+        {#if selectedInteraction}
           <button
-            class="btn btn-primary btn-sm"
+            class="btn btn-primary btn-sm interaction-run"
             type="submit"
-            disabled={busy ||
-              loading ||
-              !selected.length ||
-              !message.trim() ||
-              !activeMembers.length}
-            aria-label="Send simulated message"
+            disabled={busy || loading || !activeMembers.length}
           >
-            {#if busy}<span class="loading loading-spinner loading-xs"></span>{:else}<span
-                class="material-symbols-outlined text-base"
-                aria-hidden="true">send</span
-              >{/if}
-            Send
+            {#if busy}<span class="loading loading-spinner loading-xs"></span>{/if}
+            Run /{selectedInteraction.commandName}
           </button>
-        </div>
+        {/if}
         <p class="composer-footnote">
           Only this local simulation changes. Commands and real bot state are never saved here.
         </p>
@@ -943,6 +1127,19 @@
     margin: 0.1rem 0 0.2rem;
     overflow-wrap: anywhere;
   }
+  .ephemeral-tag {
+    display: inline-block;
+    margin-top: 0.15rem;
+    font-size: 0.5rem;
+    font-weight: 750;
+    opacity: 0.55;
+  }
+  .fake-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.45rem;
+  }
   .embed-card {
     border-left: 3px solid;
     border-radius: 0.3rem;
@@ -1127,6 +1324,41 @@
   }
   .composer-input textarea:disabled {
     opacity: 0.5;
+  }
+  .interaction-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.55rem;
+    padding: 0.7rem;
+    border: 1px solid var(--color-base-300);
+    border-radius: 0.65rem;
+    background: var(--color-base-200);
+  }
+  .interaction-heading,
+  .option-empty {
+    grid-column: 1 / -1;
+  }
+  .interaction-heading strong,
+  .interaction-heading span {
+    display: block;
+  }
+  .interaction-heading strong {
+    font-size: 0.8rem;
+  }
+  .interaction-heading span,
+  .option-empty {
+    font-size: 0.65rem;
+    opacity: 0.6;
+  }
+  .interaction-options label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 0;
+    font-size: 0.62rem;
+  }
+  .interaction-run {
+    margin-top: 0.5rem;
   }
   .composer-footnote {
     font-size: 0.56rem;

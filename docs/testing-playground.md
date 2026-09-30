@@ -1,11 +1,12 @@
 # Offline command playground
 
 Open the **Playground** bottom-toolbar tab. This is a fake guild/channel, not a
-Discord connection. Pick a saved command (or all commands), choose a fake sender,
-and type a message. Click a member to insert their mention. Reset restores Alex,
+Discord connection. Pick saved message commands or one slash command, choose a fake sender,
+and type a message or fill the slash options. Click a member to insert their mention. Reset restores Alex,
 Sam, Riley, the channel fixture and empty botState, and clears the conversation.
 Use fixture controls to test role IDs, administrator status, whitelists and NSFW
-filters. Saved command changes are loaded only through the read-only reload action.
+filters. Slash replies can expose fake buttons; clicking a non-link button runs its
+stored nested action. Saved definitions are loaded only through read-only reload actions.
 
 The channel shows evaluated text/replies, private-message destinations, and embed
 text. Image and thumbnail URLs are shown as text and are never fetched. Expand a
@@ -19,6 +20,8 @@ before/after fixture botState.
 - Channel/server whitelist, required-role, administrator and NSFW filters
 - Text, channel/DM replies and embeds, reactions in the action log
 - Local kick/ban/mute and sender role toggle effects; all members are fictional
+- Saved slash-command root actions and nested button actions, typed option validation,
+  configured choices, `$option(name)`, ephemeral/deferred reply labels, DMs and embeds
 - BCFD text, escaped characters, nested supported functions and `$if` / `$elseif` /
   `$else` conditions with the production parser and condition semantics
 - Keywords: `name`, `namePlain`, `ID`, `id`, `isBot`, `memberID`,
@@ -35,6 +38,15 @@ runtime error reply. Typing timing is only logged. Non-message event commands ar
 filtered out. Results do not certify that a real bot has the intents or permissions
 needed to perform an action.
 
+Slash option validation covers the option types currently created by the app:
+string, integer, boolean, user, channel, role and number. User/channel/role values
+are fake raw IDs, matching `$option` production output. The playground does not
+model Discord publication, autocomplete, command propagation, individual permission
+bits, role hierarchy or live reply/API failures. Moderation is evaluated before the
+fake reply. Empty slash replies use the production zero-width-space fallback. Link
+buttons are displayed disabled and never open a URL. Buttons intentionally bypass
+slash-command cooldown checks, matching the live execution path.
+
 `$eval`, arbitrary JavaScript, all other BCFD keywords (including AI, network and
 state access), cooldown timing, message deletion and specific-channel routing are
 unsupported. A matched command with any unsupported construct is blocked before
@@ -47,7 +59,8 @@ is intentionally unchanged. Fake member roles/status can change between messages
 
 ## Isolation boundary
 
-The UI's only service request is `get-commands`. Each run sends cloned command and
+The UI's only service requests are the read-only `get-commands` and `get-interactions`
+handlers. Each run sends cloned command and
 fixture data to a new renderer Web Worker. The worker imports the pure BCFD parser
 directly, not its barrel or the live interpreter. The allowlisted evaluator has
 no injected live objects, callbacks, dynamic evaluation, imports, filesystem,
@@ -76,7 +89,8 @@ empty commands, command reload failure and tab navigation while a run is pending
 
 ### Isolated desktop QA seed
 
-`playground-qa-commands.json` is a test-only saved-command seed. With the app
+`playground-qa-commands.json` and `playground-qa-interactions.json` are test-only
+saved-definition seeds. With the app
 stopped, copy it to `commands.json` inside a **new, disposable userData directory**
 selected for QA. Never overwrite a real user's existing data directory. No token,
 login, live bot or Discord connection is required. Test the empty state before
@@ -109,3 +123,7 @@ Expected runs:
 6. `!staff` as Alex → `Staff hello`; as Sam → required-role filter fails
 7. `!embed` → rendered text embed and separate DM, image URL is inert text
 8. Reset during a run → empty chat/restored fixtures; no late result reappears
+9. `/greet` with `name=world` → public `Hello world from Alex`; click **More for Alex**
+   → ephemeral nested response. Omit required `name` → filtered option trace
+10. `/moderate` with target Riley as Alex → Riley becomes voice-muted before the
+    simulated reply. Repeat as Sam → permission denial and no reply/member mutation

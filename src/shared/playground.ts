@@ -1,5 +1,10 @@
 import type { CanonicalBCFDCommand } from './commandCodec'
 import type { CommandEmbed } from './commandCapabilities'
+import type {
+  BCFDInteractionButton,
+  BCFDInteractionCommand,
+  BCFDSlashCommandOption
+} from '../main/types/types'
 
 export type PlaygroundMember = {
   id: string
@@ -22,6 +27,16 @@ export type PlaygroundOutput = {
   text?: string
   embed?: CommandEmbed
   reply: boolean
+  ephemeral?: boolean
+  buttons?: PlaygroundButton[]
+  interactionCommandId?: string
+  interactionOptions?: Record<string, PlaygroundInteractionValue>
+}
+export type PlaygroundButton = Pick<
+  BCFDInteractionButton,
+  'customId' | 'label' | 'style' | 'disabled'
+> & {
+  path: string[]
 }
 export type PlaygroundTrace = {
   command: string
@@ -33,9 +48,17 @@ export type PlaygroundTrace = {
 }
 export type PlaygroundRequest = {
   commands: CanonicalBCFDCommand[]
+  interactions?: BCFDInteractionCommand[]
   fixture: PlaygroundFixture
   senderId: string
   message: string
+  interaction?: PlaygroundInteractionInvocation
+}
+export type PlaygroundInteractionValue = string | number | boolean
+export type PlaygroundInteractionInvocation = {
+  commandId: string
+  options: Record<string, PlaygroundInteractionValue>
+  buttonPath?: string[]
 }
 export type PlaygroundResult = {
   fixture: PlaygroundFixture
@@ -44,6 +67,8 @@ export type PlaygroundResult = {
   stateBefore: Record<string, unknown>
   stateAfter: Record<string, unknown>
 }
+
+export type PlaygroundInteractionOption = BCFDSlashCommandOption
 export function createPlaygroundFixture(): PlaygroundFixture {
   return {
     guildId: '100000000000000001',

@@ -5,6 +5,7 @@ import { NodeType, type ASTNode, type ConditionNode } from '../main/services/bcf
 import { hasEmbedContent, type CommandEmbed } from './commandCapabilities'
 import type { CanonicalBCFDCommand } from './commandCodec'
 import type { PlaygroundRequest, PlaygroundResult, PlaygroundTrace } from './playground'
+import { runPlaygroundInteractionSimulation } from './playgroundInteractionEngine'
 
 const supported = new Set([
   'name',
@@ -54,6 +55,7 @@ export function runPlaygroundSimulation(input: PlaygroundRequest): PlaygroundRes
   if (input.commands.length > 100) throw new Error('Choose at most 100 commands for a run')
   if (input.message.length > 4_000)
     throw new Error('Sample messages are limited to 4,000 characters')
+  if (input.interaction) return runPlaygroundInteractionSimulation(input)
   const request: PlaygroundRequest = JSON.parse(JSON.stringify(input))
   const { fixture, message } = request
   const sender = fixture.members.find((member) => member.id === request.senderId)

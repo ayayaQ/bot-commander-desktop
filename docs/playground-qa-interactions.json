@@ -1,0 +1,130 @@
+[
+  {
+    "id": "playground-qa-greet",
+    "commandName": "greet",
+    "commandDescription": "Exercise slash options and nested buttons",
+    "options": [{ "name": "name", "description": "Who to greet", "type": 3, "required": true }],
+    "rootAction": {
+      "sendChannelMessage": true,
+      "channelMessage": "Hello $option(name) from $namePlain",
+      "sendPrivateMessage": false,
+      "privateMessage": "",
+      "sendChannelEmbed": false,
+      "channelEmbed": {
+        "title": "",
+        "description": "",
+        "hexColor": "",
+        "imageURL": "",
+        "thumbnailURL": "",
+        "footer": ""
+      },
+      "sendPrivateEmbed": false,
+      "privateEmbed": {
+        "title": "",
+        "description": "",
+        "hexColor": "",
+        "imageURL": "",
+        "thumbnailURL": "",
+        "footer": ""
+      },
+      "isRoleAssigner": false,
+      "roleToAssign": "",
+      "isKick": false,
+      "isBan": false,
+      "isVoiceMute": false,
+      "targetUserOptionName": "",
+      "deleteX": false,
+      "deleteNum": 0,
+      "ephemeral": false,
+      "deferReply": false,
+      "buttons": [
+        {
+          "customId": "playground-qa-more",
+          "label": "More for $namePlain",
+          "style": 1,
+          "disabled": false,
+          "action": {
+            "sendChannelMessage": true,
+            "channelMessage": "Nested response for $namePlain",
+            "sendPrivateMessage": false,
+            "privateMessage": "",
+            "sendChannelEmbed": false,
+            "channelEmbed": {
+              "title": "",
+              "description": "",
+              "hexColor": "",
+              "imageURL": "",
+              "thumbnailURL": "",
+              "footer": ""
+            },
+            "sendPrivateEmbed": false,
+            "privateEmbed": {
+              "title": "",
+              "description": "",
+              "hexColor": "",
+              "imageURL": "",
+              "thumbnailURL": "",
+              "footer": ""
+            },
+            "isRoleAssigner": false,
+            "roleToAssign": "",
+            "isKick": false,
+            "isBan": false,
+            "isVoiceMute": false,
+            "targetUserOptionName": "",
+            "deleteX": false,
+            "deleteNum": 0,
+            "ephemeral": true,
+            "deferReply": false,
+            "buttons": []
+          }
+        }
+      ]
+    },
+    "isRegistered": false
+  },
+  {
+    "id": "playground-qa-moderate",
+    "commandName": "moderate",
+    "commandDescription": "Exercise fake slash moderation",
+    "options": [
+      { "name": "target", "description": "Fake member to mute", "type": 6, "required": true }
+    ],
+    "rootAction": {
+      "sendChannelMessage": true,
+      "channelMessage": "Muted raw ID $option(target)",
+      "sendPrivateMessage": false,
+      "privateMessage": "",
+      "sendChannelEmbed": false,
+      "channelEmbed": {
+        "title": "",
+        "description": "",
+        "hexColor": "",
+        "imageURL": "",
+        "thumbnailURL": "",
+        "footer": ""
+      },
+      "sendPrivateEmbed": false,
+      "privateEmbed": {
+        "title": "",
+        "description": "",
+        "hexColor": "",
+        "imageURL": "",
+        "thumbnailURL": "",
+        "footer": ""
+      },
+      "isRoleAssigner": false,
+      "roleToAssign": "",
+      "isKick": false,
+      "isBan": false,
+      "isVoiceMute": true,
+      "targetUserOptionName": "target",
+      "deleteX": false,
+      "deleteNum": 0,
+      "ephemeral": false,
+      "deferReply": false,
+      "buttons": []
+    },
+    "isRegistered": false
+  }
+]

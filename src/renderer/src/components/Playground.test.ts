@@ -41,6 +41,8 @@ function createHarness(run: (request: PlaygroundRequest) => Promise<PlaygroundRe
         privateEmbed: null
       }).command
     ],
+    selectedInteraction: undefined,
+    interactionOptions: {},
     composer: { focus: vi.fn() },
     createPlaygroundFixture,
     $state: { snapshot: (value: unknown) => structuredClone(value) },
@@ -96,13 +98,17 @@ describe('playground UI safety and interrupted flows', () => {
 
   it('uses only the read-only commands IPC and no live service imports or remote media tags', () => {
     const calls = [...source.matchAll(/ipcRenderer\.(\w+)\(\s*['"]([^'"]+)['"]/g)]
-    expect(calls.map((match) => [match[1], match[2]])).toEqual([['invoke', 'get-commands']])
+    expect(calls.map((match) => [match[1], match[2]])).toEqual([
+      ['invoke', 'get-commands'],
+      ['invoke', 'get-interactions']
+    ])
     const imports = ast.instance.content.body.filter((node) => node.type === 'ImportDeclaration')
     expect(imports.map((node) => node.source.value)).toEqual([
       'svelte',
       '../../../shared/commandCodec',
       '../../../shared/playground',
-      '../playground/client'
+      '../playground/client',
+      '../types/types'
     ])
     expect(source).not.toMatch(/<(img|video|audio|iframe|object|embed)\b/i)
     expect(source).not.toContain('{@html')
@@ -114,6 +120,12 @@ describe('playground UI safety and interrupted flows', () => {
     expect(beforeDetails).toContain('Simulation only. No real Discord effects.')
     expect(beforeDetails).toContain(
       'Limited offline subset: scripts, AI, botState writes, cooldowns, and message deletion'
+    )
+  })
+
+  it('keeps the selector usable when only slash commands are loaded', () => {
+    expect(source).toContain(
+      'disabled={busy || loading || (!commands.length && !interactions.length)}'
     )
   })
 
