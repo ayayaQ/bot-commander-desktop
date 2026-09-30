@@ -2,12 +2,11 @@ import fs from 'fs/promises'
 import { app } from 'electron'
 import { join } from 'path'
 import { rendererConsole } from './rendererConsole'
-import {
-  createQuickJSScriptContext,
-  type ScriptContext
-} from './quickJsScriptContext'
+import { createQuickJSScriptContext, type ScriptContext } from './quickJsScriptContext'
+import { atomicWriteFile, atomicWriteJsonText, readJsonWithBackup } from './atomicFile'
 
 let botStateContext: ScriptContext
+let botStateSaveQueue = Promise.resolve()
 const STARTUP_JS_FILENAME = 'startup.js'
 
 function debug(msg: unknown, level: 'info' | 'error' | 'warning' | 'success' = 'info') {
@@ -23,7 +22,9 @@ function debug(msg: unknown, level: 'info' | 'error' | 'warning' | 'success' = '
   }
 }
 
-async function createScriptContext(initialContext: Record<string, unknown>): Promise<ScriptContext> {
+async function createScriptContext(
+  initialContext: Record<string, unknown>
+): Promise<ScriptContext> {
   return createQuickJSScriptContext({
     initialContext,
     debug
@@ -51,7 +52,7 @@ export async function getStartupJs(): Promise<string> {
 // Set the startup JS (writes string to file)
 export async function setStartupJs(js: string): Promise<void> {
   const path = getStartupJsPath()
-  await fs.writeFile(path, js, 'utf-8')
+  await atomicWriteFile(path, js)
 }
 
 // Run the startup JS in the given context
@@ -71,10 +72,20 @@ export async function runStartupJs(context: ScriptContext) {
 
 // Restart the JS engine: re-create context, run startup JS, load botState
 export async function restartJsEngine() {
-  botStateContext?.dispose()
-  botStateContext = await createScriptContext({ botState: {} })
-  await runStartupJs(botStateContext)
-  await loadBotState()
+  const previousContext = botStateContext
+  await saveBotState(previousContext?.getVariable('botState') ?? {})
+
+  const nextContext = await createScriptContext({ botState: {} })
+  try {
+    await runStartupJs(nextContext)
+    await loadBotState(nextContext, true)
+  } catch (error) {
+    nextContext.dispose()
+    throw error
+  }
+
+  botStateContext = nextContext
+  previousContext?.dispose()
 }
 
 export async function initializeBotState() {
@@ -83,30 +94,36 @@ export async function initializeBotState() {
   await loadBotState()
 }
 
-export async function loadBotState() {
+export async function loadBotState(context = botStateContext, failOnError = false) {
   const botStatePath = join(app.getPath('userData'), 'botState.json')
   try {
-    const data = await fs.readFile(botStatePath, 'utf-8')
-    const loadedState = JSON.parse(data)
-    botStateContext.setVariable('botState', loadedState)
+    const loaded = await readJsonWithBackup<Record<string, unknown>>(botStatePath)
+    context.setVariable('botState', loaded.value)
+    if (loaded.recoveredFromBackup) {
+      rendererConsole.warning(
+        'Recovered bot state from backup after the primary state file could not be read'
+      )
+    }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       // File doesn't exist, use default empty object
-      botStateContext.setVariable('botState', {})
+      context.setVariable('botState', {})
     } else {
       console.error('Error loading bot state:', error)
+      if (failOnError) throw error
+      context.setVariable('botState', {})
     }
   }
 }
 
-export async function saveBotState() {
+export function saveBotState(
+  state: unknown = botStateContext.getVariable('botState') ?? {}
+): Promise<void> {
   const botStatePath = join(app.getPath('userData'), 'botState.json')
-  try {
-    const state = JSON.stringify(botStateContext.getVariable('botState') ?? {})
-    await fs.writeFile(botStatePath, state)
-  } catch (error) {
-    console.error('Error saving bot state:', error)
-  }
+  const serializedState = JSON.stringify(state, null, 2)
+  const save = botStateSaveQueue.then(() => atomicWriteJsonText(botStatePath, serializedState))
+  botStateSaveQueue = save.catch(() => undefined)
+  return save
 }
 
 export function getBotStateContext() {

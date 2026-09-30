@@ -16,6 +16,8 @@ import { getContext } from './botService'
 import { getSettings } from './settingsService'
 import { interpret, BCFDContext as InterpreterContext } from './bcfdLang'
 import { rendererConsole } from '../utils/rendererConsole'
+import { saveBotState } from '../utils/virtual'
+import { emitResourceChanged, withResourceMutationLock } from './resourceChangeService'
 
 export type StringInfoContext = {
   message: string
@@ -52,45 +54,65 @@ export function contextForMessageEvent(
 }
 
 export async function stringInfoAdd(ctx: StringInfoContext): Promise<string> {
-  const cmdSource = ctx.command || ctx.interactionCommand
-  const interpreterCtx: InterpreterContext = {
-    user: ctx.user,
-    member: ctx.member,
-    client: ctx.client,
-    guild: ctx.guild,
-    textChannel: ctx.textChannel,
-    mentionedUser: ctx.mentionedUser,
-    mentionedMember: ctx.mentionedMember,
-    messageEvent: ctx.messageEvent,
-    command: ctx.command,
-    interactionCommand: ctx.interactionCommand,
-    interactionOptions: ctx.interactionOptions,
-    vmContext: getContext(),
-    wrapEvalInIIFE: !getSettings().useLegacyInterpreter,
-    commandId: cmdSource?.id,
-    cooldown: cmdSource?.cooldown,
-    cooldownType: cmdSource?.cooldownType,
-    userId: ctx.user?.id,
-    guildId: ctx.guild?.id
-  }
-
-  const result = await interpret(ctx.message, interpreterCtx)
-
-  if (result.errors.length > 0) {
-    console.warn('BCFD Interpreter errors:', result.errors)
-    for (const error of result.errors) {
-      const location =
-        error.lineNumber != null
-          ? ` (JS line ${error.lineNumber}${
-              error.columnNumber != null ? `, column ${error.columnNumber}` : ''
-            })`
-          : ''
-      const context = error.sourceContext ? `\nNear:\n${error.sourceContext}` : ''
-      rendererConsole.error(`Interpreter: ${error.message}${location}${context}`)
+  return withResourceMutationLock('bot-state', async () => {
+    const cmdSource = ctx.command || ctx.interactionCommand
+    const vmContext = getContext()
+    const stateBefore = vmContext.getVariable('botState') ?? {}
+    const serializedStateBefore = JSON.stringify(stateBefore)
+    const interpreterCtx: InterpreterContext = {
+      user: ctx.user,
+      member: ctx.member,
+      client: ctx.client,
+      guild: ctx.guild,
+      textChannel: ctx.textChannel,
+      mentionedUser: ctx.mentionedUser,
+      mentionedMember: ctx.mentionedMember,
+      messageEvent: ctx.messageEvent,
+      command: ctx.command,
+      interactionCommand: ctx.interactionCommand,
+      interactionOptions: ctx.interactionOptions,
+      vmContext,
+      wrapEvalInIIFE: !getSettings().useLegacyInterpreter,
+      commandId: cmdSource?.id,
+      cooldown: cmdSource?.cooldown,
+      cooldownType: cmdSource?.cooldownType,
+      userId: ctx.user?.id,
+      guildId: ctx.guild?.id
     }
-  }
 
-  return result.output
+    const result = await interpret(ctx.message, interpreterCtx)
+
+    if (result.errors.length > 0) {
+      console.warn('BCFD Interpreter errors:', result.errors)
+      for (const error of result.errors) {
+        const location =
+          error.lineNumber != null
+            ? ` (JS line ${error.lineNumber}${
+                error.columnNumber != null ? `, column ${error.columnNumber}` : ''
+              })`
+            : ''
+        const context = error.sourceContext ? `\nNear:\n${error.sourceContext}` : ''
+        rendererConsole.error(`Interpreter: ${error.message}${location}${context}`)
+      }
+    }
+
+    const stateAfter = vmContext.getVariable('botState') ?? {}
+    if (JSON.stringify(stateAfter) !== serializedStateBefore) {
+      try {
+        await saveBotState(stateAfter)
+      } catch (error) {
+        vmContext.setVariable('botState', stateBefore)
+        const message = error instanceof Error ? error.message : String(error)
+        rendererConsole.error(
+          `Could not save bot state; runtime changes were rolled back: ${message}`
+        )
+        throw error
+      }
+      emitResourceChanged('bot-state', 'system', stateAfter)
+    }
+
+    return result.output
+  })
 }
 
 export function contextForReactionEvent(

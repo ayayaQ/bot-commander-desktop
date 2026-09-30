@@ -3,7 +3,9 @@
   import {
     getSelectedModelForProvider,
     loadSettings,
+    retrySaveSettings,
     saveSettings,
+    settingsSaveError,
     settingsStore,
     withSelectedModelForProvider
   } from '../stores/settings'
@@ -186,6 +188,12 @@
 </HeaderBar>
 
 <div class="p-4">
+  {#if $settingsSaveError}
+    <div class="alert alert-error mb-4" role="alert">
+      <span>Settings were not saved. {$settingsSaveError}</span>
+      <button class="btn btn-sm" onclick={retrySaveSettings}>Retry save</button>
+    </div>
+  {/if}
   <h2 class="text-2xl font-bold mb-4">{$t('account')}</h2>
   <ApiAuth />
 

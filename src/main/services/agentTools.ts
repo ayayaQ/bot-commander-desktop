@@ -7,10 +7,10 @@ import type {
 } from '../../shared/agentTypes'
 import { lintBCFD } from '../../shared/bcfdLint'
 import { decodeBCFDCommand } from '../../shared/commandCodec'
-import { getCommands, setCommands } from './botService'
-import { getInteractions, setInteractions } from './interactionService'
-import { getSettings, setSettings } from './settingsService'
-import { saveCommands, saveInteractions, saveSettings } from './fileService'
+import { getCommands } from './botService'
+import { getInteractions } from './interactionService'
+import { getSettings } from './settingsService'
+import { persistCommands, persistInteractions, persistSettings } from './fileService'
 import {
   readDocumentation,
   searchDocumentation,
@@ -632,35 +632,42 @@ async function commitMutationUnlocked(prepared: PreparedMutation): Promise<unkno
   const args = prepared.arguments as Record<string, any>
   if (prepared.name === 'create_command') {
     const current = getCommands()
-    setCommands({ ...current, bcfdCommands: [...current.bcfdCommands, prepared.after as BCFDCommand] })
-    await saveCommands()
+    await persistCommands({
+      ...current,
+      bcfdCommands: [...current.bcfdCommands, prepared.after as BCFDCommand]
+    })
   } else if (prepared.name === 'edit_command') {
     const current = getCommands()
     const existing = current.bcfdCommands.find((item) => item.id === args.id)
     requireRevision(existing, args.expectedRevision)
-    setCommands({ ...current, bcfdCommands: current.bcfdCommands.map((item) => item.id === args.id ? prepared.after as BCFDCommand : item) })
-    await saveCommands()
+    await persistCommands({
+      ...current,
+      bcfdCommands: current.bcfdCommands.map((item) =>
+        item.id === args.id ? (prepared.after as BCFDCommand) : item
+      )
+    })
   } else if (prepared.name === 'create_interaction') {
-    setInteractions([...getInteractions(), prepared.after as BCFDInteractionCommand])
-    await saveInteractions()
+    await persistInteractions([...getInteractions(), prepared.after as BCFDInteractionCommand])
   } else if (prepared.name === 'edit_interaction') {
     const existing = getInteractions().find((item) => item.id === args.id)
     requireRevision(existing, args.expectedRevision)
-    setInteractions(getInteractions().map((item) => item.id === args.id ? prepared.after as BCFDInteractionCommand : item))
-    await saveInteractions()
+    await persistInteractions(
+      getInteractions().map((item) =>
+        item.id === args.id ? (prepared.after as BCFDInteractionCommand) : item
+      )
+    )
   } else if (prepared.name === 'edit_bot_state') {
     const existing = getBotStateContext().getVariable('botState') ?? {}
     requireRevision(existing, args.expectedRevision)
+    await saveBotState(prepared.after)
     getBotStateContext().setVariable('botState', prepared.after)
-    await saveBotState()
   } else if (prepared.name === 'edit_startup_js') {
     requireRevision(await getStartupJs(), args.expectedRevision)
     await setStartupJs(prepared.after as string)
     await restartJsEngine()
   } else if (prepared.name === 'edit_developer_prompt') {
     requireRevision(getSettings().developerPrompt || '', args.expectedRevision)
-    setSettings({ ...getSettings(), developerPrompt: prepared.after as string })
-    await saveSettings()
+    await persistSettings({ ...getSettings(), developerPrompt: prepared.after as string })
   } else if (prepared.name === 'create_memory') {
     await commitMemoryMutation({
       kind: 'create',

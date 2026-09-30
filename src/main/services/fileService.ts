@@ -1,6 +1,5 @@
 import { app, safeStorage } from 'electron'
 import { join } from 'path'
-import fs from 'fs/promises'
 import crypto from 'crypto'
 import {
   AppSettings,
@@ -16,6 +15,7 @@ import { getSettings, setSettings } from './settingsService'
 import { getBotStatus, setBotStatus } from './statusService'
 import { getInteractions, setInteractions } from './interactionService'
 import { decodeBCFDCommand } from '../../shared/commandCodec'
+import { atomicWriteJson, atomicWriteJsonText, readJsonWithBackup } from '../utils/atomicFile'
 
 const ENCRYPTED_SECRET_PREFIX = 'bcfd-encrypted:v1:'
 
@@ -67,9 +67,18 @@ function parseSettings(settings: AppSettings): AppSettings {
 export async function loadCommands(): Promise<void> {
   const commandsPath = join(app.getPath('userData'), 'commands.json')
   try {
-    const data = await fs.readFile(commandsPath, 'utf-8')
-    let commands: { bcfdCommands: BCFDCommand[]; bcfdSlashCommands: BCFDSlashCommand[] } =
-      JSON.parse(data)
+    const loaded = await readJsonWithBackup<{
+      bcfdCommands: BCFDCommand[]
+      bcfdSlashCommands?: BCFDSlashCommand[]
+    }>(commandsPath)
+    const commands = {
+      bcfdCommands: loaded.value.bcfdCommands ?? [],
+      bcfdSlashCommands: loaded.value.bcfdSlashCommands ?? []
+    }
+
+    if (loaded.recoveredFromBackup) {
+      console.warn('Recovered commands from backup after the primary file could not be read')
+    }
 
     // Normalize legacy command shapes into the canonical payload-derived model.
     let needsSave = false
@@ -83,81 +92,105 @@ export async function loadCommands(): Promise<void> {
 
     // Save if we migrated any commands
     if (needsSave) {
-      await saveCommands()
+      await saveCommands(commands)
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       // File doesn't exist, create it with empty commands
-      await fs.writeFile(commandsPath, JSON.stringify({ bcfdCommands: [] }))
+      await atomicWriteJson(commandsPath, { bcfdCommands: [], bcfdSlashCommands: [] })
     } else {
       console.error('Error loading commands:', error)
     }
   }
 }
 
-export async function saveCommands(): Promise<void> {
+export async function saveCommands(commands = getCommands()): Promise<void> {
   const commandsPath = join(app.getPath('userData'), 'commands.json')
-  try {
-    await fs.writeFile(commandsPath, JSON.stringify(getCommands(), null, 2))
-  } catch (error) {
-    console.error('Error saving commands:', error)
-  }
+  await atomicWriteJson(commandsPath, commands)
 }
 
-export async function saveSettings(): Promise<void> {
+export async function persistCommands(commands: {
+  bcfdCommands: BCFDCommand[]
+  bcfdSlashCommands: BCFDSlashCommand[]
+}): Promise<void> {
+  await saveCommands(commands)
+  setCommands(commands)
+}
+
+export async function saveSettings(settings = getSettings(), backup = true): Promise<void> {
   const settingsPath = join(app.getPath('userData'), 'settings.json')
+  await atomicWriteJsonText(settingsPath, serializeSettings(settings), { backup })
+}
+
+export async function persistSettings(settings: AppSettings): Promise<AppSettings> {
+  const previous = getSettings()
+  setSettings(settings)
+  const normalized = getSettings()
   try {
-    await fs.writeFile(settingsPath, serializeSettings(getSettings()))
+    await saveSettings(normalized)
+    return normalized
   } catch (error) {
-    console.error('Error saving settings:', error)
+    setSettings(previous)
+    throw error
   }
 }
 
 export async function loadBotStatus(): Promise<void> {
   const botStatusPath = join(app.getPath('userData'), 'botStatus.json')
   try {
-    const data = await fs.readFile(botStatusPath, 'utf-8')
-    let botStatus = JSON.parse(data) as BotStatus
-    setBotStatus(botStatus)
+    const loaded = await readJsonWithBackup<BotStatus>(botStatusPath)
+    setBotStatus(loaded.value)
+    if (loaded.recoveredFromBackup) {
+      console.warn('Recovered bot status from backup after the primary file could not be read')
+    }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       // File doesn't exist, create it with default bot status
-      await fs.writeFile(botStatusPath, JSON.stringify(getBotStatus(), null, 2))
+      await atomicWriteJson(botStatusPath, getBotStatus())
     } else {
       console.error('Error loading bot status:', error)
     }
   }
 }
 
-export async function saveBotStatus(): Promise<void> {
+export async function saveBotStatus(status = getBotStatus()): Promise<void> {
   const botStatusPath = join(app.getPath('userData'), 'botStatus.json')
-  try {
-    await fs.writeFile(botStatusPath, JSON.stringify(getBotStatus(), null, 2))
-  } catch (error) {
-    console.error('Error saving bot status:', error)
-  }
+  await atomicWriteJson(botStatusPath, status)
+}
+
+export async function persistBotStatus(status: BotStatus): Promise<void> {
+  await saveBotStatus(status)
+  setBotStatus(status)
 }
 
 export async function loadSettings(): Promise<void> {
   const settingsPath = join(app.getPath('userData'), 'settings.json')
   try {
-    const data = await fs.readFile(settingsPath, 'utf-8')
-    const storedSettings = JSON.parse(data) as AppSettings
+    const loaded = await readJsonWithBackup<AppSettings>(settingsPath)
+    const storedSettings = loaded.value
     const settings = parseSettings(storedSettings)
     setSettings(settings)
+
+    if (loaded.recoveredFromBackup) {
+      console.warn('Recovered settings from backup after the primary file could not be read')
+    }
 
     // Upgrade previously plaintext API keys as soon as they are read successfully.
     if (
       [storedSettings.openaiApiKey, storedSettings.openrouterApiKey].some(
-        (secret) => typeof secret === 'string' && secret.length > 0 && !secret.startsWith(ENCRYPTED_SECRET_PREFIX)
+        (secret) =>
+          typeof secret === 'string' &&
+          secret.length > 0 &&
+          !secret.startsWith(ENCRYPTED_SECRET_PREFIX)
       )
     ) {
-      await fs.writeFile(settingsPath, serializeSettings(settings))
+      // Do not retain a plaintext credential copy in the recovery backup.
+      await saveSettings(settings, false)
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       // File doesn't exist, create it with default settings
-      await fs.writeFile(settingsPath, JSON.stringify(getSettings(), null, 2))
+      await saveSettings()
     } else {
       console.error('Error loading settings:', error)
     }
@@ -167,34 +200,39 @@ export async function loadSettings(): Promise<void> {
 export async function loadInteractions(): Promise<void> {
   const interactionsPath = join(app.getPath('userData'), 'interactions.json')
   try {
-    const data = await fs.readFile(interactionsPath, 'utf-8')
-    const interactions = JSON.parse(data) as BCFDInteractionCommand[]
-    setInteractions(interactions)
+    const loaded = await readJsonWithBackup<BCFDInteractionCommand[]>(interactionsPath)
+    setInteractions(loaded.value)
+    if (loaded.recoveredFromBackup) {
+      console.warn('Recovered interactions from backup after the primary file could not be read')
+    }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       // File doesn't exist, create it with empty array
-      await fs.writeFile(interactionsPath, JSON.stringify([]))
+      await atomicWriteJson(interactionsPath, [])
     } else {
       console.error('Error loading interactions:', error)
     }
   }
 }
 
-export async function saveInteractions(): Promise<void> {
+export async function saveInteractions(interactions = getInteractions()): Promise<void> {
   const interactionsPath = join(app.getPath('userData'), 'interactions.json')
-  try {
-    await fs.writeFile(interactionsPath, JSON.stringify(getInteractions(), null, 2))
-  } catch (error) {
-    console.error('Error saving interactions:', error)
-    throw error
-  }
+  await atomicWriteJson(interactionsPath, interactions)
+}
+
+export async function persistInteractions(interactions: BCFDInteractionCommand[]): Promise<void> {
+  await saveInteractions(interactions)
+  setInteractions(interactions)
 }
 
 export async function getWebhookPresets(): Promise<WebhookPreset[]> {
   const presetsPath = join(app.getPath('userData'), 'webhook_presets.json')
   try {
-    const data = await fs.readFile(presetsPath, 'utf-8')
-    return JSON.parse(data)
+    const loaded = await readJsonWithBackup<WebhookPreset[]>(presetsPath)
+    if (loaded.recoveredFromBackup) {
+      console.warn('Recovered webhook presets from backup after the primary file could not be read')
+    }
+    return loaded.value
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return []
@@ -206,18 +244,19 @@ export async function getWebhookPresets(): Promise<WebhookPreset[]> {
 
 export async function saveWebhookPresets(presets: WebhookPreset[]): Promise<void> {
   const presetsPath = join(app.getPath('userData'), 'webhook_presets.json')
-  try {
-    await fs.writeFile(presetsPath, JSON.stringify(presets, null, 2))
-  } catch (error) {
-    console.error('Error saving webhook presets:', error)
-  }
+  await atomicWriteJson(presetsPath, presets)
 }
 
 export async function getOnboarding(): Promise<OnboardingState> {
   const onboardingPath = join(app.getPath('userData'), 'onboarding.json')
   try {
-    const data = await fs.readFile(onboardingPath, 'utf-8')
-    return JSON.parse(data) as OnboardingState
+    const loaded = await readJsonWithBackup<OnboardingState>(onboardingPath)
+    if (loaded.recoveredFromBackup) {
+      console.warn(
+        'Recovered onboarding state from backup after the primary file could not be read'
+      )
+    }
+    return loaded.value
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return { stepperDismissed: false, botHostedOnce: false, dismissedTips: [] }
@@ -229,9 +268,5 @@ export async function getOnboarding(): Promise<OnboardingState> {
 
 export async function saveOnboarding(state: OnboardingState): Promise<void> {
   const onboardingPath = join(app.getPath('userData'), 'onboarding.json')
-  try {
-    await fs.writeFile(onboardingPath, JSON.stringify(state, null, 2))
-  } catch (error) {
-    console.error('Error saving onboarding:', error)
-  }
+  await atomicWriteJson(onboardingPath, state)
 }

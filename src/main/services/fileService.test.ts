@@ -72,7 +72,12 @@ describe('fileService', () => {
       () => mocks.setCommands.mock.calls.at(-1)?.[0] ?? { bcfdCommands: [], bcfdSlashCommands: [] }
     )
     mocks.getSettings.mockReturnValue({ theme: 'light' })
-    mocks.getBotStatus.mockReturnValue({ status: 'Online', activity: 'None', activityDetails: '', streamUrl: '' })
+    mocks.getBotStatus.mockReturnValue({
+      status: 'Online',
+      activity: 'None',
+      activityDetails: '',
+      streamUrl: ''
+    })
     mocks.getInteractions.mockReturnValue([])
   })
 
@@ -92,13 +97,24 @@ describe('fileService', () => {
     }
   })
 
+  it('propagates command save failures without changing the in-memory commands', async () => {
+    const current = { bcfdCommands: [{ id: 'existing' }], bcfdSlashCommands: [] }
+    const next = { bcfdCommands: [{ id: 'new' }], bcfdSlashCommands: [] }
+    mocks.getCommands.mockReturnValue(current)
+    await fs.mkdir(join(userDataPath, 'commands.json'))
+    const { persistCommands } = await import('./fileService')
+
+    await expect(persistCommands(next as any)).rejects.toThrow()
+    expect(mocks.setCommands).not.toHaveBeenCalled()
+  })
+
   it('creates an empty commands file on first run', async () => {
     const { loadCommands } = await import('./fileService')
 
     await loadCommands()
 
     await expect(fs.readFile(join(userDataPath, 'commands.json'), 'utf-8')).resolves.toBe(
-      '{"bcfdCommands":[]}'
+      '{\n  "bcfdCommands": [],\n  "bcfdSlashCommands": []\n}'
     )
     expect(mocks.setCommands).not.toHaveBeenCalled()
   })
@@ -174,6 +190,17 @@ describe('fileService', () => {
     })
   })
 
+  it('propagates encryption failures and preserves the previous settings file', async () => {
+    const settingsPath = join(userDataPath, 'settings.json')
+    await fs.writeFile(settingsPath, JSON.stringify({ theme: 'light' }))
+    mocks.getSettings.mockReturnValue({ theme: 'dark', openaiApiKey: 'secret' })
+    mocks.isEncryptionAvailable.mockReturnValue(false)
+    const { saveSettings } = await import('./fileService')
+
+    await expect(saveSettings()).rejects.toThrow('Secure credential storage is unavailable')
+    await expect(fs.readFile(settingsPath, 'utf-8')).resolves.toBe('{"theme":"light"}')
+  })
+
   it('migrates plaintext API keys after loading them', async () => {
     await fs.writeFile(
       join(userDataPath, 'settings.json'),
@@ -189,5 +216,43 @@ describe('fileService', () => {
     const stored = await fs.readFile(join(userDataPath, 'settings.json'), 'utf-8')
     expect(stored).not.toContain('old-secret')
     expect(JSON.parse(stored).openaiApiKey).toMatch(/^bcfd-encrypted:v1:/)
+    await expect(fs.stat(`${join(userDataPath, 'settings.json')}.bak`)).rejects.toMatchObject({
+      code: 'ENOENT'
+    })
+  })
+
+  it('recovers commands from the backup when the primary file is corrupt', async () => {
+    const commandsPath = join(userDataPath, 'commands.json')
+    const backup = {
+      bcfdCommands: [
+        {
+          id: 'recovered',
+          command: '!recovered',
+          commandDescription: 'Recovered command',
+          type: 0,
+          channelMessage: '',
+          privateMessage: '',
+          channelEmbed: {},
+          privateEmbed: {}
+        }
+      ],
+      bcfdSlashCommands: []
+    }
+    await fs.writeFile(commandsPath, '{partial')
+    await fs.writeFile(`${commandsPath}.bak`, JSON.stringify(backup))
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { loadCommands } = await import('./fileService')
+
+    try {
+      await loadCommands()
+    } finally {
+      warning.mockRestore()
+    }
+
+    expect(mocks.setCommands).toHaveBeenCalledWith({
+      bcfdCommands: [expect.objectContaining({ id: 'recovered', command: '!recovered' })],
+      bcfdSlashCommands: []
+    })
+    await expect(fs.readFile(commandsPath, 'utf-8')).resolves.toContain('"id":"recovered"')
   })
 })

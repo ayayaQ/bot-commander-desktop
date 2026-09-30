@@ -23,6 +23,9 @@ export const settingsStore = writable<AppSettings>({
   agentNotificationsEnabled: true
 })
 
+export const settingsSaveError = writable<string | null>(null)
+let pendingSettings: AppSettings | null = null
+
 export async function loadSettings() {
   const settings = await window.electron.ipcRenderer.invoke('get-settings')
   settingsStore.set(settings)
@@ -30,8 +33,27 @@ export async function loadSettings() {
 }
 
 export async function saveSettings(newSettings: AppSettings) {
-  const savedSettings = await window.electron.ipcRenderer.invoke('save-settings', newSettings)
-  settingsStore.set(savedSettings || newSettings)
+  pendingSettings = newSettings
+  settingsSaveError.set(null)
+  try {
+    const savedSettings = await window.electron.ipcRenderer.invoke('save-settings', newSettings)
+    settingsStore.set(savedSettings || newSettings)
+    if (pendingSettings === newSettings) {
+      pendingSettings = null
+      settingsSaveError.set(null)
+    }
+    return true
+  } catch (error) {
+    if (pendingSettings === newSettings) {
+      settingsSaveError.set(error instanceof Error ? error.message : 'Settings could not be saved')
+    }
+    return false
+  }
+}
+
+export async function retrySaveSettings(): Promise<boolean> {
+  if (!pendingSettings) return true
+  return saveSettings(pendingSettings)
 }
 
 export function getSelectedModelForProvider(

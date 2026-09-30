@@ -37,7 +37,20 @@ vi.mock('./settingsService', () => ({
 vi.mock('./fileService', () => ({
   saveCommands: mocks.saveCommands,
   saveInteractions: mocks.saveInteractions,
-  saveSettings: mocks.saveSettings
+  saveSettings: mocks.saveSettings,
+  persistCommands: async (value: any) => {
+    await mocks.saveCommands(value)
+    mocks.state.commands = value
+  },
+  persistInteractions: async (value: any[]) => {
+    await mocks.saveInteractions(value)
+    mocks.state.interactions = value
+  },
+  persistSettings: async (value: any) => {
+    await mocks.saveSettings(value)
+    mocks.state.settings = value
+    return value
+  }
 }))
 
 vi.mock('../utils/virtual', () => ({

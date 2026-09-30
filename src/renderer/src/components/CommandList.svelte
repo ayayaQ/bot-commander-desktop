@@ -17,6 +17,7 @@
     type CommandTypeFilter
   } from '../utils/commandListSearch'
   import type { ResourceChangedEvent } from '../../../shared/mcpTypes'
+  import { saveCommandSnapshot } from '../utils/commandPersistence'
 
   const emptyKaomojis = ['(´。＿。｀)', '(╥_╥)', '(｡•́︿•̀｡)', '(っ˘̩╭╮˘̩)っ', '(ᵕ—ᴗ—)']
   const noResultsKaomojis = ['(￣ω￣;)', '(・・;)', '(¬_¬)', '(-_-;)', '(°ロ°)']
@@ -35,6 +36,9 @@
   let commandToShare: BCFDCommand | null = $state(null)
   let commandsRevision = $state('')
   let externalConflict = $state(false)
+  let saveError = $state('')
+  let isSaving = $state(false)
+  let pendingSave: { commands: BCFDCommand[]; onSuccess: () => void } | null = null
 
   onMount(() => {
     const handleResourceChanged = (event: ResourceChangedEvent) => {
@@ -53,14 +57,34 @@
     commands = result.bcfdCommands
     commandsRevision = result.revision || ''
     externalConflict = false
+    saveError = ''
+    pendingSave = null
   }
 
-  async function saveCommands() {
-    const result = await window.electron.ipcRenderer.invoke('save-commands', {
-      bcfdCommands: $state.snapshot(commands),
-      expectedRevision: commandsRevision
-    })
-    commandsRevision = result.revision || commandsRevision
+  async function saveCommands(nextCommands: BCFDCommand[], onSuccess: () => void = () => {}) {
+    if (isSaving) return
+    pendingSave = { commands: $state.snapshot(nextCommands), onSuccess }
+    await retrySave()
+  }
+
+  async function retrySave() {
+    if (!pendingSave || isSaving) return
+    isSaving = true
+    saveError = ''
+    const pending = pendingSave
+    try {
+      const saved = await saveCommandSnapshot(pending.commands, commandsRevision, (payload) =>
+        window.electron.ipcRenderer.invoke('save-commands', payload)
+      )
+      commands = saved.commands
+      commandsRevision = saved.revision
+      pendingSave = null
+      pending.onSuccess()
+    } catch (error) {
+      saveError = error instanceof Error ? error.message : 'The command changes could not be saved'
+    } finally {
+      isSaving = false
+    }
   }
 
   function addCommand() {
@@ -77,25 +101,28 @@
   }
 
   async function handleAdd(event: CustomEvent<BCFDCommand>) {
-    if (externalConflict) return
-    commands = [...commands, event.detail]
-    await saveCommands()
-    isEditing = false
+    if (externalConflict || isSaving) return
+    await saveCommands([...commands, event.detail], () => {
+      isEditing = false
+    })
   }
 
   async function handleUpdate(event: CustomEvent<{ command: BCFDCommand; index: number | null }>) {
-    if (externalConflict) return
+    if (externalConflict || isSaving) return
     const { command: updatedCommand, index } = event.detail
-    commands = commands.map((cmd, i) => (i === index ? updatedCommand : cmd))
-    await saveCommands()
-    isEditing = false
-    editingCommand = null
-    editingIndex = null
+    await saveCommands(
+      commands.map((cmd, i) => (i === index ? updatedCommand : cmd)),
+      () => {
+        isEditing = false
+        editingCommand = null
+        editingIndex = null
+      }
+    )
   }
 
   async function deleteCommand(command: BCFDCommand) {
-    commands = commands.filter((cmd) => cmd !== command)
-    await saveCommands()
+    if (isSaving) return
+    await saveCommands(commands.filter((cmd) => cmd !== command))
   }
 
   async function reloadAfterConflict() {
@@ -116,8 +143,7 @@
   async function importCommands() {
     const result = await window.electron.ipcRenderer.invoke('import-commands')
     if (result.success) {
-      commands = [...commands, ...result.commands]
-      await saveCommands()
+      await saveCommands([...commands, ...result.commands])
     } else if (!result.canceled) {
       alert('Error importing commands: ' + result.error)
     }
@@ -130,9 +156,9 @@
 
   async function handleRepoImport(event: CustomEvent<BCFDCommand>) {
     const importedCommand = event.detail
-    commands = [...commands, importedCommand]
-    await saveCommands()
-    showRepository = false
+    await saveCommands([...commands, importedCommand], () => {
+      showRepository = false
+    })
   }
 
   function resetCommandSearch() {
@@ -148,13 +174,23 @@
 </script>
 
 <TipCard tipId="tip_commands" icon="chat" title={$t('commands')} body={$t('tip-commands-body')} />
+{#if saveError}
+  <div class="alert alert-error m-4" role="alert">
+    <span>Command changes were not saved. {saveError}</span>
+    <button class="btn btn-sm" onclick={retrySave} disabled={isSaving}>
+      {isSaving ? 'Saving…' : 'Retry save'}
+    </button>
+  </div>
+{/if}
 <div class="">
   {#if showRepository}
     <CommandRepository on:import={handleRepoImport} on:close={() => (showRepository = false)} />
   {:else if isEditing}
     {#if externalConflict}
       <div class="alert alert-warning m-4">
-        <span>This command data changed externally. Reload before saving to avoid overwriting it.</span>
+        <span
+          >This command data changed externally. Reload before saving to avoid overwriting it.</span
+        >
         <button class="btn btn-sm" onclick={reloadAfterConflict}>Reload</button>
       </div>
     {/if}

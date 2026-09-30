@@ -118,9 +118,10 @@ export function getClient() {
   return client
 }
 
-export function Connect(event: Electron.IpcMainEvent, token: string) {
+export async function Connect(event: Electron.IpcMainEvent, token: string) {
   if (connection) {
     if (client) {
+      await saveBotState()
       client.destroy()
       client = null
       connection = false
@@ -232,9 +233,9 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
   })
 }
 
-export function Disconnect(event: Electron.IpcMainEvent) {
+export async function Disconnect(event: Electron.IpcMainEvent) {
   if (client) {
-    saveBotState() // Save bot state before disconnecting
+    await saveBotState() // Save bot state before disconnecting
     client.destroy()
     client = null
     connection = false
