@@ -13,7 +13,6 @@ import {
   Guild,
   GuildBan,
   GuildMember,
-  IntentsBitField,
   Interaction,
   Message,
   MessageReaction,
@@ -22,7 +21,6 @@ import {
   PartialDMChannel,
   PartialGuildMember,
   PartialMessageReaction,
-  Partials,
   PartialUser,
   PermissionsBitField,
   PresenceStatusData,
@@ -55,6 +53,7 @@ import {
 import { getStatsInstance, Stats } from '../utils/stats'
 import { getCooldownManager } from './cooldownManager'
 import { rendererConsole } from '../utils/rendererConsole'
+import { createDiscordClientOptions, formatDiscordLoginError } from './discordClientConfig'
 
 let client: Client | null = null
 let connection: boolean = false
@@ -139,17 +138,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
     sameSite: 'strict'
   })
 
-  client = new Client({
-    intents: [
-      IntentsBitField.Flags.Guilds,
-      IntentsBitField.Flags.GuildMembers,
-      IntentsBitField.Flags.GuildMessages,
-      IntentsBitField.Flags.MessageContent,
-      IntentsBitField.Flags.DirectMessages,
-      IntentsBitField.Flags.GuildMessageReactions
-    ],
-    partials: [Partials.Channel, Partials.Message, Partials.Reaction]
-  })
+  client = new Client(createDiscordClientOptions())
 
   client.once(Events.ClientReady, async () => {
     if (client == null) return
@@ -223,7 +212,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
   })
 
   client.login(token).catch((err) => {
-    const message = `Login failed: ${err.message || err}`
+    const message = formatDiscordLoginError(err)
     rendererConsole.error(message)
     client?.destroy()
     client = null

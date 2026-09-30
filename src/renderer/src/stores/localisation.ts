@@ -40,6 +40,14 @@ const publicationTranslations = {
   'sync-unregister-command': 'Remove command from Discord'
 }
 
+// Other locales use English setup guidance until reviewed translations are available.
+const discordSetupTranslations = {
+  'discord-intent-setup':
+    'Before Login, open Discord Developer Portal → your application → Bot → Privileged Gateway Intents. Enable Server Members Intent and Message Content Intent, and obtain approval if required. Both are requested even for slash-only bots. Presence Intent is not needed.',
+  'discord-ban-event-setup':
+    'Ban-event commands also need either Ban Members or View Audit Log permission in the server. GuildModeration is enabled by the app; there is no privileged toggle for it.'
+}
+
 // English translations as the source of truth
 const en = {
   'discard-command-changes': 'Discard unsaved command changes?',
@@ -236,6 +244,7 @@ const en = {
   'add-interaction-hint': 'Add an interaction to get started',
   'sync-all': 'Sync All',
   ...publicationTranslations,
+  ...discordSetupTranslations,
   registered: 'Registered',
   'not-registered': 'Not Registered',
   register: 'Register',
@@ -413,6 +422,7 @@ const translations: Languages = {
   en,
   es: {
     ...publicationTranslations,
+    ...discordSetupTranslations,
     'discard-command-changes': '¿Descartar los cambios sin guardar del comando?',
     'discard-command-changes-help': 'Se perderán tus cambios. El comando guardado seguirá igual.',
     'keep-editing': 'Seguir editando',
@@ -777,6 +787,7 @@ const translations: Languages = {
   },
   ja: {
     ...publicationTranslations,
+    ...discordSetupTranslations,
     'discard-command-changes': 'コマンドの未保存の変更を破棄しますか？',
     'discard-command-changes-help': '変更は失われます。保存済みのコマンドは変更されません。',
     'keep-editing': '編集を続ける',
@@ -1135,6 +1146,7 @@ const translations: Languages = {
   },
   zh: {
     ...publicationTranslations,
+    ...discordSetupTranslations,
     'discard-command-changes': '放弃未保存的命令更改？',
     'discard-command-changes-help': '你的更改将丢失。已保存的命令将保持不变。',
     'keep-editing': '继续编辑',
@@ -1487,6 +1499,7 @@ const translations: Languages = {
   },
   ko: {
     ...publicationTranslations,
+    ...discordSetupTranslations,
     'discard-command-changes': '저장하지 않은 명령어 변경 사항을 버릴까요?',
     'discard-command-changes-help': '변경 사항이 사라집니다. 저장된 명령어는 그대로 유지됩니다.',
     'keep-editing': '계속 편집',
@@ -1842,6 +1855,7 @@ const translations: Languages = {
   },
   ru: {
     ...publicationTranslations,
+    ...discordSetupTranslations,
     'discard-command-changes': 'Отменить несохранённые изменения команды?',
     'discard-command-changes-help':
       'Ваши изменения будут потеряны. Сохранённая команда останется без изменений.',

@@ -31,20 +31,24 @@ Want to try a ready-to-use build? See the [releases](https://github.com/ayayaQ/b
 1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) and click **New Application**.
 2. Give your application a name, then navigate to the **Bot** tab.
 3. Click **Add Bot** (or **Reset Token** if one already exists) and copy your **bot token** — you'll need this in step 3.
-4. Under **Privileged Gateway Intents**, enable **Message Content Intent** (required for reading message content).
+4. Under **Privileged Gateway Intents**, enable both **Server Members Intent** (member join/leave events) and **Message Content Intent** (message-based commands). Bot Commander requests both when connecting, even if you only use slash commands. Obtain Discord approval if required for your application.
+5. Save the changes before logging in. If Discord reports disallowed intents, check both toggles on the application matching your bot token and try **Login** again. **Presence Intent** is not required.
 
 ### 2. Invite the Bot to Your Server
 
 1. In the Developer Portal, go to **OAuth2 → URL Generator**.
 2. Under **Scopes**, check `bot`.
 3. Under **Bot Permissions**, select the permissions your bot needs (at minimum: Send Messages, Read Message History).
-4. Copy the generated URL, open it in your browser, and select the server to add the bot to.
+4. For ban-event commands, the bot also needs either **Ban Members** or **View Audit Log** in that server. The app subscribes to the standard **GuildModeration** Gateway intent; it has no privileged-intent toggle. Server permissions and Gateway intents are separate requirements.
+5. Copy the generated URL, open it in your browser, and select the server to add the bot to.
+
+See Discord’s [Gateway intents](https://docs.discord.com/developers/events/gateway#gateway-intents) and [Guild Ban Add requirements](https://docs.discord.com/developers/events/gateway-events#guild-ban-add) for details.
 
 ### 3. Start the App
 
 1. Launch Bot Commander Desktop.
-2. Paste your bot token into the **Settings** panel.
-3. Click **Start Bot** — your bot is now online.
+2. Paste your bot token into the login panel.
+3. Click **Login** — your bot is now online.
 
 ---
 

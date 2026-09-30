@@ -23,17 +23,11 @@
   let loginError = $state('')
 
   $effect(() => {
-    if (!$connectionStore.error) return undefined
-
     loginError = $connectionStore.error
-    const timeout = setTimeout(() => {
-      loginError = ''
-    }, 5000)
-
-    return () => clearTimeout(timeout)
   })
 
   function handleLogin() {
+    loginError = ''
     connectionStore.ipc.connect(token)
   }
 
@@ -69,9 +63,16 @@
     }
   })
 
+  function openDeveloperPortal() {
+    window.electron.ipcRenderer.invoke(
+      'open-external-url',
+      'https://discord.com/developers/applications'
+    )
+  }
+
   function handleStepperAction() {
     if (currentStep === 'ENTER_TOKEN') {
-      window.electron.ipcRenderer.invoke('open-external-url', 'https://discord.com/developers/applications')
+      openDeveloperPortal()
     } else if (currentStep === 'CREATE_COMMAND') {
       onSelectTab?.('commands')
     }
@@ -89,7 +90,7 @@
   })
 </script>
 
-<div class="flex flex-col items-center justify-center bg-base-200 p-4 h-full">
+<div class="flex flex-col items-center justify-center bg-base-200 p-4 min-h-full">
   <div class="card w-96 bg-base-100 shadow-xl">
     <div class="card-body items-center text-center">
       {#if currentStep !== 'COMPLETE'}
@@ -108,7 +109,9 @@
         </div>
       {:else}
         <div class="avatar placeholder mb-14">
-          <div class="bg-neutral text-neutral-content w-24 rounded-full flex items-center justify-center">
+          <div
+            class="bg-neutral text-neutral-content w-24 rounded-full flex items-center justify-center"
+          >
             <span class="text-3xl select-none">{$t('bot')}</span>
           </div>
         </div>
@@ -117,12 +120,7 @@
       {#if !$connectionStore.connected}
         <div class="w-full">
           {#if $settingsStore.showToken}
-            <input
-              type="text"
-              placeholder={$t('token')}
-              class="input w-full"
-              bind:value={token}
-            />
+            <input type="text" placeholder={$t('token')} class="input w-full" bind:value={token} />
           {:else}
             <input
               type="password"
@@ -132,8 +130,17 @@
             />
           {/if}
           {#if currentStep === 'ENTER_TOKEN'}
-            <p class="text-xs opacity-50 mt-1 ml-1">From Discord Developer Portal &gt; Bot &gt; Token</p>
+            <p class="text-xs opacity-50 mt-1 ml-1">
+              From Discord Developer Portal &gt; Bot &gt; Token
+            </p>
           {/if}
+          <div class="text-xs text-left mt-3 space-y-2">
+            <p>{$t('discord-intent-setup')}</p>
+            <p>{$t('discord-ban-event-setup')}</p>
+            <button class="btn btn-link btn-xs px-0" onclick={openDeveloperPortal}>
+              {$t('onboarding-open-portal')}
+            </button>
+          </div>
         </div>
       {:else}
         <h2 class="card-title">{username}</h2>
@@ -185,7 +192,7 @@
 
 {#if loginError}
   <div class="toast toast-end toast-bottom z-50">
-    <div class="alert alert-error">
+    <div class="alert alert-error max-w-lg" role="alert">
       <span class="material-symbols-outlined">error</span>
       <span>{loginError}</span>
       <button
