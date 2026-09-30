@@ -1,5 +1,6 @@
 <script lang="ts">
   import { initializeInteractionPublication } from './stores/interactionPublication'
+  import Playground from './components/Playground.svelte'
   import CommandList from './components/CommandList.svelte'
   import InteractionList from './components/InteractionList.svelte'
   import Help from './components/Help.svelte'
@@ -13,7 +14,6 @@
   import { onboardingStore } from './stores/onboarding'
   import Stats from './components/Stats.svelte'
   import StateViewer from './components/StateViewer.svelte'
-  import Playground from './components/Playground.svelte'
   import TitleBar from './components/TitleBar.svelte'
   import { bottomNavVisible } from './stores/navigation'
   import { apiAuthStore } from './stores/apiAuth'
@@ -121,10 +121,10 @@
         <Webhooks />
       {:else if selectedMenu === 'stats'}
         <Stats />
-      {:else if selectedMenu === 'playground'}
-        <Playground />
       {:else if selectedMenu === 'debugger'}
         <StateViewer />
+      {:else if selectedMenu === 'playground'}
+        <Playground />
       {:else if selectedMenu === 'agent'}
         <AgentPanel />
       {/if}
@@ -157,15 +157,6 @@
             <span class="material-symbols-outlined">bar_chart</span>
           </button>
           <button
-            class={selectedMenu === 'playground' ? 'dock-active' : ''}
-            onclick={() => (selectedMenu = 'playground')}
-            title="Command playground"
-            aria-label="Command playground"
-            aria-current={selectedMenu === 'playground' ? 'page' : undefined}
-          >
-            <span class="material-symbols-outlined">science</span>
-          </button>
-          <button
             class={selectedMenu === 'debugger' ? 'dock-active' : ''}
             onclick={() => (selectedMenu = 'debugger')}
           >
@@ -195,6 +186,14 @@
               <span class="absolute right-3 top-2 size-2 rounded-full bg-success" aria-hidden="true"
               ></span>
             {/if}
+          </button>
+          <button
+            class={selectedMenu === 'playground' ? 'dock-active' : ''}
+            onclick={() => (selectedMenu = 'playground')}
+            title="Playground"
+            aria-label="Playground"
+          >
+            <span class="material-symbols-outlined">science</span>
           </button>
           <button
             class={selectedMenu === 'help' ? 'dock-active' : ''}
