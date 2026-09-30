@@ -25,7 +25,7 @@ vi.mock('electron', () => ({
   },
   safeStorage: {
     isEncryptionAvailable: mocks.isEncryptionAvailable,
-    getSelectedStorageBackend: vi.fn(() => 'gnome_libsecret'),
+    getSelectedStorageBackend: () => 'kwallet6',
     encryptString: mocks.encryptString,
     decryptString: mocks.decryptString
   }

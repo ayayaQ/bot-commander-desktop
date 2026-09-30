@@ -30,25 +30,29 @@ Want to try a ready-to-use build? See the [releases](https://github.com/ayayaQ/b
 
 1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) and click **New Application**.
 2. Give your application a name, then navigate to the **Bot** tab.
-3. Click **Add Bot** (or **Reset Token** if one already exists) and copy your **bot token** — you'll need this in step 3.
-4. Under **Privileged Gateway Intents**, enable both **Server Members Intent** (member join/leave events) and **Message Content Intent** (message-based commands). Bot Commander requests both when connecting, even if you only use slash commands. Obtain Discord approval if required for your application.
-5. Save the changes before logging in. If Discord reports disallowed intents, check both toggles on the application matching your bot token and try **Login** again. **Presence Intent** is not required.
+3. Newly created applications already have a bot user. Under **Token**, use **Reset Token** if you need to generate a token, then copy your **bot token** for step 3. Keep it private; resetting a token invalidates the previous one.
+4. Under **Privileged Gateway Intents**, enable **Server Members Intent** (for join/leave events) and **Message Content Intent** (for message commands), then save your changes. This app requests both, even if your current commands do not use them. Obtain Discord approval for these intents if required for your application. Presence Intent is not requested by this app.
 
 ### 2. Invite the Bot to Your Server
 
-1. In the Developer Portal, go to **OAuth2 → URL Generator**.
-2. Under **Scopes**, check `bot`.
-3. Under **Bot Permissions**, select the permissions your bot needs (at minimum: Send Messages, Read Message History).
-4. For ban-event commands, the bot also needs either **Ban Members** or **View Audit Log** in that server. The app subscribes to the standard **GuildModeration** Gateway intent; it has no privileged-intent toggle. Server permissions and Gateway intents are separate requirements.
-5. Copy the generated URL, open it in your browser, and select the server to add the bot to.
-
-See Discord’s [Gateway intents](https://docs.discord.com/developers/events/gateway#gateway-intents) and [Guild Ban Add requirements](https://docs.discord.com/developers/events/gateway-events#guild-ban-add) for details.
+1. In the Developer Portal, open **Installation**, enable **Guild Install**, and choose **Discord Provided Link** under **Install Link**.
+2. Under **Default Install Settings → Guild Install**, add the `bot` and `applications.commands` scopes.
+3. Select the permissions your bot needs (for message commands: View Channels, Send Messages, Read Message History). For **Member Ban** triggers, also grant **Ban Members** (`BAN_MEMBERS`) **or** **View Audit Log** (`VIEW_AUDIT_LOG`) in each server. View Audit Log allows receiving ban events without granting the ability to ban members.
+4. Copy the **Install Link**, open it in your browser, and select **Add to server** and the server to add the bot to. Review and approve the installation permissions.
 
 ### 3. Start the App
 
 1. Launch Bot Commander Desktop.
-2. Paste your bot token into the login panel.
-3. Click **Login** — your bot is now online.
+2. Open the **Login** tab and paste your bot token.
+3. Click **Login** and wait for the connection to succeed.
+
+### Gateway intents and troubleshooting
+
+The app requests the standard `GuildModeration` (`GUILD_MODERATION`) intent for Member Ban triggers. It is separate from the privileged Server Members and Message Content intents and has no Developer Portal toggle. Receiving ban events also requires one of the server permissions described above; enabling Server Members Intent alone does not enable ban events.
+
+If Login reports **disallowed intents (4014)** or **Used disallowed intents**, open **Developer Portal → your application → Bot → Privileged Gateway Intents**, enable **Server Members Intent** and **Message Content Intent**, save, and try Login again. If Discord requires approval, obtain it first. A **4013 invalid intents** error is a different problem and is not fixed by enabling privileged intents.
+
+See Discord's official [bot setup guide](https://docs.discord.com/developers/quick-start/getting-started), [Gateway intent reference](https://docs.discord.com/developers/events/gateway#gateway-intents), [Guild Ban Add permissions](https://docs.discord.com/developers/events/gateway-events#guild-ban-add), and [Gateway close codes](https://docs.discord.com/developers/topics/opcodes-and-status-codes#gateway-gateway-close-event-codes).
 
 ---
 

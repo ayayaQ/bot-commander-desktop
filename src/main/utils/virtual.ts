@@ -83,16 +83,18 @@ export async function initializeBotState() {
   await loadBotState()
 }
 
-export async function loadBotState() {
+export async function loadBotState(shouldApply: () => boolean = () => true) {
+  if (!shouldApply()) return
   const botStatePath = join(app.getPath('userData'), 'botState.json')
   try {
     const data = await fs.readFile(botStatePath, 'utf-8')
     const loadedState = JSON.parse(data)
+    if (!shouldApply()) return
     botStateContext.setVariable('botState', loadedState)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       // File doesn't exist, use default empty object
-      botStateContext.setVariable('botState', {})
+      if (shouldApply()) botStateContext.setVariable('botState', {})
     } else {
       console.error('Error loading bot state:', error)
     }

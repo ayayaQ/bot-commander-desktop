@@ -8,6 +8,10 @@
   import { t } from '../stores/localisation'
   import { onboardingStore, getCurrentStep } from '../stores/onboarding'
   import OnboardingStepper from './OnboardingStepper.svelte'
+  import {
+    DISCORD_DEVELOPER_PORTAL_URL,
+    isDiscordIntentSetupError
+  } from '../../../shared/discordSetup'
 
   let {
     onSelectTab
@@ -23,16 +27,28 @@
   let loginError = $state('')
 
   $effect(() => {
-    loginError = $connectionStore.error
+    const error = $connectionStore.error
+    loginError = error
+    // Intent setup takes longer than a toast timeout. Keep the instructions until
+    // dismissed, a new login attempt starts, or the connection succeeds.
+    if (!error || isDiscordIntentSetupError(error)) return undefined
+    const timeout = setTimeout(() => {
+      loginError = ''
+    }, 5000)
+
+    return () => clearTimeout(timeout)
   })
 
   function handleLogin() {
-    loginError = ''
     connectionStore.ipc.connect(token)
   }
 
   function handleLogout() {
     connectionStore.ipc.disconnect()
+  }
+
+  function openDiscordDeveloperPortal() {
+    window.electron.ipcRenderer.invoke('open-external-url', DISCORD_DEVELOPER_PORTAL_URL)
   }
 
   async function generateInvite() {
@@ -63,16 +79,9 @@
     }
   })
 
-  function openDeveloperPortal() {
-    window.electron.ipcRenderer.invoke(
-      'open-external-url',
-      'https://discord.com/developers/applications'
-    )
-  }
-
   function handleStepperAction() {
     if (currentStep === 'ENTER_TOKEN') {
-      openDeveloperPortal()
+      openDiscordDeveloperPortal()
     } else if (currentStep === 'CREATE_COMMAND') {
       onSelectTab?.('commands')
     }
@@ -134,13 +143,6 @@
               From Discord Developer Portal &gt; Bot &gt; Token
             </p>
           {/if}
-          <div class="text-xs text-left mt-3 space-y-2">
-            <p>{$t('discord-intent-setup')}</p>
-            <p>{$t('discord-ban-event-setup')}</p>
-            <button class="btn btn-link btn-xs px-0" onclick={openDeveloperPortal}>
-              {$t('onboarding-open-portal')}
-            </button>
-          </div>
         </div>
       {:else}
         <h2 class="card-title">{username}</h2>
@@ -158,6 +160,14 @@
         />
       {/if}
       {#if !$connectionStore.connected}
+        <div class="rounded-lg bg-base-200 p-3 text-left text-sm w-full">
+          <p class="font-semibold">{$t('discord-bot-setup')}</p>
+          <p class="mt-1">{$t('discord-privileged-intents-setup')}</p>
+          <p class="mt-2">{$t('discord-ban-events-setup')}</p>
+          <button class="btn btn-link btn-sm px-0" onclick={openDiscordDeveloperPortal}>
+            {$t('onboarding-open-portal')}
+          </button>
+        </div>
         <button
           class="btn btn-primary w-full"
           onclick={handleLogin}
@@ -191,7 +201,7 @@
 </div>
 
 {#if loginError}
-  <div class="toast toast-end toast-bottom z-50">
+  <div class="toast toast-end toast-bottom z-50 max-w-full">
     <div class="alert alert-error max-w-lg" role="alert">
       <span class="material-symbols-outlined">error</span>
       <span>{loginError}</span>

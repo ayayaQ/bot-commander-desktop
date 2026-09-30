@@ -53,9 +53,14 @@ import {
 import { getStatsInstance, Stats } from '../utils/stats'
 import { getCooldownManager } from './cooldownManager'
 import { rendererConsole } from '../utils/rendererConsole'
-import { createDiscordClientOptions, formatDiscordLoginError } from './discordClientConfig'
+import {
+  DiscordLoginLifetime,
+  formatDiscordLoginError,
+  getDiscordClientOptions
+} from './discordGateway'
 
 let client: Client | null = null
+const loginLifetimes = new WeakMap<Client, DiscordLoginLifetime>()
 let connection: boolean = false
 let commands: { bcfdCommands: BCFDCommand[]; bcfdSlashCommands: BCFDSlashCommand[] } = {
   bcfdCommands: [],
@@ -117,10 +122,14 @@ export function getClient() {
   return client
 }
 
+function disposeDiscordClient(target: Client): void {
+  loginLifetimes.get(target)?.cancel()
+}
+
 export function Connect(event: Electron.IpcMainEvent, token: string) {
   if (connection) {
     if (client) {
-      client.destroy()
+      disposeDiscordClient(client)
       client = null
       connection = false
     }
@@ -138,14 +147,23 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
     sameSite: 'strict'
   })
 
-  client = new Client(createDiscordClientOptions())
+  if (client) disposeDiscordClient(client)
+  const connectingClient = new Client(getDiscordClientOptions())
+  const lifetime = new DiscordLoginLifetime(connectingClient, (error) => {
+    rendererConsole.error(`Failed to disconnect from Discord: ${String(error)}`)
+  })
+  loginLifetimes.set(connectingClient, lifetime)
+  client = connectingClient
+  const ownsConnection = () => client === connectingClient
+  const acceptsEvents = () => ownsConnection() && connection
 
   client.once(Events.ClientReady, async () => {
-    if (client == null) return
+    if (client !== connectingClient) return
 
     if (client.user == null) return
 
-    await loadBotState() // Load bot state when client is ready
+    await loadBotState(ownsConnection) // Only the current attempt may restore shared state.
+    if (client !== connectingClient) return
     // Use our bot status to set the presence of the bot
     applyBotStatus(getBotStatus())
 
@@ -168,6 +186,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
   })
 
   client.on(Events.MessageCreate, (message) => {
+    if (!acceptsEvents()) return
     stats.incrementMessagesReceived()
     if (!message.author.bot) {
       rendererConsole.event(`Message received`)
@@ -177,6 +196,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
 
   // when a user joins a guild
   client.on(Events.GuildMemberAdd, (member) => {
+    if (!acceptsEvents()) return
     stats.incrementJoinEventsReceived()
     rendererConsole.event(`User joined a guild`)
     onGuildMemberAdd(member)
@@ -184,6 +204,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
 
   // when a user leaves a guild
   client.on(Events.GuildMemberRemove, (member) => {
+    if (!acceptsEvents()) return
     stats.incrementLeaveEventsReceived()
     rendererConsole.event(`User left a guild`)
     onGuildMemberRemove(member)
@@ -191,6 +212,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
 
   // when a user is banned from a guild
   client.on(Events.GuildBanAdd, (ban) => {
+    if (!acceptsEvents()) return
     stats.incrementBanEventsReceived()
     rendererConsole.warning(`User was banned from a guild`)
     onGuildBanAdd(ban)
@@ -198,6 +220,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
 
   // when a reaction is added to a message
   client.on(Events.MessageReactionAdd, (reaction, user) => {
+    if (!acceptsEvents()) return
     if (!user.bot) {
       rendererConsole.event(`User reacted with ${reaction.emoji.name}`)
     }
@@ -205,16 +228,19 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
   })
 
   client.on(Events.InteractionCreate, (interaction) => {
+    if (!acceptsEvents()) return
     if (interaction.isChatInputCommand()) {
       rendererConsole.event(`Slash command: /${interaction.commandName}`)
     }
     onInteractionCreate(interaction)
   })
 
-  client.login(token).catch((err) => {
+  lifetime.login(token).catch((err: unknown) => {
+    // A late rejection from an earlier attempt must not destroy the current client.
+    if (client !== connectingClient) return
     const message = formatDiscordLoginError(err)
     rendererConsole.error(message)
-    client?.destroy()
+    lifetime.cancel()
     client = null
     connection = false
     event.reply('connect-error', message)
@@ -224,7 +250,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
 export function Disconnect(event: Electron.IpcMainEvent) {
   if (client) {
     saveBotState() // Save bot state before disconnecting
-    client.destroy()
+    disposeDiscordClient(client)
     client = null
     connection = false
     rendererConsole.info('Disconnected from Discord')

@@ -40,16 +40,18 @@ const publicationTranslations = {
   'sync-unregister-command': 'Remove command from Discord'
 }
 
-// Other locales use English setup guidance until reviewed translations are available.
-const discordSetupTranslations = {
-  'discord-intent-setup':
-    'Before Login, open Discord Developer Portal → your application → Bot → Privileged Gateway Intents. Enable Server Members Intent and Message Content Intent, and obtain approval if required. Both are requested even for slash-only bots. Presence Intent is not needed.',
-  'discord-ban-event-setup':
-    'Ban-event commands also need either Ban Members or View Audit Log permission in the server. GuildModeration is enabled by the app; there is no privileged toggle for it.'
+// Use English fallback copy until these setup instructions have reviewed translations.
+const discordGatewayTranslations = {
+  'discord-bot-setup': 'Discord bot setup',
+  'discord-privileged-intents-setup':
+    'In Developer Portal → your application → Bot → Privileged Gateway Intents, enable Server Members Intent for join/leave events and Message Content Intent for message commands. Save your changes before Login. This app requests both; obtain Discord approval if required for your app. Presence Intent is not requested.',
+  'discord-ban-events-setup':
+    'Ban events use the standard GuildModeration intent, which has no privileged toggle. The bot also needs Ban Members or View Audit Log permission in the server.'
 }
 
 // English translations as the source of truth
 const en = {
+  ...discordGatewayTranslations,
   'discard-command-changes': 'Discard unsaved command changes?',
   'discard-command-changes-help': 'Your changes will be lost. The saved command will stay unchanged.',
   'keep-editing': 'Keep editing',
@@ -244,7 +246,6 @@ const en = {
   'add-interaction-hint': 'Add an interaction to get started',
   'sync-all': 'Sync All',
   ...publicationTranslations,
-  ...discordSetupTranslations,
   registered: 'Registered',
   'not-registered': 'Not Registered',
   register: 'Register',
@@ -421,8 +422,8 @@ type Languages = {
 const translations: Languages = {
   en,
   es: {
+    ...discordGatewayTranslations,
     ...publicationTranslations,
-    ...discordSetupTranslations,
     'discard-command-changes': '¿Descartar los cambios sin guardar del comando?',
     'discard-command-changes-help': 'Se perderán tus cambios. El comando guardado seguirá igual.',
     'keep-editing': 'Seguir editando',
@@ -786,8 +787,8 @@ const translations: Languages = {
     'no-actions-configured': 'No hay acciones configuradas para este comando.'
   },
   ja: {
+    ...discordGatewayTranslations,
     ...publicationTranslations,
-    ...discordSetupTranslations,
     'discard-command-changes': 'コマンドの未保存の変更を破棄しますか？',
     'discard-command-changes-help': '変更は失われます。保存済みのコマンドは変更されません。',
     'keep-editing': '編集を続ける',
@@ -1145,8 +1146,8 @@ const translations: Languages = {
     'no-actions-configured': 'このコマンドにはアクションが設定されていません。'
   },
   zh: {
+    ...discordGatewayTranslations,
     ...publicationTranslations,
-    ...discordSetupTranslations,
     'discard-command-changes': '放弃未保存的命令更改？',
     'discard-command-changes-help': '你的更改将丢失。已保存的命令将保持不变。',
     'keep-editing': '继续编辑',
@@ -1498,8 +1499,8 @@ const translations: Languages = {
     'no-actions-configured': '此命令没有配置任何操作。'
   },
   ko: {
+    ...discordGatewayTranslations,
     ...publicationTranslations,
-    ...discordSetupTranslations,
     'discard-command-changes': '저장하지 않은 명령어 변경 사항을 버릴까요?',
     'discard-command-changes-help': '변경 사항이 사라집니다. 저장된 명령어는 그대로 유지됩니다.',
     'keep-editing': '계속 편집',
@@ -1854,8 +1855,8 @@ const translations: Languages = {
     'no-actions-configured': '이 명령어에 구성된 작업이 없습니다.'
   },
   ru: {
+    ...discordGatewayTranslations,
     ...publicationTranslations,
-    ...discordSetupTranslations,
     'discard-command-changes': 'Отменить несохранённые изменения команды?',
     'discard-command-changes-help':
       'Ваши изменения будут потеряны. Сохранённая команда останется без изменений.',
