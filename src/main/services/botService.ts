@@ -118,10 +118,9 @@ export function getClient() {
   return client
 }
 
-export async function Connect(event: Electron.IpcMainEvent, token: string) {
+export function Connect(event: Electron.IpcMainEvent, token: string) {
   if (connection) {
     if (client) {
-      await saveBotState()
       client.destroy()
       client = null
       connection = false
@@ -152,12 +151,24 @@ export async function Connect(event: Electron.IpcMainEvent, token: string) {
     partials: [Partials.Channel, Partials.Message, Partials.Reaction]
   })
 
-  client.once(Events.ClientReady, async () => {
-    if (client == null) return
+  const connectingClient = client
+  connectingClient.once(Events.ClientReady, async () => {
+    if (client !== connectingClient || connectingClient.user == null) return
 
-    if (client.user == null) return
-
-    await loadBotState() // Load bot state when client is ready
+    try {
+      await loadBotState(() => client === connectingClient)
+    } catch (error) {
+      const message = `Could not load bot state: ${String(error)}`
+      rendererConsole.error(message)
+      connectingClient.destroy()
+      if (client === connectingClient) {
+        client = null
+        connection = false
+        event.reply('connect-error', message)
+      }
+      return
+    }
+    if (client !== connectingClient) return
     // Use our bot status to set the presence of the bot
     applyBotStatus(getBotStatus())
 
@@ -168,14 +179,14 @@ export async function Connect(event: Electron.IpcMainEvent, token: string) {
 
     connection = true
 
-    rendererConsole.success(`Connected as ${client.user.username}`)
+    rendererConsole.success(`Connected as ${connectingClient.user!.username}`)
     rendererConsole.info(
       `Serving ${client.guilds.cache.size} servers with ${commands.bcfdCommands.length} commands`
     )
 
     return event.reply('connect', {
-      user: client.user.username,
-      avatar: client.user.avatarURL()
+      user: connectingClient.user!.username,
+      avatar: connectingClient.user!.avatarURL()
     })
   })
 
@@ -223,10 +234,11 @@ export async function Connect(event: Electron.IpcMainEvent, token: string) {
     onInteractionCreate(interaction)
   })
 
-  client.login(token).catch((err) => {
+  connectingClient.login(token).catch((err) => {
+    if (client !== connectingClient) return
     const message = `Login failed: ${err.message || err}`
     rendererConsole.error(message)
-    client?.destroy()
+    connectingClient.destroy()
     client = null
     connection = false
     event.reply('connect-error', message)
@@ -234,14 +246,22 @@ export async function Connect(event: Electron.IpcMainEvent, token: string) {
 }
 
 export async function Disconnect(event: Electron.IpcMainEvent) {
-  if (client) {
-    await saveBotState() // Save bot state before disconnecting
-    client.destroy()
+  const disconnectingClient = client
+  if (disconnectingClient) {
+    // Stop old event handlers and pending ready callbacks from owning live state immediately.
     client = null
     connection = false
-    rendererConsole.info('Disconnected from Discord')
+    try {
+      await saveBotState()
+    } catch (error) {
+      // Disconnect remains available, but a failed checkpoint must be visible.
+      rendererConsole.error(`Could not save bot state before disconnecting: ${String(error)}`)
+    }
+    disconnectingClient.destroy()
+    if (!client) rendererConsole.info('Disconnected from Discord')
   }
 
+  if (client && client !== disconnectingClient) return
   return event.reply('disconnect')
 }
 

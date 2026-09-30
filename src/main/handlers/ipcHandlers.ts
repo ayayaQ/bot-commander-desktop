@@ -2,8 +2,9 @@ import { BrowserWindow, session, dialog, shell, Notification, clipboard } from '
 import { trustedIpcMain as ipcMain } from './ipcSecurity'
 import { OAuth2Scopes, PermissionsBitField, WebhookClient } from 'discord.js'
 import {
-  getBotStateContext,
-  saveBotState,
+  readBotState,
+  updateBotState,
+  evaluateBotState,
   getStartupJs,
   setStartupJs,
   restartJsEngine
@@ -14,7 +15,8 @@ import {
   Connect,
   Disconnect,
   getClient,
-  getCommands
+  getCommands,
+  setCommands
 } from '../services/botService'
 import {
   AppSettings,
@@ -25,16 +27,16 @@ import {
   WebhookPreset
 } from '../types/types'
 import {
-  persistBotStatus,
-  persistCommands,
-  persistSettings,
-  persistInteractions,
+  saveBotStatus,
+  saveCommands,
+  saveSettings,
+  saveInteractions,
   getWebhookPresets,
   saveWebhookPresets,
   getOnboarding,
   saveOnboarding
 } from '../services/fileService'
-import { getInteractions } from '../services/interactionService'
+import { getInteractions, setInteractions } from '../services/interactionService'
 import { decodeBCFDCommandArray } from '../../shared/commandCodec'
 import type { AgentPlanDecision, AgentStreamEvent } from '../../shared/agentTypes'
 import type { McpConfig } from '../../shared/mcpTypes'
@@ -44,12 +46,11 @@ import {
   applyPublicationResults,
   PublicationFailure
 } from '../services/interactionPublisher'
-import { getSettings } from '../services/settingsService'
+import { getSettings, setSettings, normalizeSettings } from '../services/settingsService'
 import { fetchAiModels, getAiProvider } from '../services/aiProviderService'
-import { getBotStatus } from '../services/statusService'
+import { getBotStatus, setBotStatus } from '../services/statusService'
 import { getStatsInstance } from '../utils/stats'
 import { checkForUpdates } from '../services/updateService'
-import { rendererConsole } from '../utils/rendererConsole'
 import { addApiAuthHandlers } from './apiAuthHandlers'
 import { addCommandRepoHandlers } from './commandRepoHandlers'
 import {
@@ -102,7 +103,8 @@ const interactionPublisher = new InteractionPublisher({
       const updated = structuredClone(previous)
       const applied = applyPublicationResults(updated, results)
       if (!applied.length) return applied
-      await persistInteractions(updated)
+      await saveInteractions(updated)
+      setInteractions(updated)
       emitResourceChanged('interactions', 'system', updated)
       return applied
     })
@@ -221,19 +223,11 @@ export function addIPCHandlers() {
   })
 
   ipcMain.on('connect', (event, token) => {
-    void Connect(event, token).catch((error) => {
-      const message = `Could not save bot state before changing the connection: ${(error as Error).message}`
-      rendererConsole.error(message)
-      event.reply('connect-error', message)
-    })
+    Connect(event, token)
   })
 
   ipcMain.on('disconnect', (event) => {
-    void Disconnect(event).catch((error) => {
-      rendererConsole.error(
-        `Could not save bot state before disconnecting: ${(error as Error).message}`
-      )
-    })
+    Disconnect(event)
   })
 
   ipcMain.handle('get-commands', () => {
@@ -251,19 +245,22 @@ export function addIPCHandlers() {
         expectedRevision?: string
       }
     ) => {
+      newCommands = structuredClone(newCommands)
       return withResourceMutationLock('commands', async () => {
         const current = getCommands()
-        if (
-          newCommands.expectedRevision &&
-          resourceRevision(current) !== newCommands.expectedRevision
-        ) {
-          throw new Error('Commands changed externally; reload before saving')
-        }
         const next = {
           bcfdCommands: newCommands.bcfdCommands,
           bcfdSlashCommands: newCommands.bcfdSlashCommands ?? current.bcfdSlashCommands ?? []
         }
-        await persistCommands(next)
+        if (
+          newCommands.expectedRevision &&
+          resourceRevision(current) !== newCommands.expectedRevision &&
+          resourceRevision(current) !== resourceRevision(next)
+        ) {
+          throw new Error('Commands changed externally; reload before saving')
+        }
+        await saveCommands(next)
+        setCommands(next)
         const event = emitResourceChanged('commands', 'renderer', next)
         return { success: true, revision: event.revision }
       })
@@ -281,10 +278,15 @@ export function addIPCHandlers() {
     'save-interactions',
     async (_, newInteractions: BCFDInteractionCommand[], expectedRevision?: string) =>
       withResourceMutationLock('interactions', async () => {
-        if (expectedRevision && resourceRevision(getInteractions()) !== expectedRevision) {
+        if (
+          expectedRevision &&
+          resourceRevision(getInteractions()) !== expectedRevision &&
+          resourceRevision(getInteractions()) !== resourceRevision(newInteractions)
+        ) {
           throw new Error('Interactions changed externally; reload before saving')
         }
-        await persistInteractions(newInteractions)
+        await saveInteractions(newInteractions)
+        setInteractions(newInteractions)
         const event = emitResourceChanged('interactions', 'renderer', newInteractions)
         return { success: true, revision: event.revision }
       })
@@ -304,10 +306,13 @@ export function addIPCHandlers() {
   })
 
   ipcMain.handle('save-settings', async (_, newSettings: AppSettings) => {
+    newSettings = structuredClone(newSettings)
     return withResourceMutationLock('settings', async () => {
-      const savedSettings = await persistSettings(newSettings)
-      emitResourceChanged('settings', 'renderer', savedSettings)
-      return savedSettings
+      const next = normalizeSettings(newSettings)
+      await saveSettings(next)
+      setSettings(next)
+      emitResourceChanged('settings', 'renderer', getSettings())
+      return getSettings()
     })
   })
 
@@ -330,9 +335,7 @@ export function addIPCHandlers() {
   ipcMain.handle(
     'memory:update',
     async (_, id: string, expectedRevision: string, content: string) =>
-      commitMemoryMutation(
-        await prepareUpdateMemory(id, expectedRevision, content, 'user')
-      )
+      commitMemoryMutation(await prepareUpdateMemory(id, expectedRevision, content, 'user'))
   )
   ipcMain.handle('memory:delete', async (_, id: string, expectedRevision: string) =>
     commitMemoryMutation(await prepareDeleteMemory(id, expectedRevision))
@@ -350,8 +353,9 @@ export function addIPCHandlers() {
   })
 
   ipcMain.handle('save-bot-status', async (_, newBotStatus: BotStatus) => {
-    await persistBotStatus(newBotStatus)
-    applyBotStatus(getBotStatus())
+    await saveBotStatus(newBotStatus)
+    setBotStatus(newBotStatus)
+    applyBotStatus(newBotStatus)
     return true
   })
 
@@ -391,51 +395,18 @@ export function addIPCHandlers() {
     return cookies[0]?.value ?? ''
   })
 
-  ipcMain.handle('getBotState', () => {
-    const context = getBotStateContext()
-    return context.getVariable('botState') ?? {}
-  })
+  ipcMain.handle('getBotState', () => readBotState())
 
-  ipcMain.handle('updateBotState', async (_event, key: string, value: any) => {
-    return withResourceMutationLock('bot-state', async () => {
-      try {
-        const context = getBotStateContext()
-        const botState = context.getVariable('botState')
-        const nextState: Record<string, unknown> =
-          botState && typeof botState === 'object'
-            ? { ...(botState as Record<string, unknown>) }
-            : {}
-        nextState[key] = value
-        await saveBotState(nextState)
-        context.setVariable('botState', nextState)
-        emitResourceChanged('bot-state', 'renderer', nextState)
-        return true
-      } catch (error) {
-        console.error('Error updating bot state:', error)
-        return false
-      }
-    })
+  ipcMain.handle('updateBotState', async (_event, key: string, value: unknown) => {
+    await updateBotState((state) => ({ ...state, [key]: value }))
+    emitResourceChanged('bot-state', 'renderer', await readBotState())
+    return true
   })
 
   ipcMain.handle('runCodeInContext', async (_event, code: string) => {
-    return withResourceMutationLock('bot-state', async () => {
-      const context = getBotStateContext()
-      const previousState = context.getVariable('botState') ?? {}
-      try {
-        const result = context.evaluate(code, { timeoutMs: 2000, wrapReturn: false })
-        await saveBotState() // Save the state in case it was modified
-        emitResourceChanged(
-          'bot-state',
-          'renderer',
-          getBotStateContext().getVariable('botState') ?? {}
-        )
-        return JSON.stringify(result, null, 2)
-      } catch (error) {
-        context.setVariable('botState', previousState)
-        console.error('Error running code in context:', error)
-        throw error
-      }
-    })
+    const result = await evaluateBotState(code, { timeoutMs: 2000, wrapReturn: false })
+    emitResourceChanged('bot-state', 'renderer', await readBotState())
+    return JSON.stringify(result, null, 2)
   })
 
   // send a webhook using discord.js
@@ -485,10 +456,8 @@ export function addIPCHandlers() {
   })
 
   ipcMain.handle('restart-js-engine', async () => {
-    return withResourceMutationLock('bot-state', async () => {
-      await restartJsEngine()
-      return true
-    })
+    await restartJsEngine()
+    return true
   })
 
   ipcMain.handle('get-webhook-presets', async () => {
@@ -593,10 +562,8 @@ export function addIPCHandlers() {
   ipcMain.handle('agent:send', async (_, sessionId: string, content: string) =>
     runAgentSession(sessionId, content, getSettings())
   )
-  ipcMain.handle(
-    'agent:resolve-plan',
-    async (_, sessionId: string, decision: AgentPlanDecision) =>
-      resolveAgentPlan(sessionId, decision, getSettings())
+  ipcMain.handle('agent:resolve-plan', async (_, sessionId: string, decision: AgentPlanDecision) =>
+    resolveAgentPlan(sessionId, decision, getSettings())
   )
   ipcMain.handle(
     'agent:approve',

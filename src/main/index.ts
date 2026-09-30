@@ -5,7 +5,20 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import iconPng from '../../resources/icon.png?asset'
 import iconIco from '../../resources/icon.ico?asset'
 import { getStatsInstance, Stats } from './utils/stats'
-import { initializeBotState, saveBotState } from './utils/virtual'
+import {
+  initializeBotState,
+  stopRuntimeAndCheckpoint,
+  pauseRuntime,
+  resumeRuntime
+} from './utils/virtual'
+import { finishPersistenceBeforeQuit } from './utils/gracefulShutdown'
+import { closeAndDrainAtomicWrites, reopenAtomicWrites } from './services/atomicPersistence'
+import {
+  stopResourceMutations,
+  drainResourceMutations,
+  resumeResourceMutations
+} from './services/resourceChangeService'
+import { rendererConsole } from './utils/rendererConsole'
 import { addIPCHandlers, addWindowIPCHandlers } from './handlers/ipcHandlers'
 import { configureTrustedRenderer } from './handlers/ipcSecurity'
 import { loadBotStatus, loadCommands, loadSettings, loadInteractions } from './services/fileService'
@@ -25,6 +38,7 @@ const statsFilePath = join(app.getPath('userData'), 'stats.json')
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
+let savingBeforeQuit = false
 
 // Initialize the custom property
 app.isQuitting = false
@@ -173,10 +187,32 @@ app.whenReady().then(async () => {
 
   app.on('before-quit', async (event) => {
     event.preventDefault() // Prevent the app from quitting immediately
-    await saveStats() // Save stats before quitting
-    await saveBotState() // Save bot state before quitting
-    await stopMcpServer()
-    app.exit(0) // Now quit the app
+    if (savingBeforeQuit) return
+    savingBeforeQuit = true
+    try {
+      await finishPersistenceBeforeQuit({
+        pauseResources: stopResourceMutations,
+        pauseRuntime,
+        checkpointAndStopRuntime: stopRuntimeAndCheckpoint,
+        drainResources: drainResourceMutations,
+        saveStats,
+        stopServer: stopMcpServer,
+        closeAndDrainWrites: closeAndDrainAtomicWrites,
+        resumeResources: resumeResourceMutations,
+        resumeRuntime,
+        reopenWrites: reopenAtomicWrites
+      })
+      app.exit(0)
+    } catch (error) {
+      app.isQuitting = false
+      rendererConsole.error(`Could not quit safely; the app remains open: ${String(error)}`)
+      mainWindow?.show()
+      await initializeMcpServer().catch((serverError) =>
+        console.error('Could not resume MCP server:', serverError)
+      )
+    } finally {
+      savingBeforeQuit = false
+    }
   })
 
   app.on('activate', function () {
