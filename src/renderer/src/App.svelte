@@ -13,6 +13,7 @@
   import { onboardingStore } from './stores/onboarding'
   import Stats from './components/Stats.svelte'
   import StateViewer from './components/StateViewer.svelte'
+  import Playground from './components/Playground.svelte'
   import TitleBar from './components/TitleBar.svelte'
   import { bottomNavVisible } from './stores/navigation'
   import { apiAuthStore } from './stores/apiAuth'
@@ -33,6 +34,7 @@
     | 'webhooks'
     | 'stats'
     | 'debugger'
+    | 'playground'
     | 'agent' = $state('commands')
 
   let leftPanelCollapsed = $state(false)
@@ -119,6 +121,8 @@
         <Webhooks />
       {:else if selectedMenu === 'stats'}
         <Stats />
+      {:else if selectedMenu === 'playground'}
+        <Playground />
       {:else if selectedMenu === 'debugger'}
         <StateViewer />
       {:else if selectedMenu === 'agent'}
@@ -151,6 +155,15 @@
             onclick={() => (selectedMenu = 'stats')}
           >
             <span class="material-symbols-outlined">bar_chart</span>
+          </button>
+          <button
+            class={selectedMenu === 'playground' ? 'dock-active' : ''}
+            onclick={() => (selectedMenu = 'playground')}
+            title="Command playground"
+            aria-label="Command playground"
+            aria-current={selectedMenu === 'playground' ? 'page' : undefined}
+          >
+            <span class="material-symbols-outlined">science</span>
           </button>
           <button
             class={selectedMenu === 'debugger' ? 'dock-active' : ''}

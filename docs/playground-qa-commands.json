@@ -1,0 +1,98 @@
+{
+  "bcfdCommands": [
+    {
+      "commandDescription": "Playground QA fixture only",
+      "type": 0,
+      "channelMessage": "Hello $namePlain in #$channel",
+      "privateMessage": "",
+      "channelEmbed": {},
+      "privateEmbed": {},
+      "id": "qa-hello",
+      "command": "!hello",
+      "channelMessageAsReply": true
+    },
+    {
+      "commandDescription": "Playground QA fixture only",
+      "type": 0,
+      "channelMessage": "Mention: $mentionedNamePlain; sender: $namePlain",
+      "privateMessage": "",
+      "channelEmbed": {},
+      "privateEmbed": {},
+      "id": "qa-role",
+      "command": "!role",
+      "startsWith": true,
+      "roleToAssign": "tester"
+    },
+    {
+      "commandDescription": "Playground QA fixture only",
+      "type": 0,
+      "channelMessage": "",
+      "privateMessage": "",
+      "channelEmbed": {},
+      "privateEmbed": {},
+      "id": "qa-kick",
+      "command": "!kick",
+      "isKick": true
+    },
+    {
+      "commandDescription": "Playground QA fixture only",
+      "type": 0,
+      "channelMessage": "",
+      "privateMessage": "",
+      "channelEmbed": {},
+      "privateEmbed": {},
+      "id": "qa-ban",
+      "command": "!ban",
+      "isBan": true
+    },
+    {
+      "commandDescription": "Playground QA fixture only",
+      "type": 0,
+      "channelMessage": "",
+      "privateMessage": "",
+      "channelEmbed": {},
+      "privateEmbed": {},
+      "id": "qa-mute",
+      "command": "!mute",
+      "isVoiceMute": true
+    },
+    {
+      "commandDescription": "Playground QA fixture only",
+      "type": 0,
+      "channelMessage": "$if(false)$eval botState.count = 1 $halt$else safe$endif",
+      "privateMessage": "",
+      "channelEmbed": {},
+      "privateEmbed": {},
+      "id": "qa-blocked",
+      "command": "!blocked",
+      "roleToAssign": "must-not-change"
+    },
+    {
+      "commandDescription": "Playground QA fixture only",
+      "type": 0,
+      "channelMessage": "$if($namePlain == Alex)Staff hello$else Other sender$endif",
+      "privateMessage": "",
+      "channelEmbed": {},
+      "privateEmbed": {},
+      "id": "qa-filter",
+      "command": "!staff",
+      "requiredRole": "moderator"
+    },
+    {
+      "commandDescription": "Playground QA fixture only",
+      "type": 0,
+      "channelMessage": "",
+      "privateMessage": "Private hello $namePlain",
+      "channelEmbed": {
+        "title": "$upper(hello)",
+        "description": "For $namePlain",
+        "hexColor": "5865F2",
+        "imageURL": "https://example.com/do-not-load.png",
+        "footer": "Offline preview"
+      },
+      "privateEmbed": {},
+      "id": "qa-embed",
+      "command": "!embed"
+    }
+  ]
+}
