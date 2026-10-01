@@ -3,6 +3,7 @@ import { parse } from '../../main/services/bcfdLang/parser'
 import { NodeType } from '../../main/services/bcfdLang/types'
 import type { ASTNode, ConditionNode } from '../../main/services/bcfdLang/types'
 import { PLAYGROUND_LIMITS } from './types'
+import { fakeMemberRoles, hasFakeRole } from './roles'
 import type { FakeMember, PlaygroundState } from './types'
 
 export type TemplateContext = {
@@ -134,11 +135,10 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
       mentionedName: `<@${ctx.mentioned?.id ?? ''}>`,
       mentionedNamePlain: ctx.mentioned?.name ?? '',
       mentionedMemberID: ctx.mentioned?.id ?? '',
-      memberRoles: ctx.state.roles
-        .filter((role) => ctx.sender.roles.includes(role.id))
+      memberRoles: fakeMemberRoles(ctx.state, ctx.sender)
         .map((role) => role.name)
         .join(', '),
-      memberRoleCount: String(ctx.sender.roles.length),
+      memberRoleCount: String(fakeMemberRoles(ctx.state, ctx.sender).length),
       memberIsOwner: String(ctx.sender.id === ctx.state.members[0]?.id)
     }
     if (Object.hasOwn(vars, name)) return vars[name]
@@ -165,7 +165,7 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
         const role = ctx.state.roles.find((item) =>
           roleId ? item.id === roleId : item.name.toLowerCase() === query.toLowerCase()
         )
-        return String(!!role && member.roles.includes(role.id))
+        return String(!!role && hasFakeRole(ctx.state, member, role.id))
       }
       case 'upper':
         return (args[0] ?? '').toUpperCase()
