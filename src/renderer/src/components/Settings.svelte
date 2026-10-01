@@ -4,10 +4,13 @@
     getSelectedModelForProvider,
     loadSettings,
     saveSettings,
-    settingsStore,
+    patchSettings,
+    retrySettingsSave,
+    settingsDraftStore,
+    settingsSaveStatus,
     withSelectedModelForProvider
   } from '../stores/settings'
-  import { currentLanguage, t } from '../stores/localisation'
+  import { t } from '../stores/localisation'
   import HeaderBar from './HeaderBar.svelte'
   import ApiAuth from './ApiAuth.svelte'
   import ModelPicker from './ModelPicker.svelte'
@@ -18,6 +21,7 @@
     normalizeReasoningEffort,
     type ReasoningEffort
   } from '../utils/aiModelCapabilities'
+  import type { AppSettings } from '../types/types'
   import type { ResourceChangedEvent } from '../../../shared/mcpTypes'
 
   let selectedTheme: string = $state()
@@ -43,76 +47,75 @@
   let modelFetchError = $state('')
   let memoryDialog: HTMLDialogElement = $state()
 
-  function syncLocalSettings() {
-    selectedTheme = $settingsStore.theme
-    showToken = $settingsStore.showToken
-    selectedLanguage = $settingsStore.language
-    aiProvider = $settingsStore.aiProvider || 'openai'
-    openaiApiKey = $settingsStore.openaiApiKey
-    openrouterApiKey = $settingsStore.openrouterApiKey || ''
-    selectedAiModel = getSelectedModelForProvider($settingsStore, aiProvider)
-    aiReasoningEffort = $settingsStore.aiReasoningEffort || 'none'
-    developerPrompt = $settingsStore.developerPrompt
-    useCustomApi = $settingsStore.useCustomApi
-    useGlobalEvalScope = $settingsStore.useLegacyInterpreter
-    hideOutput = $settingsStore.hideOutput
-    agentNotificationsEnabled = $settingsStore.agentNotificationsEnabled
+  function syncLocalSettings(settings: AppSettings) {
+    selectedTheme = settings.theme
+    showToken = settings.showToken
+    selectedLanguage = settings.language
+    aiProvider = settings.aiProvider || 'openai'
+    openaiApiKey = settings.openaiApiKey
+    openrouterApiKey = settings.openrouterApiKey || ''
+    selectedAiModel = getSelectedModelForProvider(settings, aiProvider)
+    aiReasoningEffort = settings.aiReasoningEffort || 'none'
+    developerPrompt = settings.developerPrompt
+    useCustomApi = settings.useCustomApi
+    useGlobalEvalScope = settings.useLegacyInterpreter
+    hideOutput = settings.hideOutput
+    agentNotificationsEnabled = settings.agentNotificationsEnabled
   }
 
   async function handleResourceChanged(event: ResourceChangedEvent) {
     if (event.kind !== 'settings' || event.source === 'renderer') return
-    await loadSettings()
-    syncLocalSettings()
+    try {
+      await loadSettings()
+    } catch (error) {
+      modelFetchError = error instanceof Error ? error.message : 'Could not refresh settings'
+    }
   }
 
   function changeTheme(event) {
-    let theme = event.target.value
-    document.documentElement.setAttribute('data-theme', theme)
-    saveSettings({ ...$settingsStore, theme: theme })
+    selectedTheme = event.target.value
+    void patchSettings({ theme: selectedTheme })
   }
 
   function changeLanguage(event) {
-    let language = event.target.value
-    saveSettings({ ...$settingsStore, language: language })
-
-    // update localisation
-    currentLanguage.set(language)
+    selectedLanguage = event.target.value
+    void patchSettings({ language: selectedLanguage })
   }
 
   function toggleShowToken() {
-    saveSettings({ ...$settingsStore, showToken: showToken })
+    void patchSettings({ showToken })
   }
 
   function toggleHideOutput() {
-    saveSettings({ ...$settingsStore, hideOutput })
+    void patchSettings({ hideOutput })
   }
 
   function toggleAgentNotifications() {
-    saveSettings({ ...$settingsStore, agentNotificationsEnabled })
+    void patchSettings({ agentNotificationsEnabled })
   }
 
   function updateOpenAIKey(event) {
     openaiApiKey = event.target.value
-    saveSettings({ ...$settingsStore, openaiApiKey })
+    void patchSettings({ openaiApiKey })
   }
 
   function updateOpenRouterKey(event) {
     openrouterApiKey = event.target.value
-    saveSettings({ ...$settingsStore, openrouterApiKey })
+    void patchSettings({ openrouterApiKey })
   }
 
   async function updateAiProvider(event) {
     aiProvider = event.target.value
-    selectedAiModel = getSelectedModelForProvider($settingsStore, aiProvider)
-    await saveSettings({ ...$settingsStore, aiProvider, selectedAiModel })
-    await refreshAiModels()
+    selectedAiModel = getSelectedModelForProvider($settingsDraftStore, aiProvider)
+    if (await patchSettings({ aiProvider, selectedAiModel })) await refreshAiModels()
   }
 
   function updateModelValue(model: string) {
     if (!model) return
     selectedAiModel = model
-    saveSettings(withSelectedModelForProvider($settingsStore, aiProvider, selectedAiModel))
-    reconcileReasoningSupport()
+    const next = withSelectedModelForProvider($settingsDraftStore, aiProvider, selectedAiModel)
+    aiReasoningEffort = normalizeReasoningEffort(aiReasoningEffort, selectedModelSupportsReasoning)
+    void saveSettings({ ...next, aiReasoningEffort })
   }
 
   function updateReasoningEffort(event) {
@@ -120,13 +123,13 @@
       event.target.value as ReasoningEffort,
       selectedModelSupportsReasoning
     )
-    saveSettings({ ...$settingsStore, aiReasoningEffort })
+    void patchSettings({ aiReasoningEffort })
   }
 
   function reconcileReasoningSupport() {
     if (selectedModelSupportsReasoning || aiReasoningEffort === 'none') return
     aiReasoningEffort = 'none'
-    saveSettings({ ...$settingsStore, aiReasoningEffort })
+    void patchSettings({ aiReasoningEffort })
   }
 
   async function refreshAiModels() {
@@ -150,15 +153,15 @@
 
   function updateDeveloperPrompt(event) {
     developerPrompt = event.target.value
-    saveSettings({ ...$settingsStore, developerPrompt })
+    void patchSettings({ developerPrompt })
   }
 
   function toggleCustomApi() {
-    saveSettings({ ...$settingsStore, useCustomApi })
+    void patchSettings({ useCustomApi })
   }
 
   function toggleGlobalEvalScope() {
-    saveSettings({ ...$settingsStore, useLegacyInterpreter: useGlobalEvalScope })
+    void patchSettings({ useLegacyInterpreter: useGlobalEvalScope })
   }
 
   function openExternalLink(event) {
@@ -172,10 +175,11 @@
   )
 
   onMount(() => {
-    syncLocalSettings()
+    const unsubscribeDraft = settingsDraftStore.subscribe(syncLocalSettings)
     void refreshAiModels()
     window.electron.ipcRenderer.on('resource:changed', handleResourceChanged)
     return () => {
+      unsubscribeDraft()
       window.electron.ipcRenderer.removeListener('resource:changed', handleResourceChanged)
     }
   })
@@ -186,6 +190,20 @@
 </HeaderBar>
 
 <div class="p-4">
+  {#if $settingsSaveStatus.error}
+    <div class="alert alert-error mb-4" role="alert">
+      <span
+        >Could not confirm the settings save. Your changes are still here. {$settingsSaveStatus.error}</span
+      >
+      <button
+        class="btn btn-sm"
+        disabled={$settingsSaveStatus.saving}
+        onclick={() => retrySettingsSave()}>Retry save</button
+      >
+    </div>
+  {:else if $settingsSaveStatus.saving}
+    <p class="mb-4 text-sm" role="status">Saving settings…</p>
+  {/if}
   <h2 class="text-2xl font-bold mb-4">{$t('account')}</h2>
   <ApiAuth />
 

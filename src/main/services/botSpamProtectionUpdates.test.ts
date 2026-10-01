@@ -22,7 +22,7 @@ vi.mock('discord.js', async (original) => ({
     login() {
       return Promise.resolve('test')
     }
-    destroy() {}
+    async destroy() {}
   }
 }))
 vi.mock('electron', () => ({ session: { defaultSession: { cookies: { set: vi.fn() } } } }))

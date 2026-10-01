@@ -31,7 +31,7 @@ export function onSettingsChanged(listener: (next: AppSettings, previous: AppSet
   return () => listeners.delete(listener)
 }
 
-export function setSettings(newSettings: AppSettings) {
+export function normalizeSettings(newSettings: AppSettings): AppSettings {
   const supportedSettings = { ...newSettings } as AppSettings & Record<string, unknown>
   delete supportedSettings['selectedCommandOpenAiModel']
   delete supportedSettings['selectedCommandOpenRouterModel']
@@ -115,7 +115,11 @@ export function setSettings(newSettings: AppSettings) {
   }
 
   newSettings.spamProtectionEnabled = newSettings.spamProtectionEnabled === true
+  return newSettings
+}
+
+export function setSettings(newSettings: AppSettings) {
   const previous = settings
-  settings = newSettings
+  settings = normalizeSettings(newSettings)
   for (const listener of listeners) listener(settings, previous)
 }

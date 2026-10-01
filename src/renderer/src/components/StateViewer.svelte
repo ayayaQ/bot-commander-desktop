@@ -65,6 +65,7 @@
   }
 
   let botState: Record<string, any> = $state({})
+  let botStateError = $state('')
   let editingKey: string | null = $state(null)
   let editValue: string = $state('')
   let showToast = $state(false)
@@ -78,10 +79,14 @@
   let jsonEditorValue: string = $state('')
   let jsonEditorError: string | null = $state(null)
 
-  function updateBotState() {
-    window.electron.ipcRenderer.invoke('getBotState').then((state) => {
+  async function updateBotState() {
+    try {
+      const state = await window.electron.ipcRenderer.invoke('getBotState')
       botState = state
-    })
+      botStateError = ''
+    } catch (error) {
+      botStateError = error instanceof Error ? error.message : String(error)
+    }
   }
 
   function startEditing(key: string, value: any) {
@@ -289,6 +294,9 @@
 </HeaderBar>
 
 <div class="p-4">
+  {#if botStateError}
+    <div class="alert alert-error mb-4" role="alert">{botStateError}</div>
+  {/if}
   <!-- Startup JS Section -->
   <div class="bg-base-200 p-4 rounded-lg shadow-lg mb-4">
     <div class="flex flex-row justify-between items-center mb-2">
@@ -376,7 +384,7 @@
               </td>
             </tr>
           {/each}
-          {#if Object.keys(botState).length === 0}
+          {#if Object.keys(botState).length === 0 && !botStateError}
             <tr>
               <td colspan="3" class="text-center">{$t('no-state-data')}</td>
             </tr>

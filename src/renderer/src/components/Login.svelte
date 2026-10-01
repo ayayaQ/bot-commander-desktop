@@ -4,10 +4,14 @@
   import Status from './Status.svelte'
   import { botStatusStore } from '../stores/status'
   import type { BotStatus } from '../types/types'
-  import { settingsStore, saveSettings } from '../stores/settings'
+  import { settingsStore, patchSettings } from '../stores/settings'
   import { t } from '../stores/localisation'
   import { onboardingStore, getCurrentStep } from '../stores/onboarding'
   import OnboardingStepper from './OnboardingStepper.svelte'
+  import {
+    DISCORD_DEVELOPER_PORTAL_URL,
+    isDiscordIntentSetupError
+  } from '../../../shared/discordSetup'
 
   let {
     onSelectTab
@@ -31,10 +35,10 @@
     savingSpamProtection = true
     spamSettingsError = false
     try {
-      await saveSettings({
-        ...$settingsStore,
+      const saved = await patchSettings({
         spamProtectionEnabled: !$settingsStore.spamProtectionEnabled
       })
+      spamSettingsError = !saved
     } catch {
       spamSettingsError = true
     } finally {
@@ -43,9 +47,11 @@
   }
 
   $effect(() => {
-    if (!$connectionStore.error) return undefined
-
-    loginError = $connectionStore.error
+    const error = $connectionStore.error
+    loginError = error
+    // Intent setup takes longer than a toast timeout. Keep the instructions until
+    // dismissed, a new login attempt starts, or the connection succeeds.
+    if (!error || isDiscordIntentSetupError(error)) return undefined
     const timeout = setTimeout(() => {
       loginError = ''
     }, 5000)
@@ -59,6 +65,10 @@
 
   function handleLogout() {
     connectionStore.ipc.disconnect()
+  }
+
+  function openDiscordDeveloperPortal() {
+    window.electron.ipcRenderer.invoke('open-external-url', DISCORD_DEVELOPER_PORTAL_URL)
   }
 
   async function generateInvite() {
@@ -91,7 +101,7 @@
 
   function handleStepperAction() {
     if (currentStep === 'ENTER_TOKEN') {
-      window.electron.ipcRenderer.invoke('open-external-url', 'https://discord.com/developers/applications')
+      openDiscordDeveloperPortal()
     } else if (currentStep === 'CREATE_COMMAND') {
       onSelectTab?.('commands')
     }
@@ -109,7 +119,7 @@
   })
 </script>
 
-<div class="flex flex-col items-center justify-center bg-base-200 p-4 h-full">
+<div class="flex flex-col items-center justify-center bg-base-200 p-4 min-h-full">
   <div class="card w-96 bg-base-100 shadow-xl">
     <div class="card-body items-center text-center">
       {#if currentStep !== 'COMPLETE'}
@@ -128,7 +138,9 @@
         </div>
       {:else}
         <div class="avatar placeholder mb-14">
-          <div class="bg-neutral text-neutral-content w-24 rounded-full flex items-center justify-center">
+          <div
+            class="bg-neutral text-neutral-content w-24 rounded-full flex items-center justify-center"
+          >
             <span class="text-3xl select-none">{$t('bot')}</span>
           </div>
         </div>
@@ -137,12 +149,7 @@
       {#if !$connectionStore.connected}
         <div class="w-full">
           {#if $settingsStore.showToken}
-            <input
-              type="text"
-              placeholder={$t('token')}
-              class="input w-full"
-              bind:value={token}
-            />
+            <input type="text" placeholder={$t('token')} class="input w-full" bind:value={token} />
           {:else}
             <input
               type="password"
@@ -152,7 +159,9 @@
             />
           {/if}
           {#if currentStep === 'ENTER_TOKEN'}
-            <p class="text-xs opacity-50 mt-1 ml-1">From Discord Developer Portal &gt; Bot &gt; Token</p>
+            <p class="text-xs opacity-50 mt-1 ml-1">
+              From Discord Developer Portal &gt; Bot &gt; Token
+            </p>
           {/if}
         </div>
       {:else}
@@ -171,6 +180,14 @@
         />
       {/if}
       {#if !$connectionStore.connected}
+        <div class="rounded-lg bg-base-200 p-3 text-left text-sm w-full">
+          <p class="font-semibold">{$t('discord-bot-setup')}</p>
+          <p class="mt-1">{$t('discord-privileged-intents-setup')}</p>
+          <p class="mt-2">{$t('discord-ban-events-setup')}</p>
+          <button class="btn btn-link btn-sm px-0" onclick={openDiscordDeveloperPortal}>
+            {$t('onboarding-open-portal')}
+          </button>
+        </div>
         <button
           class="btn btn-primary w-full"
           onclick={handleLogin}
@@ -227,8 +244,8 @@
 </div>
 
 {#if loginError}
-  <div class="toast toast-end toast-bottom z-50">
-    <div class="alert alert-error">
+  <div class="toast toast-end toast-bottom z-50 max-w-full">
+    <div class="alert alert-error max-w-lg" role="alert">
       <span class="material-symbols-outlined">error</span>
       <span>{loginError}</span>
       <button

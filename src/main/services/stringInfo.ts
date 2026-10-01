@@ -12,7 +12,8 @@ import {
   User
 } from 'discord.js'
 import { BCFDCommand, BCFDInteractionCommand } from '../types/types'
-import { getContext } from './botService'
+import { withBotStateTransaction } from '../utils/virtual'
+import { emitResourceChanged } from './resourceChangeService'
 import { getSettings } from './settingsService'
 import { interpret, BCFDContext as InterpreterContext } from './bcfdLang'
 import { rendererConsole } from '../utils/rendererConsole'
@@ -53,28 +54,36 @@ export function contextForMessageEvent(
 
 export async function stringInfoAdd(ctx: StringInfoContext): Promise<string> {
   const cmdSource = ctx.command || ctx.interactionCommand
-  const interpreterCtx: InterpreterContext = {
-    user: ctx.user,
-    member: ctx.member,
-    client: ctx.client,
-    guild: ctx.guild,
-    textChannel: ctx.textChannel,
-    mentionedUser: ctx.mentionedUser,
-    mentionedMember: ctx.mentionedMember,
-    messageEvent: ctx.messageEvent,
-    command: ctx.command,
-    interactionCommand: ctx.interactionCommand,
-    interactionOptions: ctx.interactionOptions,
-    vmContext: getContext(),
-    wrapEvalInIIFE: !getSettings().useLegacyInterpreter,
-    commandId: cmdSource?.id,
-    cooldown: cmdSource?.cooldown,
-    cooldownType: cmdSource?.cooldownType,
-    userId: ctx.user?.id,
-    guildId: ctx.guild?.id
-  }
+  const result = await withBotStateTransaction(
+    async (vmContext) => {
+      const interpreterCtx: InterpreterContext = {
+        user: ctx.user,
+        member: ctx.member,
+        client: ctx.client,
+        guild: ctx.guild,
+        textChannel: ctx.textChannel,
+        mentionedUser: ctx.mentionedUser,
+        mentionedMember: ctx.mentionedMember,
+        messageEvent: ctx.messageEvent,
+        command: ctx.command,
+        interactionCommand: ctx.interactionCommand,
+        interactionOptions: ctx.interactionOptions,
+        vmContext,
+        wrapEvalInIIFE: !getSettings().useLegacyInterpreter,
+        commandId: cmdSource?.id,
+        cooldown: cmdSource?.cooldown,
+        cooldownType: cmdSource?.cooldownType,
+        userId: ctx.user?.id,
+        guildId: ctx.guild?.id
+      }
 
-  const result = await interpret(ctx.message, interpreterCtx)
+      return interpret(ctx.message, interpreterCtx)
+    },
+    {
+      shouldCommit: (result) => result.errors.length === 0,
+      onCommitted: (state) => emitResourceChanged('bot-state', 'system', state)
+    }
+  )
 
   if (result.errors.length > 0) {
     console.warn('BCFD Interpreter errors:', result.errors)

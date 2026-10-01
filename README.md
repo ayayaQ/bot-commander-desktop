@@ -30,21 +30,51 @@ Want to try a ready-to-use build? See the [releases](https://github.com/ayayaQ/b
 
 1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) and click **New Application**.
 2. Give your application a name, then navigate to the **Bot** tab.
-3. Click **Add Bot** (or **Reset Token** if one already exists) and copy your **bot token** — you'll need this in step 3.
-4. Under **Privileged Gateway Intents**, enable **Message Content Intent** (required for reading message content).
+3. Newly created applications already have a bot user. Under **Token**, use **Reset Token** if you need to generate a token, then copy your **bot token** for step 3. Keep it private; resetting a token invalidates the previous one.
+4. Under **Privileged Gateway Intents**, enable **Server Members Intent** (for join/leave events) and **Message Content Intent** (for message commands), then save your changes. This app requests both, even if your current commands do not use them. Obtain Discord approval for these intents if required for your application. Presence Intent is not requested by this app.
 
 ### 2. Invite the Bot to Your Server
 
-1. In the Developer Portal, go to **OAuth2 → URL Generator**.
-2. Under **Scopes**, check `bot`.
-3. Under **Bot Permissions**, select the permissions your bot needs (at minimum: Send Messages, Read Message History).
-4. Copy the generated URL, open it in your browser, and select the server to add the bot to.
+1. In the Developer Portal, open **Installation**, enable **Guild Install**, and choose **Discord Provided Link** under **Install Link**.
+2. Under **Default Install Settings → Guild Install**, add the `bot` and `applications.commands` scopes.
+3. Select the permissions your bot needs (for message commands: View Channels, Send Messages, Read Message History). For **Member Ban** triggers, also grant **Ban Members** (`BAN_MEMBERS`) **or** **View Audit Log** (`VIEW_AUDIT_LOG`) in each server. View Audit Log allows receiving ban events without granting the ability to ban members.
+4. Copy the **Install Link**, open it in your browser, and select **Add to server** and the server to add the bot to. Review and approve the installation permissions.
 
 ### 3. Start the App
 
 1. Launch Bot Commander Desktop.
-2. Paste your bot token into the **Settings** panel.
-3. Click **Start Bot** — your bot is now online.
+2. Open the **Login** tab and paste your bot token.
+3. Click **Login** and wait for the connection to succeed.
+
+### Gateway intents and troubleshooting
+
+The app requests the standard `GuildModeration` (`GUILD_MODERATION`) intent for Member Ban triggers. It is separate from the privileged Server Members and Message Content intents and has no Developer Portal toggle. Receiving ban events also requires one of the server permissions described above; enabling Server Members Intent alone does not enable ban events.
+
+If Login reports **disallowed intents (4014)** or **Used disallowed intents**, open **Developer Portal → your application → Bot → Privileged Gateway Intents**, enable **Server Members Intent** and **Message Content Intent**, save, and try Login again. If Discord requires approval, obtain it first. A **4013 invalid intents** error is a different problem and is not fixed by enabling privileged intents.
+
+See Discord's official [bot setup guide](https://docs.discord.com/developers/quick-start/getting-started), [Gateway intent reference](https://docs.discord.com/developers/events/gateway#gateway-intents), [Guild Ban Add permissions](https://docs.discord.com/developers/events/gateway-events#guild-ban-add), and [Gateway close codes](https://docs.discord.com/developers/topics/opcodes-and-status-codes#gateway-gateway-close-event-codes).
+
+---
+
+## Saving and Recovery
+
+Commands, settings, interactions, startup JavaScript, and bot state use exclusive temporary files,
+sync their contents, then atomically replace the saved file. The last valid version is kept in a
+`.bak` file. On supported platforms/filesystems the containing directory is also synced after each
+backup and primary rename. Windows and filesystems that do not support directory sync show a
+warning: atomic replacement still applies, but rename persistence across power loss is not
+guaranteed. Sync guarantees depend on the filesystem and storage honoring the sync operation.
+
+If a primary rename succeeds but its directory sync fails, the app keeps the committed live state
+and shows a durability error. It does not roll back to a different in-memory version. Saving again
+retries the operation; quitting also retries the pending directory sync without rewriting either
+file. The app stays open if it still cannot confirm that sync.
+
+If neither `botState.json` nor `botState.json.bak` contains a valid JSON object, the app opens its
+shell with recovery instructions and blocks bot-state reads, writes, and scripts. Both files stay
+untouched, including on quit. Copy them somewhere safe before repairing a file or restoring a
+known-good copy, then use **Restart JS Engine** in the Bot State view. Delete saved state only if
+you intentionally want to discard it.
 
 ---
 
