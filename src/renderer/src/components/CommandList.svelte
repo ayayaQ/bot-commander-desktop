@@ -16,6 +16,7 @@
     type CommandSortMode,
     type CommandTypeFilter
   } from '../utils/commandListSearch'
+  import { createCommandPersistence, prepareCommandImports } from '../utils/commandPersistence'
   import type { ResourceChangedEvent } from '../../../shared/mcpTypes'
 
   const emptyKaomojis = ['(´。＿。｀)', '(╥_╥)', '(｡•́︿•̀｡)', '(っ˘̩╭╮˘̩)っ', '(ᵕ—ᴗ—)']
@@ -35,11 +36,32 @@
   let commandToShare: BCFDCommand | null = $state(null)
   let commandsRevision = $state('')
   let externalConflict = $state(false)
+  let commandsLoaded = $state(false)
+  let loading = $state(false)
+  let loadVersion = 0
+  let importing = $state(false)
+  let operationError = $state('')
+  const persistence = createCommandPersistence(
+    (snapshot) => window.electron.ipcRenderer.invoke('save-commands', snapshot),
+    (snapshot, revision) => {
+      commands = snapshot.bcfdCommands
+      commandsRevision = revision
+    }
+  )
+  const commandSaveStatus = persistence.status
+  let mutationBlocked = $derived(
+    !commandsLoaded ||
+      loading ||
+      $commandSaveStatus.saving ||
+      $commandSaveStatus.pending ||
+      importing ||
+      externalConflict
+  )
 
   onMount(() => {
     const handleResourceChanged = (event: ResourceChangedEvent) => {
       if (event.kind !== 'commands' || event.source === 'renderer') return
-      if (isEditing) externalConflict = true
+      if (isEditing || $commandSaveStatus.pending || importing) externalConflict = true
       else void loadCommands()
     }
     window.electron.ipcRenderer.on('resource:changed', handleResourceChanged)
@@ -49,77 +71,120 @@
   })
 
   async function loadCommands() {
-    const result = await window.electron.ipcRenderer.invoke('get-commands')
-    commands = result.bcfdCommands
-    commandsRevision = result.revision || ''
-    externalConflict = false
+    const requested = ++loadVersion
+    loading = true
+    try {
+      const result = await window.electron.ipcRenderer.invoke('get-commands')
+      if (requested !== loadVersion) return false
+      commands = result.bcfdCommands
+      commandsRevision = result.revision || ''
+      commandsLoaded = true
+      externalConflict = false
+      operationError = ''
+      return true
+    } catch (error) {
+      if (requested === loadVersion) {
+        operationError = error instanceof Error ? error.message : 'Could not load commands'
+      }
+      return false
+    } finally {
+      if (requested === loadVersion) loading = false
+    }
   }
 
-  async function saveCommands() {
-    const result = await window.electron.ipcRenderer.invoke('save-commands', {
-      bcfdCommands: $state.snapshot(commands),
-      expectedRevision: commandsRevision
-    })
-    commandsRevision = result.revision || commandsRevision
+  function finishEditing() {
+    isEditing = false
+    editingCommand = null
+    editingIndex = null
   }
 
   function addCommand() {
+    if (mutationBlocked) return
     isEditing = true
     editingCommand = null
+    editingIndex = null
     externalConflict = false
   }
 
   function editCommand(command: BCFDCommand) {
+    if (mutationBlocked) return
     isEditing = true
     editingCommand = command
-    editingIndex = commands.findIndex((cmd) => cmd === command)
+    editingIndex = commands.findIndex((cmd) => cmd.id === command.id)
     externalConflict = false
   }
 
-  async function handleAdd(event: CustomEvent<BCFDCommand>) {
-    if (externalConflict) return
-    commands = [...commands, event.detail]
-    await saveCommands()
-    isEditing = false
-  }
-
-  async function handleUpdate(event: CustomEvent<{ command: BCFDCommand; index: number | null }>) {
-    if (externalConflict) return
-    const { command: updatedCommand, index } = event.detail
-    commands = commands.map((cmd, i) => (i === index ? updatedCommand : cmd))
-    await saveCommands()
-    isEditing = false
-    editingCommand = null
-    editingIndex = null
+  async function handleEditorSave(command: BCFDCommand, index: number | null): Promise<boolean> {
+    if (externalConflict || !commandsLoaded || loading || $commandSaveStatus.saving) return false
+    let next: BCFDCommand[]
+    if (editingCommand) {
+      if (index === null || !commands[index] || commands[index].id !== editingCommand.id)
+        return false
+      next = commands.map((current, i) => (i === index ? command : current))
+    } else {
+      next = [...commands, ...prepareCommandImports([command], commands)]
+    }
+    return persistence.save(
+      { bcfdCommands: next, expectedRevision: commandsRevision },
+      finishEditing
+    )
   }
 
   async function deleteCommand(command: BCFDCommand) {
-    commands = commands.filter((cmd) => cmd !== command)
-    await saveCommands()
+    if (mutationBlocked) return
+    await persistence.save({
+      bcfdCommands: commands.filter((current) => current.id !== command.id),
+      expectedRevision: commandsRevision
+    })
   }
 
   async function reloadAfterConflict() {
-    isEditing = false
-    editingCommand = null
-    editingIndex = null
-    await loadCommands()
+    if ($commandSaveStatus.saving || importing) return
+    // Keep the draft and pending retry if reading the replacement fails.
+    if (await loadCommands()) {
+      persistence.discard()
+      finishEditing()
+      showRepository = false
+    }
+  }
+
+  function cancelEditing() {
+    if ($commandSaveStatus.saving) return
+    persistence.discard()
+    finishEditing()
+    if (externalConflict) void loadCommands()
   }
 
   async function exportCommands() {
-    const result = await window.electron.ipcRenderer.invoke('export-commands')
-    if (result.success) {
-    } else if (!result.canceled) {
-      alert('Error exporting commands: ' + result.error)
+    try {
+      const result = await window.electron.ipcRenderer.invoke('export-commands')
+      if (!result.success && !result.canceled) {
+        operationError = 'Error exporting commands: ' + result.error
+      }
+    } catch (error) {
+      operationError = error instanceof Error ? error.message : 'Could not export commands'
     }
   }
 
   async function importCommands() {
-    const result = await window.electron.ipcRenderer.invoke('import-commands')
-    if (result.success) {
-      commands = [...commands, ...result.commands]
-      await saveCommands()
-    } else if (!result.canceled) {
-      alert('Error importing commands: ' + result.error)
+    if (mutationBlocked) return
+    importing = true
+    operationError = ''
+    try {
+      const result = await window.electron.ipcRenderer.invoke('import-commands')
+      if (result.success) {
+        const imported = prepareCommandImports(result.commands, commands)
+        await persistence.save({
+          bcfdCommands: [...commands, ...imported],
+          expectedRevision: commandsRevision
+        })
+      } else if (!result.canceled) {
+        operationError = 'Error importing commands: ' + result.error
+      }
+    } catch (error) {
+      operationError = error instanceof Error ? error.message : 'Could not import commands'
+    } finally {
+      importing = false
     }
   }
 
@@ -129,10 +194,12 @@
   }
 
   async function handleRepoImport(event: CustomEvent<BCFDCommand>) {
-    const importedCommand = event.detail
-    commands = [...commands, importedCommand]
-    await saveCommands()
-    showRepository = false
+    if (mutationBlocked) return
+    const imported = prepareCommandImports([event.detail], commands)
+    await persistence.save(
+      { bcfdCommands: [...commands, ...imported], expectedRevision: commandsRevision },
+      () => (showRepository = false)
+    )
   }
 
   function resetCommandSearch() {
@@ -149,25 +216,67 @@
 
 <TipCard tipId="tip_commands" icon="chat" title={$t('commands')} body={$t('tip-commands-body')} />
 <div class="">
+  {#if operationError}
+    <div class="alert alert-error m-4" role="alert">
+      <span>{operationError}</span>
+      {#if !commandsLoaded}
+        <button class="btn btn-sm" onclick={loadCommands}>Retry loading</button>
+      {/if}
+    </div>
+  {/if}
+  {#if $commandSaveStatus.error}
+    <div class="alert alert-error m-4" role="alert">
+      <span
+        >Could not confirm the command save. Your pending changes are kept for retry. {$commandSaveStatus.error}</span
+      >
+      {#if !isEditing}
+        <button
+          class="btn btn-sm"
+          disabled={$commandSaveStatus.saving || externalConflict || loading}
+          onclick={() => persistence.retry()}>Retry save</button
+        >
+      {/if}
+      <button
+        class="btn btn-sm btn-ghost"
+        disabled={$commandSaveStatus.saving || importing || loading}
+        onclick={reloadAfterConflict}>Reload and discard unsaved changes</button
+      >
+      {#if !isEditing}
+        <button
+          class="btn btn-sm btn-ghost"
+          onclick={() => {
+            persistence.discard()
+            if (externalConflict) void loadCommands()
+          }}>Discard pending save</button
+        >
+      {/if}
+    </div>
+  {:else if $commandSaveStatus.saving}
+    <p class="m-4 text-sm" role="status">Saving commands…</p>
+  {/if}
+  {#if externalConflict}
+    <div class="alert alert-warning m-4" role="alert">
+      <span
+        >This command data changed externally. Reload before saving. Reload discards your unsaved
+        command changes.</span
+      >
+      <button
+        class="btn btn-sm"
+        disabled={$commandSaveStatus.saving || importing}
+        onclick={reloadAfterConflict}>Reload</button
+      >
+    </div>
+  {/if}
   {#if showRepository}
     <CommandRepository on:import={handleRepoImport} on:close={() => (showRepository = false)} />
   {:else if isEditing}
-    {#if externalConflict}
-      <div class="alert alert-warning m-4">
-        <span>This command data changed externally. Reload before saving to avoid overwriting it.</span>
-        <button class="btn btn-sm" onclick={reloadAfterConflict}>Reload</button>
-      </div>
-    {/if}
     <CommandEditor
       mode={editingCommand ? 'edit' : 'add'}
       command={editingCommand}
       index={editingIndex}
-      on:add={handleAdd}
-      on:update={handleUpdate}
-      on:cancel={() => {
-        isEditing = false
-        externalConflict = false
-      }}
+      onSave={handleEditorSave}
+      saveBlocked={externalConflict}
+      on:cancel={cancelEditing}
     />
   {:else}
     <HeaderBar>
@@ -179,7 +288,11 @@
               class="tooltip tooltip-primary tooltip-bottom"
               data-tip={$t('browse-repository') || 'Browse Repository'}
             >
-              <button class="btn btn-secondary" onclick={() => (showRepository = true)}>
+              <button
+                class="btn btn-secondary"
+                disabled={mutationBlocked}
+                onclick={() => (showRepository = true)}
+              >
                 <span class="material-symbols-outlined">explore</span>
               </button>
             </span>
@@ -189,11 +302,11 @@
               </button>
             </span>
             <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('import')}>
-              <button class="btn btn-primary" onclick={importCommands}>
+              <button class="btn btn-primary" disabled={mutationBlocked} onclick={importCommands}>
                 <span class="material-symbols-outlined">upload</span>
               </button>
             </span>
-            <button class="btn btn-primary" onclick={addCommand}>
+            <button class="btn btn-primary" disabled={mutationBlocked} onclick={addCommand}>
               <span class="material-symbols-outlined">add</span>{$t('add-command')}
             </button>
           </div>
@@ -323,6 +436,7 @@
                 {command}
                 {editCommand}
                 {deleteCommand}
+                mutationDisabled={mutationBlocked}
                 shareCommand={$apiAuthStore.authenticated ? openShareModal : undefined}
               />
             </div>

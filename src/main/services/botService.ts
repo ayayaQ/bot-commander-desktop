@@ -157,12 +157,22 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
   const ownsConnection = () => client === connectingClient
   const acceptsEvents = () => ownsConnection() && connection
 
-  client.once(Events.ClientReady, async () => {
-    if (client !== connectingClient) return
+  connectingClient.once(Events.ClientReady, async () => {
+    if (client !== connectingClient || connectingClient.user == null) return
 
-    if (client.user == null) return
-
-    await loadBotState(ownsConnection) // Only the current attempt may restore shared state.
+    try {
+      await loadBotState(ownsConnection)
+    } catch (error) {
+      const message = `Could not load bot state: ${String(error)}`
+      rendererConsole.error(message)
+      disposeDiscordClient(connectingClient)
+      if (client === connectingClient) {
+        client = null
+        connection = false
+        event.reply('connect-error', message)
+      }
+      return
+    }
     if (client !== connectingClient) return
     // Use our bot status to set the presence of the bot
     applyBotStatus(getBotStatus())
@@ -174,14 +184,14 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
 
     connection = true
 
-    rendererConsole.success(`Connected as ${client.user.username}`)
+    rendererConsole.success(`Connected as ${connectingClient.user!.username}`)
     rendererConsole.info(
       `Serving ${client.guilds.cache.size} servers with ${commands.bcfdCommands.length} commands`
     )
 
     return event.reply('connect', {
-      user: client.user.username,
-      avatar: client.user.avatarURL()
+      user: connectingClient.user!.username,
+      avatar: connectingClient.user!.avatarURL()
     })
   })
 
@@ -247,15 +257,23 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
   })
 }
 
-export function Disconnect(event: Electron.IpcMainEvent) {
-  if (client) {
-    saveBotState() // Save bot state before disconnecting
-    disposeDiscordClient(client)
+export async function Disconnect(event: Electron.IpcMainEvent) {
+  const disconnectingClient = client
+  if (disconnectingClient) {
+    // Stop old event handlers and pending ready callbacks from owning live state immediately.
     client = null
     connection = false
-    rendererConsole.info('Disconnected from Discord')
+    disposeDiscordClient(disconnectingClient)
+    try {
+      await saveBotState()
+    } catch (error) {
+      // Disconnect remains available, but a failed checkpoint must be visible.
+      rendererConsole.error(`Could not save bot state before disconnecting: ${String(error)}`)
+    }
+    if (!client) rendererConsole.info('Disconnected from Discord')
   }
 
+  if (client && client !== disconnectingClient) return
   return event.reply('disconnect')
 }
 

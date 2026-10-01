@@ -6,18 +6,20 @@
   import CommandOutputPreview from './CommandOutputPreview.svelte'
 
   interface Props {
-    command: BCFDCommand;
-    editCommand: (command: BCFDCommand) => void;
-    deleteCommand: (command: BCFDCommand) => void;
-    shareCommand?: ((command: BCFDCommand) => void) | undefined;
+    command: BCFDCommand
+    editCommand: (command: BCFDCommand) => void
+    deleteCommand: (command: BCFDCommand) => void
+    mutationDisabled?: boolean
+    shareCommand?: ((command: BCFDCommand) => void) | undefined
   }
 
   let {
     command,
     editCommand,
     deleteCommand,
+    mutationDisabled = false,
     shareCommand = undefined
-  }: Props = $props();
+  }: Props = $props()
 
   let dialog: HTMLDialogElement = $state()
 
@@ -99,7 +101,10 @@
       </div>
       <div class="space-x-2 shrink-0">
         <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('edit')}>
-          <button class="btn btn-square btn-ghost" onclick={() => editCommand(command)}
+          <button
+            class="btn btn-square btn-ghost"
+            disabled={mutationDisabled}
+            onclick={() => editCommand(command)}
             ><span class="material-symbols-outlined">edit</span></button
           >
         </span>
@@ -118,6 +123,7 @@
         <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('delete')}>
           <button
             class="btn btn-square btn-ghost"
+            disabled={mutationDisabled}
             onclick={(e) => {
               if (e.shiftKey) {
                 deleteCommand(command)
@@ -138,8 +144,10 @@
           </p>
           <div class="modal-action">
             <form method="dialog">
-              <button class="btn btn-sm btn-error" onclick={() => deleteCommand(command)}
-                >{$t('delete')}</button
+              <button
+                class="btn btn-sm btn-error"
+                disabled={mutationDisabled}
+                onclick={() => deleteCommand(command)}>{$t('delete')}</button
               >
               <button class="btn btn-sm btn-ghost">{$t('cancel')}</button>
             </form>

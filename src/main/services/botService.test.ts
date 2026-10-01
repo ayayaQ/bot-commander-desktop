@@ -112,6 +112,7 @@ describe('botService Connect', () => {
     vi.resetModules()
     vi.clearAllMocks()
     mocks.loadBotState.mockResolvedValue(undefined)
+    mocks.saveBotState.mockResolvedValue(undefined)
     clients = []
     mocks.createClient.mockImplementation(() => {
       const client = new FakeClient()
@@ -315,5 +316,106 @@ describe('botService Connect', () => {
     await oldReady
     expect(oldEvent.reply).not.toHaveBeenCalled()
     expect(mocks.stats.incrementMessagesReceived).not.toHaveBeenCalled()
+  })
+
+  it('reports a current state-restoration failure and safely disposes that ready client', async () => {
+    mocks.loadBotState.mockRejectedValueOnce(new Error('disk read failed'))
+    const { Connect, getClient } = await import('./botService')
+    const event = ipcEvent()
+    Connect(event, 'test-token')
+    await clients[0].ready()
+    await flushLogin()
+
+    expect(getClient()).toBeNull()
+    expect(clients[0].destroy).toHaveBeenCalledOnce()
+    expect(event.reply).toHaveBeenCalledExactlyOnceWith(
+      'connect-error',
+      'Could not load bot state: Error: disk read failed'
+    )
+    expect(mocks.consoleError).toHaveBeenCalledWith(
+      'Could not load bot state: Error: disk read failed'
+    )
+    expect(mocks.consoleSuccess).not.toHaveBeenCalled()
+  })
+
+  it('does not disturb a replacement when an obsolete state-restoration fails', async () => {
+    const loading = deferred<void>()
+    mocks.loadBotState.mockReturnValueOnce(loading.promise)
+    const { Connect, getClient } = await import('./botService')
+    const oldEvent = ipcEvent()
+    const newEvent = ipcEvent()
+    Connect(oldEvent, 'old-test-token')
+    const oldReady = clients[0].ready()
+    Connect(newEvent, 'new-test-token')
+    await clients[1].ready()
+    loading.reject(new Error('old read failed'))
+    await oldReady
+    await flushLogin()
+
+    expect(getClient()).toBe(clients[1])
+    expect(clients[0].destroy).toHaveBeenCalledOnce()
+    expect(clients[1].destroy).not.toHaveBeenCalled()
+    expect(oldEvent.reply).not.toHaveBeenCalled()
+    expect(newEvent.reply).toHaveBeenCalledExactlyOnceWith('connect', {
+      user: 'test-bot',
+      avatar: 'test-avatar'
+    })
+  })
+
+  it.each([false, true])(
+    'cancels the captured client before awaiting a checkpoint and suppresses stale disconnect replies (failed=%s)',
+    async (failed) => {
+      const checkpoint = deferred<void>()
+      const { Connect, Disconnect, getClient } = await import('./botService')
+      const oldEvent = ipcEvent()
+      const newEvent = ipcEvent()
+      Connect(oldEvent, 'old-test-token')
+      await clients[0].ready()
+      vi.mocked(oldEvent.reply).mockClear()
+      mocks.saveBotState.mockReturnValueOnce(checkpoint.promise)
+
+      const disconnecting = Disconnect(oldEvent)
+      expect(getClient()).toBeNull()
+      expect(clients[0].destroy).toHaveBeenCalledOnce()
+      expect(mocks.saveBotState).toHaveBeenCalledOnce()
+      await clients[0].emit(Events.MessageCreate)
+      expect(mocks.stats.incrementMessagesReceived).not.toHaveBeenCalled()
+
+      Connect(newEvent, 'new-test-token')
+      await clients[1].ready()
+      if (failed) checkpoint.reject(new Error('checkpoint failed'))
+      else checkpoint.resolve(undefined)
+      await disconnecting
+
+      expect(getClient()).toBe(clients[1])
+      expect(clients[1].destroy).not.toHaveBeenCalled()
+      expect(oldEvent.reply).not.toHaveBeenCalled()
+      expect(newEvent.reply).toHaveBeenCalledExactlyOnceWith('connect', {
+        user: 'test-bot',
+        avatar: 'test-avatar'
+      })
+      if (failed) {
+        expect(mocks.consoleError).toHaveBeenCalledWith(
+          'Could not save bot state before disconnecting: Error: checkpoint failed'
+        )
+      }
+    }
+  )
+
+  it('finishes disconnect and reports a checkpoint failure without a replacement', async () => {
+    mocks.saveBotState.mockRejectedValueOnce(new Error('checkpoint failed'))
+    const { Connect, Disconnect, getClient } = await import('./botService')
+    const event = ipcEvent()
+    Connect(event, 'test-token')
+    await clients[0].ready()
+    vi.mocked(event.reply).mockClear()
+    await Disconnect(event)
+
+    expect(getClient()).toBeNull()
+    expect(clients[0].destroy).toHaveBeenCalledOnce()
+    expect(event.reply).toHaveBeenCalledExactlyOnceWith('disconnect')
+    expect(mocks.consoleError).toHaveBeenCalledWith(
+      'Could not save bot state before disconnecting: Error: checkpoint failed'
+    )
   })
 })
