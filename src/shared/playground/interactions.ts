@@ -5,16 +5,12 @@ import type {
   BCFDInteractionCommand,
   BCFDSlashCommandOption
 } from '../../main/types/types'
-import {
-  addMessage,
-  assertNoHeldFeatures,
-  buildFakeEmbed,
-  hasPermission,
-  toggleRole,
-  validateState
-} from './engine'
+import { addMessage, buildFakeEmbed, hasPermission, toggleRole, validateState } from './engine'
 import { evaluateTemplate } from './template'
 import type { TemplateContext } from './template'
+import type { ScriptSandboxFactory } from './script'
+import { executionContext } from './executionContext'
+import { recordCooldown, remainingCooldown } from './sessionState'
 import { PLAYGROUND_LIMITS } from './types'
 import type { PlaygroundInteractionRequest, PlaygroundResult, PlaygroundState } from './types'
 
@@ -148,11 +144,11 @@ function executeAction(
   senderId: string,
   options: Record<string, string | number | boolean> | undefined,
   isButton: boolean,
-  trace: string[]
+  trace: string[],
+  ctx: TemplateContext
 ): void {
   const sender = state.members.find((member) => member.id === senderId)!
   // Production interaction contexts have no messageEvent/mentionedMember.
-  const ctx: TemplateContext = { state, sender, content: '', trigger: '', options }
   const render = (text: string) => evaluateTemplate(text, ctx)
   if (!isButton) {
     if (action.deleteX) {
@@ -228,7 +224,10 @@ function executeAction(
   }
 }
 
-export function runInteraction(request: PlaygroundInteractionRequest): PlaygroundResult {
+export function runInteraction(
+  request: PlaygroundInteractionRequest,
+  factory?: ScriptSandboxFactory
+): PlaygroundResult {
   validateState(request.state)
   if (
     !Array.isArray(request.interactions) ||
@@ -243,6 +242,7 @@ export function runInteraction(request: PlaygroundInteractionRequest): Playgroun
     draft = structuredClone(request.state)
   const trace: string[] = [],
     errors: string[] = []
+  let scope: ReturnType<typeof executionContext> | undefined
   try {
     let command: BCFDInteractionCommand, action: BCFDInteractionAction
     let options: Record<string, string | number | boolean> | undefined
@@ -276,7 +276,37 @@ export function runInteraction(request: PlaygroundInteractionRequest): Playgroun
         `Clicked ${request.customId}; slash options are unavailable on production button events`
       )
     }
-    assertNoHeldFeatures(command)
+    scope = executionContext(
+      {
+        state: draft,
+        sender: draft.members.find((member) => member.id === request.senderId)!,
+        content: '',
+        trigger: '',
+        options,
+        command,
+        trace
+      },
+      factory
+    )
+    if (request.kind === 'slash' && (command.cooldown ?? 0) > 0 && command.cooldownType) {
+      const remaining = remainingCooldown(draft, command, request.senderId)
+      if (remaining > 0) {
+        addMessage(draft, {
+          kind: 'bot',
+          author: 'Playground Bot',
+          ephemeral: true,
+          recipient: sender.id,
+          content: command.cooldownMessage
+            ? evaluateTemplate(command.cooldownMessage, scope.context)
+            : `This command is on cooldown. Try again in ${remaining}s.`
+        })
+        trace.push(
+          `Blocked: ${command.cooldownType.toLowerCase()} cooldown; ${remaining}s remaining`
+        )
+        scope.commit()
+        return { state: draft, trace, errors }
+      }
+    }
     executeAction(
       draft,
       command,
@@ -284,11 +314,16 @@ export function runInteraction(request: PlaygroundInteractionRequest): Playgroun
       request.senderId,
       options,
       request.kind === 'button',
-      trace
+      trace,
+      scope.context
     )
+    if (request.kind === 'slash') recordCooldown(draft, command, request.senderId)
+    scope.commit()
     return { state: draft, trace, errors }
   } catch (error) {
     errors.push(error instanceof Error ? error.message : 'Interaction execution failed')
     return { state: original, trace: ['Failed closed; no interaction effects applied'], errors }
+  } finally {
+    scope?.dispose()
   }
 }

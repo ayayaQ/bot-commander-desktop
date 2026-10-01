@@ -3,6 +3,7 @@
   import type { BCFDCommand, BCFDInteractionCommand } from '../types/types'
   import { createPlaygroundState, PLAYGROUND_LIMITS } from '../../../shared/playground/types'
   import type { FakePermission, PlaygroundRequest } from '../../../shared/playground/types'
+  import { formatBotStateDraft, parseBotStateDraft } from '../../../shared/playground/botStateDraft'
   import { PlaygroundSavedData } from '../utils/playgroundSavedData'
   import { PlaygroundSession } from '../utils/playgroundSession'
 
@@ -10,7 +11,10 @@
   const session = new PlaygroundSession(
     () => new Worker(new URL('../utils/playgroundWorker.ts', import.meta.url), { type: 'module' })
   )
-  let world = $state(createPlaygroundState())
+  const initialWorld = createPlaygroundState()
+  let world = $state(initialWorld)
+  let botStateDraft = $state(formatBotStateDraft(initialWorld.botState))
+  let botStateDraftError = $state('')
   let commands = $state<BCFDCommand[]>([])
   let interactions = $state<BCFDInteractionCommand[]>([])
   let mode = $state<'message' | 'slash'>('message')
@@ -60,12 +64,13 @@
     loading = false
     busy = false
     world = createPlaygroundState()
+    syncBotStateDraft()
     senderId = world.members[0].id
     content = ''
     roleIdDraft = ''
     roleNameDraft = ''
     optionInputs = Object.create(null)
-    trace = ['Fake server reset; saved commands were not changed']
+    trace = ['Fake session reset; saved commands were not changed']
     errors = []
   }
 
@@ -78,6 +83,7 @@
       const result = await promise
       if (!alive || !session.isCurrent(revision)) return
       world = result.state
+      syncBotStateDraft()
       trace = result.trace
       errors = result.errors
       content = ''
@@ -91,6 +97,27 @@
     } finally {
       if (alive && session.isCurrent(revision)) busy = false
     }
+  }
+
+  function syncBotStateDraft() {
+    botStateDraft = formatBotStateDraft($state.snapshot(world.botState))
+    botStateDraftError = ''
+  }
+
+  function applyBotStateDraft() {
+    if (busy) return
+    try {
+      world.botState = parseBotStateDraft(botStateDraft)
+      syncBotStateDraft()
+    } catch (error) {
+      botStateDraftError =
+        error instanceof Error ? error.message : 'Enter a bounded JSON object for bot state'
+    }
+  }
+
+  function advanceClock(milliseconds: number) {
+    if (busy || !Number.isSafeInteger(world.clockMs + milliseconds)) return
+    world.clockMs += milliseconds
   }
 
   function send() {
@@ -198,15 +225,86 @@
     <button class="btn btn-sm" disabled={busy || loading} onclick={loadCommands}
       >Reload saved data</button
     >
-    <button class="btn btn-sm btn-warning" onclick={reset}>Reset fake server</button>
+    <button class="btn btn-sm btn-warning" onclick={reset}>Reset fake session</button>
     <p class="w-full text-sm">
-      Offline fake server. Saved commands are read-only. Scripts, AI, state writes and cooldowns are
-      on hold. Unsupported effects fail closed. This is a bounded simulator, not exact Discord
-      network parity.
+      Offline fake server. Saved commands are read-only. Scripts, bot state and cooldowns run only
+      in this bounded simulation. AI replies and failures are simulated; no provider is contacted.
+      Unsupported effects fail closed. This is not exact Discord network parity.
     </p>
     <p class="w-full text-xs opacity-70">
       Server ID: {world.guildId} · Channel ID: {world.channelId}
     </p>
+    <details class="w-full">
+      <summary class="text-xs cursor-pointer">Offline session controls</summary>
+      <div class="grid gap-3 mt-2 md:grid-cols-2">
+        <div class="space-y-2">
+          <h2 class="font-semibold text-sm">Fake clock and cooldowns</h2>
+          <p class="text-xs">Fake time: {world.clockMs.toLocaleString()} ms</p>
+          <div class="flex gap-2">
+            <button
+              class="btn btn-xs"
+              disabled={busy || !Number.isSafeInteger(world.clockMs + 1000)}
+              onclick={() => advanceClock(1000)}>Advance 1 second</button
+            >
+            <button
+              class="btn btn-xs"
+              disabled={busy || !Number.isSafeInteger(world.clockMs + 10_000)}
+              onclick={() => advanceClock(10_000)}>Advance 10 seconds</button
+            >
+          </div>
+          <p class="text-xs opacity-70">
+            Time advances only when you click. Reset fake session clears the clock and cooldowns.
+          </p>
+          <h2 class="font-semibold text-sm">Offline AI simulation</h2>
+          <label class="block text-xs"
+            >Simulated AI response
+            <textarea
+              class="textarea textarea-sm w-full mt-1"
+              rows={2}
+              bind:value={world.ai.response}
+              maxlength={PLAYGROUND_LIMITS.output}
+              disabled={busy}></textarea></label
+          >
+          <label class="block text-xs"
+            >Simulated AI failure (empty for success)
+            <input
+              class="input input-sm w-full mt-1"
+              bind:value={world.ai.error}
+              maxlength={PLAYGROUND_LIMITS.input}
+              disabled={busy}
+              placeholder="Example: simulated provider unavailable"
+            /></label
+          >
+          <p class="text-xs opacity-70">These values never call a real AI provider.</p>
+        </div>
+        <div class="space-y-2">
+          <h2 class="font-semibold text-sm">Fake session bot state</h2>
+          <label class="block text-xs"
+            >Bot state JSON draft
+            <textarea
+              class="textarea textarea-sm w-full font-mono mt-1"
+              rows={8}
+              bind:value={botStateDraft}
+              maxlength={PLAYGROUND_LIMITS.stateBytes}
+              disabled={busy}
+              aria-invalid={botStateDraftError ? 'true' : 'false'}
+              aria-describedby="playground-bot-state-help playground-bot-state-error"
+            ></textarea></label
+          >
+          <button class="btn btn-xs" disabled={busy} onclick={applyBotStateDraft}
+            >Apply draft</button
+          >
+          <p id="playground-bot-state-help" class="text-xs opacity-70">
+            Apply commits a JSON object to this fake session only. Draft edits are not sent. Every
+            completed request refreshes the draft from committed state, including script changes.
+            Maximum {PLAYGROUND_LIMITS.stateBytes.toLocaleString()} characters.
+          </p>
+          <p id="playground-bot-state-error" class="text-xs text-error" aria-live="polite">
+            {botStateDraftError}
+          </p>
+        </div>
+      </div>
+    </details>
     <details class="w-full">
       <summary class="text-xs cursor-pointer">Fake channel/server context</summary>
       <div class="flex flex-wrap gap-2 mt-2">

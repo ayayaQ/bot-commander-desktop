@@ -202,7 +202,7 @@ describe('isolated playground message simulation', () => {
     '$createChannel(foo)',
     '$unknown',
     '$if(false)$eval return 1 $halt$else safe$endif'
-  ])('fails closed on held or unsupported effects: %s', (template) => {
+  ])('fails closed without a script sandbox or on unsupported effects: %s', (template) => {
     const input = request({
       channelMessage: 'would send',
       privateMessage: template,
@@ -216,8 +216,8 @@ describe('isolated playground message simulation', () => {
     expect(result.state.members[0].roles).toEqual(input.state.members[0].roles)
   })
 
-  it('does not run scripts, held cooldowns, reactions or unknown destinations', () => {
-    for (const patch of [{ cooldown: 5 }, { reaction: 'emoji' }, { specificChannel: 'outside' }]) {
+  it('does not run reactions or unknown destinations', () => {
+    for (const patch of [{ reaction: 'emoji' }, { specificChannel: 'outside' }]) {
       const result = runMessage(request({ channelMessage: 'not sent', ...patch }))
       expect(result.errors).toHaveLength(1)
       expect(result.state.messages).toHaveLength(1)
