@@ -13,7 +13,6 @@ import {
   Guild,
   GuildBan,
   GuildMember,
-  IntentsBitField,
   Interaction,
   Message,
   MessageReaction,
@@ -22,7 +21,6 @@ import {
   PartialDMChannel,
   PartialGuildMember,
   PartialMessageReaction,
-  Partials,
   PartialUser,
   PermissionsBitField,
   PresenceStatusData,
@@ -55,8 +53,32 @@ import {
 import { getStatsInstance, Stats } from '../utils/stats'
 import { getCooldownManager } from './cooldownManager'
 import { rendererConsole } from '../utils/rendererConsole'
+import { getSettings, onSettingsChanged } from './settingsService'
+import { classifySpamWithOpenRouter } from './aiProviderService'
+import { SpamProtectionService } from './spamProtectionService'
+import {
+  DiscordLoginLifetime,
+  formatDiscordLoginError,
+  getDiscordClientOptions
+} from './discordGateway'
+
+const spamProtection = new SpamProtectionService({
+  getSettings,
+  classify: classifySpamWithOpenRouter,
+  logger: rendererConsole
+})
+onSettingsChanged((next, previous) => spamProtection.settingsChanged(next, previous))
+
+export function stopSpamProtection() {
+  spamProtection.stop()
+}
+
+export function resumeSpamProtection() {
+  if (client && connection) spamProtection.start()
+}
 
 let client: Client | null = null
+const loginLifetimes = new WeakMap<Client, DiscordLoginLifetime>()
 let connection: boolean = false
 let commands: { bcfdCommands: BCFDCommand[]; bcfdSlashCommands: BCFDSlashCommand[] } = {
   bcfdCommands: [],
@@ -118,10 +140,15 @@ export function getClient() {
   return client
 }
 
+function disposeDiscordClient(target: Client): void {
+  loginLifetimes.get(target)?.cancel()
+}
+
 export function Connect(event: Electron.IpcMainEvent, token: string) {
   if (connection) {
     if (client) {
-      client.destroy()
+      spamProtection.stop()
+      disposeDiscordClient(client)
       client = null
       connection = false
     }
@@ -139,24 +166,35 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
     sameSite: 'strict'
   })
 
-  client = new Client({
-    intents: [
-      IntentsBitField.Flags.Guilds,
-      IntentsBitField.Flags.GuildMembers,
-      IntentsBitField.Flags.GuildMessages,
-      IntentsBitField.Flags.MessageContent,
-      IntentsBitField.Flags.DirectMessages,
-      IntentsBitField.Flags.GuildMessageReactions
-    ],
-    partials: [Partials.Channel, Partials.Message, Partials.Reaction]
+  if (client) disposeDiscordClient(client)
+  spamProtection.start()
+  const connectingClient = new Client(getDiscordClientOptions())
+  const lifetime = new DiscordLoginLifetime(connectingClient, (error) => {
+    rendererConsole.error(`Failed to disconnect from Discord: ${String(error)}`)
   })
+  loginLifetimes.set(connectingClient, lifetime)
+  client = connectingClient
+  const ownsConnection = () => client === connectingClient
+  const acceptsEvents = () => ownsConnection() && connection
 
-  client.once(Events.ClientReady, async () => {
-    if (client == null) return
+  connectingClient.once(Events.ClientReady, async () => {
+    if (client !== connectingClient || connectingClient.user == null) return
 
-    if (client.user == null) return
-
-    await loadBotState() // Load bot state when client is ready
+    try {
+      await loadBotState(ownsConnection)
+    } catch (error) {
+      const message = `Could not load bot state: ${String(error)}`
+      rendererConsole.error(message)
+      disposeDiscordClient(connectingClient)
+      if (client === connectingClient) {
+        spamProtection.stop()
+        client = null
+        connection = false
+        event.reply('connect-error', message)
+      }
+      return
+    }
+    if (client !== connectingClient) return
     // Use our bot status to set the presence of the bot
     applyBotStatus(getBotStatus())
 
@@ -167,27 +205,44 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
 
     connection = true
 
-    rendererConsole.success(`Connected as ${client.user.username}`)
+    rendererConsole.success(`Connected as ${connectingClient.user!.username}`)
     rendererConsole.info(
       `Serving ${client.guilds.cache.size} servers with ${commands.bcfdCommands.length} commands`
     )
 
     return event.reply('connect', {
-      user: client.user.username,
-      avatar: client.user.avatarURL()
+      user: connectingClient.user!.username,
+      avatar: connectingClient.user!.avatarURL()
     })
   })
 
   client.on(Events.MessageCreate, (message) => {
+    if (!acceptsEvents()) return
     stats.incrementMessagesReceived()
     if (!message.author.bot) {
       rendererConsole.event(`Message received`)
     }
-    onMessageCreate(message)
+    void onMessageCreate(message, connectingClient).catch(() => {
+      rendererConsole.error('Could not process an incoming message')
+    })
+  })
+
+  client.on(Events.MessageUpdate, (_, message) => {
+    if (!acceptsEvents()) return
+    spamProtection.invalidateEdit(message.id, message.content)
+  })
+  client.on(Events.MessageDelete, (message) => {
+    if (!acceptsEvents()) return
+    spamProtection.invalidate(message.id)
+  })
+  client.on(Events.MessageBulkDelete, (messages) => {
+    if (!acceptsEvents()) return
+    for (const id of messages.keys()) spamProtection.invalidate(id)
   })
 
   // when a user joins a guild
   client.on(Events.GuildMemberAdd, (member) => {
+    if (!acceptsEvents()) return
     stats.incrementJoinEventsReceived()
     rendererConsole.event(`User joined a guild`)
     onGuildMemberAdd(member)
@@ -195,6 +250,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
 
   // when a user leaves a guild
   client.on(Events.GuildMemberRemove, (member) => {
+    if (!acceptsEvents()) return
     stats.incrementLeaveEventsReceived()
     rendererConsole.event(`User left a guild`)
     onGuildMemberRemove(member)
@@ -202,6 +258,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
 
   // when a user is banned from a guild
   client.on(Events.GuildBanAdd, (ban) => {
+    if (!acceptsEvents()) return
     stats.incrementBanEventsReceived()
     rendererConsole.warning(`User was banned from a guild`)
     onGuildBanAdd(ban)
@@ -209,6 +266,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
 
   // when a reaction is added to a message
   client.on(Events.MessageReactionAdd, (reaction, user) => {
+    if (!acceptsEvents()) return
     if (!user.bot) {
       rendererConsole.event(`User reacted with ${reaction.emoji.name}`)
     }
@@ -216,31 +274,44 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
   })
 
   client.on(Events.InteractionCreate, (interaction) => {
+    if (!acceptsEvents()) return
     if (interaction.isChatInputCommand()) {
       rendererConsole.event(`Slash command: /${interaction.commandName}`)
     }
     onInteractionCreate(interaction)
   })
 
-  client.login(token).catch((err) => {
-    const message = `Login failed: ${err.message || err}`
+  lifetime.login(token).catch((err: unknown) => {
+    // A late rejection from an earlier attempt must not destroy the current client.
+    if (client !== connectingClient) return
+    const message = formatDiscordLoginError(err)
     rendererConsole.error(message)
-    client?.destroy()
+    spamProtection.stop()
+    lifetime.cancel()
     client = null
     connection = false
     event.reply('connect-error', message)
   })
 }
 
-export function Disconnect(event: Electron.IpcMainEvent) {
-  if (client) {
-    saveBotState() // Save bot state before disconnecting
-    client.destroy()
+export async function Disconnect(event: Electron.IpcMainEvent) {
+  spamProtection.stop()
+  const disconnectingClient = client
+  if (disconnectingClient) {
+    // Stop old event handlers and pending ready callbacks from owning live state immediately.
     client = null
     connection = false
-    rendererConsole.info('Disconnected from Discord')
+    disposeDiscordClient(disconnectingClient)
+    try {
+      await saveBotState()
+    } catch (error) {
+      // Disconnect remains available, but a failed checkpoint must be visible.
+      rendererConsole.error(`Could not save bot state before disconnecting: ${String(error)}`)
+    }
+    if (!client) rendererConsole.info('Disconnected from Discord')
   }
 
+  if (client && client !== disconnectingClient) return
   return event.reply('disconnect')
 }
 
@@ -345,9 +416,7 @@ async function handleSlashCommand(interaction: ChatInputCommandInteraction) {
       interactionCommand.cooldownType
     ) {
       const cooldownLevel = interactionCommand.cooldownType.toLowerCase() as
-        | 'user'
-        | 'server'
-        | 'global'
+        'user' | 'server' | 'global'
       const cooldownResult = getCooldownManager().check(
         interactionCommand.id,
         interactionCommand.cooldown,
@@ -385,9 +454,7 @@ async function handleSlashCommand(interaction: ChatInputCommandInteraction) {
       interactionCommand.cooldownType
     ) {
       const cooldownLevel = interactionCommand.cooldownType.toLowerCase() as
-        | 'user'
-        | 'server'
-        | 'global'
+        'user' | 'server' | 'global'
       getCooldownManager().record(
         interactionCommand.id,
         interactionCommand.cooldown,
@@ -517,7 +584,10 @@ async function executeInteractionModerationActions(
   }
 
   if (!interaction.guild) {
-    await respondToInteractionFailure(interaction, 'Moderation actions can only be used in a server.')
+    await respondToInteractionFailure(
+      interaction,
+      'Moderation actions can only be used in a server.'
+    )
     return false
   }
 
@@ -901,7 +971,8 @@ async function channelMessage(
   replyTarget?: OmitPartialGroupDMChannel<Message<boolean>>
 ): Promise<boolean> {
   if (commandCapabilities.sendsChannelMessage(command)) {
-    const typingChannel = command.channelMessageAsReply && replyTarget ? replyTarget.channel : channel
+    const typingChannel =
+      command.channelMessageAsReply && replyTarget ? replyTarget.channel : channel
     const stopTyping = startTypingUntilStopped(typingChannel, command.channelMessageTyping)
 
     try {
@@ -1392,11 +1463,16 @@ async function onMessageReactionAdd(
   }
 }
 
-async function onMessageCreate(message: OmitPartialGroupDMChannel<Message<boolean>>) {
+async function onMessageCreate(
+  message: OmitPartialGroupDMChannel<Message<boolean>>,
+  messageClient: Client
+) {
   if (message.author.bot) return
   if (message.channel.type === ChannelType.DM) {
     stats.incrementPrivateMessagesReceived()
   }
+
+  if ((await spamProtection.check(message)) !== 'allow' || client !== messageClient) return
 
   let firstItem = message.content.split(' ')[0]
   let messageWordCount = message.content.split(' ').length
