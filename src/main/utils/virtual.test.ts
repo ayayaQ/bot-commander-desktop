@@ -517,6 +517,44 @@ describe('serialized runtime bot state checkpoints', () => {
     expect(await readBotState()).toEqual({ count: 1 })
   })
 
+  it('rechecks ownership after a missing state file before applying default state', async () => {
+    await setBotState({ kept: true })
+    const gate = deferred()
+    const entered = deferred()
+    let current = true
+    read.mockImplementationOnce(async () => {
+      entered.resolve()
+      await gate.promise
+      throw Object.assign(new Error('missing'), { code: 'ENOENT' })
+    })
+    const loading = loadBotState(() => current)
+    await entered.promise
+    current = false
+    gate.resolve()
+    await loading
+    expect(await readBotState()).toEqual({ kept: true })
+  })
+
+  it('checks ownership when a queued load starts after an older transaction', async () => {
+    await setBotState({ kept: true })
+    const gate = deferred()
+    const entered = deferred()
+    const transaction = withBotStateTransaction(async () => {
+      entered.resolve()
+      await gate.promise
+    })
+    await entered.promise
+    let current = true
+    read.mockClear()
+    const loading = loadBotState(() => current)
+    current = false
+    gate.resolve()
+    await transaction
+    await loading
+    expect(read).not.toHaveBeenCalled()
+    expect(await readBotState()).toEqual({ kept: true })
+  })
+
   it('recovers a valid backup state without promoting corrupt primary contents', async () => {
     await fs.writeFile(join(mocks.directory, 'botState.json'), '{corrupt')
     await fs.writeFile(join(mocks.directory, 'botState.json.bak'), '{"recovered":true}')

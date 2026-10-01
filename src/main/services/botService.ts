@@ -13,7 +13,6 @@ import {
   Guild,
   GuildBan,
   GuildMember,
-  IntentsBitField,
   Interaction,
   Message,
   MessageReaction,
@@ -22,7 +21,6 @@ import {
   PartialDMChannel,
   PartialGuildMember,
   PartialMessageReaction,
-  Partials,
   PartialUser,
   PermissionsBitField,
   PresenceStatusData,
@@ -55,8 +53,14 @@ import {
 import { getStatsInstance, Stats } from '../utils/stats'
 import { getCooldownManager } from './cooldownManager'
 import { rendererConsole } from '../utils/rendererConsole'
+import {
+  DiscordLoginLifetime,
+  formatDiscordLoginError,
+  getDiscordClientOptions
+} from './discordGateway'
 
 let client: Client | null = null
+const loginLifetimes = new WeakMap<Client, DiscordLoginLifetime>()
 let connection: boolean = false
 let commands: { bcfdCommands: BCFDCommand[]; bcfdSlashCommands: BCFDSlashCommand[] } = {
   bcfdCommands: [],
@@ -118,10 +122,14 @@ export function getClient() {
   return client
 }
 
+function disposeDiscordClient(target: Client): void {
+  loginLifetimes.get(target)?.cancel()
+}
+
 export function Connect(event: Electron.IpcMainEvent, token: string) {
   if (connection) {
     if (client) {
-      client.destroy()
+      disposeDiscordClient(client)
       client = null
       connection = false
     }
@@ -139,28 +147,25 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
     sameSite: 'strict'
   })
 
-  client = new Client({
-    intents: [
-      IntentsBitField.Flags.Guilds,
-      IntentsBitField.Flags.GuildMembers,
-      IntentsBitField.Flags.GuildMessages,
-      IntentsBitField.Flags.MessageContent,
-      IntentsBitField.Flags.DirectMessages,
-      IntentsBitField.Flags.GuildMessageReactions
-    ],
-    partials: [Partials.Channel, Partials.Message, Partials.Reaction]
+  if (client) disposeDiscordClient(client)
+  const connectingClient = new Client(getDiscordClientOptions())
+  const lifetime = new DiscordLoginLifetime(connectingClient, (error) => {
+    rendererConsole.error(`Failed to disconnect from Discord: ${String(error)}`)
   })
+  loginLifetimes.set(connectingClient, lifetime)
+  client = connectingClient
+  const ownsConnection = () => client === connectingClient
+  const acceptsEvents = () => ownsConnection() && connection
 
-  const connectingClient = client
   connectingClient.once(Events.ClientReady, async () => {
     if (client !== connectingClient || connectingClient.user == null) return
 
     try {
-      await loadBotState(() => client === connectingClient)
+      await loadBotState(ownsConnection)
     } catch (error) {
       const message = `Could not load bot state: ${String(error)}`
       rendererConsole.error(message)
-      connectingClient.destroy()
+      disposeDiscordClient(connectingClient)
       if (client === connectingClient) {
         client = null
         connection = false
@@ -191,6 +196,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
   })
 
   client.on(Events.MessageCreate, (message) => {
+    if (!acceptsEvents()) return
     stats.incrementMessagesReceived()
     if (!message.author.bot) {
       rendererConsole.event(`Message received`)
@@ -200,6 +206,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
 
   // when a user joins a guild
   client.on(Events.GuildMemberAdd, (member) => {
+    if (!acceptsEvents()) return
     stats.incrementJoinEventsReceived()
     rendererConsole.event(`User joined a guild`)
     onGuildMemberAdd(member)
@@ -207,6 +214,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
 
   // when a user leaves a guild
   client.on(Events.GuildMemberRemove, (member) => {
+    if (!acceptsEvents()) return
     stats.incrementLeaveEventsReceived()
     rendererConsole.event(`User left a guild`)
     onGuildMemberRemove(member)
@@ -214,6 +222,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
 
   // when a user is banned from a guild
   client.on(Events.GuildBanAdd, (ban) => {
+    if (!acceptsEvents()) return
     stats.incrementBanEventsReceived()
     rendererConsole.warning(`User was banned from a guild`)
     onGuildBanAdd(ban)
@@ -221,6 +230,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
 
   // when a reaction is added to a message
   client.on(Events.MessageReactionAdd, (reaction, user) => {
+    if (!acceptsEvents()) return
     if (!user.bot) {
       rendererConsole.event(`User reacted with ${reaction.emoji.name}`)
     }
@@ -228,17 +238,19 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
   })
 
   client.on(Events.InteractionCreate, (interaction) => {
+    if (!acceptsEvents()) return
     if (interaction.isChatInputCommand()) {
       rendererConsole.event(`Slash command: /${interaction.commandName}`)
     }
     onInteractionCreate(interaction)
   })
 
-  connectingClient.login(token).catch((err) => {
+  lifetime.login(token).catch((err: unknown) => {
+    // A late rejection from an earlier attempt must not destroy the current client.
     if (client !== connectingClient) return
-    const message = `Login failed: ${err.message || err}`
+    const message = formatDiscordLoginError(err)
     rendererConsole.error(message)
-    connectingClient.destroy()
+    lifetime.cancel()
     client = null
     connection = false
     event.reply('connect-error', message)
@@ -251,13 +263,13 @@ export async function Disconnect(event: Electron.IpcMainEvent) {
     // Stop old event handlers and pending ready callbacks from owning live state immediately.
     client = null
     connection = false
+    disposeDiscordClient(disconnectingClient)
     try {
       await saveBotState()
     } catch (error) {
       // Disconnect remains available, but a failed checkpoint must be visible.
       rendererConsole.error(`Could not save bot state before disconnecting: ${String(error)}`)
     }
-    disconnectingClient.destroy()
     if (!client) rendererConsole.info('Disconnected from Discord')
   }
 
