@@ -6,6 +6,10 @@ A no-code Discord bot builder. Design commands through a GUI and host your bot d
 
 Want to try a ready-to-use build? See the [releases](https://github.com/ayayaQ/bot-commander-desktop/releases).
 
+Current builds use Electron 44 and require macOS 13 (Ventura) or newer. Windows and Linux builds
+support 64-bit platforms only; Windows x86 (`ia32`) and Linux 32-bit ARM (`armv7l`) are no longer
+supported. See [Electron's platform changes](https://www.electronjs.org/docs/latest/breaking-changes#breaking-api-changes-440).
+
 ### Visual Example
 
 <img width="1417" height="844" alt="bcfd-screenshot" src="https://github.com/user-attachments/assets/978b3e1b-9d7f-47df-8c25-1b81d7c3ecf2" />
@@ -184,10 +188,14 @@ For the full language reference, see [`SPECIFICATION.md`](src/main/services/bcfd
 
 ## Project Setup
 
+Use Node.js 22.20 or newer in the 22.x series, or Node.js 24.12 or newer. These minimums cover
+both the development toolchain and the native packaging dependencies. The packaged application
+uses Electron's bundled Node.js runtime, independently of the Node.js installed on your computer.
+
 ### Install
 
 ```bash
-$ npm install
+$ npm ci
 ```
 
 ### Development
