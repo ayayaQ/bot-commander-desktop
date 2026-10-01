@@ -1,10 +1,10 @@
-import { writable } from 'svelte/store'
+import { createSettingsPersistence } from './settingsPersistence'
 import type { AppSettings } from '../types/types'
 import { currentLanguage } from './localisation'
 
 export type AiProvider = 'openai' | 'openrouter'
 
-export const settingsStore = writable<AppSettings>({
+const defaultSettings: AppSettings = {
   theme: 'light',
   showToken: false,
   hideOutput: false,
@@ -21,17 +21,28 @@ export const settingsStore = writable<AppSettings>({
   useCustomApi: false,
   useLegacyInterpreter: false,
   agentNotificationsEnabled: true
-})
-
-export async function loadSettings() {
-  const settings = await window.electron.ipcRenderer.invoke('get-settings')
-  settingsStore.set(settings)
-  currentLanguage.set(settings.language)
 }
 
-export async function saveSettings(newSettings: AppSettings) {
-  const savedSettings = await window.electron.ipcRenderer.invoke('save-settings', newSettings)
-  settingsStore.set(savedSettings || newSettings)
+const persistence = createSettingsPersistence(
+  defaultSettings,
+  (settings) => window.electron.ipcRenderer.invoke('save-settings', settings),
+  (settings) => {
+    currentLanguage.set(settings.language)
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-theme', settings.theme)
+    }
+  }
+)
+
+export const settingsStore = persistence.committed
+export const settingsDraftStore = persistence.draft
+export const settingsSaveStatus = persistence.status
+export const saveSettings = persistence.save
+export const patchSettings = persistence.patch
+export const retrySettingsSave = persistence.retry
+
+export async function loadSettings() {
+  return persistence.load(() => window.electron.ipcRenderer.invoke('get-settings'))
 }
 
 export function getSelectedModelForProvider(

@@ -48,6 +48,28 @@ Want to try a ready-to-use build? See the [releases](https://github.com/ayayaQ/b
 
 ---
 
+## Saving and Recovery
+
+Commands, settings, interactions, startup JavaScript, and bot state use exclusive temporary files,
+sync their contents, then atomically replace the saved file. The last valid version is kept in a
+`.bak` file. On supported platforms/filesystems the containing directory is also synced after each
+backup and primary rename. Windows and filesystems that do not support directory sync show a
+warning: atomic replacement still applies, but rename persistence across power loss is not
+guaranteed. Sync guarantees depend on the filesystem and storage honoring the sync operation.
+
+If a primary rename succeeds but its directory sync fails, the app keeps the committed live state
+and shows a durability error. It does not roll back to a different in-memory version. Saving again
+retries the operation; quitting also retries the pending directory sync without rewriting either
+file. The app stays open if it still cannot confirm that sync.
+
+If neither `botState.json` nor `botState.json.bak` contains a valid JSON object, the app opens its
+shell with recovery instructions and blocks bot-state reads, writes, and scripts. Both files stay
+untouched, including on quit. Copy them somewhere safe before repairing a file or restoring a
+known-good copy, then use **Restart JS Engine** in the Bot State view. Delete saved state only if
+you intentionally want to discard it.
+
+---
+
 ## BCFD Template Language
 
 Command responses use the **BCFD Template Language** — a simple string interpolation syntax that lets you embed dynamic values without writing code.

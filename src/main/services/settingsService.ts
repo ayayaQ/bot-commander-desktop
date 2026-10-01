@@ -23,7 +23,7 @@ export function getSettings() {
   return settings
 }
 
-export function setSettings(newSettings: AppSettings) {
+export function normalizeSettings(newSettings: AppSettings): AppSettings {
   const supportedSettings = { ...newSettings } as AppSettings & Record<string, unknown>
   delete supportedSettings['selectedCommandOpenAiModel']
   delete supportedSettings['selectedCommandOpenRouterModel']
@@ -106,5 +106,9 @@ export function setSettings(newSettings: AppSettings) {
     newSettings.agentNotificationsEnabled = true
   }
 
-  settings = newSettings
+  return newSettings
+}
+
+export function setSettings(newSettings: AppSettings) {
+  settings = normalizeSettings(newSettings)
 }
