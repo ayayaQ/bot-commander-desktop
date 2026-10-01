@@ -16,13 +16,23 @@ async function workerHarness() {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('headless worker entry-point boundary', () => {
-  it('dispatches message requests without service access', async () => {
+  it('dispatches both message and interaction-only requests without service access', async () => {
     const scope = await workerHarness(),
       state = createPlaygroundState()
     scope.onmessage!({
       data: { state, commands: [], senderId: state.members[0].id, content: 'hello' }
     })
     expect(scope.postMessage.mock.calls[0][0].result.state.messages[0].content).toBe('hello')
+    scope.onmessage!({
+      data: {
+        kind: 'slash',
+        state,
+        interactions: [],
+        senderId: state.members[0].id,
+        commandId: 'missing'
+      }
+    })
+    expect(scope.postMessage.mock.calls[1][0].result.errors[0]).toContain('not found')
   })
 
   it('rejects serialized oversized input before evaluating any template', async () => {

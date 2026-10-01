@@ -1,4 +1,9 @@
-import type { BCFDCommand, BCFDEmbedMessageTemplate } from '../../main/types/types'
+import type {
+  BCFDCommand,
+  BCFDEmbedMessageTemplate,
+  BCFDInteractionCommand,
+  BCFDInteractionButton
+} from '../../main/types/types'
 
 export type FakePermission = 'admin' | 'manageMessages' | 'kick' | 'ban' | 'mute'
 export type FakeMember = {
@@ -20,6 +25,9 @@ export type PlaygroundMessage = {
   replyTo?: number
   embed?: BCFDEmbedMessageTemplate
   deleted?: boolean
+  ephemeral?: boolean
+  deferred?: boolean
+  buttons?: BCFDInteractionButton[]
 }
 export type PlaygroundState = {
   guildId: string
@@ -33,12 +41,24 @@ export type PlaygroundState = {
   nextId: number
 }
 export type PlaygroundResult = { state: PlaygroundState; trace: string[]; errors: string[] }
-export type PlaygroundRequest = {
+export type PlaygroundMessageRequest = {
+  kind?: 'message'
   state: PlaygroundState
   commands: BCFDCommand[]
   senderId: string
   content: string
 }
+export type PlaygroundInteractionRequest = {
+  kind: 'slash' | 'button'
+  state: PlaygroundState
+  interactions: BCFDInteractionCommand[]
+  senderId: string
+  commandId?: string
+  options?: Record<string, string | number | boolean>
+  messageId?: number
+  customId?: string
+}
+export type PlaygroundRequest = PlaygroundMessageRequest | PlaygroundInteractionRequest
 export const PLAYGROUND_LIMITS = {
   input: 16_384,
   template: 16_384,

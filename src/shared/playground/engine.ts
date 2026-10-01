@@ -8,7 +8,7 @@ import type {
   FakeMember,
   FakePermission,
   PlaygroundMessage,
-  PlaygroundRequest,
+  PlaygroundMessageRequest,
   PlaygroundResult,
   PlaygroundState
 } from './types'
@@ -157,7 +157,7 @@ function executeCommand(
     if (!Number.isInteger(command.deleteNum) || command.deleteNum > 100)
       throw new Error('Deletion count must be from 1 to 100')
     state.messages
-      .filter((message) => message.kind !== 'dm' && !message.deleted)
+      .filter((message) => message.kind !== 'dm' && !message.deleted && !message.ephemeral)
       .slice(-command.deleteNum)
       .forEach((message) => (message.deleted = true))
     trace.push(`Deleted ${command.deleteNum} fake channel messages`)
@@ -228,7 +228,7 @@ function executeCommand(
   trace.push(`Executed ${command.command}`)
 }
 
-export function runMessage(request: PlaygroundRequest): PlaygroundResult {
+export function runMessage(request: PlaygroundMessageRequest): PlaygroundResult {
   validateState(request.state)
   if (!Array.isArray(request.commands) || request.commands.length > PLAYGROUND_LIMITS.commands)
     throw new Error('Saved-command limit exceeded')

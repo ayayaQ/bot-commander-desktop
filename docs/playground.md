@@ -48,3 +48,39 @@ cancellation and stale completion rejection. Source-graph security tests forbid 
 network/dynamic evaluation and renderer embed-loading elements. `npm test`, `npm run typecheck`,
 `npm run build` and `git diff --check` are the verification commands. No UI tests, automation,
 application launches or walkthroughs were performed for this redo.
+
+## Saved slash commands and buttons
+
+Saved interactions enter through read-only `get-interactions`. Saved snapshots are sanitized with template, total-size, option/choice, and bounded button-tree checks before renderer assignment. Loading message commands and
+interactions is independent: an interaction-only saved file and even an unavailable message
+command read do not prevent slash simulation. Choose Slash command mode, a saved command and the
+fake invoker. Options are typed and validated for required fields, numeric finiteness/integer
+range, booleans, known fake user/channel/role IDs and exact typed choice membership. `$option`
+returns raw IDs and preserves `false` and `0`. Optional omitted options render as empty strings.
+Unregistered saved interactions are allowed in this offline simulator.
+
+Action flags gate output and evaluation. Stale text/embed/role payloads behind disabled action
+flags have no effect. The minimal empty interaction response is U+200B and is labeled visibly.
+Ephemeral and deferred/edit responses are labeled; this review transcript retains ephemeral
+content for inspection instead of hiding it from other simulated senders. Only its recipient can
+click ephemeral buttons. DMs and role toggles address the invocation/click member; slash
+kick/ban/mute uses the configured **user-typed** target option. Deletion affects only fake channel
+messages. Buttons show up to five per row; disabled and link-style buttons never execute, and
+link URLs remain inert text.
+
+The production implementation has important differences between slash and button events, which
+this simulator follows:
+
+- `contextForInteractionEvent` supplies options only for slash invocations. Button actions and
+  their nested labels receive **no original slash options**; `$option` is empty on button clicks.
+  No slash-option snapshot is inherited. The current clicking member becomes the invoker.
+- `executeButtonAction` does not call `executeInteractionModerationActions`. Moderation and
+  deletion flags on button actions are ignored and explicitly explained in the trace. Button
+  DMs, embeds, replies, nested buttons and invoker role toggles are simulated.
+- Button custom IDs resolve across saved interactions in saved order, as in
+  `findInteractionByButtonId`; a button removed from saved data is no longer active.
+
+These checks mirror inspected production orchestration and template data semantics, not Discord
+network parity. Moderation errors are shown in the simulator's errors panel with atomic rollback;
+live operations may already have succeeded and can emit a failure reply. Real guild scope,
+registration, permissions, role hierarchy and API behavior still need live deployment validation.

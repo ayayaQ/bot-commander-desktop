@@ -31,9 +31,12 @@ describe('headless playground security boundary', () => {
 
   it('reads saved commands only and keeps embed assets inert in the renderer source', () => {
     const source = readFileSync(resolve('src/renderer/src/components/Playground.svelte'), 'utf8')
-    expect(
-      [...source.matchAll(/ipcRenderer\.invoke\('([^']+)'/g)].map((match) => match[1])
-    ).toEqual(['get-commands'])
+    const loader = readFileSync(resolve('src/renderer/src/utils/playgroundSavedData.ts'), 'utf8')
+    expect([...loader.matchAll(/invoke\('([^']+)'/g)].map((match) => match[1])).toEqual([
+      'get-commands',
+      'get-interactions'
+    ])
+    expect(source).toContain('savedData.cancel()')
     expect(source).not.toMatch(/ipcRenderer\.send|<img\b|<iframe\b|<a\b|@html|openExternal|url\(/)
     expect(source).toContain('session.cancel()')
     expect(source).toContain('session.isCurrent(revision)')

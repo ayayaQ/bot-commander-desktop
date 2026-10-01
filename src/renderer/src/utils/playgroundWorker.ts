@@ -1,3 +1,4 @@
+import { runInteraction } from '../../../shared/playground/interactions'
 import { runMessage } from '../../../shared/playground/engine'
 import { PLAYGROUND_LIMITS } from '../../../shared/playground/types'
 import type { PlaygroundRequest } from '../../../shared/playground/types'
@@ -7,7 +8,8 @@ self.onmessage = (event: MessageEvent<PlaygroundRequest>) => {
   try {
     if (JSON.stringify(event.data).length > PLAYGROUND_LIMITS.requestBytes)
       throw new Error('Playground request is too large')
-    const result = runMessage(event.data)
+    const request = event.data
+    const result = 'commands' in request ? runMessage(request) : runInteraction(request)
     if (JSON.stringify(result).length > PLAYGROUND_LIMITS.requestBytes)
       throw new Error('Playground result is too large; reset the playground')
     self.postMessage({ result })
