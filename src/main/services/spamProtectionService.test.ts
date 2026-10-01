@@ -196,6 +196,27 @@ describe('SpamProtectionService', () => {
     expect(incoming.delete).not.toHaveBeenCalled()
   })
 
+  it.each(['unchanged', 'partial', 'changed'])(
+    'handles a queued %s update using the original content snapshot',
+    async (kind) => {
+      const pending = deferred<{ probability: number; model: string }>()
+      classify.mockReturnValue(pending.promise)
+      const active = Array.from({ length: SPAM_LIMITS.concurrency }, () => service.check(message()))
+      const incoming = message({ content: 'queued content' })
+      const result = service.check(incoming)
+      service.invalidateEdit(
+        incoming.id,
+        kind === 'partial' ? null : kind === 'changed' ? 'edited content' : incoming.content
+      )
+      expect(classify).toHaveBeenCalledTimes(SPAM_LIMITS.concurrency)
+      pending.resolve({ probability: 1, model: 'jev' })
+      await Promise.all(active)
+      expect(await result).toBe(kind === 'changed' ? 'cancelled' : 'blocked')
+      expect(incoming.delete).toHaveBeenCalledTimes(kind === 'changed' ? 0 : 1)
+      expect(classify).toHaveBeenCalledTimes(SPAM_LIMITS.concurrency + (kind === 'changed' ? 0 : 1))
+    }
+  )
+
   it.each([50013, 10008])(
     'suppresses commands if deletion fails with %s, without retrying',
     async (code) => {
@@ -227,6 +248,86 @@ describe('SpamProtectionService', () => {
     await vi.advanceTimersByTimeAsync(10_000)
     await service.check(message())
     expect(classify).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(
+    [401, 402, 403, 429].flatMap((status) =>
+      ['transport', 'timeout', 'short-rate-limit'].map((failure) => ({ status, failure }))
+    )
+  )('preserves a $status pause after concurrent $failure errors', async ({ status, failure }) => {
+    const requests = Array.from({ length: SPAM_LIMITS.concurrency }, () =>
+      deferred<{ probability: number; model: string }>()
+    )
+    for (const request of requests) classify.mockReturnValueOnce(request.promise)
+    const results = requests.map(() => service.check(message()))
+    requests[0].reject(new OpenRouterDecisionError(status, 120_000))
+    await Promise.resolve()
+    if (failure === 'timeout') {
+      await vi.advanceTimersByTimeAsync(SPAM_LIMITS.deadlineMs)
+    } else {
+      for (const request of requests.slice(1)) {
+        request.reject(
+          failure === 'transport'
+            ? new Error('synthetic transport failure')
+            : new OpenRouterDecisionError(429, 1000)
+        )
+        await Promise.resolve()
+      }
+    }
+    expect(await Promise.all(results)).toEqual(Array(SPAM_LIMITS.concurrency).fill('allow'))
+    await vi.advanceTimersByTimeAsync(30_001)
+    await service.check(message())
+    expect(classify).toHaveBeenCalledTimes(SPAM_LIMITS.concurrency)
+    if (status === 429) {
+      // Reach the original 120-second Retry-After, including time spent timing out.
+      await vi.advanceTimersByTimeAsync(120_000 - 30_001 - (failure === 'timeout' ? 3000 : 0))
+      await service.check(message())
+    } else {
+      await vi.advanceTimersByTimeAsync(600_000)
+      await service.check(message())
+      expect(classify).toHaveBeenCalledTimes(SPAM_LIMITS.concurrency)
+      service.settingsChanged(settings, settings)
+      await service.check(message())
+    }
+    expect(classify).toHaveBeenCalledTimes(SPAM_LIMITS.concurrency + 1)
+  })
+
+  it('does not shorten a repeated-failure pause with a later, shorter Retry-After', async () => {
+    const requests = Array.from({ length: SPAM_LIMITS.concurrency }, () =>
+      deferred<{ probability: number; model: string }>()
+    )
+    for (const request of requests) classify.mockReturnValueOnce(request.promise)
+    const results = requests.map(() => service.check(message()))
+    for (const request of requests.slice(0, 3)) {
+      request.reject(new Error('synthetic transport failure'))
+      await Promise.resolve()
+    }
+    await vi.advanceTimersByTimeAsync(1000)
+    requests[3].reject(new OpenRouterDecisionError(429, 10_000))
+    await Promise.all(results)
+    await vi.advanceTimersByTimeAsync(10_000)
+    await service.check(message())
+    expect(classify).toHaveBeenCalledTimes(SPAM_LIMITS.concurrency)
+    await vi.advanceTimersByTimeAsync(19_000)
+    await service.check(message())
+    expect(classify).toHaveBeenCalledTimes(SPAM_LIMITS.concurrency + 1)
+  })
+
+  it('retains an access pause when another concurrent request succeeds', async () => {
+    const access = deferred<{ probability: number; model: string }>()
+    const success = deferred<{ probability: number; model: string }>()
+    classify.mockReturnValueOnce(access.promise).mockReturnValueOnce(success.promise)
+    const results = [service.check(message()), service.check(message())]
+    access.reject(new OpenRouterDecisionError(401))
+    await Promise.resolve()
+    success.resolve({ probability: 0, model: 'jev' })
+    await Promise.all(results)
+    await vi.advanceTimersByTimeAsync(600_000)
+    await service.check(message())
+    expect(classify).toHaveBeenCalledTimes(2)
+    service.settingsChanged(settings, settings)
+    await service.check(message())
+    expect(classify).toHaveBeenCalledTimes(3)
   })
 
   it.each([401, 402, 403])('pauses on %s until settings change', async (status) => {

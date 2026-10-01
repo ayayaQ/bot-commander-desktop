@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   setInteractions: vi.fn(),
   randomUUID: vi.fn(),
   isEncryptionAvailable: vi.fn(),
+  getSelectedStorageBackend: vi.fn(),
   encryptString: vi.fn(),
   decryptString: vi.fn()
 }))
@@ -25,6 +26,7 @@ vi.mock('electron', () => ({
   },
   safeStorage: {
     isEncryptionAvailable: mocks.isEncryptionAvailable,
+    getSelectedStorageBackend: mocks.getSelectedStorageBackend,
     encryptString: mocks.encryptString,
     decryptString: mocks.decryptString
   }
@@ -66,6 +68,7 @@ describe('fileService', () => {
     mocks.appGetPath.mockReturnValue(userDataPath)
     mocks.randomUUID.mockReturnValue('generated-id')
     mocks.isEncryptionAvailable.mockReturnValue(true)
+    mocks.getSelectedStorageBackend.mockReturnValue('gnome_libsecret')
     mocks.encryptString.mockImplementation((value) => Buffer.from(`encrypted:${value}`))
     mocks.decryptString.mockImplementation((value) => value.toString().replace('encrypted:', ''))
     mocks.getCommands.mockImplementation(

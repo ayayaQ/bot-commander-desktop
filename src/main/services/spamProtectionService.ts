@@ -84,6 +84,15 @@ export class SpamProtectionService {
     }
   }
 
+  invalidateEdit(messageId: string, content: string | null) {
+    // Partial updates may omit content, and embed previews do not change it. Compare
+    // with the job's snapshot rather than an old Message that may itself be partial.
+    if (typeof content !== 'string') return
+    for (const job of this.jobs) {
+      if (job.message.id === messageId && job.content !== content) this.finish(job, 'cancelled')
+    }
+  }
+
   private reset(result: SpamResult) {
     // Clear the queue first so finishing active jobs cannot start queued requests.
     this.queue = []
@@ -225,16 +234,20 @@ export class SpamProtectionService {
 
   private failure(error: unknown) {
     const status = error instanceof OpenRouterDecisionError ? error.status : 0
+    // Already-dispatched requests may fail after a stronger pause has been set.
     if ([401, 402, 403].includes(status)) {
       this.pausedUntil = Infinity
       this.warn(
         'OpenRouter access or credits unavailable. Update Settings or toggle protection to retry.'
       )
     } else if (status === 429) {
-      this.pausedUntil = Date.now() + (error as OpenRouterDecisionError).retryAfterMs
+      this.pausedUntil = Math.max(
+        this.pausedUntil,
+        Date.now() + (error as OpenRouterDecisionError).retryAfterMs
+      )
       this.warn('OpenRouter rate limit reached; checks paused temporarily.')
     } else if (++this.failures >= 3) {
-      this.pausedUntil = Date.now() + 30_000
+      this.pausedUntil = Math.max(this.pausedUntil, Date.now() + 30_000)
       this.warn('OpenRouter checks failed repeatedly; checks paused for 30 seconds.')
     } else {
       this.warn('OpenRouter check failed; message was left unchanged.')

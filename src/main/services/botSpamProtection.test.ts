@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   start: vi.fn(),
   stop: vi.fn(),
   invalidate: vi.fn(),
+  invalidateEdit: vi.fn(),
   settingsChanged: vi.fn(),
   log: vi.fn(),
   handlers: new Map<string, (...args: unknown[]) => unknown>()
@@ -62,6 +63,7 @@ vi.mock('./spamProtectionService', () => ({
     start = mocks.start
     stop = mocks.stop
     invalidate = mocks.invalidate
+    invalidateEdit = mocks.invalidateEdit
     settingsChanged = mocks.settingsChanged
   }
 }))
@@ -109,10 +111,11 @@ describe('bot message moderation integration', () => {
   )
 
   it('forwards edits, individual deletions, bulk deletions, settings changes and disconnects', async () => {
-    mocks.handlers.get(Events.MessageUpdate)!({}, { id: 'edited' })
+    mocks.handlers.get(Events.MessageUpdate)!({}, { id: 'edited', content: 'changed' })
     mocks.handlers.get(Events.MessageDelete)!({ id: 'deleted' })
     mocks.handlers.get(Events.MessageBulkDelete)!(new Map([['bulk', {}]]))
-    expect(mocks.invalidate.mock.calls).toEqual([['edited'], ['deleted'], ['bulk']])
+    expect(mocks.invalidateEdit).toHaveBeenCalledWith('edited', 'changed')
+    expect(mocks.invalidate.mock.calls).toEqual([['deleted'], ['bulk']])
     const { getSettings, setSettings } = await import('./settingsService')
     setSettings({ ...getSettings(), spamProtectionEnabled: true })
     expect(mocks.settingsChanged).toHaveBeenCalled()

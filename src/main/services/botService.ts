@@ -204,7 +204,9 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
     })
   })
 
-  client.on(Events.MessageUpdate, (_, message) => spamProtection.invalidate(message.id))
+  client.on(Events.MessageUpdate, (_, message) =>
+    spamProtection.invalidateEdit(message.id, message.content)
+  )
   client.on(Events.MessageDelete, (message) => spamProtection.invalidate(message.id))
   client.on(Events.MessageBulkDelete, (messages) => {
     for (const id of messages.keys()) spamProtection.invalidate(id)
