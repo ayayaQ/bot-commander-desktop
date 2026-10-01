@@ -116,6 +116,8 @@ describe('failed shutdown recovery', () => {
     await expect(withResourceMutationLock('settings', async () => 'retry')).resolves.toBe('retry')
     const directory = await fs.mkdtemp(join(tmpdir(), 'bcfd-shutdown-retry-'))
     directories.push(directory)
-    await expect(atomicWrite(join(directory, 'retry.json'), '{}')).resolves.toBeUndefined()
+    await expect(atomicWrite(join(directory, 'retry.json'), '{}')).resolves.toEqual({
+      durability: 'confirmed'
+    })
   })
 })

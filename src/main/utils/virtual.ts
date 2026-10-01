@@ -105,13 +105,15 @@ export async function runStartupJs(context: ScriptContext, source?: string): Pro
 }
 
 async function prepareContext(source?: string): Promise<ScriptContext> {
+  // Do not run any saved script while unrecoverable durable state requires repair.
+  const state = await readSavedState()
   const candidate = await createQuickJSScriptContext({ initialContext: { botState: {} }, debug })
   try {
     // Preserve the existing startup semantics: initialize globals, then load durable state.
     await runStartupJs(candidate, source)
     // Validate guest-installed descriptors/proxies before host assignment can invoke a setter.
     contextSnapshot(candidate)
-    candidate.setVariable('botState', await readSavedState())
+    candidate.setVariable('botState', state)
     contextSnapshot(candidate)
     return candidate
   } catch (error) {
@@ -147,7 +149,16 @@ export function initializeBotState(): Promise<void> {
     } catch (error) {
       // A saved startup script must not prevent opening the app to repair that script.
       // The fallback still validates durable bot state; corrupt state is never silently reset.
-      const fallback = await prepareContext('')
+      let fallback: ScriptContext
+      try {
+        fallback = await prepareContext('')
+      } catch (fallbackError) {
+        runtimeFailure = new AggregateError(
+          [error, fallbackError],
+          `The JavaScript runtime could not initialize: ${String(fallbackError)}. Bot-state reads, writes, and scripts are disabled. The saved files were retained. Copy ${botStatePath()} and ${botStatePath()}.bak somewhere safe, repair or restore a valid JSON object, then use Restart JS Engine in the Bot State view. Do not delete the files unless you intend to discard the saved state.`
+        )
+        throw runtimeFailure
+      }
       replaceContext(fallback)
       rendererConsole.error(
         `Startup JavaScript could not run. The saved script was retained for repair, and startup globals are disabled: ${String(error)}`
@@ -192,6 +203,8 @@ export function resumeRuntime(): void {
 export function stopRuntimeAndCheckpoint(): Promise<void> {
   runtimeStopped = true
   const next = runtimeWork.then(async () => {
+    // Recovery-only startup never admitted scripts or mutations. Preserve its files on quit.
+    if (!botStateContext && runtimeFailure) return
     const snapshot = contextSnapshot(getBotStateContext())
     await atomicWrite(botStatePath(), snapshot, { validate: decodeBotState })
   })

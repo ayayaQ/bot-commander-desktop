@@ -2,7 +2,6 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import type { ScriptContext } from './quickJsScriptContext'
 
 const mocks = vi.hoisted(() => ({ directory: '' }))
 vi.mock('electron', () => ({ app: { getPath: () => mocks.directory } }))
@@ -22,7 +21,12 @@ vi.mock('./quickJsScriptContext', async (importOriginal) => {
   return { ...actual, createQuickJSScriptContext: vi.fn(actual.createQuickJSScriptContext) }
 })
 
-import { atomicWrite, readWithBackup } from '../services/atomicPersistence'
+import {
+  atomicWrite,
+  readWithBackup,
+  closeAndDrainAtomicWrites,
+  reopenAtomicWrites
+} from '../services/atomicPersistence'
 import { createQuickJSScriptContext } from './quickJsScriptContext'
 import {
   evaluateBotState,
@@ -127,6 +131,7 @@ describe('serialized runtime bot state checkpoints', () => {
     write.mockImplementationOnce(async () => {
       entered.resolve()
       await gate.promise
+      return { durability: 'confirmed' }
     })
 
     const first = evaluateBotState('botState.count += 1; return botState.count')
@@ -149,6 +154,38 @@ describe('serialized runtime bot state checkpoints', () => {
     expect(JSON.parse(await fs.readFile(join(mocks.directory, 'botState.json'), 'utf8'))).toEqual({
       count: 1
     })
+  })
+
+  it('keeps committed guest state and notifications when post-rename durability is uncertain', async () => {
+    await setBotState({ count: 0 })
+    const path = join(mocks.directory, 'botState.json')
+    const open = fs.open.bind(fs)
+    let directorySyncs = 0
+    const opening = vi
+      .spyOn(fs, 'open')
+      .mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+        const handle = await open(...args)
+        if (args[0] === mocks.directory && ++directorySyncs >= 2) {
+          vi.spyOn(handle, 'sync').mockRejectedValue(
+            Object.assign(new Error('disk I/O'), { code: 'EIO' })
+          )
+        }
+        return handle
+      })
+    const onCommitted = vi.fn()
+    try {
+      await withBotStateTransaction((context) => context.run('botState.count = 1'), { onCommitted })
+      expect(await readBotState()).toEqual({ count: 1 })
+      expect(await fs.readFile(path, 'utf8')).toBe('{"count":1}')
+      expect(onCommitted).toHaveBeenCalledWith({ count: 1 })
+      await expect(closeAndDrainAtomicWrites()).rejects.toThrow('Pending persistence failed')
+    } finally {
+      opening.mockRestore()
+      reopenAtomicWrites()
+      await setBotState({ count: 2 })
+    }
+    await expect(closeAndDrainAtomicWrites()).resolves.toBeUndefined()
+    reopenAtomicWrites()
   })
 
   it('serializes async commands and checkpoints each completed mutation exactly once', async () => {
@@ -510,21 +547,14 @@ describe('staged JavaScript engine replacement', () => {
     })
   })
 
-  it('keeps the active engine and disposes the candidate on state load failure', async () => {
-    let candidate: ScriptContext | undefined
-    const actual =
-      await vi.importActual<typeof import('./quickJsScriptContext')>('./quickJsScriptContext')
+  it('keeps the active engine without creating a candidate when saved state is invalid', async () => {
     await retainCurrentOnFailure(async () => {
-      create.mockImplementationOnce(async (options) => {
-        candidate = await actual.createQuickJSScriptContext(options)
-        vi.spyOn(candidate, 'dispose')
-        return candidate as Awaited<ReturnType<typeof createQuickJSScriptContext>>
-      })
+      create.mockClear()
       await fs.writeFile(join(mocks.directory, 'botState.json'), 'null')
       await fs.rm(join(mocks.directory, 'botState.json.bak'), { force: true })
       await restartJsEngine()
     })
-    expect(candidate?.dispose).toHaveBeenCalledOnce()
+    expect(create).not.toHaveBeenCalled()
   })
 
   it('keeps the active engine if startup throws or times out', async () => {
@@ -551,7 +581,7 @@ describe('staged JavaScript engine replacement', () => {
     expect(await getStartupJs()).toBe('globalThis.original = true')
   })
 
-  it('only publishes a fully initialized replacement after its startup file is durable', async () => {
+  it('only publishes a fully initialized replacement after its startup file commits', async () => {
     await setBotState({ durable: true })
     const active = getBotStateContext()
     const dispose = vi.spyOn(active, 'dispose')
