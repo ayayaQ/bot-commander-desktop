@@ -2,6 +2,9 @@ import type { BCFDCommand, BCFDEmbedMessageTemplate } from '../../main/types/typ
 import { commandCapabilities } from '../commandCapabilities'
 import { evaluateTemplate } from './template'
 import type { TemplateContext } from './template'
+import type { ScriptSandboxFactory } from './script'
+import { executionContext } from './executionContext'
+import { recordCooldown, remainingCooldown, validateSessionState } from './sessionState'
 import { PLAYGROUND_LIMITS } from './types'
 import type {
   FakeMember,
@@ -36,6 +39,7 @@ export function validateState(state: PlaygroundState): void {
     state.nextId < 1
   )
     throw new Error('Invalid or oversized playground state')
+  validateSessionState(state)
 }
 
 export function addMessage(
@@ -80,11 +84,6 @@ export function toggleRole(state: PlaygroundState, sender: FakeMember, roleId: s
     : [...sender.roles, roleId]
 }
 
-export function assertNoHeldFeatures(command: { cooldown?: number }): void {
-  if ((command.cooldown ?? 0) > 0)
-    throw new Error('Cooldown simulation is on hold; command was not executed')
-}
-
 function matches(command: BCFDCommand, content: string): boolean {
   return (
     command.type === 0 &&
@@ -104,13 +103,12 @@ function executeCommand(
   senderId: string,
   content: string,
   inputId: number,
-  trace: string[]
+  trace: string[],
+  ctx: TemplateContext
 ): void {
-  assertNoHeldFeatures(command)
   const sender = state.members.find((member) => member.id === senderId)!
   const mentionedId = /<@!?(\d+)>/.exec(content)?.[1]
   const mentioned = state.members.find((member) => member.id === mentionedId)
-  const ctx = { state, sender, mentioned, content, trigger: command.command }
   const render = (source: string) => evaluateTemplate(source, ctx)
   if (
     command.channelWhitelist?.trim() &&
@@ -143,6 +141,22 @@ function executeCommand(
   if (command.isNSFW && !state.nsfw) {
     trace.push('Blocked: fake channel is not NSFW')
     return
+  }
+  if ((command.cooldown ?? 0) > 0 && command.cooldownType) {
+    const remaining = remainingCooldown(state, command, senderId)
+    if (remaining > 0) {
+      if (command.cooldownMessage || !command.ignoreErrorMessage)
+        addMessage(state, {
+          kind: 'bot',
+          author: 'Playground Bot',
+          replyTo: inputId,
+          content: command.cooldownMessage
+            ? render(command.cooldownMessage)
+            : `This command is on cooldown. Try again in ${remaining}s.`
+        })
+      trace.push(`Blocked: ${command.cooldownType.toLowerCase()} cooldown; ${remaining}s remaining`)
+      return
+    }
   }
   if (command.specificChannel?.trim() && command.specificChannel !== state.channelId)
     throw new Error('Specific channel is outside the fake channel')
@@ -224,10 +238,14 @@ function executeCommand(
   }
   if (command.channelMessageTyping || command.channelEmbedTyping)
     trace.push('Typing is simulated; no network activity')
+  recordCooldown(state, command, senderId)
   trace.push(`Executed ${command.command}`)
 }
 
-export function runMessage(request: PlaygroundMessageRequest): PlaygroundResult {
+export function runMessage(
+  request: PlaygroundMessageRequest,
+  factory?: ScriptSandboxFactory
+): PlaygroundResult {
   validateState(request.state)
   if (!Array.isArray(request.commands) || request.commands.length > PLAYGROUND_LIMITS.commands)
     throw new Error('Saved-command limit exceeded')
@@ -244,8 +262,33 @@ export function runMessage(request: PlaygroundMessageRequest): PlaygroundResult 
   for (const command of matching) {
     const draft = structuredClone(state),
       commandTrace: string[] = []
+    const sender = draft.members.find((member) => member.id === request.senderId)!
+    const mentioned = draft.members.find(
+      (member) => member.id === /<@!?(\d+)>/.exec(request.content)?.[1]
+    )
+    const scope = executionContext(
+      {
+        state: draft,
+        sender,
+        mentioned,
+        content: request.content,
+        trigger: command.command,
+        command,
+        trace: commandTrace
+      },
+      factory
+    )
     try {
-      executeCommand(draft, command, request.senderId, request.content, input.id, commandTrace)
+      executeCommand(
+        draft,
+        command,
+        request.senderId,
+        request.content,
+        input.id,
+        commandTrace,
+        scope.context
+      )
+      scope.commit()
       state = draft
       trace.push(...commandTrace)
     } catch (error) {
@@ -253,6 +296,8 @@ export function runMessage(request: PlaygroundMessageRequest): PlaygroundResult 
         `${command.command}: ${error instanceof Error ? error.message : 'Execution failed'}`
       )
       trace.push(`Failed closed: ${command.command}; no command effects applied`)
+    } finally {
+      scope.dispose()
     }
   }
   return { state, trace, errors }

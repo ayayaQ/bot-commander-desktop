@@ -30,6 +30,12 @@ export type PlaygroundMessage = {
   buttons?: BCFDInteractionButton[]
 }
 export type PlaygroundState = {
+  /** Local JSON state only. No saved/live bot state is read or written. */
+  botState: Record<string, unknown>
+  variables: Record<string, unknown>
+  cooldowns: Record<string, number>
+  clockMs: number
+  ai: { response: string; error: string }
   guildId: string
   guildName: string
   channelId: string
@@ -70,11 +76,17 @@ export const PLAYGROUND_LIMITS = {
   nodes: 10_000,
   depth: 32,
   requestBytes: 2_000_000,
+  stateBytes: 65_536,
   timeoutMs: 1500
 } as const
 
 export function createPlaygroundState(): PlaygroundState {
   return {
+    botState: {},
+    variables: {},
+    cooldowns: {},
+    clockMs: 0,
+    ai: { response: '[Simulated AI response]', error: '' },
     guildId: '900000000000000001',
     guildName: 'Playground server',
     channelId: '900000000000000002',

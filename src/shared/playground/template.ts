@@ -4,6 +4,10 @@ import { NodeType } from '../../main/services/bcfdLang/types'
 import type { ASTNode, ConditionNode } from '../../main/services/bcfdLang/types'
 import { PLAYGROUND_LIMITS } from './types'
 import type { FakeMember, PlaygroundState } from './types'
+import type { ScriptSandbox } from './script'
+import { skipScriptExpression } from './scriptExpressions'
+import { remainingCooldown } from './sessionState'
+import type { CooldownCommand } from './sessionState'
 
 export type TemplateContext = {
   state: PlaygroundState
@@ -12,6 +16,10 @@ export type TemplateContext = {
   content: string
   trigger: string
   options?: Record<string, string | number | boolean>
+  script?: ScriptSandbox
+  setVariable?: (name: string, value: string) => void
+  command?: CooldownCommand
+  trace?: string[]
 }
 
 export function evaluateTemplate(source: string, ctx: TemplateContext): string {
@@ -58,7 +66,11 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
     'replace',
     'random',
     'sum',
-    'rollnum'
+    'rollnum',
+    'set',
+    'get',
+    'chat',
+    'cooldownRemaining'
   ])
   // Inspect every AST branch before interpreting any value, including inactive branches.
   const preflightCondition = (node: ConditionNode, depth: number): void => {
@@ -78,8 +90,17 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
     for (const node of list) {
       if (++visited > PLAYGROUND_LIMITS.nodes)
         throw new Error('Template work exceeds the playground limit')
-      if (node.type === NodeType.EVAL_BLOCK)
-        throw new Error('$eval is disabled in Playground; scripts are on hold')
+      if (node.type === NodeType.EVAL_BLOCK) {
+        if (!ctx.script) throw new Error('Script sandbox is unavailable')
+        // Match production: literal strings, comment text and template static parts stay literal.
+        preflight(
+          node.innerNodes.filter(
+            (inner) =>
+              inner.type !== NodeType.TEXT && !skipScriptExpression(node.code, inner.position)
+          ),
+          depth + 1
+        )
+      }
       if (node.type === NodeType.ERROR) throw new Error(node.message)
       if (
         (node.type === NodeType.VARIABLE || node.type === NodeType.FUNCTION_CALL) &&
@@ -143,6 +164,25 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
     }
     if (Object.hasOwn(vars, name)) return vars[name]
     switch (name) {
+      case 'set':
+        if (!ctx.script) throw new Error('Script sandbox is unavailable')
+        if (args.length >= 2) {
+          if (ctx.setVariable) ctx.setVariable(args[0], args[1])
+          else ctx.script.set(args[0], args[1])
+        }
+        return ''
+      case 'get':
+        if (!ctx.script) throw new Error('Script sandbox is unavailable')
+        return args.length ? ctx.script.get(args[0]) : ''
+      case 'chat':
+        if (!args.length) return ''
+        ctx.trace?.push('Simulated AI: configured local response/failure; no provider call')
+        if (ctx.state.ai.error) throw new Error(`Simulated AI failure: ${ctx.state.ai.error}`)
+        return ctx.state.ai.response
+      case 'cooldownRemaining':
+        return String(
+          ctx.command ? remainingCooldown(ctx.state, ctx.command, ctx.sender.id, args[0]) : 0
+        )
       case 'args':
         return (
           ctx.content.substring(ctx.trigger.length).trim().split(' ').filter(Boolean)[
@@ -238,8 +278,34 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
           output += nodes(branch?.body ?? node.elseBranch ?? [], depth + 1)
           break
         }
-        case NodeType.EVAL_BLOCK:
-          throw new Error('$eval is disabled in Playground; scripts are on hold')
+        case NodeType.EVAL_BLOCK: {
+          if (!ctx.script) throw new Error('Script sandbox is unavailable')
+          const replacements: { position: number; length: number; name: string }[] = []
+          let code = node.code
+          let failed = false
+          try {
+            for (const inner of node.innerNodes) {
+              if (inner.type === NodeType.TEXT || skipScriptExpression(node.code, inner.position))
+                continue
+              const name = ctx.script.temp(nodes([inner], depth + 1))
+              replacements.push({ position: inner.position, length: inner.length, name })
+            }
+            for (const replacement of [...replacements].sort((a, b) => b.position - a.position))
+              code =
+                code.slice(0, replacement.position) +
+                replacement.name +
+                code.slice(replacement.position + replacement.length)
+            output += bounded(ctx.script.evaluate(code))
+          } catch (error) {
+            failed = true
+            throw error
+          } finally {
+            // Failed VMs are discarded by the command scope. Further operations on a
+            // poisoned VM would mask the primary error with a cleanup error.
+            if (!failed) for (const replacement of replacements) ctx.script.delete(replacement.name)
+          }
+          break
+        }
         case NodeType.ERROR:
           throw new Error(node.message)
       }

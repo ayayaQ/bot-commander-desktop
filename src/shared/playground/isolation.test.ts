@@ -13,6 +13,16 @@ describe('headless playground security boundary', () => {
         /^import\s+(?!type\b)[\s\S]*?from\s+['"]([^'"]+)['"]/gm
       )) {
         const specifier = match[1]
+        if (
+          file.endsWith('/script.ts') &&
+          new Set([
+            'quickjs-emscripten-core',
+            '@jitl/quickjs-wasmfile-release-sync/ffi',
+            '@jitl/quickjs-wasmfile-release-sync/emscripten-module',
+            '@jitl/quickjs-wasmfile-release-sync/wasm?url&inline'
+          ]).has(specifier)
+        )
+          continue
         expect(specifier.startsWith('.'), `External runtime import: ${specifier}`).toBe(true)
         const target = resolve(dirname(file), `${specifier}.ts`)
         expect(target).not.toMatch(

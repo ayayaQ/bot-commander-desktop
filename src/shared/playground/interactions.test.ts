@@ -496,7 +496,7 @@ describe('saved interaction playground', () => {
     expect(runInteraction(input).errors[0]).toContain('unavailable')
   })
 
-  it('fails closed for active unsupported effects and held cooldown simulation', () => {
+  it('fails closed for scripts when no sandbox is supplied', () => {
     for (const saved of [
       command({
         rootAction: action({
@@ -505,8 +505,7 @@ describe('saved interaction playground', () => {
           sendPrivateMessage: true,
           privateMessage: '$eval return 1 $halt'
         })
-      }),
-      command({ cooldown: 5 })
+      })
     ]) {
       const input = request(saved),
         result = runInteraction(input)
