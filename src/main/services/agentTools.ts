@@ -5,6 +5,7 @@ import type {
   AgentMemory,
   AgentPatchOperation
 } from '../../shared/agentTypes'
+import { createPlaygroundState } from '../../shared/playground/types'
 import { lintBCFD } from '../../shared/bcfdLint'
 import { decodeBCFDCommand } from '../../shared/commandCodec'
 import { getCommands, setCommands } from './botService'
@@ -64,6 +65,52 @@ const objectSchema = (properties: Record<string, unknown>, required: string[] = 
   required,
   additionalProperties: false
 })
+
+// Fixtures and expected outcomes are explicit inputs, never inferred from saved/live state.
+const validationSchema = objectSchema(
+  {
+    cases: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 6,
+      items: objectSchema(
+        {
+          name: { type: 'string', maxLength: 80 },
+          state: {
+            type: 'object',
+            description:
+              'Complete fake state from read_validation_fixture, with deliberate test changes. No live state is loaded.'
+          },
+          steps: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 12,
+            items: objectSchema(
+              {
+                kind: { type: 'string', enum: ['message', 'slash', 'button'] },
+                senderId: { type: 'string' },
+                content: { type: 'string' },
+                options: { type: 'object' },
+                customId: { type: 'string' },
+                messageId: { type: 'integer' },
+                advanceClockMs: { type: 'integer', minimum: 0 },
+                assertions: {
+                  type: 'array',
+                  minItems: 2,
+                  maxItems: 8,
+                  items: objectSchema({ path: { type: 'string' }, equals: {} }, ['path', 'equals'])
+                }
+              },
+              ['kind', 'senderId', 'assertions']
+            )
+          }
+        },
+        ['name', 'state', 'steps']
+      )
+    }
+  },
+  ['cases']
+)
 
 const patchSchema = {
   type: 'array',
@@ -163,33 +210,66 @@ export const agentToolDefinitions: ToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'read_validation_fixture',
+      description:
+        'Read a fresh, complete offline Playground fake state and assertion guidance. This never reads saved/live bot state. Use it to construct explicit validation cases for unsaved command and interaction drafts.',
+      parameters: objectSchema({})
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'create_command',
-      description: 'Create a command by merging the supplied object with command defaults. The app assigns the ID.',
-      parameters: objectSchema({ command: { type: 'object' } }, ['command'])
+      description:
+        'Create a command from defaults; the app assigns its ID once. Supply explicit validation fixtures and expected outcome/effect assertions for message commands. Tests run against this exact unsaved normalized draft before approval or auto-save. Failed tests return the report for bounded repair without saving. Event commands are labeled unsupported.',
+      parameters: objectSchema({ command: { type: 'object' }, validation: validationSchema }, [
+        'command'
+      ])
     }
   },
   {
     type: 'function',
     function: {
       name: 'edit_command',
-      description: 'Patch a command. Use the revision returned by read_command.',
-      parameters: objectSchema({ id: { type: 'string' }, expectedRevision: { type: 'string' }, patches: patchSchema }, ['id', 'expectedRevision', 'patches'])
+      description:
+        'Patch a command using its exact read revision. Supply explicit validation cases for the complete resulting message-command draft, including intended replies/state changes and relevant negative gates. No save occurs when validation fails.',
+      parameters: objectSchema(
+        {
+          id: { type: 'string' },
+          expectedRevision: { type: 'string' },
+          patches: patchSchema,
+          validation: validationSchema
+        },
+        ['id', 'expectedRevision', 'patches']
+      )
     }
   },
   {
     type: 'function',
     function: {
       name: 'create_interaction',
-      description: 'Create an interaction by merging the supplied object with defaults. The app assigns the ID.',
-      parameters: objectSchema({ interaction: { type: 'object' } }, ['interaction'])
+      description:
+        'Create an interaction from defaults; the app assigns its ID once. Supply explicit slash/button validation cases with meaningful outcome, response or state assertions. The exact unsaved draft is tested before approval or auto-save; failed tests return a report without saving.',
+      parameters: objectSchema({ interaction: { type: 'object' }, validation: validationSchema }, [
+        'interaction'
+      ])
     }
   },
   {
     type: 'function',
     function: {
       name: 'edit_interaction',
-      description: 'Patch an interaction. Use the revision returned by read_interaction.',
-      parameters: objectSchema({ id: { type: 'string' }, expectedRevision: { type: 'string' }, patches: patchSchema }, ['id', 'expectedRevision', 'patches'])
+      description:
+        'Patch an interaction using its exact read revision. Supply explicit slash/button validation cases for the complete resulting draft, including expected replies and missing-option or permission cases where relevant. No save occurs when validation fails.',
+      parameters: objectSchema(
+        {
+          id: { type: 'string' },
+          expectedRevision: { type: 'string' },
+          patches: patchSchema,
+          validation: validationSchema
+        },
+        ['id', 'expectedRevision', 'patches']
+      )
     }
   },
   {
@@ -266,6 +346,32 @@ export const agentToolDefinitions: ToolDefinition[] = [
   { type: 'function', function: { name: 'lint_command', description: 'Lint a complete persisted command.', parameters: objectSchema({ id: { type: 'string' } }, ['id']) } },
   { type: 'function', function: { name: 'lint_interaction', description: 'Lint a complete persisted interaction.', parameters: objectSchema({ id: { type: 'string' } }, ['id']) } }
 ]
+
+// External MCP clients retain the pre-existing create/edit surface. Offline draft
+// validation and the fixture helper belong only to the built-in agent harness.
+const MCP_MUTATION_DESCRIPTIONS: Record<string, string> = {
+  create_command:
+    'Create a command by merging the supplied object with command defaults. The app assigns the ID.',
+  edit_command: 'Patch a command. Use the revision returned by read_command.',
+  create_interaction:
+    'Create an interaction by merging the supplied object with defaults. The app assigns the ID.',
+  edit_interaction: 'Patch an interaction. Use the revision returned by read_interaction.'
+}
+export const mcpAgentToolDefinitions: ToolDefinition[] = agentToolDefinitions
+  .filter((tool) => tool.function.name !== 'read_validation_fixture')
+  .map((tool) => {
+    const description = MCP_MUTATION_DESCRIPTIONS[tool.function.name]
+    if (!description) return tool
+    const parameters = tool.function.parameters
+    const { validation: _validation, ...properties } = parameters.properties as Record<
+      string,
+      unknown
+    >
+    return {
+      ...tool,
+      function: { ...tool.function, description, parameters: { ...parameters, properties } }
+    }
+  })
 
 export const mutationToolNames = new Set([
   'create_command', 'edit_command', 'create_interaction', 'edit_interaction',
@@ -449,13 +555,20 @@ async function lintCommandResource(command: BCFDCommand): Promise<AgentLintDiagn
   return diagnostics
 }
 
-async function lintInteractionResource(interaction: BCFDInteractionCommand): Promise<AgentLintDiagnostic[]> {
+async function lintInteractionResource(
+  interaction: BCFDInteractionCommand
+): Promise<AgentLintDiagnostic[]> {
   const diagnostics = await lintTextFields(interaction)
   if (!/^[a-z0-9_-]{1,32}$/.test(interaction.commandName)) diagnostics.unshift({ severity: 'error', message: 'Interaction name must be 1-32 lowercase characters using letters, numbers, hyphens, or underscores', path: '/commandName' })
   if (!interaction.commandDescription.trim() || interaction.commandDescription.length > 100) diagnostics.unshift({ severity: 'error', message: 'Interaction description must be 1-100 characters', path: '/commandDescription' })
   const names = new Set<string>()
   interaction.options.forEach((option, index) => {
-    if (names.has(option.name)) diagnostics.unshift({ severity: 'error', message: `Duplicate option name: ${option.name}`, path: `/options/${index}/name` })
+    if (names.has(option.name))
+      diagnostics.unshift({
+        severity: 'error',
+        message: `Duplicate option name: ${option.name}`,
+        path: `/options/${index}/name`
+      })
     names.add(option.name)
   })
   return diagnostics
@@ -471,6 +584,17 @@ export async function executeReadTool(name: string, args: Record<string, any>): 
     )
   }
   if (name === 'read_documentation') return readDocumentation(String(args.id || ''))
+  if (name === 'read_validation_fixture')
+    return {
+      state: createPlaygroundState(),
+      limits: { cases: 6, totalSteps: 12, assertionsPerStep: 8, totalAssertions: 64 },
+      guidance:
+        'Each step needs /outcome and a meaningful effect assertion; blocked/error expectations additionally need a specific nonempty /reason or /errors/N assertion. Execution outcomes: executed, blocked, error, unmatched, unsupported, not_run. Assertion paths are JSON Pointers into {outcome,reason,errors,state,effects}. Fresh state per case; advanceClockMs advances the fake clock between sequence steps without sleeping. At least one executed candidate step is needed for an overall pass. Expected-negative steps must include a specific nonempty /reason or /errors/N assertion and an effects assertion proving no unintended outputs. AI is mocked; startup scripts, live state, Discord and providers are never loaded.',
+      exampleAssertions: [
+        { path: '/outcome', equals: 'executed' },
+        { path: '/effects/messages/0/content', equals: 'Pong!' }
+      ]
+    }
   if (name === 'search_commands') {
     const query = String(args.query || '')
     return getCommands().bcfdCommands.filter((item) => snippets(item, query).length).slice(0, limit)
@@ -494,7 +618,7 @@ export async function executeReadTool(name: string, args: Record<string, any>): 
   if (name === 'read_console') {
     return getRendererConsoleEntries({
       limit: args.limit,
-      types: Array.isArray(args.types) ? args.types as ConsoleMessageType[] : undefined
+      types: Array.isArray(args.types) ? (args.types as ConsoleMessageType[]) : undefined
     })
   }
   if (name === 'read_bot_state') {
@@ -547,7 +671,10 @@ function requireRevision(actual: unknown, expected: unknown) {
   if (revision(actual) !== expected) throw new Error('Stale resource revision; read the resource again before editing')
 }
 
-export async function prepareMutation(name: string, args: Record<string, any>): Promise<PreparedMutation> {
+export async function prepareMutation(
+  name: string,
+  args: Record<string, any>
+): Promise<PreparedMutation> {
   if (name === 'create_command') {
     const input = args.command || {}
     const candidate = {
@@ -568,7 +695,13 @@ export async function prepareMutation(name: string, args: Record<string, any>): 
     const after = decodeBCFDCommand(candidate, () => crypto.randomUUID()).command
     if (after.id !== before.id) throw new Error('Command IDs cannot be edited')
     assertCommand(after)
-    return { name, arguments: args, before, after, target: { type: 'command', id: before.id } }
+    return {
+      name,
+      arguments: args,
+      before: clone(before),
+      after,
+      target: { type: 'command', id: before.id }
+    }
   }
   if (name === 'create_interaction') {
     const input = args.interaction || {}
@@ -583,7 +716,13 @@ export async function prepareMutation(name: string, args: Record<string, any>): 
     const after = applyPatches(before, args.patches || [])
     if (after.id !== before.id) throw new Error('Interaction IDs cannot be edited')
     assertInteraction(after)
-    return { name, arguments: args, before, after, target: { type: 'interaction', id: before.id } }
+    return {
+      name,
+      arguments: args,
+      before: clone(before),
+      after,
+      target: { type: 'interaction', id: before.id }
+    }
   }
   if (name === 'edit_bot_state') {
     const before = await readBotState()
@@ -625,6 +764,15 @@ export async function prepareMutation(name: string, args: Record<string, any>): 
     return { name, arguments: args, before: mutation.before, after: mutation.after, target: { type: 'memory', id: String(args.id || '') } }
   }
   throw new Error(`Unknown mutation tool: ${name}`)
+}
+
+export async function lintPreparedMutation(
+  prepared: PreparedMutation
+): Promise<AgentLintDiagnostic[]> {
+  if (prepared.target.type === 'command') return lintCommandResource(prepared.after as BCFDCommand)
+  if (prepared.target.type === 'interaction')
+    return lintInteractionResource(prepared.after as BCFDInteractionCommand)
+  return []
 }
 
 async function commitMutationUnlocked(prepared: PreparedMutation): Promise<unknown> {
@@ -769,5 +917,9 @@ export async function executeAgentTool(
   source: ResourceChangeSource = 'agent'
 ): Promise<unknown> {
   if (!mutationToolNames.has(name)) return executeReadTool(name, args)
+  if (source === 'mcp' && Object.hasOwn(args, 'validation'))
+    throw new Error(
+      'Draft validation is available only in the built-in agent panel; MCP mutations do not accept validation input'
+    )
   return commitMutation(await prepareMutation(name, args), source)
 }

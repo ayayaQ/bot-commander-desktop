@@ -11,8 +11,13 @@ import type { TemplateContext } from './template'
 import type { ScriptSandboxFactory } from './script'
 import { executionContext } from './executionContext'
 import { recordCooldown, remainingCooldown } from './sessionState'
-import { PLAYGROUND_LIMITS } from './types'
-import type { PlaygroundInteractionRequest, PlaygroundResult, PlaygroundState } from './types'
+import { PLAYGROUND_LIMITS, PlaygroundExecutionError } from './types'
+import type {
+  PlaygroundInteractionRequest,
+  PlaygroundResult,
+  PlaygroundResourceResult,
+  PlaygroundState
+} from './types'
 
 const optionTypes = new Set([3, 4, 5, 6, 7, 8, 10])
 
@@ -153,7 +158,7 @@ function executeAction(
   if (!isButton) {
     if (action.deleteX) {
       if (!hasPermission(sender, 'manageMessages'))
-        throw new Error('Manage Messages permission required')
+        throw new PlaygroundExecutionError('Manage Messages permission required', 'blocked')
       const count = Math.min(Math.max(Number(action.deleteNum) || 0, 1), 100)
       state.messages
         .filter((message) => message.kind !== 'dm' && !message.deleted && !message.ephemeral)
@@ -177,7 +182,8 @@ function executeAction(
         [action.isVoiceMute, 'mute', 'muted']
       ] as const) {
         if (!enabled) continue
-        if (!hasPermission(sender, permission)) throw new Error(`${permission} permission required`)
+        if (!hasPermission(sender, permission))
+          throw new PlaygroundExecutionError(`${permission} permission required`, 'blocked')
         target[key] = true
         trace.push(`${key}: ${target.name}`)
       }
@@ -242,6 +248,15 @@ export function runInteraction(
     draft = structuredClone(request.state)
   const trace: string[] = [],
     errors: string[] = []
+  const resources: PlaygroundResourceResult[] = request.interactions.map((command) => ({
+    resourceId: command.id,
+    kind: 'interaction',
+    matched: false,
+    executed: false,
+    outcome: 'unmatched',
+    reason: 'Interaction was not targeted'
+  }))
+  let resource: PlaygroundResourceResult | undefined
   let scope: ReturnType<typeof executionContext> | undefined
   try {
     let command: BCFDInteractionCommand, action: BCFDInteractionAction
@@ -250,8 +265,11 @@ export function runInteraction(
       const selected = request.interactions.find(
         (interaction) => interaction.id === request.commandId
       )
-      if (!selected) throw new Error('Saved slash command not found')
+      if (!selected)
+        throw new PlaygroundExecutionError('Saved slash command not found', 'unmatched')
       command = selected
+      resource = resources[request.interactions.indexOf(command)]
+      resource.matched = true
       action = command.rootAction
       options = validateOptions(command.options, request.options ?? {}, draft)
       trace.push(
@@ -261,14 +279,22 @@ export function runInteraction(
       const message = original.messages.find(
         (item) => item.id === request.messageId && !item.deleted
       )
-      if (!message || (message.ephemeral && message.recipient !== sender.id))
-        throw new Error('Button message is unavailable to this fake sender')
+      if (
+        !message ||
+        ((message.kind === 'dm' || message.ephemeral) && message.recipient !== sender.id)
+      )
+        throw new PlaygroundExecutionError(
+          'Button message is unavailable to this fake sender',
+          'blocked'
+        )
       const visible = message.buttons?.find((button) => button.customId === request.customId)
       if (!visible || visible.disabled || visible.style === 5)
-        throw new Error('Button is disabled, inert, or unavailable')
+        throw new PlaygroundExecutionError('Button is disabled, inert, or unavailable', 'blocked')
       const found = findButton(request.interactions, request.customId ?? '')
-      if (!found) throw new Error('This button is no longer active')
+      if (!found) throw new PlaygroundExecutionError('This button is no longer active', 'unmatched')
       command = found.command
+      resource = resources[request.interactions.indexOf(command)]
+      resource.matched = true
       action = found.button.action
       // No slash option snapshot: contextForInteractionEvent deliberately omits options on buttons.
       options = undefined
@@ -304,7 +330,9 @@ export function runInteraction(
           `Blocked: ${command.cooldownType.toLowerCase()} cooldown; ${remaining}s remaining`
         )
         scope.commit()
-        return { state: draft, trace, errors }
+        resource.outcome = 'blocked'
+        resource.reason = `Cooldown; ${remaining}s remaining`
+        return { state: draft, trace, errors, resources }
       }
     }
     executeAction(
@@ -319,10 +347,36 @@ export function runInteraction(
     )
     if (request.kind === 'slash') recordCooldown(draft, command, request.senderId)
     scope.commit()
-    return { state: draft, trace, errors }
+    resource.outcome = 'executed'
+    resource.executed = true
+    resource.reason = undefined
+    return { state: draft, trace, errors, resources }
   } catch (error) {
+    // A denied button can still target an existing candidate; coverage is derived
+    // from structured resource resolution, never user-facing trace strings.
+    if (!resource && request.kind === 'button') {
+      try {
+        const found = findButton(request.interactions, request.customId ?? '')
+        if (found) {
+          resource = resources[request.interactions.indexOf(found.command)]
+          resource.matched = true
+        }
+      } catch {
+        // Preserve the original handler error if its definition cannot be resolved.
+      }
+    }
+    if (resource) {
+      resource.outcome = error instanceof PlaygroundExecutionError ? error.outcome : 'error'
+      resource.reason = error instanceof Error ? error.message : 'Interaction execution failed'
+      resource.error = resource.reason
+    }
     errors.push(error instanceof Error ? error.message : 'Interaction execution failed')
-    return { state: original, trace: ['Failed closed; no interaction effects applied'], errors }
+    return {
+      state: original,
+      trace: ['Failed closed; no interaction effects applied'],
+      errors,
+      resources
+    }
   } finally {
     scope?.dispose()
   }

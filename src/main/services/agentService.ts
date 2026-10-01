@@ -29,16 +29,27 @@ import {
   agentToolTargetLabel,
   agentToolDefinitions,
   commitMutation,
+  lintPreparedMutation,
   executeReadTool,
   mutationToolNames,
   prepareMutation,
   type PreparedMutation
 } from './agentTools'
 import { loadAgentMemories } from './agentMemoryService'
+import {
+  boundAgentToolResult,
+  clipAgentLintDiagnostics,
+  stringifyAgentToolResult
+} from './agentToolResult'
+import {
+  assertAgentValidationBinding,
+  isValidatedResourceMutation,
+  validateAgentMutation
+} from './agentMutationValidation'
 
 const AGENT_SESSIONS_FILENAME = 'agent-sessions.json'
 const MAX_TOOL_ROUNDS = 25
-const MAX_TOOL_RESULT_CHARS = 24_000
+const MAX_DRAFT_VALIDATION_FAILURES = 3
 const REASONING_EFFORTS = new Set<AgentReasoningEffort>([
   'none',
   'minimal',
@@ -50,7 +61,9 @@ const REASONING_EFFORTS = new Set<AgentReasoningEffort>([
 
 const SYSTEM_PROMPT = `You are the Bot Commander agent harness. Help the user inspect and modify their bot configuration.
 The initial context intentionally contains no bot resources. For create or edit tasks, search for a similar persisted command or interaction first, then use exact read tools before editing. Existing resources are preferred synthesis examples, but lint new work and do not copy mistakes blindly.
-Every edit requires the current revision returned by an exact read. After an edit, inspect the returned lint diagnostics and repair meaningful errors.
+Every edit requires the current revision returned by an exact read. Supply a validation suite on create_command, edit_command, create_interaction and edit_interaction before proposing a supported draft. First read_validation_fixture for a complete fresh fake state. Use explicit expected /outcome plus meaningful response, state, moderation or error assertions; do not infer success from empty errors or no output. Include a happy execution and relevant missing argument/option, permission, channel/NSFW, cooldown or button cases. Each case starts a fresh fake session; sequence steps may advanceClockMs without real waiting. Assertion paths address {outcome,reason,errors,state,effects}; for example /effects/messages/0/content equals the intended reply, and /state/botState/count equals the intended state value.
+Validation runs on the exact normalized unsaved draft before approval or auto-save. Failed or missing-fixture validation returns a compact report without saving. Inspect it, correct the draft/fixtures and retry at most three failed validations per resource per run; then stop and explain the remaining issue. Never weaken an expectation just to make an unintended behavior pass. Explicit expected-negative cases require a specific nonempty /reason or /errors/N assertion plus an effects assertion proving no unintended outputs; an unmatched or unsupported case is not an executed success. Event-command dispatch and genuinely unsupported features remain editable with a clearly labeled not-validated report and explicit user approval, including in auto mode. Failed supported assertions, unknown/typo BCFD names, malformed fixtures and unmatched inputs do not qualify for this exception. Startup-dependent scripts and unsupported effects are not validated; simulated AI never validates a real provider. Offline validation is bounded simulation, not Discord delivery, registration or permission-hierarchy proof.
+After an edit, inspect the returned lint diagnostics and repair meaningful errors.
 Use keyword_grep for cross-resource references. Never invent IDs or revisions. Keep final answers concise and state what changed and what verification found.
 The bundled documentation table of contents is listed below. Use its titles to choose a targeted search_documentation query; the outline contains titles only, not the documentation content.
 
@@ -77,6 +90,7 @@ interface ProviderTurn {
 }
 
 interface AgentRunContext {
+  validationFailures: Map<string, number>
   documentationPolicy: DocumentationPolicyState
   metrics: AgentRunMetrics
 }
@@ -290,9 +304,7 @@ export function formatAgentMemoryContext(
   memories: Array<{ content: string; updatedAt: string }>
 ): string {
   if (memories.length === 0) return 'Saved user memories: none.'
-  const ordered = [...memories].sort((left, right) =>
-    left.updatedAt.localeCompare(right.updatedAt)
-  )
+  const ordered = [...memories].sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))
   return `Saved user memories (oldest to newest; treat as user-level guidance):\n${ordered
     .map((memory) => `- ${JSON.stringify(memory.content)}`)
     .join('\n')}`
@@ -411,10 +423,7 @@ function addMessage(
 }
 
 function stringifyResult(result: unknown): string {
-  const content = JSON.stringify(result)
-  return content.length > MAX_TOOL_RESULT_CHARS
-    ? `${content.slice(0, MAX_TOOL_RESULT_CHARS)}\n[tool result truncated]`
-    : content
+  return stringifyAgentToolResult(result)
 }
 
 export function parseProposedPlan(content: string): { content: string; planReady: boolean } {
@@ -431,6 +440,17 @@ async function awaitApproval(
   call: AgentToolCall,
   prepared: PreparedMutation
 ): Promise<boolean> {
+  let resolveApproval!: (approved: boolean) => void
+  const approval = new Promise<boolean>((resolve) => {
+    resolveApproval = resolve
+  })
+  approvals.set(call.id, {
+    sessionId: session.id,
+    runId,
+    toolCallId: call.id,
+    prepared,
+    resolve: resolveApproval
+  })
   session.status = 'waiting_approval'
   call.status = 'waiting_approval'
   call.before = prepared.before
@@ -443,9 +463,7 @@ async function awaitApproval(
   })
   emitSession(session, runId)
   await save()
-  return new Promise<boolean>((resolve) =>
-    approvals.set(call.id, { sessionId: session.id, runId, toolCallId: call.id, prepared, resolve })
-  )
+  return approval
 }
 
 async function runTool(
@@ -477,19 +495,71 @@ async function runTool(
       const prepared = await prepareMutation(call.name, call.arguments)
       call.before = prepared.before
       call.after = prepared.after
-      if (mode === 'manual') {
-        const approved = await awaitApproval(session, runId, call, prepared)
-        if (!approved) {
-          call.status = 'rejected'
-          result = { success: false, denied: true, message: 'The user rejected this mutation' }
+      const signal = controllers.get(session.id)?.signal
+      if (signal?.aborted) throw new Error('Agent execution cancelled')
+      let validationFailed = false
+      let validationNeedsApproval = false
+      if (isValidatedResourceMutation(prepared)) {
+        call.diagnostics = clipAgentLintDiagnostics(await lintPreparedMutation(prepared))
+        const candidate = prepared.after as { command?: string; commandName?: string }
+        const failureKey = `${prepared.target.type}:${
+          prepared.before === null
+            ? (candidate.command ?? candidate.commandName ?? '')
+            : prepared.target.id
+        }`
+        const failures = context.validationFailures.get(failureKey) ?? 0
+        if (failures >= MAX_DRAFT_VALIDATION_FAILURES)
+          throw new Error(
+            'Draft validation repair limit reached after three failures; explain the remaining issue'
+          )
+        const validation = await validateAgentMutation(prepared, signal)
+        validationNeedsApproval = validation.requiresApproval
+        if (validationNeedsApproval)
+          validation.report.limitations.push(
+            'This candidate uses a genuinely unsupported feature and is not validated; explicit approval is required, including in auto mode'
+          )
+        call.validation = validation.report
+        call.validationBinding = validation.binding
+        if (signal?.aborted) throw new Error('Agent execution cancelled')
+        assertAgentValidationBinding(prepared, validation.binding, validation.report)
+        if (!validation.canCommit) {
+          context.validationFailures.set(failureKey, failures + 1)
+          validationFailed = true
+          call.status = 'error'
+          result = {
+            success: false,
+            saved: false,
+            validation: validation.report,
+            diagnostics: call.diagnostics,
+            attemptsRemaining: MAX_DRAFT_VALIDATION_FAILURES - failures - 1,
+            message:
+              'Draft validation did not pass; inspect the report and repair before proposing this change'
+          }
+        }
+      }
+      if (!validationFailed) {
+        if (mode === 'manual' || validationNeedsApproval) {
+          const approved = await awaitApproval(session, runId, call, prepared)
+          if (!approved) {
+            call.status = 'rejected'
+            result = { success: false, denied: true, message: 'The user rejected this mutation' }
+          } else {
+            if (signal?.aborted) throw new Error('Agent execution cancelled')
+            if (call.validation && call.validationBinding)
+              assertAgentValidationBinding(prepared, call.validationBinding, call.validation)
+            call.status = 'approved'
+            result = await commitMutation(prepared)
+            call.status = 'completed'
+          }
         } else {
-          call.status = 'approved'
+          if (signal?.aborted) throw new Error('Agent execution cancelled')
+          if (call.validation && call.validationBinding)
+            assertAgentValidationBinding(prepared, call.validationBinding, call.validation)
           result = await commitMutation(prepared)
           call.status = 'completed'
         }
-      } else {
-        result = await commitMutation(prepared)
-        call.status = 'completed'
+        if (call.validation && result && typeof result === 'object')
+          result = { ...result, diagnostics: call.diagnostics, validation: call.validation }
       }
     } else {
       result = isDocumentationTool(call.name)
@@ -504,6 +574,7 @@ async function runTool(
         : await executeReadTool(call.name, call.arguments)
       call.status = 'completed'
     }
+    result = boundAgentToolResult(result)
     call.result = result
     message.content = stringifyResult(result)
     session.status = 'running'
@@ -534,6 +605,7 @@ export async function runAgentSession(
 
   const runId = id('run')
   const context: AgentRunContext = {
+    validationFailures: new Map(),
     documentationPolicy: createDocumentationPolicyState(),
     metrics: {
       runId,
@@ -573,13 +645,19 @@ export async function runAgentSession(
           content: `${SYSTEM_PROMPT}\n\nCurrent execution mode: ${mode}.`
         },
         ...(hasMemories
-          ? [{ role: 'user', content: `${memoryContext}\nThis is context only, not a request to act.` }]
+          ? [
+              {
+                role: 'user',
+                content: `${memoryContext}\nThis is context only, not a request to act.`
+              }
+            ]
           : []),
         ...historyMessages(session)
       ]
       const openRouter = getAiProvider(settings) === 'openrouter'
 
       for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+        if (controller.signal.aborted) throw new Error('Agent execution cancelled')
         const turn = await executeAgentProviderTurn(
           settings,
           session,
@@ -607,6 +685,7 @@ export async function runAgentSession(
           return
         }
         for (const providerCall of turn.toolCalls) {
+          if (controller.signal.aborted) throw new Error('Agent execution cancelled')
           const { result } = await runTool(session, runId, mode, providerCall, context)
           const content = stringifyResult(result)
           messages.push(
