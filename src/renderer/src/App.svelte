@@ -1,5 +1,6 @@
 <script lang="ts">
   import { initializeInteractionPublication } from './stores/interactionPublication'
+  import Playground from './components/Playground.svelte'
   import CommandList from './components/CommandList.svelte'
   import InteractionList from './components/InteractionList.svelte'
   import Help from './components/Help.svelte'
@@ -33,6 +34,7 @@
     | 'webhooks'
     | 'stats'
     | 'debugger'
+    | 'playground'
     | 'agent' = $state('commands')
 
   let leftPanelCollapsed = $state(false)
@@ -121,6 +123,8 @@
         <Stats />
       {:else if selectedMenu === 'debugger'}
         <StateViewer />
+      {:else if selectedMenu === 'playground'}
+        <Playground />
       {:else if selectedMenu === 'agent'}
         <AgentPanel />
       {/if}
@@ -182,6 +186,14 @@
               <span class="absolute right-3 top-2 size-2 rounded-full bg-success" aria-hidden="true"
               ></span>
             {/if}
+          </button>
+          <button
+            class={selectedMenu === 'playground' ? 'dock-active' : ''}
+            onclick={() => (selectedMenu = 'playground')}
+            title="Playground"
+            aria-label="Playground"
+          >
+            <span class="material-symbols-outlined">science</span>
           </button>
           <button
             class={selectedMenu === 'help' ? 'dock-active' : ''}
