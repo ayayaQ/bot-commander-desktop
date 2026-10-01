@@ -7,15 +7,21 @@
   import CodeEditor from './CodeEditor.svelte'
   import { bottomNavVisible } from '../stores/navigation'
   import { commandCapabilities } from '../../../shared/commandCapabilities'
-  import { cloneCommandDraft, commandDraftSignature } from '../utils/commandDraft'
+  import {
+    cloneCommandDraft,
+    commandDraftSignature,
+    prepareCommandDraftForSave
+  } from '../utils/commandDraft'
 
   interface Props {
     mode?: 'edit' | 'add'
     command?: BCFDCommand | null
     index?: number | null
+    onSave: (command: BCFDCommand, index: number | null) => Promise<boolean>
+    saveBlocked?: boolean
   }
 
-  let { mode = 'add', command = null, index = null }: Props = $props()
+  let { mode = 'add', command = null, index = null, onSave, saveBlocked = false }: Props = $props()
 
   const TYPE_MESSAGE_RECEIVED = 0
   const TYPE_PM_RECEIVED = 1
@@ -36,8 +42,11 @@
   let dialog: HTMLDialogElement = $state()
   let discardDialog: HTMLDialogElement = $state()
   let initialDraftSignature = ''
+  let saving = $state(false)
+  let saveError = $state('')
 
   function handleCancel() {
+    if (saving) return
     if (commandDraftSignature(editedCommand, activeActions) !== initialDraftSignature) {
       discardDialog.showModal()
     } else {
@@ -56,13 +65,52 @@
   // Maps each action type to the set of command types it supports,
   // based on what BotListener actually executes for each event type.
   const actionCompatibility: Record<string, Set<number>> = {
-    sendMessage: new Set([TYPE_MESSAGE_RECEIVED, TYPE_MEMBER_JOIN, TYPE_MEMBER_LEAVE, TYPE_MEMBER_BAN, TYPE_REACTION]),
-    sendPrivateMessage: new Set([TYPE_MESSAGE_RECEIVED, TYPE_PM_RECEIVED, TYPE_MEMBER_JOIN, TYPE_MEMBER_LEAVE, TYPE_MEMBER_BAN, TYPE_REACTION]),
-    sendChannelEmbed: new Set([TYPE_MESSAGE_RECEIVED, TYPE_MEMBER_JOIN, TYPE_MEMBER_LEAVE, TYPE_MEMBER_BAN, TYPE_REACTION]),
-    sendPrivateEmbed: new Set([TYPE_MESSAGE_RECEIVED, TYPE_PM_RECEIVED, TYPE_MEMBER_JOIN, TYPE_MEMBER_LEAVE, TYPE_MEMBER_BAN, TYPE_REACTION]),
-    specificChannel: new Set([TYPE_MESSAGE_RECEIVED, TYPE_MEMBER_JOIN, TYPE_MEMBER_LEAVE, TYPE_MEMBER_BAN, TYPE_REACTION]),
+    sendMessage: new Set([
+      TYPE_MESSAGE_RECEIVED,
+      TYPE_MEMBER_JOIN,
+      TYPE_MEMBER_LEAVE,
+      TYPE_MEMBER_BAN,
+      TYPE_REACTION
+    ]),
+    sendPrivateMessage: new Set([
+      TYPE_MESSAGE_RECEIVED,
+      TYPE_PM_RECEIVED,
+      TYPE_MEMBER_JOIN,
+      TYPE_MEMBER_LEAVE,
+      TYPE_MEMBER_BAN,
+      TYPE_REACTION
+    ]),
+    sendChannelEmbed: new Set([
+      TYPE_MESSAGE_RECEIVED,
+      TYPE_MEMBER_JOIN,
+      TYPE_MEMBER_LEAVE,
+      TYPE_MEMBER_BAN,
+      TYPE_REACTION
+    ]),
+    sendPrivateEmbed: new Set([
+      TYPE_MESSAGE_RECEIVED,
+      TYPE_PM_RECEIVED,
+      TYPE_MEMBER_JOIN,
+      TYPE_MEMBER_LEAVE,
+      TYPE_MEMBER_BAN,
+      TYPE_REACTION
+    ]),
+    specificChannel: new Set([
+      TYPE_MESSAGE_RECEIVED,
+      TYPE_MEMBER_JOIN,
+      TYPE_MEMBER_LEAVE,
+      TYPE_MEMBER_BAN,
+      TYPE_REACTION
+    ]),
     channelWhitelist: new Set([TYPE_MESSAGE_RECEIVED, TYPE_REACTION]),
-    serverWhitelist: new Set([TYPE_MESSAGE_RECEIVED, TYPE_PM_RECEIVED, TYPE_MEMBER_JOIN, TYPE_MEMBER_LEAVE, TYPE_MEMBER_BAN, TYPE_REACTION]),
+    serverWhitelist: new Set([
+      TYPE_MESSAGE_RECEIVED,
+      TYPE_PM_RECEIVED,
+      TYPE_MEMBER_JOIN,
+      TYPE_MEMBER_LEAVE,
+      TYPE_MEMBER_BAN,
+      TYPE_REACTION
+    ]),
     reaction: new Set([TYPE_MESSAGE_RECEIVED, TYPE_PM_RECEIVED]),
     deleteIf: new Set([TYPE_MESSAGE_RECEIVED]),
     deleteAfter: new Set([TYPE_MESSAGE_RECEIVED]),
@@ -115,8 +163,11 @@
   }
 
   function addAction(type: string) {
+    if (saving) return
     dropdownOpen = false
-    const action = getAvailableActions(activeActions, editedCommand?.type ?? 0).find((a) => a.type === type)
+    const action = getAvailableActions(activeActions, editedCommand?.type ?? 0).find(
+      (a) => a.type === type
+    )
     if (action) {
       activeActions = [...activeActions, action]
       // Set corresponding command property
@@ -305,66 +356,34 @@
     return errors
   })
 
-  let hasErrors =
-    $derived(descriptionError !== '' ||
-    commandError !== '' ||
-    Object.keys(actionErrors).length > 0 ||
-    activeActions.length === 0)
+  let hasErrors = $derived(
+    descriptionError !== '' ||
+      commandError !== '' ||
+      Object.keys(actionErrors).length > 0 ||
+      activeActions.length === 0
+  )
 
-  function handleSubmit() {
-    if (
-      editedCommand.type === TYPE_MEMBER_JOIN ||
-      editedCommand.type === TYPE_MEMBER_LEAVE ||
-      editedCommand.type === TYPE_MEMBER_BAN
-    ) {
-      // reset the fields that are not needed for these types
-      editedCommand.requiredRole = ''
-      editedCommand.isAdmin = false
-      editedCommand.phrase = false
-      editedCommand.isNSFW = false
-      editedCommand.deleteAfter = false
-      editedCommand.deleteNum = 0
-      editedCommand.deleteIfStrings = ''
-      editedCommand.reaction = ''
-      editedCommand.isKick = false
-      editedCommand.isBan = false
-      editedCommand.isVoiceMute = false
-      editedCommand.command = ''
+  async function handleSubmit() {
+    if (hasErrors || saving || saveBlocked) return
+    saving = true
+    saveError = ''
+    try {
+      const submitted = prepareCommandDraftForSave(editedCommand, activeActions)
+      if (!(await onSave(submitted, index))) {
+        saveError =
+          'Could not confirm the command save. Your draft is still here. Retry saving when ready.'
+      }
+    } catch (error) {
+      saveError = error instanceof Error ? error.message : 'Command could not be saved'
+    } finally {
+      saving = false
     }
-
-    clearInactivePayloads()
-
-    if (mode === 'edit') {
-      dispatch('update', { command: editedCommand, index })
-    } else {
-      dispatch('add', editedCommand)
-    }
-  }
-
-  function hasActiveAction(type: string): boolean {
-    return activeActions.some((action) => action.type === type)
-  }
-
-  function emptyEmbed() {
-    return { title: '', description: '', hexColor: '', imageURL: '', thumbnailURL: '', footer: '' }
-  }
-
-  function clearInactivePayloads() {
-    if (!hasActiveAction('sendMessage')) editedCommand.channelMessage = ''
-    if (!hasActiveAction('sendPrivateMessage')) editedCommand.privateMessage = ''
-    if (!hasActiveAction('sendChannelEmbed')) editedCommand.channelEmbed = emptyEmbed()
-    if (!hasActiveAction('sendPrivateEmbed')) editedCommand.privateEmbed = emptyEmbed()
-    if (!hasActiveAction('specificChannel')) editedCommand.specificChannel = ''
-    if (!hasActiveAction('reaction')) editedCommand.reaction = ''
-    if (!hasActiveAction('deleteIf')) editedCommand.deleteIfStrings = ''
-    if (!hasActiveAction('deleteX')) editedCommand.deleteNum = 0
-    if (!hasActiveAction('roleAssigner')) editedCommand.roleToAssign = ''
-    if (!hasActiveAction('requiredRole')) editedCommand.requiredRole = ''
   }
 
   function initializeActiveActions(cmd: BCFDCommand) {
     activeActions = []
-    if (commandCapabilities.sendsChannelMessage(cmd)) activeActions.push({ type: 'sendMessage', name: $t('send-message') })
+    if (commandCapabilities.sendsChannelMessage(cmd))
+      activeActions.push({ type: 'sendMessage', name: $t('send-message') })
     if (commandCapabilities.sendsPrivateMessage(cmd))
       activeActions.push({ type: 'sendPrivateMessage', name: $t('send-private-message') })
     if (commandCapabilities.sendsChannelEmbed(cmd))
@@ -377,15 +396,20 @@
       activeActions.push({ type: 'channelWhitelist', name: $t('channel-whitelist') })
     if (cmd.serverWhitelist?.trim())
       activeActions.push({ type: 'serverWhitelist', name: $t('server-whitelist') })
-    if (commandCapabilities.reacts(cmd)) activeActions.push({ type: 'reaction', name: $t('react-to-message') })
-    if (commandCapabilities.deletesIfMatched(cmd)) activeActions.push({ type: 'deleteIf', name: $t('delete-if-contains') })
+    if (commandCapabilities.reacts(cmd))
+      activeActions.push({ type: 'reaction', name: $t('react-to-message') })
+    if (commandCapabilities.deletesIfMatched(cmd))
+      activeActions.push({ type: 'deleteIf', name: $t('delete-if-contains') })
     if (cmd.deleteAfter) activeActions.push({ type: 'deleteAfter', name: $t('delete-after') })
-    if (commandCapabilities.deletesMessages(cmd)) activeActions.push({ type: 'deleteX', name: $t('delete-x-times') })
-    if (commandCapabilities.assignsRole(cmd)) activeActions.push({ type: 'roleAssigner', name: $t('role-assigner') })
+    if (commandCapabilities.deletesMessages(cmd))
+      activeActions.push({ type: 'deleteX', name: $t('delete-x-times') })
+    if (commandCapabilities.assignsRole(cmd))
+      activeActions.push({ type: 'roleAssigner', name: $t('role-assigner') })
     if (cmd.isKick) activeActions.push({ type: 'kick', name: $t('kick') })
     if (cmd.isBan) activeActions.push({ type: 'ban', name: $t('ban') })
     if (cmd.isVoiceMute) activeActions.push({ type: 'voiceMute', name: $t('voice-mute') })
-    if (commandCapabilities.hasRequiredRole(cmd)) activeActions.push({ type: 'requiredRole', name: $t('requires-role') })
+    if (commandCapabilities.hasRequiredRole(cmd))
+      activeActions.push({ type: 'requiredRole', name: $t('requires-role') })
     if (cmd.isAdmin) activeActions.push({ type: 'requireAdmin', name: $t('requires-admin') })
     if (cmd.isNSFW) activeActions.push({ type: 'nsfw', name: $t('is-nsfw') })
     if (cmd.cooldown && cmd.cooldown > 0)
@@ -467,12 +491,7 @@
     <p>
       {$t('import-json-command')}:
     </p>
-    <input
-      type="text"
-      bind:value={importText}
-      placeholder="Paste JSON here"
-      class="input w-full"
-    />
+    <input type="text" bind:value={importText} placeholder="Paste JSON here" class="input w-full" />
     {#if showImportError}
       <p>Bad JSON provided. Does not match required structure for command.</p>
     {/if}
@@ -484,6 +503,7 @@
           onclick={(e) => {
             const newCommand = validateBCFDCommand(importText)
             if (newCommand) {
+              newCommand.id = editedCommand.id
               editedCommand = newCommand
               initializeActiveActions(editedCommand)
               dialog.close()
@@ -518,7 +538,11 @@
         >
           {#each getAvailableActions(activeActions, editedCommand?.type ?? 0) as action}
             <li>
-              <button class="dropdown-item" onclick={() => addAction(action.type)}>
+              <button
+                class="dropdown-item"
+                disabled={saving}
+                onclick={() => addAction(action.type)}
+              >
                 {action.name}
               </button>
             </li>
@@ -527,7 +551,12 @@
       </details>
       <!-- import button -->
       <span class="tooltip tooltip-primary tooltip-bottom" data-tip={$t('import')}>
-        <button type="button" class="btn btn-primary" onclick={() => dialog.showModal()}>
+        <button
+          type="button"
+          class="btn btn-primary"
+          disabled={saving}
+          onclick={() => dialog.showModal()}
+        >
           <span class="material-symbols-outlined">upload</span>
         </button>
       </span>
@@ -538,23 +567,32 @@
           ? $t('fix-errors-to-save')
           : $t(mode === 'edit' ? 'update-command' : 'add-command')}
       >
-        <button type="submit" disabled={hasErrors} class="btn btn-primary" onclick={handleSubmit}
-          ><span class="material-symbols-outlined">save</span></button
+        <button
+          type="submit"
+          disabled={hasErrors || saving || saveBlocked}
+          class="btn btn-primary"
+          onclick={handleSubmit}
         >
+          {#if saveError}Retry save{:else}<span class="material-symbols-outlined">save</span>{/if}
+        </button>
       </span>
       <!-- cancel button-->
       <button
         type="button"
         class="btn btn-secondary"
         aria-label={$t('cancel')}
-        onclick={handleCancel}
-        ><span class="material-symbols-outlined">close</span></button
+        disabled={saving}
+        onclick={handleCancel}><span class="material-symbols-outlined">close</span></button
       >
     </div>
   </HeaderBar>
 
+  {#if saveError}
+    <div class="alert alert-error m-4" role="alert"><span>{saveError}</span></div>
+  {/if}
+
   <!-- Editor container -->
-  <div class="flex flex-1 overflow-hidden" style="height: calc(100vh - 120px);">
+  <div inert={saving} class="flex flex-1 overflow-hidden" style="height: calc(100vh - 120px);">
     <div class="flex-1 w-full overflow-y-auto">
       <div class="p-4">
         <div class="">
@@ -677,7 +715,11 @@
                 <p class="text-center text-error text-xs mt-2">{$t('no-actions-added-hint')}</p>
               {/if}
               {#each activeActions as action}
-                <div class="card bg-base-200 {incompatibleActions.has(action.type) ? 'ring-2 ring-warning' : ''}">
+                <div
+                  class="card bg-base-200 {incompatibleActions.has(action.type)
+                    ? 'ring-2 ring-warning'
+                    : ''}"
+                >
                   <div class="card-header flex justify-between items-center p-3">
                     <h3 class="text-lg font-bold">{action.name}</h3>
                     <button
@@ -698,12 +740,20 @@
                       {/if}
                       {#if editedCommand.type === TYPE_MESSAGE_RECEIVED || editedCommand.type === TYPE_REACTION}
                         <label class="label cursor-pointer justify-start gap-2 mt-2">
-                          <input type="checkbox" class="toggle toggle-sm" bind:checked={editedCommand.channelMessageAsReply} />
+                          <input
+                            type="checkbox"
+                            class="toggle toggle-sm"
+                            bind:checked={editedCommand.channelMessageAsReply}
+                          />
                           <span class="label-text">{$t('as-reply')}</span>
                         </label>
                       {/if}
                       <label class="label cursor-pointer justify-start gap-2 mt-2">
-                        <input type="checkbox" class="toggle toggle-sm" bind:checked={editedCommand.channelMessageTyping} />
+                        <input
+                          type="checkbox"
+                          class="toggle toggle-sm"
+                          bind:checked={editedCommand.channelMessageTyping}
+                        />
                         <span class="label-text">{$t('show-typing')}</span>
                       </label>
                     {:else if action.type === 'sendChannelEmbed'}
@@ -761,12 +811,20 @@
                       {/if}
                       {#if editedCommand.type === TYPE_MESSAGE_RECEIVED || editedCommand.type === TYPE_REACTION}
                         <label class="label cursor-pointer justify-start gap-2 mt-2">
-                          <input type="checkbox" class="toggle toggle-sm" bind:checked={editedCommand.channelEmbedAsReply} />
+                          <input
+                            type="checkbox"
+                            class="toggle toggle-sm"
+                            bind:checked={editedCommand.channelEmbedAsReply}
+                          />
                           <span class="label-text">{$t('as-reply')}</span>
                         </label>
                       {/if}
                       <label class="label cursor-pointer justify-start gap-2 mt-2">
-                        <input type="checkbox" class="toggle toggle-sm" bind:checked={editedCommand.channelEmbedTyping} />
+                        <input
+                          type="checkbox"
+                          class="toggle toggle-sm"
+                          bind:checked={editedCommand.channelEmbedTyping}
+                        />
                         <span class="label-text">{$t('show-typing')}</span>
                       </label>
                     {:else if action.type === 'sendPrivateMessage'}
@@ -851,7 +909,9 @@
                         <CodeEditor bind:value={editedCommand.channelWhitelist} />
                       </div>
                       {#if actionErrors['channelWhitelist']}
-                        <p class="text-error text-xs mt-2">{$t(actionErrors['channelWhitelist'])}</p>
+                        <p class="text-error text-xs mt-2">
+                          {$t(actionErrors['channelWhitelist'])}
+                        </p>
                       {/if}
                     {:else if action.type === 'serverWhitelist'}
                       <div

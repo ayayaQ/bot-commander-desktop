@@ -17,11 +17,10 @@ import {
   type DocumentationCategory
 } from './documentationService'
 import {
-  getBotStateContext,
+  readBotState,
+  withBotStateTransaction,
   getStartupJs,
-  restartJsEngine,
-  saveBotState,
-  setStartupJs
+  updateStartupJsAndRestart
 } from '../utils/virtual'
 import {
   getRendererConsoleEntries,
@@ -499,7 +498,7 @@ export async function executeReadTool(name: string, args: Record<string, any>): 
     })
   }
   if (name === 'read_bot_state') {
-    const state = getBotStateContext().getVariable('botState') ?? {}
+    const state = await readBotState()
     return { resource: state, revision: revision(state) }
   }
   if (name === 'read_startup_js') {
@@ -523,7 +522,7 @@ export async function executeReadTool(name: string, args: Record<string, any>): 
         id: value.id,
         value: value.content
       })),
-      { type: 'bot-state', value: getBotStateContext().getVariable('botState') ?? {} }
+      { type: 'bot-state', value: await readBotState() }
     ]
     return resources.flatMap((resource) => textEntries(resource.value)
       .filter((entry) => entry.value.toLowerCase().includes(query))
@@ -587,7 +586,7 @@ export async function prepareMutation(name: string, args: Record<string, any>): 
     return { name, arguments: args, before, after, target: { type: 'interaction', id: before.id } }
   }
   if (name === 'edit_bot_state') {
-    const before = getBotStateContext().getVariable('botState') ?? {}
+    const before = await readBotState()
     requireRevision(before, args.expectedRevision)
     const after = applyPatches(before, args.patches || [])
     if (!after || typeof after !== 'object' || Array.isArray(after)) throw new Error('Bot state must remain an object')
@@ -632,35 +631,63 @@ async function commitMutationUnlocked(prepared: PreparedMutation): Promise<unkno
   const args = prepared.arguments as Record<string, any>
   if (prepared.name === 'create_command') {
     const current = getCommands()
-    setCommands({ ...current, bcfdCommands: [...current.bcfdCommands, prepared.after as BCFDCommand] })
-    await saveCommands()
+    const command = prepared.after as BCFDCommand
+    const existing = current.bcfdCommands.find((item) => item.id === command.id)
+    if (existing && revision(existing) !== revision(command))
+      throw new Error('Command id already exists')
+    const next = existing
+      ? current
+      : { ...current, bcfdCommands: [...current.bcfdCommands, command] }
+    await saveCommands(next)
+    setCommands(next)
   } else if (prepared.name === 'edit_command') {
     const current = getCommands()
     const existing = current.bcfdCommands.find((item) => item.id === args.id)
-    requireRevision(existing, args.expectedRevision)
-    setCommands({ ...current, bcfdCommands: current.bcfdCommands.map((item) => item.id === args.id ? prepared.after as BCFDCommand : item) })
-    await saveCommands()
+    if (revision(existing) !== revision(prepared.after))
+      requireRevision(existing, args.expectedRevision)
+    const next = {
+      ...current,
+      bcfdCommands: current.bcfdCommands.map((item) =>
+        item.id === args.id ? (prepared.after as BCFDCommand) : item
+      )
+    }
+    await saveCommands(next)
+    setCommands(next)
   } else if (prepared.name === 'create_interaction') {
-    setInteractions([...getInteractions(), prepared.after as BCFDInteractionCommand])
-    await saveInteractions()
+    const interaction = prepared.after as BCFDInteractionCommand
+    const existing = getInteractions().find((item) => item.id === interaction.id)
+    if (existing && revision(existing) !== revision(interaction))
+      throw new Error('Interaction id already exists')
+    const next = existing ? getInteractions() : [...getInteractions(), interaction]
+    await saveInteractions(next)
+    setInteractions(next)
   } else if (prepared.name === 'edit_interaction') {
     const existing = getInteractions().find((item) => item.id === args.id)
-    requireRevision(existing, args.expectedRevision)
-    setInteractions(getInteractions().map((item) => item.id === args.id ? prepared.after as BCFDInteractionCommand : item))
-    await saveInteractions()
+    if (revision(existing) !== revision(prepared.after))
+      requireRevision(existing, args.expectedRevision)
+    const next = getInteractions().map((item) =>
+      item.id === args.id ? (prepared.after as BCFDInteractionCommand) : item
+    )
+    await saveInteractions(next)
+    setInteractions(next)
   } else if (prepared.name === 'edit_bot_state') {
-    const existing = getBotStateContext().getVariable('botState') ?? {}
-    requireRevision(existing, args.expectedRevision)
-    getBotStateContext().setVariable('botState', prepared.after)
-    await saveBotState()
+    await withBotStateTransaction((context) => {
+      if (!context.serializeVariable) throw new Error('Bot state revision requires a safe snapshot')
+      const existing = JSON.parse(context.serializeVariable('botState'))
+      if (revision(existing) !== revision(prepared.after))
+        requireRevision(existing, args.expectedRevision)
+      context.setVariable('botState', prepared.after)
+    })
   } else if (prepared.name === 'edit_startup_js') {
-    requireRevision(await getStartupJs(), args.expectedRevision)
-    await setStartupJs(prepared.after as string)
-    await restartJsEngine()
+    const existing = await getStartupJs()
+    if (existing !== prepared.after) requireRevision(existing, args.expectedRevision)
+    await updateStartupJsAndRestart(prepared.after as string)
   } else if (prepared.name === 'edit_developer_prompt') {
-    requireRevision(getSettings().developerPrompt || '', args.expectedRevision)
-    setSettings({ ...getSettings(), developerPrompt: prepared.after as string })
-    await saveSettings()
+    const existing = getSettings().developerPrompt || ''
+    if (existing !== prepared.after) requireRevision(existing, args.expectedRevision)
+    const next = { ...getSettings(), developerPrompt: prepared.after as string }
+    await saveSettings(next)
+    setSettings(next)
   } else if (prepared.name === 'create_memory') {
     await commitMemoryMutation({
       kind: 'create',
@@ -684,9 +711,12 @@ async function commitMutationUnlocked(prepared: PreparedMutation): Promise<unkno
   }
 
   let diagnostics: AgentLintDiagnostic[] = []
-  if (prepared.target.type === 'command') diagnostics = await lintCommandResource(prepared.after as BCFDCommand)
-  if (prepared.target.type === 'interaction') diagnostics = await lintInteractionResource(prepared.after as BCFDInteractionCommand)
-  if (prepared.target.type === 'startup-js') diagnostics = lintSource(prepared.after as string, 'js')
+  if (prepared.target.type === 'command')
+    diagnostics = await lintCommandResource(prepared.after as BCFDCommand)
+  if (prepared.target.type === 'interaction')
+    diagnostics = await lintInteractionResource(prepared.after as BCFDInteractionCommand)
+  if (prepared.target.type === 'startup-js')
+    diagnostics = lintSource(prepared.after as string, 'js')
   const nextRevision =
     prepared.target.type === 'memory' && prepared.after
       ? agentMemoryRevision(prepared.after as AgentMemory)
@@ -708,7 +738,7 @@ function mutationResourceKind(prepared: PreparedMutation): ResourceChangeKind {
 async function changedResourceValue(kind: ResourceChangeKind): Promise<unknown> {
   if (kind === 'commands') return getCommands()
   if (kind === 'interactions') return getInteractions()
-  if (kind === 'bot-state') return getBotStateContext().getVariable('botState') ?? {}
+  if (kind === 'bot-state') return await readBotState()
   if (kind === 'startup-js') return getStartupJs()
   if (kind === 'settings') return getSettings()
   return loadAgentMemories()
@@ -718,6 +748,8 @@ export async function commitMutation(
   prepared: PreparedMutation,
   source: ResourceChangeSource = 'agent'
 ): Promise<unknown> {
+  // Approval/retry objects may be reused by callers while this mutation waits its turn.
+  prepared = structuredClone(prepared)
   const kind = mutationResourceKind(prepared)
   return withResourceMutationLock(kind, async () => {
     const result = await commitMutationUnlocked(prepared)
