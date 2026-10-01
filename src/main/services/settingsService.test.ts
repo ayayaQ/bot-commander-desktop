@@ -35,6 +35,7 @@ describe('settingsService', () => {
       aiProvider: 'openai',
       openaiApiKey: '',
       openrouterApiKey: '',
+      spamProtectionEnabled: false,
       openaiModel: 'gpt-5.4-nano',
       selectedAiModel: 'gpt-5.4-nano',
       selectedOpenAiModel: 'gpt-5.4-nano',
@@ -81,5 +82,22 @@ describe('settingsService', () => {
     expect(getSettings()).not.toHaveProperty('selectedCommandOpenAiModel')
     expect(getSettings()).not.toHaveProperty('selectedCommandOpenRouterModel')
     expect(getSettings()).not.toHaveProperty('disableReasoningApi')
+  })
+
+  it('preserves the toggle and notifies runtime consumers synchronously', async () => {
+    const { getSettings, setSettings, onSettingsChanged } = await import('./settingsService')
+    const listener = vi.fn()
+    const unsubscribe = onSettingsChanged(listener)
+    setSettings(legacySettings({ spamProtectionEnabled: true }))
+    expect(getSettings().spamProtectionEnabled).toBe(true)
+    expect(listener).toHaveBeenLastCalledWith(
+      expect.objectContaining({ spamProtectionEnabled: true }),
+      expect.objectContaining({ spamProtectionEnabled: false })
+    )
+    setSettings({ ...getSettings(), spamProtectionEnabled: false })
+    expect(getSettings().spamProtectionEnabled).toBe(false)
+    unsubscribe()
+    setSettings(legacySettings())
+    expect(listener).toHaveBeenCalledTimes(2)
   })
 })

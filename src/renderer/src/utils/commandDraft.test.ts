@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { proxy } from 'svelte/internal/client'
 import { decodeBCFDCommand } from '../../../shared/commandCodec'
-import { cloneCommandDraft, commandDraftSignature } from './commandDraft'
+import {
+  cloneCommandDraft,
+  commandDraftSignature,
+  prepareCommandDraftForSave
+} from './commandDraft'
 
 function command() {
   return decodeBCFDCommand({
@@ -74,5 +78,34 @@ describe('command editor drafts', () => {
     expect(commandDraftSignature(draft, actions)).not.toBe(baseline)
     const imported = { ...command(), id: 'imported' }
     expect(commandDraftSignature(imported, actions)).not.toBe(baseline)
+  })
+})
+
+describe('command submission snapshots', () => {
+  it('clears inactive payloads in the submitted copy while preserving failed editor drafts', () => {
+    const draft = proxy(cloneCommandDraft(command()))
+    draft.channelMessage = 'Retained while inactive'
+    draft.privateEmbed.title = 'Retained private embed'
+    const original = JSON.stringify(draft)
+    const submitted = prepareCommandDraftForSave(draft, [{ type: 'sendChannelEmbed' }])
+    expect(submitted.channelMessage).toBe('')
+    expect(submitted.privateEmbed.title).toBe('')
+    expect(submitted.channelEmbed.title).toBe('Channel title')
+    expect(submitted.id).toBe(draft.id)
+    expect(JSON.stringify(draft)).toBe(original)
+  })
+
+  it('normalizes member-event fields without erasing the editor copy on failure', () => {
+    const draft = command()
+    draft.type = 2
+    draft.isBan = true
+    draft.requiredRole = 'retained-role'
+    const submitted = prepareCommandDraftForSave(draft, [{ type: 'sendChannelEmbed' }])
+    expect(submitted.command).toBe('')
+    expect(submitted.isBan).toBe(false)
+    expect(submitted.requiredRole).toBe('')
+    expect(draft.command).toBe('!hello')
+    expect(draft.isBan).toBe(true)
+    expect(draft.requiredRole).toBe('retained-role')
   })
 })
