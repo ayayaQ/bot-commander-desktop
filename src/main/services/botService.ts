@@ -53,11 +53,29 @@ import {
 import { getStatsInstance, Stats } from '../utils/stats'
 import { getCooldownManager } from './cooldownManager'
 import { rendererConsole } from '../utils/rendererConsole'
+import { getSettings, onSettingsChanged } from './settingsService'
+import { classifySpamWithOpenRouter } from './aiProviderService'
+import { SpamProtectionService } from './spamProtectionService'
 import {
   DiscordLoginLifetime,
   formatDiscordLoginError,
   getDiscordClientOptions
 } from './discordGateway'
+
+const spamProtection = new SpamProtectionService({
+  getSettings,
+  classify: classifySpamWithOpenRouter,
+  logger: rendererConsole
+})
+onSettingsChanged((next, previous) => spamProtection.settingsChanged(next, previous))
+
+export function stopSpamProtection() {
+  spamProtection.stop()
+}
+
+export function resumeSpamProtection() {
+  if (client && connection) spamProtection.start()
+}
 
 let client: Client | null = null
 const loginLifetimes = new WeakMap<Client, DiscordLoginLifetime>()
@@ -129,6 +147,7 @@ function disposeDiscordClient(target: Client): void {
 export function Connect(event: Electron.IpcMainEvent, token: string) {
   if (connection) {
     if (client) {
+      spamProtection.stop()
       disposeDiscordClient(client)
       client = null
       connection = false
@@ -148,6 +167,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
   })
 
   if (client) disposeDiscordClient(client)
+  spamProtection.start()
   const connectingClient = new Client(getDiscordClientOptions())
   const lifetime = new DiscordLoginLifetime(connectingClient, (error) => {
     rendererConsole.error(`Failed to disconnect from Discord: ${String(error)}`)
@@ -167,6 +187,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
       rendererConsole.error(message)
       disposeDiscordClient(connectingClient)
       if (client === connectingClient) {
+        spamProtection.stop()
         client = null
         connection = false
         event.reply('connect-error', message)
@@ -201,7 +222,22 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
     if (!message.author.bot) {
       rendererConsole.event(`Message received`)
     }
-    onMessageCreate(message)
+    void onMessageCreate(message, connectingClient).catch(() => {
+      rendererConsole.error('Could not process an incoming message')
+    })
+  })
+
+  client.on(Events.MessageUpdate, (_, message) => {
+    if (!acceptsEvents()) return
+    spamProtection.invalidateEdit(message.id, message.content)
+  })
+  client.on(Events.MessageDelete, (message) => {
+    if (!acceptsEvents()) return
+    spamProtection.invalidate(message.id)
+  })
+  client.on(Events.MessageBulkDelete, (messages) => {
+    if (!acceptsEvents()) return
+    for (const id of messages.keys()) spamProtection.invalidate(id)
   })
 
   // when a user joins a guild
@@ -250,6 +286,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
     if (client !== connectingClient) return
     const message = formatDiscordLoginError(err)
     rendererConsole.error(message)
+    spamProtection.stop()
     lifetime.cancel()
     client = null
     connection = false
@@ -258,6 +295,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
 }
 
 export async function Disconnect(event: Electron.IpcMainEvent) {
+  spamProtection.stop()
   const disconnectingClient = client
   if (disconnectingClient) {
     // Stop old event handlers and pending ready callbacks from owning live state immediately.
@@ -378,9 +416,7 @@ async function handleSlashCommand(interaction: ChatInputCommandInteraction) {
       interactionCommand.cooldownType
     ) {
       const cooldownLevel = interactionCommand.cooldownType.toLowerCase() as
-        | 'user'
-        | 'server'
-        | 'global'
+        'user' | 'server' | 'global'
       const cooldownResult = getCooldownManager().check(
         interactionCommand.id,
         interactionCommand.cooldown,
@@ -418,9 +454,7 @@ async function handleSlashCommand(interaction: ChatInputCommandInteraction) {
       interactionCommand.cooldownType
     ) {
       const cooldownLevel = interactionCommand.cooldownType.toLowerCase() as
-        | 'user'
-        | 'server'
-        | 'global'
+        'user' | 'server' | 'global'
       getCooldownManager().record(
         interactionCommand.id,
         interactionCommand.cooldown,
@@ -550,7 +584,10 @@ async function executeInteractionModerationActions(
   }
 
   if (!interaction.guild) {
-    await respondToInteractionFailure(interaction, 'Moderation actions can only be used in a server.')
+    await respondToInteractionFailure(
+      interaction,
+      'Moderation actions can only be used in a server.'
+    )
     return false
   }
 
@@ -934,7 +971,8 @@ async function channelMessage(
   replyTarget?: OmitPartialGroupDMChannel<Message<boolean>>
 ): Promise<boolean> {
   if (commandCapabilities.sendsChannelMessage(command)) {
-    const typingChannel = command.channelMessageAsReply && replyTarget ? replyTarget.channel : channel
+    const typingChannel =
+      command.channelMessageAsReply && replyTarget ? replyTarget.channel : channel
     const stopTyping = startTypingUntilStopped(typingChannel, command.channelMessageTyping)
 
     try {
@@ -1425,11 +1463,16 @@ async function onMessageReactionAdd(
   }
 }
 
-async function onMessageCreate(message: OmitPartialGroupDMChannel<Message<boolean>>) {
+async function onMessageCreate(
+  message: OmitPartialGroupDMChannel<Message<boolean>>,
+  messageClient: Client
+) {
   if (message.author.bot) return
   if (message.channel.type === ChannelType.DM) {
     stats.incrementPrivateMessagesReceived()
   }
+
+  if ((await spamProtection.check(message)) !== 'allow' || client !== messageClient) return
 
   let firstItem = message.content.split(' ')[0]
   let messageWordCount = message.content.split(' ').length

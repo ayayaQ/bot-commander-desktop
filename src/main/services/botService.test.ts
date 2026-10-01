@@ -7,6 +7,7 @@ import {
   Partials,
   type ClientOptions
 } from 'discord.js'
+import type { BCFDCommand } from '../types/types'
 import { DISCORD_DISALLOWED_INTENTS_ERROR } from '../../shared/discordSetup'
 
 const mocks = vi.hoisted(() => ({
@@ -18,6 +19,11 @@ const mocks = vi.hoisted(() => ({
   consoleInfo: vi.fn(),
   consoleSuccess: vi.fn(),
   consoleEvent: vi.fn(),
+  spamCheck: vi.fn(),
+  spamStart: vi.fn(),
+  spamStop: vi.fn(),
+  spamInvalidate: vi.fn(),
+  spamInvalidateEdit: vi.fn(),
   stats: {
     updateUserCount: vi.fn(),
     updateServerCount: vi.fn(),
@@ -52,6 +58,16 @@ vi.mock('../utils/rendererConsole', () => ({
     info: mocks.consoleInfo,
     success: mocks.consoleSuccess,
     event: mocks.consoleEvent
+  }
+}))
+vi.mock('./spamProtectionService', () => ({
+  SpamProtectionService: class {
+    check = mocks.spamCheck
+    start = mocks.spamStart
+    stop = mocks.spamStop
+    invalidate = mocks.spamInvalidate
+    invalidateEdit = mocks.spamInvalidateEdit
+    settingsChanged = vi.fn()
   }
 }))
 vi.mock('../utils/stats', () => ({ getStatsInstance: () => mocks.stats }))
@@ -113,6 +129,7 @@ describe('botService Connect', () => {
     vi.clearAllMocks()
     mocks.loadBotState.mockResolvedValue(undefined)
     mocks.saveBotState.mockResolvedValue(undefined)
+    mocks.spamCheck.mockResolvedValue('allow')
     clients = []
     mocks.createClient.mockImplementation(() => {
       const client = new FakeClient()
@@ -327,6 +344,7 @@ describe('botService Connect', () => {
     await flushLogin()
 
     expect(getClient()).toBeNull()
+    expect(mocks.spamStop).toHaveBeenCalledOnce()
     expect(clients[0].destroy).toHaveBeenCalledOnce()
     expect(event.reply).toHaveBeenCalledExactlyOnceWith(
       'connect-error',
@@ -353,6 +371,7 @@ describe('botService Connect', () => {
     await flushLogin()
 
     expect(getClient()).toBe(clients[1])
+    expect(mocks.spamStop).not.toHaveBeenCalled()
     expect(clients[0].destroy).toHaveBeenCalledOnce()
     expect(clients[1].destroy).not.toHaveBeenCalled()
     expect(oldEvent.reply).not.toHaveBeenCalled()
@@ -417,5 +436,84 @@ describe('botService Connect', () => {
     expect(mocks.consoleError).toHaveBeenCalledWith(
       'Could not save bot state before disconnecting: Error: checkpoint failed'
     )
+  })
+
+  it('ignores stale moderation updates and failures while a replacement owns the session', async () => {
+    const { Connect } = await import('./botService')
+    Connect(ipcEvent(), 'old-test-token')
+    Connect(ipcEvent(), 'new-test-token')
+    await clients[1].ready()
+
+    await clients[0].emit(Events.MessageUpdate, {}, { id: 'shared', content: 'old' })
+    await clients[0].emit(Events.MessageDelete, { id: 'shared' })
+    await clients[0].emit(Events.MessageBulkDelete, new Map([['shared', {}]]))
+    clients[0].pendingLogin.reject(new Error('obsolete login failed'))
+    await flushLogin()
+    expect(mocks.spamInvalidate).not.toHaveBeenCalled()
+    expect(mocks.spamInvalidateEdit).not.toHaveBeenCalled()
+    expect(mocks.spamStop).not.toHaveBeenCalled()
+
+    await clients[1].emit(Events.MessageUpdate, {}, { id: 'current', content: 'new' })
+    await clients[1].emit(Events.MessageDelete, { id: 'current' })
+    await clients[1].emit(Events.MessageBulkDelete, new Map([['bulk', {}]]))
+    expect(mocks.spamInvalidateEdit).toHaveBeenCalledExactlyOnceWith('current', 'new')
+    expect(mocks.spamInvalidate.mock.calls).toEqual([['current'], ['bulk']])
+  })
+
+  it('stops moderation before a checkpoint and suppresses a late allow result from the old client', async () => {
+    const { Connect, Disconnect, setCommands } = await import('./botService')
+    Connect(ipcEvent(), 'old-test-token')
+    await clients[0].ready()
+    setCommands({
+      bcfdCommands: [{ id: 'command', type: 0, command: '!test' } as BCFDCommand],
+      bcfdSlashCommands: []
+    })
+    const verdict = deferred<string>()
+    mocks.spamCheck.mockReturnValueOnce(verdict.promise)
+    await clients[0].emit(Events.MessageCreate, {
+      id: 'message',
+      content: '!test',
+      author: { bot: false },
+      channel: {}
+    })
+    const checkpoint = deferred<void>()
+    mocks.saveBotState.mockReturnValueOnce(checkpoint.promise)
+    const disconnect = Disconnect(ipcEvent())
+    expect(mocks.spamStop).toHaveBeenCalledOnce()
+    Connect(ipcEvent(), 'new-test-token')
+    await clients[1].ready()
+    verdict.resolve('allow')
+    await flushLogin()
+    expect(mocks.consoleInfo).not.toHaveBeenCalledWith('Executing command: "!test"')
+    checkpoint.resolve(undefined)
+    await disconnect
+    expect(mocks.spamStop).toHaveBeenCalledOnce()
+
+    await clients[1].emit(Events.MessageCreate, {
+      id: 'current-message',
+      content: '!test',
+      author: { bot: false },
+      channel: {}
+    })
+    await flushLogin()
+    expect(mocks.consoleInfo).toHaveBeenCalledWith('Executing command: "!test"')
+  })
+
+  it('resumes moderation after a cancelled quit only for a ready current connection', async () => {
+    const { Connect, Disconnect, resumeSpamProtection, stopSpamProtection } =
+      await import('./botService')
+    resumeSpamProtection()
+    expect(mocks.spamStart).not.toHaveBeenCalled()
+    Connect(ipcEvent(), 'test-token')
+    mocks.spamStart.mockClear()
+    resumeSpamProtection()
+    expect(mocks.spamStart).not.toHaveBeenCalled()
+    await clients[0].ready()
+    stopSpamProtection()
+    resumeSpamProtection()
+    expect(mocks.spamStart).toHaveBeenCalledOnce()
+    await Disconnect(ipcEvent())
+    resumeSpamProtection()
+    expect(mocks.spamStart).toHaveBeenCalledOnce()
   })
 })

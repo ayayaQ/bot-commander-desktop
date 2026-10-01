@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   setInteractions: vi.fn(),
   randomUUID: vi.fn(),
   isEncryptionAvailable: vi.fn(),
+  getSelectedStorageBackend: vi.fn(),
   encryptString: vi.fn(),
   decryptString: vi.fn()
 }))
@@ -25,9 +26,9 @@ vi.mock('electron', () => ({
   },
   safeStorage: {
     isEncryptionAvailable: mocks.isEncryptionAvailable,
+    getSelectedStorageBackend: mocks.getSelectedStorageBackend,
     encryptString: mocks.encryptString,
-    decryptString: mocks.decryptString,
-    getSelectedStorageBackend: () => 'gnome_libsecret'
+    decryptString: mocks.decryptString
   }
 }))
 
@@ -69,6 +70,7 @@ describe('fileService', () => {
     mocks.appGetPath.mockReturnValue(userDataPath)
     mocks.randomUUID.mockReturnValue('generated-id')
     mocks.isEncryptionAvailable.mockReturnValue(true)
+    mocks.getSelectedStorageBackend.mockReturnValue('gnome_libsecret')
     mocks.encryptString.mockImplementation((value) => Buffer.from(`encrypted:${value}`))
     mocks.decryptString.mockImplementation((value) => value.toString().replace('encrypted:', ''))
     mocks.getCommands.mockImplementation(
@@ -168,7 +170,8 @@ describe('fileService', () => {
     mocks.getSettings.mockReturnValue({
       theme: 'light',
       openaiApiKey: 'openai-secret',
-      openrouterApiKey: 'openrouter-secret'
+      openrouterApiKey: 'openrouter-secret',
+      spamProtectionEnabled: true
     })
     const { saveSettings } = await import('./fileService')
 
@@ -179,7 +182,8 @@ describe('fileService', () => {
     expect(stored).not.toContain('openrouter-secret')
     expect(JSON.parse(stored)).toMatchObject({
       openaiApiKey: expect.stringMatching(/^bcfd-encrypted:v1:/),
-      openrouterApiKey: expect.stringMatching(/^bcfd-encrypted:v1:/)
+      openrouterApiKey: expect.stringMatching(/^bcfd-encrypted:v1:/),
+      spamProtectionEnabled: true
     })
   })
 

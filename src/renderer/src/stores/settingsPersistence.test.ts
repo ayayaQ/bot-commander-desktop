@@ -240,3 +240,33 @@ describe('settings refresh ordering and effects', () => {
     }
   })
 })
+
+describe('spam-toggle settings integration', () => {
+  it('patches the toggle without overwriting pending settings and reports a failed save', async () => {
+    const pending = deferred<AppSettings>()
+    const persist = vi
+      .fn()
+      .mockReturnValueOnce(pending.promise)
+      .mockImplementation(async (value) => value)
+    const model = createSettingsPersistence(settings({ spamProtectionEnabled: false }), persist)
+    const saving = model.patch({ theme: 'dark', developerPrompt: 'Preserved pending draft' })
+    await Promise.resolve()
+    const toggle = model.patch({ spamProtectionEnabled: true })
+    pending.reject(new Error('Disk full'))
+    expect(await saving).toBe(false)
+    expect(await toggle).toBe(false)
+    expect(get(model.committed).spamProtectionEnabled).toBe(false)
+    expect(get(model.draft)).toMatchObject({
+      theme: 'dark',
+      developerPrompt: 'Preserved pending draft',
+      spamProtectionEnabled: true
+    })
+    expect(await model.retry()).toBe(true)
+    expect(persist.mock.calls[1][0]).toMatchObject({
+      theme: 'dark',
+      developerPrompt: 'Preserved pending draft',
+      spamProtectionEnabled: true
+    })
+    expect(get(model.committed).spamProtectionEnabled).toBe(true)
+  })
+})

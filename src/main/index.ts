@@ -1,3 +1,4 @@
+import { stopSpamProtection, resumeSpamProtection } from './services/botService'
 import { app, shell, BrowserWindow, Tray, Menu, session, dialog } from 'electron'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
@@ -231,6 +232,7 @@ app.whenReady().then(async () => {
       app.exit(0)
     } catch (error) {
       app.isQuitting = false
+      resumeSpamProtection()
       rendererConsole.error(`Could not quit safely; the app remains open: ${String(error)}`)
       mainWindow?.show()
       await initializeMcpServer().catch((serverError) =>
@@ -258,6 +260,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   app.isQuitting = true
+  stopSpamProtection()
 })
 
 function saveStatsPeriodicaly() {

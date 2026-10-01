@@ -4,7 +4,7 @@
   import Status from './Status.svelte'
   import { botStatusStore } from '../stores/status'
   import type { BotStatus } from '../types/types'
-  import { settingsStore } from '../stores/settings'
+  import { settingsStore, patchSettings } from '../stores/settings'
   import { t } from '../stores/localisation'
   import { onboardingStore, getCurrentStep } from '../stores/onboarding'
   import OnboardingStepper from './OnboardingStepper.svelte'
@@ -25,6 +25,26 @@
 
   let token = $state('')
   let loginError = $state('')
+  let savingSpamProtection = $state(false)
+  let spamSettingsError = $state(false)
+
+  async function toggleSpamProtection(event: Event) {
+    // Keep the control on its saved value until persistence succeeds.
+    const input = event.currentTarget as HTMLInputElement
+    input.checked = $settingsStore.spamProtectionEnabled === true
+    savingSpamProtection = true
+    spamSettingsError = false
+    try {
+      const saved = await patchSettings({
+        spamProtectionEnabled: !$settingsStore.spamProtectionEnabled
+      })
+      spamSettingsError = !saved
+    } catch {
+      spamSettingsError = true
+    } finally {
+      savingSpamProtection = false
+    }
+  }
 
   $effect(() => {
     const error = $connectionStore.error
@@ -185,6 +205,29 @@
           ><span class="material-symbols-outlined">mail</span>{$t('invite')}</button
         >
       {/if}
+      <div class="w-full rounded-box bg-base-200 p-3 text-left">
+        <label class="flex items-center justify-between gap-3">
+          <span class="font-medium">{$t('spam-protection')}</span>
+          <input
+            type="checkbox"
+            class="toggle toggle-primary"
+            checked={$settingsStore.spamProtectionEnabled === true}
+            disabled={savingSpamProtection ||
+              (!$settingsStore.spamProtectionEnabled && !$settingsStore.openrouterApiKey?.trim())}
+            onchange={toggleSpamProtection}
+          />
+        </label>
+        <p class="text-xs opacity-70 mt-2">{$t('spam-protection-help')}</p>
+        {#if !$settingsStore.openrouterApiKey?.trim()}
+          <p class="text-xs mt-2">{$t('spam-protection-key-required')}</p>
+          <button class="btn btn-link btn-xs px-0" onclick={() => onSelectTab?.('settings')}
+            >{$t('settings')}</button
+          >
+        {/if}
+        {#if spamSettingsError}
+          <p class="text-error text-xs mt-2" role="alert">{$t('spam-protection-save-failed')}</p>
+        {/if}
+      </div>
       <div class="collapse bg-base-200">
         <input type="checkbox" />
         <div class="collapse-title text-xl font-medium px-0">

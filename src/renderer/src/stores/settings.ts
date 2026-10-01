@@ -12,6 +12,7 @@ const defaultSettings: AppSettings = {
   aiProvider: 'openai',
   openaiApiKey: '',
   openrouterApiKey: '',
+  spamProtectionEnabled: false,
   selectedAiModel: 'gpt-5.4-nano',
   selectedOpenAiModel: 'gpt-5.4-nano',
   selectedOpenRouterModel: 'openai/gpt-5.4-nano',

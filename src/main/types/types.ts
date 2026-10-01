@@ -139,6 +139,7 @@ export type AppSettings = {
   language: string
   aiProvider?: 'openai' | 'openrouter'
   openaiApiKey: string
+  spamProtectionEnabled?: boolean
   openrouterApiKey?: string
   selectedAiModel?: string
   selectedOpenAiModel?: string
