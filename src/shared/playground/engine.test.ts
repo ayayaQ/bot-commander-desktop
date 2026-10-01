@@ -51,6 +51,49 @@ describe('isolated playground message simulation', () => {
     expect(evaluateTemplate('$hasRole($ID,unknown)', ctx)).toBe('false')
   })
 
+  it('includes the current guild-ID @everyone role in every member gate and role query', () => {
+    for (const guildId of ['900000000000000001', '456']) {
+      for (const index of [0, 1, 2]) {
+        const input = request({ requiredRole: guildId, channelMessage: 'allowed' })
+        input.state.guildId = guildId
+        input.senderId = input.state.members[index].id
+        const result = runMessage(input)
+        expect(result.errors).toEqual([])
+        expect(result.state.messages[1].content).toBe('allowed')
+        const ctx = {
+          state: input.state,
+          sender: input.state.members[index],
+          content: '',
+          trigger: ''
+        }
+        expect(evaluateTemplate(`$hasRole($ID,${guildId})`, ctx)).toBe('true')
+        expect(evaluateTemplate(`$hasRole($ID,<@&${guildId}>)`, ctx)).toBe('true')
+        expect(evaluateTemplate('$hasRole($ID,@everyone)', ctx)).toBe('true')
+        expect(evaluateTemplate('$memberRoles', ctx).split(', ')[0]).toBe('@everyone')
+        expect(evaluateTemplate('$memberRoleCount', ctx)).toBe(
+          String(input.state.members[index].roles.length + 1)
+        )
+      }
+    }
+  })
+
+  it('does not duplicate an explicit @everyone fixture or retain a previous guild-ID role', () => {
+    const state = createPlaygroundState()
+    const sender = state.members[1]
+    state.roles.push({ id: state.guildId, name: '@everyone' })
+    sender.roles.push(state.guildId)
+    const ctx = { state, sender, content: '', trigger: '' }
+    expect(evaluateTemplate('$memberRoles|$memberRoleCount', ctx)).toBe('@everyone|1')
+    state.roles.pop()
+    sender.roles = []
+    state.guildId = '456'
+    expect(evaluateTemplate('$hasRole($ID,900000000000000001)', ctx)).toBe('false')
+    expect(evaluateTemplate('$memberRoles|$memberRoleCount', ctx)).toBe('@everyone|1')
+    const input = request({ requiredRole: '900000000000000001', channelMessage: 'blocked' })
+    input.state.guildId = '456'
+    expect(runMessage(input).state.messages).toHaveLength(1)
+  })
+
   it('interpolates identity, nested functions, arguments and conditions using fake fixtures', () => {
     const input = request({
       startsWith: true,

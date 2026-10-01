@@ -102,10 +102,44 @@ const BOOTSTRAP = `(() => {
   define(global, 'Proxy', { value: undefined, writable: false, configurable: false })
   define(global, 'botState', { value: {}, writable: true, configurable: false })
   let temporaryCounter = 0
-  const text = value => {
-    const output = value === undefined ? '' : string(value)
+  const boundedText = output => {
     if (output.length > ${MAX_STRING}) throw new ErrorClass('Script output exceeds the playground limit')
     return output
+  }
+  const text = value => {
+    if (value === undefined) return ''
+    if (value === null || (typeof value !== 'object' && typeof value !== 'function'))
+      return boundedText(string(value))
+    // QuickJS context.dump JSON-serializes objects (including Date/toJSON), falling
+    // back to their string form when serialization fails. Production then applies
+    // host String to that dumped value. Keep all user callbacks inside this VM and
+    // its shared interrupt/memory/stack limits; never dump a user object into the host.
+    let json
+    try { json = stringify(value) } catch { json = undefined }
+    if (json === undefined) json = string(value)
+    if (json.length > ${MAX_JSON}) throw new ErrorClass('Script result exceeds the playground limit')
+    let dumped
+    try { dumped = parse(json) } catch { return boundedText(json) }
+    let count = 0
+    const dumpText = (item, depth) => {
+      if (++count > ${MAX_VALUES} || depth > ${MAX_DEPTH})
+        throw new ErrorClass('Script result exceeds the playground limit')
+      if (item === null || typeof item !== 'object') return boundedText(string(item))
+      if (!isArray(item)) {
+        // JSON data cannot contain callable methods. An own toString shadows the
+        // host Object prototype and makes ordinary String conversion fail there too.
+        if (apply(own, item, ['toString'])) throw new ErrorClass('Cannot convert object to primitive value')
+        return '[object Object]'
+      }
+      let output = ''
+      for (let index = 0; index < item.length; index++) {
+        if (index) output += ','
+        if (item[index] !== null) output += dumpText(item[index], depth + 1)
+        boundedText(output)
+      }
+      return output
+    }
+    return dumpText(dumped, 0)
   }
   const serialize = state => {
     const seen = new SetClass()

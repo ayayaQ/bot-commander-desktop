@@ -191,6 +191,30 @@ describe('bundled offline playground worker (headless)', () => {
       expect(second.result?.state.variables).toEqual({ label: 'local again' })
       expect(second.result?.state.cooldowns).toEqual({ [`offline:user:${input.senderId}`]: 1000 })
       expect(second.result?.state.messages.at(-1)?.content).toBe('2:local again')
+
+      const editedGuild = structuredClone(second.result!.state)
+      editedGuild.guildId = '456'
+      editedGuild.clockMs = 2000
+      const parity = await nextReply(worker, {
+        ...input,
+        state: editedGuild,
+        senderId: editedGuild.members[1].id,
+        commands: [
+          {
+            ...saved,
+            requiredRole: editedGuild.guildId,
+            channelMessage:
+              '$set(label,old)$if(true | $set(label,new))ok$endif:$get(label):$eval return new Date(0); $halt'
+          }
+        ]
+      })
+      expect(parity.error).toBeUndefined()
+      expect(parity.networkCalls).toEqual([])
+      expect(parity.result?.errors).toEqual([])
+      expect(parity.result?.state.botState).toEqual({ count: 2 })
+      expect(parity.result?.state.variables).toEqual({ label: 'new' })
+      expect(parity.result?.state.messages.at(-1)?.content).toBe('ok:new:1970-01-01T00:00:00.000Z')
+      expect(editedGuild.variables).toEqual({ label: 'local again' })
     } finally {
       if (worker) await worker.terminate()
       await rm(directory, { recursive: true, force: true })

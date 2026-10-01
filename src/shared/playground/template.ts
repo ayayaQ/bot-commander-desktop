@@ -3,6 +3,7 @@ import { parse } from '../../main/services/bcfdLang/parser'
 import { NodeType } from '../../main/services/bcfdLang/types'
 import type { ASTNode, ConditionNode } from '../../main/services/bcfdLang/types'
 import { PLAYGROUND_LIMITS } from './types'
+import { fakeMemberRoles, hasFakeRole } from './roles'
 import type { FakeMember, PlaygroundState } from './types'
 import type { ScriptSandbox } from './script'
 import { skipScriptExpression } from './scriptExpressions'
@@ -155,11 +156,10 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
       mentionedName: `<@${ctx.mentioned?.id ?? ''}>`,
       mentionedNamePlain: ctx.mentioned?.name ?? '',
       mentionedMemberID: ctx.mentioned?.id ?? '',
-      memberRoles: ctx.state.roles
-        .filter((role) => ctx.sender.roles.includes(role.id))
+      memberRoles: fakeMemberRoles(ctx.state, ctx.sender)
         .map((role) => role.name)
         .join(', '),
-      memberRoleCount: String(ctx.sender.roles.length),
+      memberRoleCount: String(fakeMemberRoles(ctx.state, ctx.sender).length),
       memberIsOwner: String(ctx.sender.id === ctx.state.members[0]?.id)
     }
     if (Object.hasOwn(vars, name)) return vars[name]
@@ -205,7 +205,7 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
         const role = ctx.state.roles.find((item) =>
           roleId ? item.id === roleId : item.name.toLowerCase() === query.toLowerCase()
         )
-        return String(!!role && member.roles.includes(role.id))
+        return String(!!role && hasFakeRole(ctx.state, member, role.id))
       }
       case 'upper':
         return (args[0] ?? '').toUpperCase()
@@ -319,10 +319,12 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
     if (node.type === 'value') return nodes(node.nodes, depth + 1)
     if (node.type === 'group') return conditionValue(node.expr, depth + 1)
     if (node.type === 'unary') return !condition(node.operand, depth + 1)
-    if (node.op === '&') return condition(node.left, depth + 1) && condition(node.right, depth + 1)
-    if (node.op === '|') return condition(node.left, depth + 1) || condition(node.right, depth + 1)
+    // Production evaluates both operands, left to right, before applying any operator.
+    // BCFD operands can mutate variables or fail, so JS short-circuiting changes behavior.
     const left = conditionValue(node.left, depth + 1),
       right = conditionValue(node.right, depth + 1)
+    if (node.op === '&') return truthy(left) && truthy(right)
+    if (node.op === '|') return truthy(left) || truthy(right)
     if (node.op === '==') return String(left) === String(right)
     if (node.op === '!=') return String(left) !== String(right)
     if (node.op === '>') return parseFloat(String(left)) > parseFloat(String(right))
@@ -330,9 +332,9 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
     if (node.op === '>=') return parseFloat(String(left)) >= parseFloat(String(right))
     return parseFloat(String(left)) <= parseFloat(String(right))
   }
-  const condition = (node: ConditionNode, depth: number): boolean => {
-    const value = conditionValue(node, depth)
-    return typeof value === 'boolean' ? value : value !== '' && value !== 'false' && value !== '0'
-  }
+  const truthy = (value: string | boolean): boolean =>
+    typeof value === 'boolean' ? value : value !== '' && value !== 'false' && value !== '0'
+  const condition = (node: ConditionNode, depth: number): boolean =>
+    truthy(conditionValue(node, depth))
   return nodes(parsed.ast.children, 0)
 }

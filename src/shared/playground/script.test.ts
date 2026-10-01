@@ -29,6 +29,42 @@ describe('offline playground QuickJS sandbox', () => {
     expect(run('return [1, 2]').output).toBe('1,2')
   })
 
+  it('matches production dumped transient values without changing persistent JSON state', () => {
+    expect(run('return new Date(0)')).toEqual({
+      output: '1970-01-01T00:00:00.000Z',
+      state: {}
+    })
+    expect(run('return new Date(NaN)').output).toBe('null')
+    expect(run('return [new Date(0), { x: 1 }, null, undefined]').output).toBe(
+      '1970-01-01T00:00:00.000Z,[object Object],,'
+    )
+    expect(run('return { toJSON() { return ["serialized", 2] } }').output).toBe('serialized,2')
+    expect(run('return { toString() { return "custom" } }').output).toBe('[object Object]')
+    expect(run('const value = {}; value.self = value; return value').output).toBe('[object Object]')
+    expect(run('return Object.create(null)').output).toBe('[object Object]')
+    expect(run('Object.prototype.toString = () => "wrong"; return {}').output).toBe(
+      '[object Object]'
+    )
+    expect(run('Array.prototype.toString = () => "wrong"; return [1, 2]').output).toBe('1,2')
+    expect(() => run('return { toString: "not callable" }')).toThrow(/primitive/)
+    const vm = factory({})
+    try {
+      vm.evaluate('globalThis.date = new Date(0)')
+      expect(vm.get('date')).toBe('1970-01-01T00:00:00.000Z')
+      expect(vm.state()).toEqual({})
+    } finally {
+      vm.dispose()
+    }
+  })
+
+  it('bounds transient serialized results and nested array conversion', () => {
+    expect(() => run('return { toJSON() { return "x".repeat(70_000) } }')).toThrow(/limit/)
+    expect(() =>
+      run('let value = 1; for (let i = 0; i < 40; i++) value = [value]; return value')
+    ).toThrow(/limit/)
+    expect(() => run('return Array(11_000).fill(0)')).toThrow(/limit/)
+  })
+
   it('rejects invalid deadlines rather than disabling interrupts', () => {
     expect(() => factory({}, { timeoutMs: NaN })).toThrow(/timeout/)
     expect(() => factory({}, { deadline: NaN })).toThrow(/deadline/)
@@ -149,7 +185,11 @@ describe('offline playground QuickJS sandbox', () => {
 
   it.each([
     ['eval', 'while (true) {}'],
-    ['conversion', 'return { toString() { while (true) {} } }'],
+    ['serialization', 'return { toJSON() { while (true) {} } }'],
+    [
+      'fallback conversion',
+      'const value = { toString() { while (true) {} } }; value.self = value; return value'
+    ],
     [
       'error conversion',
       'throw { get message() { while (true) {} }, toString() { while (true) {} } }'
@@ -169,7 +209,7 @@ describe('offline playground QuickJS sandbox', () => {
   it('bounds get conversion and refuses calls after the overall lifetime', async () => {
     const vm = factory({}, { timeoutMs: 40 })
     try {
-      vm.evaluate('globalThis.bad = { toString() { while (true) {} } }')
+      vm.evaluate('globalThis.bad = { toJSON() { while (true) {} } }')
       expect(() => vm.get('bad')).toThrow(/time limit|interrupted/)
     } finally {
       vm.dispose()

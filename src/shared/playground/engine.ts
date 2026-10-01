@@ -1,6 +1,7 @@
 import type { BCFDCommand, BCFDEmbedMessageTemplate } from '../../main/types/types'
 import { commandCapabilities } from '../commandCapabilities'
 import { evaluateTemplate } from './template'
+import { hasFakeRole } from './roles'
 import type { TemplateContext } from './template'
 import type { ScriptSandboxFactory } from './script'
 import { executionContext } from './executionContext'
@@ -130,7 +131,7 @@ function executeCommand(
     trace.push('Skipped: fake server is not whitelisted')
     return
   }
-  if (command.requiredRole?.trim() && !sender.roles.includes(command.requiredRole)) {
+  if (command.requiredRole?.trim() && !hasFakeRole(state, sender, command.requiredRole)) {
     trace.push('Blocked: missing required fake role')
     return
   }
