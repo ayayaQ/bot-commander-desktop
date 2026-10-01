@@ -94,6 +94,23 @@ vi.mock('../utils/rendererConsole', () => ({
 }))
 
 describe('agent resource tools', () => {
+  it('returns fresh offline fixtures without saved state and lints an unsaved draft without saving', async () => {
+    const tools = await import('./agentTools')
+    const first = (await tools.executeReadTool('read_validation_fixture', {})) as any
+    first.state.botState.count = 99
+    const second = (await tools.executeReadTool('read_validation_fixture', {})) as any
+    expect(second.state.botState).toEqual({})
+    expect(second.state.variables).toEqual({})
+    expect(second.state.botState).not.toEqual(mocks.state.botState)
+    const prepared = await tools.prepareMutation('create_command', {
+      command: { command: '!ping', commandDescription: 'Ping', channelMessage: 'Pong!' }
+    })
+    expect(await tools.lintPreparedMutation(prepared)).toEqual([])
+    expect(mocks.state.commands.bcfdCommands).toEqual([])
+    expect(mocks.saveCommands).not.toHaveBeenCalled()
+    expect(mocks.restartJsEngine).not.toHaveBeenCalled()
+  })
+
   beforeEach(() => {
     mocks.state.commands = { bcfdCommands: [], bcfdSlashCommands: [] }
     mocks.state.interactions = []
@@ -202,6 +219,44 @@ describe('agent resource tools', () => {
     ).toBe('new-interaction')
     expect(agentToolTargetLabel('read_command', { id: 'missing' })).toBeUndefined()
     expect(agentToolTargetLabel('read_bot_state', {})).toBeUndefined()
+  })
+
+  it('keeps validation schema/promises in the built-in catalog and out of MCP', async () => {
+    const { agentToolDefinitions, mcpAgentToolDefinitions } = await import('./agentTools')
+    expect(
+      agentToolDefinitions.some((tool) => tool.function.name === 'read_validation_fixture')
+    ).toBe(true)
+    expect(
+      mcpAgentToolDefinitions.some((tool) => tool.function.name === 'read_validation_fixture')
+    ).toBe(false)
+    for (const name of [
+      'create_command',
+      'edit_command',
+      'create_interaction',
+      'edit_interaction'
+    ]) {
+      const builtin = agentToolDefinitions.find((tool) => tool.function.name === name)!
+      const external = mcpAgentToolDefinitions.find((tool) => tool.function.name === name)!
+      expect(builtin.function.parameters.properties).toHaveProperty('validation')
+      expect(external.function.parameters.properties).not.toHaveProperty('validation')
+      expect(external.function.description).not.toContain('validation')
+    }
+  })
+
+  it('rejects supplied MCP validation instead of silently ignoring a failing suite and saving', async () => {
+    const { executeAgentTool } = await import('./agentTools')
+    await expect(
+      executeAgentTool(
+        'create_command',
+        {
+          command: { command: '!ping', commandDescription: 'Ping', channelMessage: 'Pong!' },
+          validation: { cases: [] }
+        },
+        'mcp'
+      )
+    ).rejects.toThrow('built-in agent panel')
+    expect(mocks.saveCommands).not.toHaveBeenCalled()
+    expect(mocks.state.commands.bcfdCommands).toEqual([])
   })
 
   it('creates canonical commands and returns automatic lint diagnostics', async () => {

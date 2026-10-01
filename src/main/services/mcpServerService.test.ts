@@ -25,7 +25,7 @@ vi.mock('./mcpConfigService', () => ({
 }))
 
 vi.mock('./agentTools', () => ({
-  agentToolDefinitions: [
+  mcpAgentToolDefinitions: [
     {
       type: 'function',
       function: {

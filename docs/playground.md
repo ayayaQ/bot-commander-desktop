@@ -149,3 +149,78 @@ An interaction failure restores its whole original fixture. The renderer accepts
 worker result only for the current generation; timeout, worker error, reset/navigation and stale
 results commit no pending effects at all. This atomic model differs from live Discord operations,
 which can partially succeed before a later error.
+
+## Agent draft validation
+
+This feature applies to the built-in agent panel. External MCP clients retain their existing
+mutation tool catalog and execution semantics; they do not advertise the fixture helper or
+validation argument. MCP mutations reject a supplied `validation` field instead of silently
+ignoring it or promising tests they do not run.
+
+The agent's command and interaction create/edit tools accept a `validation` suite containing
+explicit fake-state fixtures, input steps and expected assertions. `read_validation_fixture`
+returns a fresh complete fixture and the assertion-path guide; it never loads saved/live bot
+state. The harness prepares one normalized, unsaved mutation, lints that candidate and tests it
+before manual approval or auto-save. The assigned creation ID is retained through validation,
+approval and commit. Failed or missing-fixture tests do not save a supported draft. The agent can
+inspect the returned report and repair the proposal, with at most three failed validations for a
+resource in one run. Existing final resource revision checks still reject concurrent edits.
+Planning mode remains read-only. Event commands and genuinely unsupported features remain
+editable with a conspicuous unsupported/not-validated report and explicit user approval, including
+when the session is in auto mode. Session mode is unchanged. Wrong-kind fixtures, unmatched
+inputs, malformed requests, timeouts and failed assertions for supported scenarios cannot use
+this exception. Unknown/typo BCFD names are execution failures; only recognized production
+features outside the simulator allowlist qualify as unsupported. Any supplied event-command
+fixtures must pass the same deep validation and step-kind checks before approval is offered.
+Only message-received, slash and button dispatch are simulated.
+
+A suite supports at most six independent cases, twelve total steps and sixty-four total
+assertions (eight per step). Each case starts from its own complete deeply validated fake state;
+steps within that case share only local messages, members, roles, variables, botState and
+cooldowns. `advanceClockMs` advances the fake clock without sleeping. Inputs reject malformed or
+spoofed member/role/message references, unsafe JSON objects, accessors, cycles, sparse arrays,
+unknown fields, unsupported permission values and excessive work/depth/text. Fixtures never
+implicitly import other commands, interactions, startup scripts, saved state or credentials.
+
+Each step includes a JSON Pointer `/outcome` assertion and an explicit behavior assertion, such
+as `/effects/messages/0/content`, `/state/botState/count` (with an effect assertion), or a specific
+error. Raw execution outcomes are `executed`, `blocked`, `error`, `unmatched`, `unsupported` and
+`not_run`. Expected-negative tests prove the intended denial/error and absence of unwanted
+outputs; an empty errors array, a wrong trigger or an unsupported expression cannot count as a
+successful execution. A suite needs at least one real candidate execution and satisfied behavior
+assertions for an overall `passed` result. Otherwise the compact report says `failed`, `blocked`,
+`unmatched`, `unsupported` or `not_run`. Timeout, cancellation and oversized report details do
+not produce a passing report.
+
+Reports carry the exact candidate SHA-256, existing base revision (or null for a creation) and
+fixture SHA-256. The harness checks that binding again before approval/commit; any changed
+candidate or fixture invalidates the evidence. Reports include expected/actual values, explicit
+matched/executed resource coverage, local effects/state differences, traces/errors and simulation
+limitations, bounded below the agent tool-result limit. Diagnostic fields and the complete
+result envelope are bounded too; oversized results stay valid JSON and retain outcome, save/
+denial and repair-budget fields rather than cutting JSON mid-value. The agent panel shows the report beside
+the proposed change and retains the existing approval/rejection controls.
+
+Agent suites run in their own disposable Node worker thread, independently bundled with the
+same Playground engine, production parser and locally inlined QuickJS WASM. The privileged main
+thread only validates input data and coordinates the worker; it does not evaluate user source.
+The worker has an empty environment and execArgv, bounded V8 heap/stack, disabled host network
+APIs, per-script/per-step limits and a maximum twenty-second outer lifetime. Completion, worker
+error, exit, timeout and agent cancellation terminate it; safe closing error handlers remain until termination settles; request tokens and candidate bindings
+reject stale replies. The independent worker asset is unpacked beside the main bundle for
+packaged Electron applications. Build/watch hooks also produce it for development. It has no
+Electron, filesystem, bot, interaction-registry, provider, webhook or persistence service imports.
+
+Neither suite execution nor report inspection saves resources, writes live botState, restarts
+startup JavaScript, registers slash commands or contacts Discord/AI/webhooks. It does not touch
+the user's separate Playground tab. Scripts only see fixture data; AI response/error fields are
+explicit mocks. The atomic simulator does not prove production partial-effect ordering, Discord
+permissions/hierarchy, network delivery, registration or real provider behavior.
+
+Headless tests cover fixture boundaries, exact draft identities, approval/auto/planning behavior,
+bounded repairs, stale/cancelled results, expected-negative assertions, matched/executed coverage,
+message gates, moderation, DM/ephemeral button visibility, slash/button input, clock/cooldown sequences, script/fake state and
+mock AI. Built-entry tests run the production worker/inline WASM without launching Electron or
+any UI, exercise runaway-code interruption while a main event-loop heartbeat stays responsive,
+and inspect the bundle for privileged/external imports. Verification uses `npm test`,
+`npm run typecheck`, `npm run build`, `git diff --check` and headless package-artifact inspection.

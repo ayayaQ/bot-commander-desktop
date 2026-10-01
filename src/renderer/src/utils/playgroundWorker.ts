@@ -19,6 +19,9 @@ self.onmessage = async (event: MessageEvent<PlaygroundRequest>) => {
     const factory = (state: Record<string, unknown>) => createSandbox(state, { deadline })
     const result =
       'commands' in request ? runMessage(request, factory) : runInteraction(request, factory)
+    // Candidate-validation workers consume structured coverage. Preserve this
+    // existing UI worker's transcript budget and response shape.
+    delete result.resources
     if (JSON.stringify(result).length > PLAYGROUND_LIMITS.requestBytes)
       throw new Error('Playground result is too large; reset the playground')
     self.postMessage({ result })

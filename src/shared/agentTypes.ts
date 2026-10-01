@@ -1,3 +1,5 @@
+import type { AgentValidationReport } from './agentValidationTypes'
+
 export type AgentMode = 'manual' | 'auto' | 'planning'
 export type AgentPlanDecision = 'auto' | 'manual' | 'continue'
 export type AgentProvider = 'openai' | 'openrouter'
@@ -19,6 +21,13 @@ export interface AgentToolCall {
   status: 'running' | 'waiting_approval' | 'approved' | 'rejected' | 'completed' | 'error'
   result?: unknown
   error?: string
+  validation?: AgentValidationReport
+  validationBinding?: {
+    candidateHash: string
+    baseRevision: string | null
+    fixtureHash: string
+  }
+  diagnostics?: AgentLintDiagnostic[]
   before?: unknown
   after?: unknown
   createdAt: string
