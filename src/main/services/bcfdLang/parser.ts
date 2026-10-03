@@ -109,7 +109,11 @@ export class Parser {
         return this.parseIfBlock(token, condition)
       }
 
-      const args = this.parseParenArguments(argsStr || '', token.position + name.length + 2)
+      const args = this.parseParenArguments(
+        argsStr || '',
+        token.position + name.length + 2,
+        name === 'deleteMessage'
+      )
       return {
         type: NodeType.FUNCTION_CALL,
         name,
@@ -124,7 +128,11 @@ export class Parser {
     const braceMatch = value.match(/^(\w+)\{(.*)?\}$/s)
     if (braceMatch) {
       const [, name, argsStr] = braceMatch
-      const args = this.parseBraceArguments(argsStr || '', token.position + name.length + 2)
+      const args = this.parseBraceArguments(
+        argsStr || '',
+        token.position + name.length + 2,
+        name === 'deleteMessage'
+      )
       return {
         type: NodeType.FUNCTION_CALL,
         name,
@@ -148,7 +156,11 @@ export class Parser {
    * Parse comma-separated arguments within parentheses
    * Each argument can contain nested expressions
    */
-  private parseParenArguments(argsStr: string, basePosition: number): ASTNode[][] {
+  private parseParenArguments(
+    argsStr: string,
+    basePosition: number,
+    preserveTrailingEmpty = false
+  ): ASTNode[][] {
     if (argsStr.trim() === '') {
       return []
     }
@@ -186,7 +198,7 @@ export class Parser {
     }
 
     // Don't forget the last argument
-    if (currentArg.trim() !== '') {
+    if (currentArg.trim() !== '' || preserveTrailingEmpty) {
       args.push(this.parseArgumentContent(currentArg.trim(), basePosition + pos))
     }
 
@@ -197,7 +209,11 @@ export class Parser {
    * Parse pipe-separated arguments within braces
    * Each argument can contain nested expressions
    */
-  private parseBraceArguments(argsStr: string, basePosition: number): ASTNode[][] {
+  private parseBraceArguments(
+    argsStr: string,
+    basePosition: number,
+    preserveTrailingEmpty = false
+  ): ASTNode[][] {
     if (argsStr.trim() === '') {
       return []
     }
@@ -235,7 +251,7 @@ export class Parser {
     }
 
     // Don't forget the last argument
-    if (currentArg !== '') {
+    if (currentArg !== '' || preserveTrailingEmpty) {
       args.push(this.parseArgumentContent(currentArg, basePosition + pos))
     }
 

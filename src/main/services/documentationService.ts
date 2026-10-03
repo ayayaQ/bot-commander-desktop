@@ -1,12 +1,8 @@
 import documentationIndex from '../generated/documentationIndex.json'
+import { supplementalDocumentationRecords } from './documentationSupplement'
 
 export type DocumentationCategory =
-  | 'creating'
-  | 'commands'
-  | 'interactions'
-  | 'keywords'
-  | 'tutorial'
-  | 'webhooks'
+  'creating' | 'commands' | 'interactions' | 'keywords' | 'tutorial' | 'webhooks'
 
 interface DocumentationRecord {
   id: string
@@ -18,8 +14,14 @@ interface DocumentationRecord {
   sourceUrl: string
 }
 
-const records = documentationIndex.records as DocumentationRecord[]
-export const documentationTableOfContents = documentationIndex.tableOfContents
+const records: DocumentationRecord[] = [
+  ...documentationIndex.records,
+  ...supplementalDocumentationRecords
+] as DocumentationRecord[]
+export const documentationTableOfContents =
+  documentationIndex.tableOfContents +
+  '\n\nCurrent release keyword additions:\n' +
+  supplementalDocumentationRecords.map((record) => record.title).join('\n')
 const MAX_BEST_CONTENT_CHARS = 2_000
 const STOP_WORDS = new Set([
   'a',

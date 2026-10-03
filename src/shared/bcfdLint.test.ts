@@ -40,6 +40,10 @@ describe('lintBCFD', () => {
     expect(diagnostics).toEqual([])
   })
 
+  it('recognizes nested single-message deletion in autocomplete and lint', () => {
+    expect(lintBCFD('$deleteMessage($args(0)) $deleteMessage($option(messageid))')).toEqual([])
+  })
+
   it('does not warn for interpreter-supported names missing from autocomplete', () => {
     const diagnostics = lintBCFD(
       '$upper($namePlain) $serverID $memberColor $cooldownRemaining(user)'
