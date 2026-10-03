@@ -9,6 +9,7 @@ import type { ScriptSandbox } from './script'
 import { skipScriptExpression } from './scriptExpressions'
 import { remainingCooldown } from './sessionState'
 import type { CooldownCommand } from './sessionState'
+import { DELETE_MESSAGE_ERRORS, validateDeleteMessageArguments } from '../deleteMessage'
 
 export type TemplateContext = {
   state: PlaygroundState
@@ -71,6 +72,7 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
     'set',
     'get',
     'chat',
+    'deleteMessage',
     'cooldownRemaining'
   ])
   // Inspect every AST branch before interpreting any value, including inactive branches.
@@ -164,6 +166,21 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
     }
     if (Object.hasOwn(vars, name)) return vars[name]
     switch (name) {
+      case 'deleteMessage': {
+        const validated = validateDeleteMessageArguments(args)
+        if ('error' in validated) return validated.error
+        const message = ctx.state.messages.find(
+          (item) =>
+            String(item.id) === validated.id &&
+            item.kind !== 'dm' &&
+            !item.deleted &&
+            !item.ephemeral
+        )
+        if (!message) return DELETE_MESSAGE_ERRORS.missingMessage
+        message.deleted = true
+        ctx.trace?.push(`Simulated deleteMessage: deleted fake channel message ${validated.id}`)
+        return ''
+      }
       case 'set':
         if (!ctx.script) throw new Error('Script sandbox is unavailable')
         if (args.length >= 2) {

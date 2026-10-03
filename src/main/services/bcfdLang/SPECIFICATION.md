@@ -399,6 +399,47 @@ characters, nesting beyond 64 levels, non-finite results, and division by zero.
 | `$messageAfterCommand` | Message content after command |
 | `$commandCount`        | Number of registered commands |
 
+### Single-Message Deletion
+
+`$deleteMessage(MessageId)` deletes exactly one regular message in the current channel and returns
+an empty string on success. It works in message/event, slash-command and button templates, in
+both current and legacy settings. Arguments are evaluated first, so `$deleteMessage($args(0))`
+and `$deleteMessage($option(messageid))` can use a supplied message ID. Use a string slash option
+for IDs; JavaScript numbers cannot represent all Discord snowflakes exactly.
+
+Exactly one string argument is required. After trimming surrounding whitespace, it must be a
+canonical positive decimal ID (`[1-9][0-9]{0,19}`) no greater than `18446744073709551615`.
+Blank values, zero, leading zeroes, signs, decimals, exponents, mentions and message URLs are
+invalid. The trimmed string is passed losslessly to Discord. There is no channel-ID argument,
+cross-channel search, message prefetch or bulk-delete/14-day limit. The operation awaits Discord's
+single-message deletion; it does not report success before the request completes.
+
+The bot needs channel access and Discord permission to delete the target. Deleting its own
+messages does not require Manage Messages; other authors' guild messages normally do. The
+keyword does not impose an invoking-user permission gate. Ephemeral interaction replies cannot
+be targeted through the regular channel message endpoint.
+
+Failures produce these deterministic inline values, without raw Discord/network details:
+
+| Condition | Output |
+| --------- | ------ |
+| Not exactly one argument | `[BCFD Error: deleteMessage requires exactly one message ID]` |
+| Invalid or blank evaluated ID | `[BCFD Error: deleteMessage requires a valid message ID]` |
+| Missing/non-message channel context | `[BCFD Error: deleteMessage requires a message channel context]` |
+| Unknown message (10008) | `[BCFD Error: deleteMessage message not found in the current channel]` |
+| Unknown channel (10003) | `[BCFD Error: deleteMessage current channel not found]` |
+| Missing access (50001) | `[BCFD Error: deleteMessage missing access to the current channel]` |
+| Missing permission (50013/50003) | `[BCFD Error: deleteMessage missing permission to delete this message]` |
+| Other deletion failure | `[BCFD Error: deleteMessage failed]` |
+
+Offline Playground applies this keyword only to the current fake channel transcript. Use the
+visible **Fake message ID** (for example `$deleteMessage(1)`), not a real Discord message ID.
+The same validation and inline-result contract applies; successful local deletion is recorded in
+the trace. Fake DMs, already-deleted entries, and ephemeral replies are not addressable through
+this scope. The simulator assumes the bot can delete regular local channel messages regardless
+of the fake invoking member's permissions; it cannot simulate Discord access, permission or
+network failures and never contacts Discord.
+
 ### AI Functions
 
 | Function | Syntax          | Description               |
