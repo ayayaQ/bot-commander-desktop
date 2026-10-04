@@ -8,6 +8,7 @@
   import type { AgentMode, AgentPlanDecision, AgentToolCall } from '../../../shared/agentTypes'
   import {
     activeAgentSession,
+    activeAgentProgress,
     agentSessions,
     cancelAgentRun,
     createAgentSession,
@@ -252,7 +253,7 @@
             })}
           aria-label="Reasoning effort"
         >
-          <option value="none">No reasoning</option>
+          <option value="none">Provider default</option>
           <option value="low">Low</option>
           <option value="medium">Medium</option>
           <option value="high">High</option>
@@ -331,6 +332,15 @@
                 {/each}
               {/if}
             {/each}
+            {#if $activeAgentProgress}
+              <div
+                class="rounded-box bg-base-200 p-4 text-sm whitespace-pre-wrap break-words"
+                aria-live="polite"
+                aria-label="Agent response in progress"
+              >
+                {$activeAgentProgress}
+              </div>
+            {/if}
             {#if $activeAgentSession.status === 'running'}
               <div class="flex items-center gap-2 text-sm opacity-60">
                 <span
@@ -389,8 +399,7 @@
                 : $activeAgentSession.mode === 'planning'
                   ? 'Describe what you want planned...'
                   : 'Ask the agent...'}
-              disabled={running || awaitingPlanDecision || resolvingPlan}
-            ></textarea>
+              disabled={running || awaitingPlanDecision || resolvingPlan}></textarea>
             {#if running}
               <button
                 class="btn btn-square btn-error"

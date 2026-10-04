@@ -2,7 +2,11 @@ import { app } from 'electron'
 import fs from 'node:fs/promises'
 import { join } from 'node:path'
 import crypto from 'node:crypto'
-import OpenAI from 'openai'
+import { runAgent, type HistoryMessage, type ToolCall } from '@ayayaq/vivi'
+import { createAgentProvider } from './agentProviderAdapter'
+import { initializeAgentHistory } from './agentHistory'
+
+export { executeAgentProviderTurn } from './agentProviderAdapter'
 import type {
   AgentMessage,
   AgentModelDefaults,
@@ -64,18 +68,6 @@ When the user clearly states a durable preference or standing instruction, creat
 When the user asks to forget a saved preference or change how it is remembered, use list_memories and then delete or edit the matching memory instead of only acknowledging the request.
 In planning mode, investigate with read and lint tools and never make mutations. Ask concise questions without special markup whenever more user input is needed. Once the plan is decision-complete, return the plan inside exactly one <proposed_plan>...</proposed_plan> block with no text outside the block. Do not use that block for questions, partial plans, or ordinary discussion.`
 
-type ProviderMessage = Record<string, any>
-type ProviderToolCall = { id: string; name: string; arguments: Record<string, unknown> }
-
-interface ProviderTurn {
-  content: string
-  toolCalls: ProviderToolCall[]
-  inputTokenCount: number
-  outputTokenCount: number
-  tokenCount: number
-  rawAssistant: ProviderMessage[]
-}
-
 interface AgentRunContext {
   documentationPolicy: DocumentationPolicyState
   metrics: AgentRunMetrics
@@ -98,6 +90,8 @@ let loaded = false
 const controllers = new Map<string, AbortController>()
 const approvals = new Map<string, PendingApproval>()
 const deletedSessionIds = new Set<string>()
+// Derived on load, never serialized over the preserved damaged transcript.
+const historyRecoveryErrors = new WeakMap<AgentSession, string>()
 let eventSink: ((event: AgentStreamEvent) => void) | null = null
 let saveChain: Promise<void> = Promise.resolve()
 
@@ -107,6 +101,14 @@ function path(): string {
 
 function clone<T>(value: T): T {
   return structuredClone(value)
+}
+
+function errorDetail(error: unknown): string {
+  try {
+    return error instanceof Error ? error.message : String(error)
+  } catch {
+    return 'Unknown error (could not be formatted)'
+  }
 }
 
 function now(): string {
@@ -146,6 +148,20 @@ function normalizeModelDefaults(
     }
   }
   return defaults
+}
+
+function settleInterruptedToolCalls(session: AgentSession): void {
+  for (const message of session.messages) {
+    for (const call of message.toolCalls || []) {
+      if (['running', 'waiting_approval', 'approved'].includes(call.status)) {
+        call.status = 'error'
+        call.error =
+          'Tool call interrupted; the outcome may be unknown. Read current state before retrying.'
+        call.result = { interrupted: true, outcome: 'unknown', message: call.error }
+        message.content = JSON.stringify(call.result)
+      }
+    }
+  }
 }
 
 function emit(session: AgentSession, event: Omit<AgentStreamEvent, 'sessionId'>) {
@@ -188,21 +204,29 @@ export async function loadAgentSessions(): Promise<AgentSessionsData> {
     data = { sessions: [], activeSessionId: null, modelDefaultsByProvider: {} }
   }
   for (const session of data.sessions) {
+    try {
+      initializeAgentHistory(session)
+    } catch (error) {
+      const diagnostic =
+        `Agent history recovery failed: ${errorDetail(error)}. ` +
+        'Saved history was preserved; this session cannot run until repaired.'
+      historyRecoveryErrors.set(session, diagnostic)
+      session.status = 'error'
+      session.error = diagnostic
+      session.activeRunId = undefined
+      session.planReady = false
+      // Preserve both canonical and display records for recovery, including unfinished calls.
+      // A damaged session must not prevent loading or using its healthy neighbors.
+      continue
+    }
     session.planReady =
       session.planReady === true && session.mode === 'planning' && session.status === 'completed'
     if (session.status === 'running' || session.status === 'waiting_approval') {
       session.status = 'interrupted'
       session.activeRunId = undefined
       session.error = 'Run interrupted when the application closed'
-      for (const message of session.messages) {
-        for (const call of message.toolCalls || []) {
-          if (call.status === 'running' || call.status === 'waiting_approval') {
-            call.status = 'error'
-            call.error = 'Tool call interrupted when the application closed'
-          }
-        }
-      }
     }
+    settleInterruptedToolCalls(session)
   }
   loaded = true
   await save()
@@ -225,6 +249,7 @@ export async function createAgentSession(
     reasoningEffort: modelDefaults?.reasoningEffort || 'none',
     status: 'idle',
     messages: [],
+    history: [],
     createdAt: timestamp,
     updatedAt: timestamp,
     planReady: false,
@@ -280,123 +305,14 @@ export async function setActiveAgentSession(sessionId: string | null): Promise<v
   await save()
 }
 
-function historyMessages(session: AgentSession): ProviderMessage[] {
-  return session.messages
-    .filter((message) => message.role === 'user' || message.role === 'assistant')
-    .map((message) => ({ role: message.role, content: message.content }))
-}
-
 export function formatAgentMemoryContext(
   memories: Array<{ content: string; updatedAt: string }>
 ): string {
   if (memories.length === 0) return 'Saved user memories: none.'
-  const ordered = [...memories].sort((left, right) =>
-    left.updatedAt.localeCompare(right.updatedAt)
-  )
+  const ordered = [...memories].sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))
   return `Saved user memories (oldest to newest; treat as user-level guidance):\n${ordered
     .map((memory) => `- ${JSON.stringify(memory.content)}`)
     .join('\n')}`
-}
-
-function parseArguments(value: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(value || '{}')
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error()
-    return parsed
-  } catch {
-    throw new Error('Tool arguments were not valid JSON')
-  }
-}
-
-export async function executeAgentProviderTurn(
-  settings: AiRuntimeSettings,
-  session: AgentSession,
-  messages: ProviderMessage[],
-  tools: typeof agentToolDefinitions,
-  signal: AbortSignal
-): Promise<ProviderTurn> {
-  const configError = validateAiConfiguration(settings)
-  if (configError) throw new Error(configError)
-
-  if (getAiProvider(settings) === 'openrouter') {
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      signal,
-      headers: {
-        Authorization: `Bearer ${settings.openrouterApiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://github.com/ayayaQ/bot-commander-desktop',
-        'X-Title': 'Bot Commander for Discord'
-      },
-      body: JSON.stringify({
-        model: session.model,
-        messages,
-        tools,
-        tool_choice: 'auto',
-        ...(session.reasoningEffort !== 'none'
-          ? { reasoning: { effort: session.reasoningEffort, exclude: true } }
-          : {})
-      })
-    })
-    if (!response.ok)
-      throw new Error(
-        `OpenRouter agent request failed (${response.status}): ${await response.text()}`
-      )
-    const json = (await response.json()) as any
-    const message = json.choices?.[0]?.message
-    if (!message) throw new Error('OpenRouter returned no agent message')
-    return {
-      content: typeof message.content === 'string' ? message.content : '',
-      toolCalls: (message.tool_calls || []).map((call: any) => ({
-        id: call.id,
-        name: call.function.name,
-        arguments: parseArguments(call.function.arguments)
-      })),
-      inputTokenCount: json.usage?.prompt_tokens || 0,
-      outputTokenCount: json.usage?.completion_tokens || 0,
-      tokenCount:
-        json.usage?.total_tokens ||
-        (json.usage?.prompt_tokens || 0) + (json.usage?.completion_tokens || 0),
-      rawAssistant: [message]
-    }
-  }
-
-  const openai = new OpenAI({ apiKey: settings.openaiApiKey })
-  const response = await openai.responses.create(
-    {
-      model: session.model,
-      input: messages as any,
-      tools: tools.map((tool) => ({
-        type: 'function' as const,
-        name: tool.function.name,
-        description: tool.function.description,
-        parameters: tool.function.parameters,
-        strict: false
-      })),
-      tool_choice: 'auto',
-      ...(session.reasoningEffort !== 'none'
-        ? { reasoning: { effort: session.reasoningEffort } }
-        : {})
-    } as any,
-    { signal }
-  )
-  const output = response.output as any[]
-  return {
-    content: response.output_text || '',
-    toolCalls: output
-      .filter((item) => item.type === 'function_call')
-      .map((call) => ({
-        id: call.call_id,
-        name: call.name,
-        arguments: parseArguments(call.arguments)
-      })),
-    inputTokenCount: response.usage?.input_tokens || 0,
-    outputTokenCount: response.usage?.output_tokens || 0,
-    tokenCount:
-      response.usage?.total_tokens ||
-      (response.usage?.input_tokens || 0) + (response.usage?.output_tokens || 0),
-    rawAssistant: output
-  }
 }
 
 function addMessage(
@@ -411,9 +327,12 @@ function addMessage(
 }
 
 function stringifyResult(result: unknown): string {
-  const content = JSON.stringify(result)
+  const content = JSON.stringify(result) ?? 'null'
   return content.length > MAX_TOOL_RESULT_CHARS
-    ? `${content.slice(0, MAX_TOOL_RESULT_CHARS)}\n[tool result truncated]`
+    ? JSON.stringify({
+        truncated: true,
+        preview: content.slice(0, Math.floor((MAX_TOOL_RESULT_CHARS - 100) / 2))
+      })
     : content
 }
 
@@ -431,6 +350,17 @@ async function awaitApproval(
   call: AgentToolCall,
   prepared: PreparedMutation
 ): Promise<boolean> {
+  let resolveApproval!: (approved: boolean) => void
+  const approval = new Promise<boolean>((resolve) => {
+    resolveApproval = resolve
+  })
+  approvals.set(call.id, {
+    sessionId: session.id,
+    runId,
+    toolCallId: call.id,
+    prepared,
+    resolve: resolveApproval
+  })
   session.status = 'waiting_approval'
   call.status = 'waiting_approval'
   call.before = prepared.before
@@ -443,17 +373,29 @@ async function awaitApproval(
   })
   emitSession(session, runId)
   await save()
-  return new Promise<boolean>((resolve) =>
-    approvals.set(call.id, { sessionId: session.id, runId, toolCallId: call.id, prepared, resolve })
+  return approval
+}
+
+function isActiveRun(session: AgentSession, runId: string, signal: AbortSignal): boolean {
+  return (
+    !signal.aborted &&
+    session.activeRunId === runId &&
+    controllers.get(session.id)?.signal === signal &&
+    !deletedSessionIds.has(session.id)
   )
+}
+
+function assertActiveRun(session: AgentSession, runId: string, signal: AbortSignal): void {
+  if (!isActiveRun(session, runId, signal)) throw new Error('Agent execution cancelled')
 }
 
 async function runTool(
   session: AgentSession,
   runId: string,
   mode: AgentMode,
-  providerCall: ProviderToolCall,
-  context: AgentRunContext
+  providerCall: ToolCall,
+  context: AgentRunContext,
+  signal: AbortSignal
 ): Promise<{ toolCall: AgentToolCall; result: unknown }> {
   const targetLabel = agentToolTargetLabel(providerCall.name, providerCall.arguments)
   const call: AgentToolCall = {
@@ -471,25 +413,28 @@ async function runTool(
   })
   emit(session, { type: 'tool', runId, toolCall: clone(call) })
   try {
+    assertActiveRun(session, runId, signal)
     let result: unknown
     if (mutationToolNames.has(call.name)) {
       if (mode === 'planning') throw new Error('Mutation tools are disabled in planning mode')
       const prepared = await prepareMutation(call.name, call.arguments)
+      assertActiveRun(session, runId, signal)
       call.before = prepared.before
       call.after = prepared.after
       if (mode === 'manual') {
         const approved = await awaitApproval(session, runId, call, prepared)
+        assertActiveRun(session, runId, signal)
         if (!approved) {
           call.status = 'rejected'
           result = { success: false, denied: true, message: 'The user rejected this mutation' }
         } else {
+          assertActiveRun(session, runId, signal)
           call.status = 'approved'
-          result = await commitMutation(prepared)
-          call.status = 'completed'
+          result = await commitMutation(prepared, 'agent', signal)
         }
       } else {
-        result = await commitMutation(prepared)
-        call.status = 'completed'
+        assertActiveRun(session, runId, signal)
+        result = await commitMutation(prepared, 'agent', signal)
       }
     } else {
       result = isDocumentationTool(call.name)
@@ -502,8 +447,9 @@ async function runTool(
             () => executeReadTool(call.name, call.arguments)
           )
         : await executeReadTool(call.name, call.arguments)
-      call.status = 'completed'
     }
+    assertActiveRun(session, runId, signal)
+    if (call.status !== 'rejected') call.status = 'completed'
     call.result = result
     message.content = stringifyResult(result)
     session.status = 'running'
@@ -511,7 +457,9 @@ async function runTool(
     await save()
     return { toolCall: call, result }
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error)
+    const detail = errorDetail(error)
+    if (!isActiveRun(session, runId, signal))
+      return { toolCall: call, result: { success: false, error: 'Agent execution cancelled' } }
     call.status = 'error'
     call.error = detail
     message.content = JSON.stringify({ success: false, error: detail })
@@ -528,9 +476,14 @@ export async function runAgentSession(
 ): Promise<{ runId: string }> {
   await loadAgentSessions()
   const session = getSessionOrThrow(sessionId)
+  const historyError = historyRecoveryErrors.get(session)
+  if (historyError) throw new Error(historyError)
   if (controllers.has(sessionId))
     throw new Error('This agent session already has a running request')
   if (!userContent.trim()) throw new Error('Message cannot be empty')
+  // App policy remains here; a standalone vivi OpenRouter provider needs only its own key.
+  const configError = validateAiConfiguration(settings)
+  if (configError) throw new Error(configError)
 
   const runId = id('run')
   const context: AgentRunContext = {
@@ -555,8 +508,18 @@ export async function runAgentSession(
   session.planReady = false
   session.error = undefined
   if (session.messages.length === 0) session.title = userContent.trim().slice(0, 48)
+  session.history ??= []
+  session.history.push({ kind: 'message', role: 'user', content: userContent.trim() })
   addMessage(session, { role: 'user', content: userContent.trim() })
-  await save()
+  try {
+    await save()
+  } catch (error) {
+    if (controllers.get(sessionId) === controller) controllers.delete(sessionId)
+    session.status = 'error'
+    session.activeRunId = undefined
+    session.error = errorDetail(error)
+    throw error
+  }
   emitSession(session, runId)
 
   void (async () => {
@@ -567,71 +530,103 @@ export async function runAgentSession(
         mode === 'planning'
           ? agentToolDefinitions.filter((tool) => !mutationToolNames.has(tool.function.name))
           : agentToolDefinitions
-      const messages: ProviderMessage[] = [
+      const prefix: HistoryMessage[] = [
         {
+          kind: 'message',
           role: 'system',
           content: `${SYSTEM_PROMPT}\n\nCurrent execution mode: ${mode}.`
         },
         ...(hasMemories
-          ? [{ role: 'user', content: `${memoryContext}\nThis is context only, not a request to act.` }]
-          : []),
-        ...historyMessages(session)
+          ? [
+              {
+                kind: 'message' as const,
+                role: 'user' as const,
+                content: `${memoryContext}\nThis is context only, not a request to act.`
+              }
+            ]
+          : [])
       ]
-      const openRouter = getAiProvider(settings) === 'openrouter'
-
-      for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-        const turn = await executeAgentProviderTurn(
-          settings,
-          session,
-          messages,
-          tools,
-          controller.signal
-        )
-        context.metrics.providerRounds += 1
-        context.metrics.inputTokens += turn.inputTokenCount
-        context.metrics.outputTokens += turn.outputTokenCount
-        context.metrics.totalTokens += turn.tokenCount
-        session.tokenCount += turn.tokenCount
-        messages.push(...turn.rawAssistant)
-        if (turn.toolCalls.length === 0) {
-          const content = turn.content.trim() || 'The agent completed without a text response.'
-          const response =
-            mode === 'planning' ? parseProposedPlan(content) : { content, planReady: false }
-          addMessage(session, { role: 'assistant', content: response.content })
-          session.status = 'completed'
-          session.planReady = response.planReady
-          session.activeRunId = undefined
-          session.lastRunMetrics = clone(context.metrics)
-          await save()
-          emit(session, { type: 'done', runId, session: clone(session) })
-          return
+      const initialTokenCount = session.tokenCount
+      const runModel = { model: session.model, reasoningEffort: session.reasoningEffort }
+      const result = await runAgent({
+        provider: createAgentProvider(settings, runModel, { stream: true }),
+        messages: [...prefix, ...session.history!],
+        tools: tools.map((tool) => ({
+          name: tool.function.name,
+          description: tool.function.description,
+          parameters: JSON.parse(JSON.stringify(tool.function.parameters))
+        })),
+        signal: controller.signal,
+        maxRounds: MAX_TOOL_ROUNDS,
+        executeTool: async (call, { signal }) => {
+          const { toolCall, result } = await runTool(session, runId, mode, call, context, signal)
+          return { content: stringifyResult(result), isError: toolCall.status === 'error' }
+        },
+        onEvent: async (event) => {
+          assertActiveRun(session, runId, controller.signal)
+          if (event.type === 'text_delta') {
+            emit(session, { type: 'text_delta', runId, delta: event.text })
+          }
+          if (event.type === 'assistant') {
+            // Partial output is display-only and must never become persisted history.
+            emit(session, { type: 'progress_reset', runId })
+          }
+          if (event.type === 'round_completed') {
+            context.metrics.providerRounds += 1
+            context.metrics.inputTokens += event.usage?.inputTokens || 0
+            context.metrics.outputTokens += event.usage?.outputTokens || 0
+            context.metrics.totalTokens += event.usage?.totalTokens || 0
+            session.tokenCount += event.usage?.totalTokens || 0
+          }
+          if (event.type === 'assistant' || event.type === 'tool_completed') {
+            session.history!.push(clone(event.message))
+            // Checkpoint calls before execution, then each result; recovery never replays them.
+            await save()
+          }
         }
-        for (const providerCall of turn.toolCalls) {
-          const { result } = await runTool(session, runId, mode, providerCall, context)
-          const content = stringifyResult(result)
-          messages.push(
-            openRouter
-              ? { role: 'tool', tool_call_id: providerCall.id, content }
-              : { type: 'function_call_output', call_id: providerCall.id, output: content }
-          )
-        }
-      }
-      throw new Error(`Agent exceeded the ${MAX_TOOL_ROUNDS}-round tool limit`)
-    } catch (error) {
-      const aborted = controller.signal.aborted
-      session.status = aborted ? 'cancelled' : 'error'
-      session.error = aborted ? undefined : error instanceof Error ? error.message : String(error)
+      })
+      // Cancellation/error may close unexecuted calls without emitting further events.
+      if (result.error?.code !== 'invalid_input')
+        session.history = result.history.slice(prefix.length)
+      context.metrics.providerRounds = result.rounds
+      context.metrics.inputTokens = result.usage.inputTokens
+      context.metrics.outputTokens = result.usage.outputTokens
+      context.metrics.totalTokens = result.usage.totalTokens
+      session.tokenCount = initialTokenCount + result.usage.totalTokens
+      settleInterruptedToolCalls(session)
+      if (result.status === 'error')
+        throw new Error(result.error?.message || 'Agent execution failed')
+      if (result.status === 'cancelled') throw new Error('Agent execution cancelled')
+      const content = result.content.trim() || 'The agent completed without a text response.'
+      const response =
+        mode === 'planning' ? parseProposedPlan(content) : { content, planReady: false }
+      addMessage(session, { role: 'assistant', content: response.content })
+      session.status = 'completed'
+      session.planReady = response.planReady
       session.activeRunId = undefined
       session.lastRunMetrics = clone(context.metrics)
       await save()
+      emit(session, { type: 'done', runId, session: clone(session) })
+    } catch (error) {
+      const aborted = controller.signal.aborted
+      session.status = aborted ? 'cancelled' : 'error'
+      session.error = aborted ? undefined : errorDetail(error)
+      session.activeRunId = undefined
+      session.lastRunMetrics = clone(context.metrics)
+      try {
+        await save()
+      } catch (persistenceError) {
+        session.status = 'error'
+        session.error = `Failed to save agent session: ${errorDetail(persistenceError)}`
+      }
       emit(
         session,
-        aborted
+        session.status === 'cancelled'
           ? { type: 'done', runId, session: clone(session) }
           : { type: 'error', runId, error: session.error, session: clone(session) }
       )
     } finally {
-      controllers.delete(sessionId)
+      if (controllers.get(sessionId) === controller) controllers.delete(sessionId)
       for (const [callId, approval] of approvals) {
         if (approval.sessionId === sessionId && approval.runId === runId) {
           approvals.delete(callId)
