@@ -2,12 +2,13 @@
 
 The generic sequential provider/tool loop lives in the separate
 [ayayaQ/vivi](https://github.com/ayayaQ/vivi) repository. Bot Commander consumes a reviewed,
-versioned `@ayayaq/vivi` package snapshot from `vendor/`, with the source commit, tree and archive digest recorded
-beside it. The lockfile also verifies npm's package integrity. No npm registry release or runtime
-Git authentication/build is required.
+exact npm registry release `@ayayaq/vivi@0.2.0`. The published artifact was verified
+byte-for-byte against the reviewed release archive; its immutable registry URL and
+SHA-512 integrity are recorded in the lockfile. Runtime Git authentication/build is
+not required, and npm pack outputs are not committed to this repository.
 
-This branch integrates the unreleased `0.2.0-dev.0` development snapshot. The published npm
-`0.1.0` release contains the original core, without these provider subpaths or progress helpers.
+The published `0.2.0` includes the shared provider subpaths and canonical-history
+helpers used here. The earlier `0.1.0` release contains only the original core.
 
 ## Responsibilities
 
@@ -55,17 +56,21 @@ The returned transcript is authoritative on cancellation/errors, including synth
 accepted calls that did not finish. The desktop reconciles it before persisting terminal status.
 Tool output truncation produces a marked JSON envelope instead of cutting JSON mid-value.
 
-## Updating the vendored package
+## Updating the shared package
 
 1. Review and test the new vivi source revision, then run its complete `npm run check`
-2. Build and `npm pack` that exact checkout; copy the archive into `vendor/`
-3. Update the package's source revision/tree/digest record and local-file dependency together
-4. Regenerate the lockfile without changing unrelated dependency versions
-5. Verify a clean `npm ci`, full tests, typecheck, production build and headless package contents
+2. Build and `npm pack` that exact checkout, then publish the compatible shared npm release first
+3. Verify the registry-served archive's bytes and integrity against the reviewed release artifact
+4. Update the exact registry dependency and regenerate the lockfile, preserving every unrelated
+   dependency entry, including locked versions, resolutions, integrity and platform metadata
+5. Verify a clean `npm ci`, full tests, typecheck, production build and headless package contents,
+   including the shared source, LICENSE, NOTICE and attribution records
 
-Do not replace the package with an absolute filesystem path or a mutable Git branch. A new vivi
-snapshot is a normal reviewed dependency change. The desktop project retains its existing GPL
-license; vivi is separately licensed Apache-2.0 by its owner.
+Do not commit archive outputs or reintroduce vendor tarballs, absolute filesystem dependencies,
+version ranges or mutable Git branches. Historical tracked snapshots remain recoverable from Git.
+A new vivi release is a normal reviewed dependency change; it does not release or deploy the
+application. The desktop project retains its existing GPL license; vivi is separately licensed
+Apache-2.0 by its owner.
 
 PR #12's proposed offline draft validation remains host code. Integrating that PR later should
 retain lint/validation binding, bounded repair counts, unsupported-candidate approval and
