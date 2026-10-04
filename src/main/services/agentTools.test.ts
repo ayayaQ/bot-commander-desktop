@@ -375,4 +375,34 @@ describe('agent resource tools', () => {
       vm.dispose()
     }
   })
+
+  it('does not start a cancelled mutation after waiting for the resource lock', async () => {
+    const { commitMutation, prepareMutation } = await import('./agentTools')
+    const { withResourceMutationLock } = await import('./resourceChangeService')
+    let release!: () => void
+    let entered!: () => void
+    const started = new Promise<void>((resolve) => entered = resolve)
+    const barrier = new Promise<void>((resolve) => release = resolve)
+    const holding = withResourceMutationLock('commands', async () => {
+      entered()
+      await barrier
+    })
+    await started
+    const prepared = await prepareMutation('create_command', {
+      command: { command: 'cancelled', channelMessage: 'Do not save' }
+    })
+    const controller = new AbortController()
+    const pending = commitMutation(prepared, 'agent', controller.signal)
+    const rejected = expect(pending).rejects.toThrow('cancelled before mutation started')
+    controller.abort()
+    release()
+    await holding
+    await rejected
+    expect(mocks.saveCommands).not.toHaveBeenCalled()
+    expect(mocks.state.commands.bcfdCommands).toEqual([])
+    // Existing no-signal callers, including MCP, retain the normal commit path.
+    await expect(commitMutation(prepared, 'mcp')).resolves.toMatchObject({ success: true })
+    expect(mocks.saveCommands).toHaveBeenCalledOnce()
+  })
+
 })

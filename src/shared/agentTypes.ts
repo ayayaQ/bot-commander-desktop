@@ -1,15 +1,11 @@
+import type { HistoryMessage } from '@ayayaq/vivi'
+
 export type AgentMode = 'manual' | 'auto' | 'planning'
 export type AgentPlanDecision = 'auto' | 'manual' | 'continue'
 export type AgentProvider = 'openai' | 'openrouter'
 export type AgentReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 export type AgentRunStatus =
-  | 'idle'
-  | 'running'
-  | 'waiting_approval'
-  | 'completed'
-  | 'error'
-  | 'cancelled'
-  | 'interrupted'
+  'idle' | 'running' | 'waiting_approval' | 'completed' | 'error' | 'cancelled' | 'interrupted'
 
 export interface AgentToolCall {
   id: string
@@ -53,6 +49,8 @@ export interface AgentSession {
   reasoningEffort: AgentReasoningEffort
   status: AgentRunStatus
   messages: AgentMessage[]
+  /** Canonical provider-neutral transcript, including matched tool calls/results. */
+  history?: HistoryMessage[]
   createdAt: string
   updatedAt: string
   activeRunId?: string
@@ -120,7 +118,16 @@ export interface AgentLintDiagnostic {
 export interface AgentStreamEvent {
   sessionId: string
   runId?: string
-  type: 'session' | 'thinking' | 'message' | 'tool' | 'approval' | 'done' | 'error'
+  type:
+    | 'session'
+    | 'thinking'
+    | 'text_delta'
+    | 'progress_reset'
+    | 'message'
+    | 'tool'
+    | 'approval'
+    | 'done'
+    | 'error'
   session?: AgentSession
   delta?: string
   message?: AgentMessage

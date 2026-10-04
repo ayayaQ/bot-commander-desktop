@@ -746,12 +746,15 @@ async function changedResourceValue(kind: ResourceChangeKind): Promise<unknown> 
 
 export async function commitMutation(
   prepared: PreparedMutation,
-  source: ResourceChangeSource = 'agent'
+  source: ResourceChangeSource = 'agent',
+  signal?: AbortSignal
 ): Promise<unknown> {
   // Approval/retry objects may be reused by callers while this mutation waits its turn.
   prepared = structuredClone(prepared)
   const kind = mutationResourceKind(prepared)
   return withResourceMutationLock(kind, async () => {
+    // A cancellation while queued must not start a fresh mutation after lock admission.
+    if (signal?.aborted) throw new Error('Agent execution cancelled before mutation started')
     const result = await commitMutationUnlocked(prepared)
     emitResourceChanged(
       kind,
