@@ -1019,6 +1019,106 @@ describe('desktop agent service shared-provider integration', () => {
     ).toBe(true)
   })
 
+  it.each(['openai', 'openrouter'] as const)(
+    'rejects %s streamed completion after the progress callback crosses its deadline without dispatching tools',
+    async (provider) => {
+      const frames =
+        provider === 'openai'
+          ? [
+              { type: 'response.output_text.delta', delta: 'Unaccepted timeout partial' },
+              {
+                type: 'response.completed',
+                response: {
+                  status: 'completed',
+                  output: [
+                    {
+                      type: 'function_call',
+                      call_id: 'late_timeout_call',
+                      name: 'read_bot_state',
+                      arguments: '{}'
+                    }
+                  ]
+                }
+              }
+            ]
+          : [
+              {
+                choices: [
+                  {
+                    index: 0,
+                    delta: { role: 'assistant', content: 'Unaccepted timeout partial' },
+                    finish_reason: null
+                  }
+                ]
+              },
+              {
+                choices: [
+                  {
+                    index: 0,
+                    delta: {
+                      tool_calls: [
+                        {
+                          index: 0,
+                          id: 'late_timeout_call',
+                          type: 'function',
+                          function: { name: 'read_bot_state', arguments: '{}' }
+                        }
+                      ]
+                    },
+                    finish_reason: null
+                  }
+                ]
+              },
+              { choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
+              '[DONE]'
+            ]
+      const body = frames
+        .map((frame) => `data: ${typeof frame === 'string' ? frame : JSON.stringify(frame)}\n\n`)
+        .join('')
+      const fetchMock = vi.fn(
+        async () => new Response(body, { headers: { 'Content-Type': 'text/event-stream' } })
+      )
+      vi.stubGlobal('fetch', fetchMock)
+      const service = await import('./agentService')
+      const runtime = {
+        aiProvider: provider,
+        openaiApiKey: 'fake-moderation-key',
+        openrouterApiKey: 'fake-router-key'
+      }
+      const session = await service.createAgentSession(runtime)
+      let elapsed = 0
+      const clock = vi.spyOn(globalThis.performance, 'now').mockImplementation(() => elapsed)
+      try {
+        // Simulate synchronous callback work without waiting ten minutes or
+        // allowing the timeout timer to run before the completed tool frame.
+        const done = new Promise<void>((resolve) =>
+          service.setAgentEventSink((event) => {
+            if (event.type === 'text_delta') elapsed = 600_001
+            if (event.type === 'done' || event.type === 'error') resolve()
+          })
+        )
+        await service.runAgentSession(session.id, 'Inspect after timeout', runtime)
+        await done
+        const stored = (await service.loadAgentSessions()).sessions[0]
+        expect(mocks.executeReadTool).not.toHaveBeenCalled()
+        expect(mocks.prepareMutation).not.toHaveBeenCalled()
+        expect(mocks.commitMutation).not.toHaveBeenCalled()
+        expect(stored.status).toBe('error')
+        expect(stored.error).toContain('timed out')
+        expect(fetchMock).toHaveBeenCalledOnce()
+        expect(stored.history).toEqual([
+          { kind: 'message', role: 'user', content: 'Inspect after timeout' }
+        ])
+        expect(stored.messages.map((message) => message.role)).toEqual(['user'])
+        expect(stored.lastRunMetrics?.providerRounds).toBe(0)
+        expect(JSON.stringify(stored)).not.toContain('Unaccepted timeout partial')
+        expect(JSON.stringify(stored)).not.toContain('late_timeout_call')
+      } finally {
+        clock.mockRestore()
+      }
+    }
+  )
+
   it('rejects malformed streamed completion before any tool or history acceptance', async () => {
     vi.stubGlobal(
       'fetch',

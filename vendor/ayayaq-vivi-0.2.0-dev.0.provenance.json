@@ -2,12 +2,12 @@
   "package": "@ayayaq/vivi",
   "version": "0.2.0-dev.0",
   "sourceRepository": "https://github.com/ayayaQ/vivi",
-  "sourceCommit": "6bf90d15bb50db574835faf1415abd8e28ad7bb9",
-  "sourceTree": "a33c63f8535c226b08e131c005fd20a25c3b5093",
+  "sourceCommit": "17cfd69f3566190961a5bf62f1a675c310ca317f",
+  "sourceTree": "aee40714ff39f698a52111b99014d3a3686ec962",
   "baseCommit": "af60dc42b2a087534049779392190a1b6cfc5101",
   "archive": "ayayaq-vivi-0.2.0-dev.0.tgz",
-  "sha256": "658388791dc725679f127cfa0c948a58f5db6e4b641a9faa2a00f8485bee8453",
-  "integrity": "sha512-lKSTxwycUNPmL6dfFShN9zObetVlaIJCKlMnX3NJza36ZUAPDtP0IjSm9cRBcJ7dAfyUX7PGAbAyniH53p6YIQ==",
+  "sha256": "db05d31640b337819d1cf13fb5417f71912bf7adee5caef5ba3c3cd5747ef4ab",
+  "integrity": "sha512-kl53sn5hbEOtOaTM3guzYReu8EWBrZFfJ5VZlZAo5ViStogKHlNM4q67z40oq9P3usF6UdyTrJQmUwx4+eZozQ==",
   "license": "Apache-2.0",
   "publicationStatus": "unreleased-development-candidate"
 }
