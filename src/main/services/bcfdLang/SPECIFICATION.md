@@ -421,16 +421,16 @@ be targeted through the regular channel message endpoint.
 
 Failures produce these deterministic inline values, without raw Discord/network details:
 
-| Condition | Output |
-| --------- | ------ |
-| Not exactly one argument | `[BCFD Error: deleteMessage requires exactly one message ID]` |
-| Invalid or blank evaluated ID | `[BCFD Error: deleteMessage requires a valid message ID]` |
-| Missing/non-message channel context | `[BCFD Error: deleteMessage requires a message channel context]` |
-| Unknown message (10008) | `[BCFD Error: deleteMessage message not found in the current channel]` |
-| Unknown channel (10003) | `[BCFD Error: deleteMessage current channel not found]` |
-| Missing access (50001) | `[BCFD Error: deleteMessage missing access to the current channel]` |
-| Missing permission (50013/50003) | `[BCFD Error: deleteMessage missing permission to delete this message]` |
-| Other deletion failure | `[BCFD Error: deleteMessage failed]` |
+| Condition                           | Output                                                                  |
+| ----------------------------------- | ----------------------------------------------------------------------- |
+| Not exactly one argument            | `[BCFD Error: deleteMessage requires exactly one message ID]`           |
+| Invalid or blank evaluated ID       | `[BCFD Error: deleteMessage requires a valid message ID]`               |
+| Missing/non-message channel context | `[BCFD Error: deleteMessage requires a message channel context]`        |
+| Unknown message (10008)             | `[BCFD Error: deleteMessage message not found in the current channel]`  |
+| Unknown channel (10003)             | `[BCFD Error: deleteMessage current channel not found]`                 |
+| Missing access (50001)              | `[BCFD Error: deleteMessage missing access to the current channel]`     |
+| Missing permission (50013/50003)    | `[BCFD Error: deleteMessage missing permission to delete this message]` |
+| Other deletion failure              | `[BCFD Error: deleteMessage failed]`                                    |
 
 Offline Playground applies this keyword only to the current fake channel transcript. Use the
 visible **Fake message ID** (for example `$deleteMessage(1)`), not a real Discord message ID.

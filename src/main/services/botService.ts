@@ -39,6 +39,11 @@ import {
   BCFDInteractionAction,
   BCFDInteractionButton
 } from '../types/types'
+import type {
+  HostConnectionObservation,
+  HostLoginState,
+  HostLoginFailure
+} from '../../shared/hostReadiness'
 import { commandCapabilities } from '../../shared/commandCapabilities'
 import { findInteractionByCommandName, findInteractionByButtonId } from './interactionService'
 import { getBotStateContext, loadBotState, saveBotState } from '../utils/virtual'
@@ -80,6 +85,25 @@ export function resumeSpamProtection() {
 let client: Client | null = null
 const loginLifetimes = new WeakMap<Client, DiscordLoginLifetime>()
 let connection: boolean = false
+let loginObservation: Pick<HostConnectionObservation, 'attempt' | 'failure' | 'observedAt'> = {
+  attempt: 'never-attempted',
+  failure: null,
+  observedAt: null
+}
+
+function observeLogin(attempt: HostLoginState, failure: HostLoginFailure | null = null): void {
+  loginObservation = { attempt, failure, observedAt: Date.now() }
+}
+
+/** In-memory latch and gateway cache only. Do not inspect client identity or token. */
+export function getHostConnectionObservation(): HostConnectionObservation {
+  return {
+    ...loginObservation,
+    servingReady: connection,
+    gatewayReady: client ? client.isReady() : false,
+    guildCount: client ? client.guilds.cache.size : null
+  }
+}
 let commands: { bcfdCommands: BCFDCommand[]; bcfdSlashCommands: BCFDSlashCommand[] } = {
   bcfdCommands: [],
   bcfdSlashCommands: []
@@ -153,6 +177,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
       connection = false
     }
 
+    observeLogin('disconnected')
     return event.reply('disconnect')
   }
 
@@ -174,12 +199,14 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
   })
   loginLifetimes.set(connectingClient, lifetime)
   client = connectingClient
+  observeLogin('pending')
   const ownsConnection = () => client === connectingClient
   const acceptsEvents = () => ownsConnection() && connection
 
   connectingClient.once(Events.ClientReady, async () => {
     if (client !== connectingClient || connectingClient.user == null) return
 
+    observeLogin('initializing')
     try {
       await loadBotState(ownsConnection)
     } catch (error) {
@@ -190,6 +217,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
         spamProtection.stop()
         client = null
         connection = false
+        observeLogin('failed', 'state-load-failed')
         event.reply('connect-error', message)
       }
       return
@@ -204,6 +232,7 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
     stats.updateCommandCount(commands.bcfdCommands.length)
 
     connection = true
+    observeLogin('ready')
 
     rendererConsole.success(`Connected as ${connectingClient.user!.username}`)
     rendererConsole.info(
@@ -290,11 +319,13 @@ export function Connect(event: Electron.IpcMainEvent, token: string) {
     lifetime.cancel()
     client = null
     connection = false
+    observeLogin('failed', 'login-failed')
     event.reply('connect-error', message)
   })
 }
 
 export async function Disconnect(event: Electron.IpcMainEvent) {
+  observeLogin('disconnected')
   spamProtection.stop()
   const disconnectingClient = client
   if (disconnectingClient) {

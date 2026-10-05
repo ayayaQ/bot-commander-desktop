@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { readHostStatus } from './hostReadinessService'
 import type { BCFDCommand, BCFDInteractionAction, BCFDInteractionCommand } from '../types/types'
 import type {
   AgentLintDiagnostic,
@@ -156,6 +157,15 @@ export const agentToolDefinitions: ToolDefinition[] = [
       })
     }
   },
+  {
+    type: 'function',
+    function: {
+      name: 'read_host_status',
+      description:
+        'Read a redacted local-cache hosting snapshot and fixed guidance to existing Login sidebar/Interactions controls. No credentials, hosting actions or network checks. Remote registration, portal permissions and freshness remain unknown; past publication success is not current remote proof.',
+      parameters: objectSchema({})
+    }
+  },
   { type: 'function', function: { name: 'read_bot_state', description: 'Read persistent bot state.', parameters: objectSchema({}) } },
   { type: 'function', function: { name: 'read_startup_js', description: 'Read startup JavaScript.', parameters: objectSchema({}) } },
   { type: 'function', function: { name: 'read_developer_prompt', description: 'Read the developer prompt used by bot AI functions.', parameters: objectSchema({}) } },
@@ -266,6 +276,9 @@ export const agentToolDefinitions: ToolDefinition[] = [
   { type: 'function', function: { name: 'lint_command', description: 'Lint a complete persisted command.', parameters: objectSchema({ id: { type: 'string' } }, ['id']) } },
   { type: 'function', function: { name: 'lint_interaction', description: 'Lint a complete persisted interaction.', parameters: objectSchema({ id: { type: 'string' } }, ['id']) } }
 ]
+
+// Host readiness is for the app's agent only, never the external MCP catalog.
+export const agentOnlyToolNames = new Set(['read_host_status'])
 
 export const mutationToolNames = new Set([
   'create_command', 'edit_command', 'create_interaction', 'edit_interaction',
@@ -462,6 +475,11 @@ async function lintInteractionResource(interaction: BCFDInteractionCommand): Pro
 }
 
 export async function executeReadTool(name: string, args: Record<string, any>): Promise<unknown> {
+  if (name === 'read_host_status') {
+    if (!args || Object.keys(args).length)
+      return { success: false, error: 'read_host_status accepts no arguments' }
+    return readHostStatus()
+  }
   const limit = Math.max(1, Math.min(Number(args.limit) || 20, 100))
   if (name === 'search_documentation') {
     return searchDocumentation(
@@ -746,12 +764,15 @@ async function changedResourceValue(kind: ResourceChangeKind): Promise<unknown> 
 
 export async function commitMutation(
   prepared: PreparedMutation,
-  source: ResourceChangeSource = 'agent'
+  source: ResourceChangeSource = 'agent',
+  signal?: AbortSignal
 ): Promise<unknown> {
   // Approval/retry objects may be reused by callers while this mutation waits its turn.
   prepared = structuredClone(prepared)
   const kind = mutationResourceKind(prepared)
   return withResourceMutationLock(kind, async () => {
+    // A cancellation while queued must not start a fresh mutation after lock admission.
+    if (signal?.aborted) throw new Error('Agent execution cancelled before mutation started')
     const result = await commitMutationUnlocked(prepared)
     emitResourceChanged(
       kind,
@@ -768,6 +789,9 @@ export async function executeAgentTool(
   args: Record<string, unknown>,
   source: ResourceChangeSource = 'agent'
 ): Promise<unknown> {
+  if (source === 'mcp' && agentOnlyToolNames.has(name)) {
+    return { success: false, error: 'Tool is available only to the desktop agent' }
+  }
   if (!mutationToolNames.has(name)) return executeReadTool(name, args)
   return commitMutation(await prepareMutation(name, args), source)
 }

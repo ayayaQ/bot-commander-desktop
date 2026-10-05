@@ -1,15 +1,11 @@
+import type { HistoryMessage } from '@ayayaq/vivi'
+
 export type AgentMode = 'manual' | 'auto' | 'planning'
 export type AgentPlanDecision = 'auto' | 'manual' | 'continue'
 export type AgentProvider = 'openai' | 'openrouter'
 export type AgentReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
 export type AgentRunStatus =
-  | 'idle'
-  | 'running'
-  | 'waiting_approval'
-  | 'completed'
-  | 'error'
-  | 'cancelled'
-  | 'interrupted'
+  'idle' | 'running' | 'waiting_approval' | 'completed' | 'error' | 'cancelled' | 'interrupted'
 
 export interface AgentToolCall {
   id: string
@@ -39,10 +35,29 @@ export interface AgentRunMetrics {
   inputTokens: number
   outputTokens: number
   totalTokens: number
+  /** Cache counts are already included in inputTokens; absent means unreported. */
+  cachedInputTokens?: number
+  cacheWriteInputTokens?: number
   documentationCalls: number
   uniqueDocumentationCalls: number
   duplicateDocumentationCalls: number
   documentationResultChars: number
+  /** New fields are optional so older saved runs remain readable without invented evidence. */
+  startedAt?: string
+  checkpointAt?: string
+  finishedAt?: string
+  status?: 'running' | 'completed' | 'error' | 'cancelled' | 'interrupted'
+  /** True only after reconciling the core's final committed-round result. */
+  usageReconciled?: boolean
+  tools?: AgentRunToolMetric[]
+}
+
+export interface AgentRunToolMetric {
+  id: string
+  name: string
+  status: AgentToolCall['status'] | 'unknown'
+  /** Diagnostic evidence only; lint is not runtime validation. */
+  lint?: { errors: number; warnings: number }
 }
 
 export interface AgentSession {
@@ -53,6 +68,8 @@ export interface AgentSession {
   reasoningEffort: AgentReasoningEffort
   status: AgentRunStatus
   messages: AgentMessage[]
+  /** Canonical provider-neutral transcript, including matched tool calls/results. */
+  history?: HistoryMessage[]
   createdAt: string
   updatedAt: string
   activeRunId?: string
@@ -120,7 +137,16 @@ export interface AgentLintDiagnostic {
 export interface AgentStreamEvent {
   sessionId: string
   runId?: string
-  type: 'session' | 'thinking' | 'message' | 'tool' | 'approval' | 'done' | 'error'
+  type:
+    | 'session'
+    | 'thinking'
+    | 'text_delta'
+    | 'progress_reset'
+    | 'message'
+    | 'tool'
+    | 'approval'
+    | 'done'
+    | 'error'
   session?: AgentSession
   delta?: string
   message?: AgentMessage

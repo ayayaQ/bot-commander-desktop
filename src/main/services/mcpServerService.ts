@@ -17,6 +17,7 @@ import {
 import type { McpActivityEntry, McpConfig, McpServerStatus } from '../../shared/mcpTypes'
 import {
   agentToolDefinitions,
+  agentOnlyToolNames,
   agentToolTargetLabel,
   executeAgentTool,
   mutationToolNames
@@ -137,7 +138,9 @@ export function createBotCommanderMcpServer(
     { instructions: SERVER_INSTRUCTIONS }
   )
   const definitions = agentToolDefinitions.filter(
-    (definition) => accessMode === 'read-write' || !mutationToolNames.has(definition.function.name)
+    (definition) =>
+      !agentOnlyToolNames.has(definition.function.name) &&
+      (accessMode === 'read-write' || !mutationToolNames.has(definition.function.name))
   )
 
   for (const definition of definitions) {

@@ -2,12 +2,14 @@
   import { onMount, tick } from 'svelte'
   import ModelPicker from './ModelPicker.svelte'
   import AgentApprovalDiff from './AgentApprovalDiff.svelte'
+  import AgentRunSummary from './AgentRunSummary.svelte'
   import { renderMarkdown } from '../utils/markdown'
   import { agentToolLabel } from '../utils/agentToolLabel'
   import { settingsStore } from '../stores/settings'
   import type { AgentMode, AgentPlanDecision, AgentToolCall } from '../../../shared/agentTypes'
   import {
     activeAgentSession,
+    activeAgentProgress,
     agentSessions,
     cancelAgentRun,
     createAgentSession,
@@ -252,7 +254,7 @@
             })}
           aria-label="Reasoning effort"
         >
-          <option value="none">No reasoning</option>
+          <option value="none">Provider default</option>
           <option value="low">Low</option>
           <option value="medium">Medium</option>
           <option value="high">High</option>
@@ -331,6 +333,15 @@
                 {/each}
               {/if}
             {/each}
+            {#if $activeAgentProgress}
+              <div
+                class="rounded-box bg-base-200 p-4 text-sm whitespace-pre-wrap break-words"
+                aria-live="polite"
+                aria-label="Agent response in progress"
+              >
+                {$activeAgentProgress}
+              </div>
+            {/if}
             {#if $activeAgentSession.status === 'running'}
               <div class="flex items-center gap-2 text-sm opacity-60">
                 <span
@@ -345,6 +356,9 @@
             {/if}
             {#if $activeAgentSession.error}
               <div class="alert alert-error text-sm">{$activeAgentSession.error}</div>
+            {/if}
+            {#if $activeAgentSession.lastRunMetrics}
+              <AgentRunSummary metrics={$activeAgentSession.lastRunMetrics} />
             {/if}
           </div>
         {/if}
@@ -389,8 +403,7 @@
                 : $activeAgentSession.mode === 'planning'
                   ? 'Describe what you want planned...'
                   : 'Ask the agent...'}
-              disabled={running || awaitingPlanDecision || resolvingPlan}
-            ></textarea>
+              disabled={running || awaitingPlanDecision || resolvingPlan}></textarea>
             {#if running}
               <button
                 class="btn btn-square btn-error"
