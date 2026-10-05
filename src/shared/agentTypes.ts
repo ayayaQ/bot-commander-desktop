@@ -35,10 +35,29 @@ export interface AgentRunMetrics {
   inputTokens: number
   outputTokens: number
   totalTokens: number
+  /** Cache counts are already included in inputTokens; absent means unreported. */
+  cachedInputTokens?: number
+  cacheWriteInputTokens?: number
   documentationCalls: number
   uniqueDocumentationCalls: number
   duplicateDocumentationCalls: number
   documentationResultChars: number
+  /** New fields are optional so older saved runs remain readable without invented evidence. */
+  startedAt?: string
+  checkpointAt?: string
+  finishedAt?: string
+  status?: 'running' | 'completed' | 'error' | 'cancelled' | 'interrupted'
+  /** True only after reconciling the core's final committed-round result. */
+  usageReconciled?: boolean
+  tools?: AgentRunToolMetric[]
+}
+
+export interface AgentRunToolMetric {
+  id: string
+  name: string
+  status: AgentToolCall['status'] | 'unknown'
+  /** Diagnostic evidence only; lint is not runtime validation. */
+  lint?: { errors: number; warnings: number }
 }
 
 export interface AgentSession {
