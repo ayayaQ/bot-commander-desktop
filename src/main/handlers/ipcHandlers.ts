@@ -322,7 +322,7 @@ export function addIPCHandlers() {
     updateMcpServerConfig(updates)
   )
   ipcMain.handle('mcp:copy-token', async () => {
-    clipboard.writeText(await copyMcpToken())
+    await clipboard.writeText(await copyMcpToken())
     return true
   })
   ipcMain.handle('mcp:rotate-token', () => rotateMcpToken())
