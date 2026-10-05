@@ -7,6 +7,11 @@ import type {
   AgentToolCall
 } from '../../../shared/agentTypes'
 import { deriveAgentNavigationStatus, type AgentTerminalAttention } from '../utils/agentAttention'
+import {
+  isStaleAgentRunEvent,
+  reduceAgentProgress,
+  type AgentProgressBySession
+} from '../utils/agentProgress'
 
 const initial: AgentSessionsData = {
   sessions: [],
@@ -17,6 +22,14 @@ export const agentSessions = writable<AgentSessionsData>(initial)
 export const activeAgentSession = derived(
   agentSessions,
   ($data) => $data.sessions.find((session) => session.id === $data.activeSessionId) || null
+)
+export const agentProgress = writable<AgentProgressBySession>({})
+export const activeAgentProgress = derived(
+  [activeAgentSession, agentProgress],
+  ([$session, $progress]) => {
+    const progress = $session && $progress[$session.id]
+    return progress?.runId === $session?.activeRunId ? progress?.text || '' : ''
+  }
 )
 export const unseenAgentResults = writable<Record<string, AgentTerminalAttention>>({})
 export const agentNavigationStatus = derived(
@@ -61,6 +74,10 @@ function updateTool(sessionId: string, toolCall: AgentToolCall) {
 }
 
 function handleEvent(payload: AgentStreamEvent) {
+  if (isStaleAgentRunEvent(payload, get(agentSessions).sessions)) return
+  agentProgress.update((progress) =>
+    reduceAgentProgress(progress, payload, get(agentSessions).sessions)
+  )
   if (payload.session) replaceSession(payload.session)
   if (payload.message) {
     agentSessions.update((data) => ({
@@ -108,6 +125,7 @@ export function destroyAgentListeners() {
   cleanup?.()
   cleanup = null
   initialization = null
+  agentProgress.set({})
 }
 
 export function setAgentViewActive(active: boolean) {
@@ -133,6 +151,11 @@ export async function selectAgentSession(sessionId: string) {
 
 export async function deleteAgentSession(sessionId: string) {
   await window.electron.ipcRenderer.invoke('agent:delete', sessionId)
+  agentProgress.update((progress) => {
+    const next = { ...progress }
+    delete next[sessionId]
+    return next
+  })
   agentSessions.update((data) => {
     const sessions = data.sessions.filter((session) => session.id !== sessionId)
     return {

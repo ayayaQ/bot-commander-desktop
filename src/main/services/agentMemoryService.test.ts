@@ -24,8 +24,24 @@ vi.mock('node:fs/promises', () => ({
     rename: vi.fn(async (from: string, to: string) => {
       mocks.files.set(to, mocks.files.get(from) || '')
       mocks.files.delete(from)
-    })
+    }),
+    copyFile: vi.fn(async (from: string, to: string) => {
+      mocks.files.set(to, mocks.files.get(from)!)
+    }),
+    open: vi.fn(async () => ({ sync: async () => {}, close: async () => {} }))
   }
+}))
+
+// Collection/revision tests observe checkpoints. The adapter and service integration suites
+// exercise the real atomic writer and filesystem commit faults.
+vi.mock('./atomicPersistence', () => ({
+  atomicWrite: vi.fn(async (path: string, raw: string, options) => {
+    options?.validate?.(raw)
+    const fs = (await import('node:fs/promises')).default
+    await fs.writeFile(`${path}.tmp`, raw)
+    await fs.rename(`${path}.tmp`, path)
+    return { durability: 'confirmed' }
+  })
 }))
 
 describe('agentMemoryService', () => {
@@ -104,7 +120,7 @@ describe('agentMemoryService', () => {
     await expect(service.commitMemoryMutation(prepared)).rejects.toThrow('Stale memory revision')
   })
 
-  it('loads valid records and ignores malformed records', async () => {
+  it('preserves malformed collections and blocks saves instead of dropping records', async () => {
     mocks.files.set(
       memoryPath,
       JSON.stringify({
@@ -125,6 +141,11 @@ describe('agentMemoryService', () => {
     const service = await import('./agentMemoryService')
     const loaded = await service.loadAgentMemories()
 
-    expect(loaded.memories.map((memory) => memory.id)).toEqual(['valid'])
+    expect(loaded.memories).toEqual([])
+    await expect(
+      service.prepareCreateMemory('Do not erase malformed records', 'user')
+    ).rejects.toThrow('read-only')
+    expect(JSON.parse(mocks.files.get(memoryPath)!).memories).toHaveLength(2)
+    expect(mocks.writes).toEqual([])
   })
 })
