@@ -101,7 +101,493 @@ describe('desktop agent service shared-provider integration', () => {
     })
     mocks.commitMutation.mockResolvedValue({ success: true, saved: true })
   })
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it.each(['manual', 'auto', 'planning'] as const)(
+    'executes calculate in %s mode through persisted host tool records without approval',
+    async (mode) => {
+      mocks.responsesCreate
+        .mockResolvedValueOnce({
+          output_text: '',
+          output: [
+            {
+              type: 'function_call',
+              call_id: 'call_calculate',
+              name: 'calculate',
+              arguments: '{"expression":"2 * (3 + 4)"}'
+            }
+          ]
+        })
+        .mockResolvedValueOnce({ output_text: 'The result is 14.', output: [] })
+      const service = await import('./agentService')
+      const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+      const session = await service.createAgentSession(settings)
+      await service.updateAgentSession(session.id, { mode }, 'openai')
+      const events: string[] = []
+      const done = new Promise<void>((resolve) =>
+        service.setAgentEventSink((event) => {
+          events.push(event.type)
+          if (event.type === 'done') resolve()
+        })
+      )
+      await service.runAgentSession(session.id, 'Calculate', settings)
+      await done
+      expect(mocks.responsesCreate.mock.calls[0][0].tools).toContainEqual(
+        expect.objectContaining({ name: 'calculate' })
+      )
+      expect(events).not.toContain('approval')
+      expect(mocks.prepareMutation).not.toHaveBeenCalled()
+      expect(mocks.commitMutation).not.toHaveBeenCalled()
+      expect(mocks.executeReadTool).not.toHaveBeenCalled()
+      const stored = (await service.loadAgentSessions()).sessions[0]
+      const message = stored.messages.find((item) => item.role === 'tool')!
+      expect(message.content).toBe('{"result":14}')
+      expect(message.toolCalls![0]).toMatchObject({
+        id: 'call_calculate',
+        name: 'calculate',
+        status: 'completed',
+        result: { result: 14 }
+      })
+      expect(stored.history?.find((item) => item.kind === 'tool_result')).toMatchObject({
+        callId: 'call_calculate',
+        name: 'calculate',
+        content: '{"result":14}',
+        isError: false
+      })
+      const saved = mocks.writeFile.mock.calls.at(-1)![1]
+      vi.resetModules()
+      mocks.readFile.mockResolvedValueOnce(saved)
+      const reloaded = await import('./agentService')
+      const recovered = (await reloaded.loadAgentSessions()).sessions[0]
+      expect(recovered.history).toEqual(stored.history)
+      expect(recovered.messages.find((item) => item.role === 'tool')).toEqual(message)
+    }
+  )
+
+  it('records structured calculator validation errors without double encoding or execution', async () => {
+    const { calculatorExtension } = await import('@ayayaq/vivi/extensions/calculator')
+    const execute = vi.spyOn(calculatorExtension.tools[0], 'execute')
+    mocks.responsesCreate
+      .mockResolvedValueOnce({
+        output_text: '',
+        output: [
+          {
+            type: 'function_call',
+            call_id: 'call_bad_calculate',
+            name: 'calculate',
+            arguments: '{"expression":"process.exit()"}'
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ output_text: 'That expression is unsupported.', output: [] })
+    const service = await import('./agentService')
+    const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+    const session = await service.createAgentSession(settings)
+    const done = new Promise<void>((resolve) =>
+      service.setAgentEventSink((event) => {
+        if (event.type === 'done') resolve()
+      })
+    )
+    await service.runAgentSession(session.id, 'Calculate', settings)
+    await done
+    expect(execute).not.toHaveBeenCalled()
+    const stored = (await service.loadAgentSessions()).sessions[0]
+    const message = stored.messages.find((item) => item.role === 'tool')!
+    const failure = JSON.parse(message.content)
+    expect(failure).toMatchObject({ success: false, error: { code: 'invalid_arguments' } })
+    expect(message.toolCalls![0]).toMatchObject({
+      status: 'error',
+      error: failure.error.message,
+      result: failure
+    })
+    expect(stored.history?.find((item) => item.kind === 'tool_result')).toMatchObject({
+      content: message.content,
+      isError: true
+    })
+    expect(mocks.prepareMutation).not.toHaveBeenCalled()
+    expect(mocks.executeReadTool).not.toHaveBeenCalled()
+  })
+
+  it('captures the extension snapshot and reserves every built-in before provider execution', async () => {
+    const extensions = await import('./agentExtensions')
+    const createRegistry = vi.spyOn(extensions, 'createAgentExtensionRegistry')
+    const { calculatorExtension } = await import('@ayayaq/vivi/extensions/calculator')
+    const tool = calculatorExtension.tools[0]
+    const description = tool.definition.description
+    const validate = vi.fn(() => {
+      throw new Error('Changed validator')
+    })
+    const execute = vi.fn(() => ({ content: '{"result":99}' }))
+    try {
+      mocks.responsesCreate
+        .mockImplementationOnce(() => {
+          tool.definition.description = 'Changed after run admission'
+          vi.spyOn(tool, 'validateArguments').mockImplementation(validate)
+          vi.spyOn(tool, 'execute').mockImplementation(execute)
+          return {
+            output_text: '',
+            output: [
+              {
+                type: 'function_call',
+                call_id: 'call_snapshot_calculate',
+                name: 'calculate',
+                arguments: '{"expression":"1 + 1"}'
+              }
+            ]
+          }
+        })
+        .mockResolvedValueOnce({ output_text: 'Two.', output: [] })
+      const service = await import('./agentService')
+      const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+      const session = await service.createAgentSession(settings)
+      await service.updateAgentSession(session.id, { mode: 'planning' }, 'openai')
+      const done = new Promise<void>((resolve) =>
+        service.setAgentEventSink((event) => {
+          if (event.type === 'done') resolve()
+        })
+      )
+      await service.runAgentSession(session.id, 'Calculate', settings)
+      await done
+      expect(createRegistry).toHaveBeenCalledWith([
+        'read_bot_state',
+        'search_documentation',
+        'read_command',
+        'edit_command'
+      ])
+      for (const [request] of mocks.responsesCreate.mock.calls) {
+        expect(request.tools).toContainEqual(
+          expect.objectContaining({ name: 'calculate', description })
+        )
+      }
+      expect(validate).not.toHaveBeenCalled()
+      expect(execute).not.toHaveBeenCalled()
+      expect(
+        (await service.loadAgentSessions()).sessions[0].history?.find(
+          (item) => item.kind === 'tool_result'
+        )
+      ).toMatchObject({ content: '{"result":2}' })
+    } finally {
+      tool.definition.description = description
+    }
+  })
+
+  it('keeps unadvertised extension names unavailable without invoking host tools', async () => {
+    const { calculatorExtension } = await import('@ayayaq/vivi/extensions/calculator')
+    const execute = vi.spyOn(calculatorExtension.tools[0], 'execute')
+    mocks.responsesCreate
+      .mockResolvedValueOnce({
+        output_text: '',
+        output: [
+          {
+            type: 'function_call',
+            call_id: 'call_unknown_extension',
+            name: 'calculate_unknown',
+            arguments: '{"expression":"1"}'
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ output_text: 'Unavailable.', output: [] })
+    const service = await import('./agentService')
+    const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+    const session = await service.createAgentSession(settings)
+    const done = new Promise<void>((resolve) =>
+      service.setAgentEventSink((event) => {
+        if (event.type === 'done') resolve()
+      })
+    )
+    await service.runAgentSession(session.id, 'Calculate', settings)
+    await done
+    expect(execute).not.toHaveBeenCalled()
+    expect(mocks.executeReadTool).not.toHaveBeenCalled()
+    expect(mocks.prepareMutation).not.toHaveBeenCalled()
+    const stored = (await service.loadAgentSessions()).sessions[0]
+    expect(stored.history?.find((item) => item.kind === 'tool_result')).toMatchObject({
+      isError: true,
+      content: expect.stringContaining('unavailable_tool')
+    })
+    expect(stored.messages.filter((item) => item.role === 'tool')).toHaveLength(0)
+  })
+
+  it('rejects a collision with a planning-hidden mutation before changing the session', async () => {
+    const tools = await import('./agentTools')
+    const mutation = tools.agentToolDefinitions.find(
+      (tool) => tool.function.name === 'edit_command'
+    )!
+    mutation.function.name = 'calculate'
+    tools.mutationToolNames.add('calculate')
+    try {
+      const service = await import('./agentService')
+      const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+      const session = await service.createAgentSession(settings)
+      await service.updateAgentSession(session.id, { mode: 'planning' }, 'openai')
+      const before = await service.loadAgentSessions()
+      const writes = mocks.writeFile.mock.calls.length
+
+      await expect(service.runAgentSession(session.id, 'Calculate', settings)).rejects.toThrow(
+        'Tool name collision: calculate'
+      )
+
+      expect(await service.loadAgentSessions()).toEqual(before)
+      expect(mocks.writeFile).toHaveBeenCalledTimes(writes)
+      expect(mocks.responsesCreate).not.toHaveBeenCalled()
+      expect(mocks.executeReadTool).not.toHaveBeenCalled()
+      expect(mocks.prepareMutation).not.toHaveBeenCalled()
+    } finally {
+      mutation.function.name = 'edit_command'
+      tools.mutationToolNames.delete('calculate')
+    }
+  })
+
+  it.each([
+    { content: '"A JSON string"', result: 'A JSON string', isError: false },
+    { content: '0', result: 0, isError: false },
+    { content: '', result: '', isError: false },
+    { content: 'null', result: null, isError: true },
+    { content: 'A plain text error', result: 'A plain text error', isError: true },
+    {
+      content: '{"error":{"message":"Arithmetic failed"}}',
+      result: { error: { message: 'Arithmetic failed' } },
+      isError: true
+    }
+  ])('preserves extension content $content and isError=$isError', async (output) => {
+    const { calculatorExtension } = await import('@ayayaq/vivi/extensions/calculator')
+    vi.spyOn(calculatorExtension.tools[0], 'execute').mockReturnValue({
+      content: output.content,
+      isError: output.isError
+    })
+    mocks.responsesCreate
+      .mockResolvedValueOnce({
+        output_text: '',
+        output: [
+          {
+            type: 'function_call',
+            call_id: 'call_content',
+            name: 'calculate',
+            arguments: '{"expression":"1"}'
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ output_text: 'Done.', output: [] })
+    const service = await import('./agentService')
+    const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+    const session = await service.createAgentSession(settings)
+    const done = new Promise<void>((resolve) =>
+      service.setAgentEventSink((event) => {
+        if (event.type === 'done') resolve()
+      })
+    )
+    await service.runAgentSession(session.id, 'Calculate', settings)
+    await done
+    const stored = (await service.loadAgentSessions()).sessions[0]
+    const display = stored.messages.find((item) => item.role === 'tool')!
+    expect(display.content).toBe(output.content)
+    expect(display.toolCalls![0]).toMatchObject({
+      status: output.isError ? 'error' : 'completed',
+      result: output.result,
+      ...(output.isError
+        ? {
+            error:
+              typeof output.result === 'object' && output.result?.error
+                ? output.result.error.message
+                : output.content
+          }
+        : {})
+    })
+    expect(stored.history?.find((item) => item.kind === 'tool_result')).toMatchObject({
+      content: output.content,
+      isError: output.isError
+    })
+    expect(
+      mocks.responsesCreate.mock.calls[1][0].input.find(
+        (item: { call_id?: string }) => item.call_id === 'call_content' && 'output' in item
+      ).output
+    ).toBe(output.content)
+    expect(mocks.prepareMutation).not.toHaveBeenCalled()
+    expect(mocks.executeReadTool).not.toHaveBeenCalled()
+  })
+
+  it('creates a fresh extension snapshot for each successive run', async () => {
+    const extensions = await import('./agentExtensions')
+    const createRegistry = vi.spyOn(extensions, 'createAgentExtensionRegistry')
+    const { calculatorExtension } = await import('@ayayaq/vivi/extensions/calculator')
+    const tool = calculatorExtension.tools[0]
+    const description = tool.definition.description
+    mocks.responsesCreate
+      .mockResolvedValueOnce({ output_text: 'First run.', output: [] })
+      .mockResolvedValueOnce({ output_text: 'Second run.', output: [] })
+    const service = await import('./agentService')
+    const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+    const session = await service.createAgentSession(settings)
+    const run = async (): Promise<void> => {
+      const done = new Promise<void>((resolve) =>
+        service.setAgentEventSink((event) => {
+          if (event.type === 'done') resolve()
+        })
+      )
+      await service.runAgentSession(session.id, 'Calculate', settings)
+      await done
+    }
+    try {
+      await run()
+      tool.definition.description = 'Updated before the next run'
+      await run()
+      expect(createRegistry).toHaveBeenCalledTimes(2)
+      expect(createRegistry.mock.results[0].value).not.toBe(createRegistry.mock.results[1].value)
+      expect(mocks.responsesCreate.mock.calls[0][0].tools).toContainEqual(
+        expect.objectContaining({ name: 'calculate', description })
+      )
+      expect(mocks.responsesCreate.mock.calls[1][0].tools).toContainEqual(
+        expect.objectContaining({
+          name: 'calculate',
+          description: 'Updated before the next run'
+        })
+      )
+    } finally {
+      tool.definition.description = description
+    }
+  })
+
+  it('cancels before calculator execution without starting later tools or provider rounds', async () => {
+    const { calculatorExtension } = await import('@ayayaq/vivi/extensions/calculator')
+    const execute = vi.spyOn(calculatorExtension.tools[0], 'execute')
+    mocks.responsesCreate.mockResolvedValueOnce({
+      output_text: '',
+      output: [
+        {
+          type: 'function_call',
+          call_id: 'call_cancel_calculate',
+          name: 'calculate',
+          arguments: '{"expression":"1"}'
+        },
+        {
+          type: 'function_call',
+          call_id: 'call_later_read',
+          name: 'read_bot_state',
+          arguments: '{}'
+        }
+      ]
+    })
+    const service = await import('./agentService')
+    const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+    const session = await service.createAgentSession(settings)
+    const done = new Promise<void>((resolve) =>
+      service.setAgentEventSink((event) => {
+        if (event.type === 'tool' && event.toolCall?.status === 'running') {
+          expect(service.cancelAgentRun(session.id)).toBe(true)
+        }
+        if (event.type === 'done') resolve()
+      })
+    )
+    await service.runAgentSession(session.id, 'Calculate then read', settings)
+    await done
+    expect(execute).not.toHaveBeenCalled()
+    expect(mocks.executeReadTool).not.toHaveBeenCalled()
+    expect(mocks.responsesCreate).toHaveBeenCalledTimes(1)
+    const stored = (await service.loadAgentSessions()).sessions[0]
+    expect(stored.status).toBe('cancelled')
+    expect(stored.history?.filter((item) => item.kind === 'tool_result')).toHaveLength(2)
+  })
+
+  it('ignores a late extension result after cancellation', async () => {
+    const { calculatorExtension } = await import('@ayayaq/vivi/extensions/calculator')
+    let finish!: (result: { content: string }) => void
+    const execute = vi
+      .spyOn(calculatorExtension.tools[0], 'execute')
+      .mockImplementation(() => new Promise((resolve) => (finish = resolve)))
+    mocks.responsesCreate.mockResolvedValueOnce({
+      output_text: '',
+      output: [
+        {
+          type: 'function_call',
+          call_id: 'call_slow_calculate',
+          name: 'calculate',
+          arguments: '{"expression":"1"}'
+        }
+      ]
+    })
+    const service = await import('./agentService')
+    const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+    const session = await service.createAgentSession(settings)
+    const events: string[] = []
+    const done = new Promise<void>((resolve) =>
+      service.setAgentEventSink((event) => {
+        events.push(event.type)
+        if (event.type === 'done') resolve()
+      })
+    )
+    await service.runAgentSession(session.id, 'Calculate', settings)
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1))
+    service.cancelAgentRun(session.id)
+    await done
+    const before = (await service.loadAgentSessions()).sessions[0]
+    const count = events.length
+    finish({ content: '{"result":999}' })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(events).toHaveLength(count)
+    expect((await service.loadAgentSessions()).sessions[0]).toEqual(before)
+    expect(before.status).toBe('cancelled')
+    expect(JSON.stringify(before.history)).not.toContain('999')
+    expect(mocks.responsesCreate).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    { label: 'quoted JSON', content: JSON.stringify({ huge: '"'.repeat(30_000) }) },
+    { label: 'raw NUL', content: '\0'.repeat(30_000) },
+    { label: 'raw control characters', content: '\u0001\u001f'.repeat(15_000) }
+  ])(
+    'bounds $label extension content and preserves plain text without extra encoding',
+    async ({ content }) => {
+      const { calculatorExtension } = await import('@ayayaq/vivi/extensions/calculator')
+      vi.spyOn(calculatorExtension.tools[0], 'execute')
+        .mockReturnValueOnce({ content: 'A plain text result' })
+        .mockReturnValueOnce({ content })
+      mocks.responsesCreate
+        .mockResolvedValueOnce({
+          output_text: '',
+          output: [
+            {
+              type: 'function_call',
+              call_id: 'call_text',
+              name: 'calculate',
+              arguments: '{"expression":"1"}'
+            },
+            {
+              type: 'function_call',
+              call_id: 'call_large',
+              name: 'calculate',
+              arguments: '{"expression":"1"}'
+            }
+          ]
+        })
+        .mockResolvedValueOnce({ output_text: 'Done.', output: [] })
+      const service = await import('./agentService')
+      const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+      const session = await service.createAgentSession(settings)
+      const done = new Promise<void>((resolve) =>
+        service.setAgentEventSink((event) => {
+          if (event.type === 'done') resolve()
+        })
+      )
+      await service.runAgentSession(session.id, 'Calculate', settings)
+      await done
+      const stored = (await service.loadAgentSessions()).sessions[0]
+      const outputs = stored.history?.filter((item) => item.kind === 'tool_result')!
+      expect(outputs[0].content).toBe('A plain text result')
+      expect(outputs[1].content.length).toBeLessThanOrEqual(24_000)
+      expect(JSON.parse(outputs[1].content)).toMatchObject({ truncated: true })
+      const display = stored.messages.find((item) => item.toolCalls?.[0].id === 'call_large')!
+      expect(display.content).toBe(outputs[1].content)
+      expect(display.content.length).toBeLessThanOrEqual(24_000)
+      expect(JSON.parse(display.content)).toMatchObject({ truncated: true })
+      const accepted = mocks.responsesCreate.mock.calls[1][0].input.find(
+        (item: { call_id?: string }) => item.call_id === 'call_large' && 'output' in item
+      ).output
+      expect(accepted).toBe(outputs[1].content)
+    }
+  )
 
   it('uses the shared OpenAI provider with session reasoning and function tools', async () => {
     mocks.responsesCreate.mockResolvedValue({
