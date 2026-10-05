@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   dialog: vi.fn(),
   warningDialog: vi.fn(async () => ({ response: 0 })),
   consoleError: vi.fn(),
+  consoleWarning: vi.fn(),
   addIPCHandlers: vi.fn(),
   initializeMcpServer: vi.fn(async () => undefined),
   stopSpamProtection: vi.fn(),
@@ -75,7 +76,7 @@ vi.mock('./utils/rendererConsole', () => ({
   rendererConsole: {
     error: mocks.consoleError,
     info: vi.fn(),
-    warning: vi.fn(),
+    warning: mocks.consoleWarning,
     success: vi.fn()
   }
 }))
@@ -160,23 +161,76 @@ it('opens a normal shell without a recovery dialog after a valid backup loads', 
   expect(await runtime.readBotState()).toEqual({ recovered: true })
 })
 
-it('makes unsupported save durability visible once per directory', async () => {
+it('logs unsupported save durability once per directory without showing a dialog', async () => {
   await import('./index')
   await vi.waitFor(() => expect(mocks.addIPCHandlers).toHaveBeenCalledOnce())
+  const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
   vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
   try {
     const { atomicWrite } = await import('./services/atomicPersistence')
     const path = join(mocks.directory, 'settings.json')
     await atomicWrite(path, '{}')
     await atomicWrite(path, '{"theme":"dark"}')
-    expect(mocks.warningDialog).toHaveBeenCalledOnce()
-    expect(mocks.warningDialog).toHaveBeenCalledWith({
-      type: 'warning',
-      title: 'Limited power-loss save protection',
-      message: expect.stringContaining('cannot be guaranteed')
-    })
+    const message = expect.stringContaining(
+      'rename durability across power loss cannot be guaranteed'
+    )
+    expect(warning).toHaveBeenCalledOnce()
+    expect(warning).toHaveBeenCalledWith(message)
+    expect(mocks.consoleWarning).toHaveBeenCalledOnce()
+    expect(mocks.consoleWarning).toHaveBeenCalledWith(message)
+    expect(mocks.warningDialog).not.toHaveBeenCalled()
+    expect(mocks.dialog).not.toHaveBeenCalled()
   } finally {
     vi.restoreAllMocks()
+  }
+})
+
+it('still shows a recovery warning when agent storage is restored from its backup', async () => {
+  await import('./index')
+  await vi.waitFor(() => expect(mocks.addIPCHandlers).toHaveBeenCalledOnce())
+  const { createAgentPersistence } = await import('./services/agentPersistence')
+  const path = join(mocks.directory, 'agent-sessions.json')
+  await fs.writeFile(path, '{broken')
+  await fs.writeFile(`${path}.bak`, '{"recovered":true}')
+  const store = createAgentPersistence({
+    path: () => path,
+    label: 'Agent sessions',
+    decode: JSON.parse,
+    empty: () => ({})
+  })
+
+  expect(await store.load()).toEqual({ data: { recovered: true }, writable: true })
+  expect(mocks.warningDialog).toHaveBeenCalledOnce()
+  expect(mocks.warningDialog).toHaveBeenCalledWith({
+    type: 'warning',
+    title: 'Agent storage recovered',
+    message: expect.stringContaining('Agent sessions was recovered from its backup')
+  })
+  expect(mocks.consoleWarning).toHaveBeenCalledWith(
+    expect.stringContaining('Agent sessions was recovered from its backup')
+  )
+})
+
+it('still shows an error for an actual committed-save directory sync failure', async () => {
+  await import('./index')
+  await vi.waitFor(() => expect(mocks.addIPCHandlers).toHaveBeenCalledOnce())
+  const { atomicWrite } = await import('./services/atomicPersistence')
+  const path = join(mocks.directory, 'settings.json')
+  const open = fs.open.bind(fs)
+  vi.spyOn(fs, 'open').mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+    if (args[0] === mocks.directory) throw Object.assign(new Error('disk I/O'), { code: 'EIO' })
+    return open(...args)
+  })
+  try {
+    expect(await atomicWrite(path, '{}')).toEqual({ durability: 'uncertain' })
+    expect(mocks.dialog).toHaveBeenCalledWith(
+      'Save durability could not be confirmed',
+      expect.stringContaining('has not been rolled back')
+    )
+    expect(mocks.consoleError).toHaveBeenCalledWith(expect.stringContaining('disk I/O'))
+  } finally {
+    vi.restoreAllMocks()
+    await atomicWrite(path, '{}')
   }
 })
 

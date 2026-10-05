@@ -180,15 +180,8 @@ app.whenReady().then(async () => {
   })
   setAtomicWriteNoticeHandler(({ level, message }) => {
     rendererConsole[level](message)
+    // Unsupported directory sync is an expected platform limitation; keep it in the logs.
     if (level === 'error') dialog.showErrorBox('Save durability could not be confirmed', message)
-    else
-      void dialog
-        .showMessageBox({
-          type: 'warning',
-          title: 'Limited power-loss save protection',
-          message
-        })
-        .catch((error) => console.error('Could not show persistence warning:', error))
   })
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
