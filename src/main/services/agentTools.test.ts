@@ -430,4 +430,110 @@ describe('agent resource tools', () => {
       vm.dispose()
     }
   })
+
+  it('does not start a cancelled mutation after waiting for the resource lock', async () => {
+    const { commitMutation, prepareMutation } = await import('./agentTools')
+    const { withResourceMutationLock } = await import('./resourceChangeService')
+    let release!: () => void
+    let entered!: () => void
+    const started = new Promise<void>((resolve) => (entered = resolve))
+    const barrier = new Promise<void>((resolve) => (release = resolve))
+    const holding = withResourceMutationLock('commands', async () => {
+      entered()
+      await barrier
+    })
+    await started
+    const prepared = await prepareMutation('create_command', {
+      command: { command: 'cancelled', channelMessage: 'Do not save' }
+    })
+    const controller = new AbortController()
+    const pending = commitMutation(prepared, 'agent', controller.signal)
+    const rejected = expect(pending).rejects.toThrow('cancelled before mutation started')
+    controller.abort()
+    release()
+    await holding
+    await rejected
+    expect(mocks.saveCommands).not.toHaveBeenCalled()
+    expect(mocks.state.commands.bcfdCommands).toEqual([])
+    // Existing no-signal callers, including MCP, retain the normal commit path.
+    await expect(commitMutation(prepared, 'mcp')).resolves.toMatchObject({ success: true })
+    expect(mocks.saveCommands).toHaveBeenCalledOnce()
+  })
+
+  it('rechecks validated interpreter mode after waiting for the resource lock', async () => {
+    const { commitMutation, prepareMutation } = await import('./agentTools')
+    const { withResourceMutationLock } = await import('./resourceChangeService')
+    const { assertAgentValidationBinding, validationHash } =
+      await import('./agentMutationValidation')
+    const { createNotRunAgentValidationReport } = await import('../../shared/agentValidationTypes')
+    const { createPlaygroundState } = await import('../../shared/playground/types')
+    const state = createPlaygroundState()
+    const validation = {
+      cases: [
+        {
+          name: 'reply',
+          state,
+          steps: [
+            {
+              kind: 'message' as const,
+              senderId: state.members[0].id,
+              content: '!ping',
+              assertions: [
+                { path: '/outcome', equals: 'executed' },
+                { path: '/effects/messages/0/content', equals: 'Pong!' }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+    const prepared = await prepareMutation('create_command', {
+      command: { command: '!ping', channelMessage: 'Pong!' },
+      validation
+    })
+    const binding = {
+      candidateHash: validationHash(prepared.after),
+      baseRevision: null,
+      fixtureHash: validationHash(validation),
+      wrapEvalInIIFE: true
+    }
+    const report = createNotRunAgentValidationReport(
+      {
+        candidateKind: 'command',
+        candidate: prepared.after as import('../types/types').BCFDCommand,
+        ...binding,
+        suite: validation
+      },
+      'binding fixture only'
+    )
+    const guard = vi.fn((snapshot) => {
+      expect(snapshot).not.toBe(prepared)
+      assertAgentValidationBinding(snapshot, binding, report)
+    })
+    let release!: () => void
+    let entered!: () => void
+    const started = new Promise<void>((resolve) => (entered = resolve))
+    const barrier = new Promise<void>((resolve) => (release = resolve))
+    const holding = withResourceMutationLock('commands', async () => {
+      entered()
+      await barrier
+    })
+    await started
+    const pending = commitMutation(prepared, 'agent', undefined, guard)
+    const rejected = expect(pending).rejects.toThrow('stale')
+    expect(guard).not.toHaveBeenCalled()
+    mocks.state.settings.useLegacyInterpreter = true
+    release()
+    await holding
+    await rejected
+    expect(guard).toHaveBeenCalledOnce()
+    expect(mocks.saveCommands).not.toHaveBeenCalled()
+    expect(mocks.state.commands.bcfdCommands).toEqual([])
+
+    mocks.state.settings.useLegacyInterpreter = false
+    await expect(commitMutation(prepared, 'agent', undefined, guard)).resolves.toMatchObject({
+      success: true
+    })
+    expect(mocks.saveCommands).toHaveBeenCalledOnce()
+  })
 })

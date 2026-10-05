@@ -29,6 +29,7 @@ import { getCommands } from '../botService'
 import { createAiChatCompletion, moderateTextWithOpenAI } from '../aiProviderService'
 import { ScriptExecutionError } from '../../utils/quickJsScriptContext'
 import { mutualGuildCount, setBotStatus } from './keywordHelpers'
+import { deleteMessage } from './deleteMessage'
 
 // ============================================================================
 // Channel Management Helpers
@@ -929,6 +930,7 @@ function createFunctionRegistry(): FunctionRegistry {
   registry.set('randomFloat', () => Math.random().toString())
   registry.set('randomBoolean', () => (Math.random() > 0.5).toString())
   registry.set('commandCount', () => getCommands().bcfdCommands.length.toString())
+  registry.set('deleteMessage', (args, ctx) => deleteMessage(args, ctx.textChannel))
   registry.set('date', () => new Date().toLocaleString())
   registry.set('dateDiscord', () => discordTimestampFromMillis(Date.now()))
   registry.set('day', () => new Date().getDate().toString())

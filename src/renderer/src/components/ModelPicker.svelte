@@ -1,24 +1,5 @@
 <script lang="ts">
-  interface ModelOption {
-    id: string
-    name?: string
-    description?: string
-    contextLength?: number
-    supportedParameters?: string[]
-    outputModalities?: string[]
-    supportsStructuredOutputs?: boolean
-    supportsReasoning?: boolean
-    pricing?: {
-      prompt?: string
-      completion?: string
-      request?: string
-      image?: string
-      webSearch?: string
-      internalReasoning?: string
-      inputCacheRead?: string
-      inputCacheWrite?: string
-    }
-  }
+  import type { AiModelInfo as ModelOption } from '../../../shared/aiModelTypes'
 
   interface Props {
     value: string
@@ -273,8 +254,15 @@
                   {#if provider === 'openrouter' && model.supportsStructuredOutputs === false}
                     <span class="badge badge-warning badge-sm shrink-0">JSON?</span>
                   {/if}
-                  {#if model.supportsReasoning}
+                  {#if model.capabilities.reasoning.support === 'supported'}
                     <span class="badge badge-info badge-sm shrink-0">Reasoning</span>
+                  {:else if model.capabilities.reasoning.support === 'unknown'}
+                    <span class="badge badge-ghost badge-sm shrink-0">Reasoning unknown</span>
+                  {/if}
+                  {#if model.capabilities.tools !== 'supported'}
+                    <span class="badge badge-ghost badge-sm shrink-0"
+                      >Tools {model.capabilities.tools}</span
+                    >
                   {/if}
                 </div>
               </button>
@@ -283,6 +271,9 @@
         </div>
 
         <div class="divider my-1">Custom</div>
+        <p class="text-xs opacity-70 mb-2">
+          Unverified IDs use provider-default reasoning. Chat and tool capabilities may be unknown.
+        </p>
         <div class="flex gap-2">
           <input
             class="input input-bordered flex-1"

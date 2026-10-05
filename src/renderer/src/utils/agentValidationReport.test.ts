@@ -53,6 +53,7 @@ function step(overrides: Partial<AgentValidationStepReport> = {}): AgentValidati
 function report(overrides: Partial<AgentValidationReport> = {}): AgentValidationReport {
   return {
     version: 1,
+    wrapEvalInIIFE: true,
     candidateKind: 'command',
     candidateId: candidate.id,
     candidateHash: 'candidate_hash',
@@ -81,11 +82,23 @@ function binding(value: AgentValidationReport): ValidationReportBinding {
   return {
     candidateHash: value.candidateHash,
     baseRevision: value.baseRevision,
-    fixtureHash: value.fixtureHash
+    fixtureHash: value.fixtureHash,
+    wrapEvalInIIFE: value.wrapEvalInIIFE
   }
 }
 
 describe('agent validation report presentation', () => {
+  it('marks mismatched interpreter mode as stale evidence', () => {
+    const value = report()
+    const view = agentValidationReportView(
+      value,
+      { ...binding(value), wrapEvalInIIFE: false },
+      candidate
+    )
+    expect(view.outcome).not.toBe('Passed')
+    expect(view.warnings.join(' ')).toContain('interpreter mode')
+  })
+
   it('shows a verified execution and explicit expected/actual assertions', () => {
     const value = report()
     const view = agentValidationReportView(value, binding(value), candidate)
@@ -160,7 +173,7 @@ describe('agent validation report presentation', () => {
       expect(view.outcome).toBe('Stale report')
       expect(view.tone).toBe('warning')
       expect(view.warnings).toContain(
-        'This report belongs to a different candidate, revision, or fixture set.'
+        'This report belongs to a different candidate, revision, fixture set, or interpreter mode.'
       )
     }
   )

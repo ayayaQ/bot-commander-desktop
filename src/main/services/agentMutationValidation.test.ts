@@ -15,8 +15,12 @@ import {
   validationHash
 } from './agentMutationValidation'
 
-const { validate } = vi.hoisted(() => ({ validate: vi.fn() }))
+const { validate, settings } = vi.hoisted(() => ({
+  validate: vi.fn(),
+  settings: { useLegacyInterpreter: false }
+}))
 vi.mock('./agentValidationService', () => ({ validatePreparedResource: validate }))
+vi.mock('./settingsService', () => ({ getSettings: () => settings }))
 
 function suite(): AgentValidationSuite {
   const state = createPlaygroundState()
@@ -99,8 +103,47 @@ function passed(request: AgentValidationRequest) {
 
 describe('exact unsaved candidate validation binding', () => {
   beforeEach(() => {
+    settings.useLegacyInterpreter = false
     validate.mockReset()
     validate.mockImplementation(async (input) => passed(input))
+  })
+
+  it.each([false, true])(
+    'ordinary mode snapshots the selected legacy setting %s',
+    async (legacy) => {
+      settings.useLegacyInterpreter = legacy
+      const result = await validateAgentMutation(draft())
+      const request = validate.mock.calls[0][0] as AgentValidationRequest
+      expect(request.wrapEvalInIIFE).toBe(!legacy)
+      expect(result.binding.wrapEvalInIIFE).toBe(!legacy)
+      expect(result.report.wrapEvalInIIFE).toBe(!legacy)
+      expect(result.canCommit).toBe(true)
+    }
+  )
+
+  it('ordinary mode rejects a changed selection while validation is pending', async () => {
+    validate.mockImplementation(async (input) => {
+      settings.useLegacyInterpreter = true
+      return passed(input)
+    })
+    await expect(validateAgentMutation(draft())).rejects.toThrow('interpreter mode')
+  })
+
+  it('ordinary mode rejects a changed selection before approval commit', async () => {
+    const prepared = draft()
+    const result = await validateAgentMutation(prepared)
+    settings.useLegacyInterpreter = true
+    expect(() => assertAgentValidationBinding(prepared, result.binding, result.report)).toThrow(
+      'interpreter mode'
+    )
+  })
+
+  it('ordinary mode rejects worker evidence from the other eval mode', async () => {
+    validate.mockImplementation(async (input) => ({
+      ...passed(input),
+      wrapEvalInIIFE: !input.wrapEvalInIIFE
+    }))
+    await expect(validateAgentMutation(draft())).rejects.toThrow('interpreter mode')
   })
 
   it('sends a resource snapshot and fixtures without changing the prepared creation identity', async () => {

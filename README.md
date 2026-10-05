@@ -6,6 +6,10 @@ A no-code Discord bot builder. Design commands through a GUI and host your bot d
 
 Want to try a ready-to-use build? See the [releases](https://github.com/ayayaQ/bot-commander-desktop/releases).
 
+Current builds use Electron 44 and require macOS 13 (Ventura) or newer. Windows and Linux builds
+support 64-bit platforms only; Windows x86 (`ia32`) and Linux 32-bit ARM (`armv7l`) are no longer
+supported. See [Electron's platform changes](https://www.electronjs.org/docs/latest/breaking-changes#breaking-api-changes-440).
+
 ### Visual Example
 
 <img width="1417" height="844" alt="bcfd-screenshot" src="https://github.com/user-attachments/assets/978b3e1b-9d7f-47df-8c25-1b81d7c3ecf2" />
@@ -184,11 +188,49 @@ For the full language reference, see [`SPECIFICATION.md`](src/main/services/bcfd
 
 ## Project Setup
 
+Use Node.js 22.20 or newer in the 22.x series, or Node.js 24.12 or newer. These minimums cover
+both the development toolchain and the native packaging dependencies. The packaged application
+uses Electron's bundled Node.js runtime, independently of the Node.js installed on your computer.
+
 ### Install
 
+The shared agent loop, canonical history helpers and OpenAI/OpenRouter provider factories use
+the exact npm release `@ayayaq/vivi@0.4.0`.
+Its registry artifact was verified against the reviewed release bytes; the immutable
+registry URL and SHA-512 integrity are recorded in the lockfile. Publish and verify a
+compatible shared dependency before updating this pin. Do not commit npm pack outputs
+or vendor tarballs; keep other dependencies and the desktop application version
+unchanged during shared dependency updates.
+
 ```bash
-$ npm install
+$ npm ci
+$ npm test
+$ npm run typecheck
 ```
+
+The installed shared dependency is packaged with its own source, LICENSE, NOTICE and
+attribution records. Obsolete tracked vendor snapshots can be recovered from Git.
+Changing the shared dependency does not release or deploy the desktop application.
+
+The desktop agent explicitly imports the shared bounded arithmetic `calculate` tool
+from `@ayayaq/vivi/extensions/calculator` in that published registry release. Its
+executable registry is snapshotted per run and reserves every built-in tool name before
+planning mode filters mutation tools. This pure calculator is available in manual,
+auto and planning modes without mutation approval; normal host tools keep their
+existing mutation, revision and approval policy. The desktop host owns tool display,
+bounded result content, persisted history, cancellation and recovery.
+
+Extensions are trusted explicit code imports, not a plugin loader or sandbox. Their
+execution context supplies only an `AbortSignal`, with no host-permissions API.
+No filesystem, network or other host-capable extensions are enabled.
+The calculator is not added to the external MCP server.
+
+Model controls use the separate `@ayayaq/vivi/providers/models` capability normalizer
+and documented endpoint-specific host facts. Agent OpenAI Responses and general bot-chat
+Chat Completions have separate capability snapshots; missing metadata stays unknown.
+Legacy saved reasoning `none` still means provider default. Agent reasoning disable is
+a separate choice, and unsupported or unverified saved overrides remain visible with an
+actionable configuration error. See [shared-runtime integration](docs/vivi-core.md).
 
 ### Development
 

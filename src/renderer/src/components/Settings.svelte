@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { ModelCapabilities } from '@ayayaq/vivi/providers/models'
   import { onMount } from 'svelte'
   import {
     getSelectedModelForProvider,
@@ -7,6 +8,7 @@
     patchSettings,
     retrySettingsSave,
     settingsDraftStore,
+    settingsStore,
     settingsSaveStatus,
     withSelectedModelForProvider
   } from '../stores/settings'
@@ -17,10 +19,17 @@
   import MemoryManagerModal from './MemoryManagerModal.svelte'
   import McpSettingsCard from './McpSettingsCard.svelte'
   import {
-    modelSupportsReasoning,
-    normalizeReasoningEffort,
+    currentSelectedCapabilities,
+    reasoningChoices,
+    reasoningConfigurationError,
+    reasoningCapabilityLabel,
+    ModelCatalogRequestGate,
+    catalogSettingsMatch,
+    canRefreshModelCatalog,
+    modelCapabilitySnapshotMatches,
     type ReasoningEffort
   } from '../utils/aiModelCapabilities'
+  import type { AiModelInfo, SelectedModelCapabilitySnapshot } from '../../../shared/aiModelTypes'
   import type { AppSettings } from '../types/types'
   import type { ResourceChangedEvent } from '../../../shared/mcpTypes'
 
@@ -37,17 +46,32 @@
   let useGlobalEvalScope: boolean = $state()
   let hideOutput: boolean = $state()
   let agentNotificationsEnabled: boolean = $state(true)
-  let aiModels: Array<{
-    id: string
-    name: string
-    supportsStructuredOutputs?: boolean
-    supportsReasoning?: boolean
-  }> = $state([])
+  let aiModels: AiModelInfo[] = $state([])
+  const catalogGate = new ModelCatalogRequestGate()
+  const selectedGate = new ModelCatalogRequestGate()
+  let selectedCapabilities: ModelCapabilities | undefined = $state()
+  let selectedCapabilityError = $state('')
+  let selectedExpiresAt: number | undefined = $state()
+  let capabilityExpiryTimer: ReturnType<typeof setTimeout> | undefined
+  let catalogExpiryTimer: ReturnType<typeof setTimeout> | undefined
   let isLoadingModels = $state(false)
   let modelFetchError = $state('')
   let memoryDialog: HTMLDialogElement = $state()
 
   function syncLocalSettings(settings: AppSettings) {
+    const provider = settings.aiProvider || 'openai'
+    if (
+      aiProvider !== provider ||
+      openaiApiKey !== settings.openaiApiKey ||
+      openrouterApiKey !== (settings.openrouterApiKey || '')
+    ) {
+      catalogGate.invalidate()
+      selectedGate.invalidate()
+      selectedCapabilities = undefined
+      aiModels = []
+      isLoadingModels = false
+      modelFetchError = 'Provider settings changed. Refresh the model catalog.'
+    }
     selectedTheme = settings.theme
     showToken = settings.showToken
     selectedLanguage = settings.language
@@ -95,16 +119,33 @@
   }
 
   function updateOpenAIKey(event) {
+    catalogGate.invalidate()
+    selectedGate.invalidate()
+    selectedCapabilities = undefined
+    aiModels = []
+    isLoadingModels = false
+    modelFetchError = 'Provider key changed. Refresh the model catalog.'
     openaiApiKey = event.target.value
     void patchSettings({ openaiApiKey })
   }
 
   function updateOpenRouterKey(event) {
+    catalogGate.invalidate()
+    selectedGate.invalidate()
+    selectedCapabilities = undefined
+    aiModels = []
+    isLoadingModels = false
+    modelFetchError = 'Provider key changed. Refresh the model catalog.'
     openrouterApiKey = event.target.value
     void patchSettings({ openrouterApiKey })
   }
 
   async function updateAiProvider(event) {
+    catalogGate.invalidate()
+    selectedGate.invalidate()
+    selectedCapabilities = undefined
+    aiModels = []
+    isLoadingModels = false
     aiProvider = event.target.value
     selectedAiModel = getSelectedModelForProvider($settingsDraftStore, aiProvider)
     if (await patchSettings({ aiProvider, selectedAiModel })) await refreshAiModels()
@@ -114,27 +155,71 @@
     if (!model) return
     selectedAiModel = model
     const next = withSelectedModelForProvider($settingsDraftStore, aiProvider, selectedAiModel)
-    aiReasoningEffort = normalizeReasoningEffort(aiReasoningEffort, selectedModelSupportsReasoning)
     void saveSettings({ ...next, aiReasoningEffort })
   }
 
   function updateReasoningEffort(event) {
-    aiReasoningEffort = normalizeReasoningEffort(
-      event.target.value as ReasoningEffort,
-      selectedModelSupportsReasoning
+    const value = event.target.value as ReasoningEffort
+    const current = currentSelectedCapabilities(
+      selectedCapabilities,
+      aiProvider,
+      'chat-completions',
+      selectedAiModel,
+      selectedExpiresAt
     )
+    const error = reasoningConfigurationError(current, value)
+    if (error) {
+      selectedCapabilityError = error
+      void refreshSelectedCapabilities(
+        selectedAiModel,
+        { aiProvider, openaiApiKey, openrouterApiKey },
+        $settingsStore
+      )
+      return
+    }
+    aiReasoningEffort = value
     void patchSettings({ aiReasoningEffort })
   }
 
-  function reconcileReasoningSupport() {
-    if (selectedModelSupportsReasoning || aiReasoningEffort === 'none') return
-    aiReasoningEffort = 'none'
-    void patchSettings({ aiReasoningEffort })
+  function scheduleCatalogExpiry(result: AiModelInfo[], request: number) {
+    clearTimeout(catalogExpiryTimer)
+    const expiries = result
+      .map((model) => model.capabilityExpiresAt)
+      .filter((at): at is number => Number.isFinite(at))
+    if (!expiries.length) return
+    catalogExpiryTimer = setTimeout(
+      () => {
+        if (!catalogGate.current(request)) return
+        catalogGate.invalidate()
+        aiModels = []
+        isLoadingModels = false
+        modelFetchError = 'Provider catalog metadata expired. Refresh the model catalog.'
+        selectedGate.invalidate()
+        selectedCapabilities = undefined
+        void refreshSelectedCapabilities(
+          selectedAiModel,
+          { aiProvider, openaiApiKey, openrouterApiKey },
+          $settingsStore
+        )
+      },
+      Math.max(0, Math.min(...expiries) - Date.now())
+    )
   }
 
   async function refreshAiModels() {
+    const request = catalogGate.begin()
+    clearTimeout(catalogExpiryTimer)
+    aiModels = []
+    const local = { aiProvider, openaiApiKey, openrouterApiKey }
+    const committed = $settingsStore
+    if (!canRefreshModelCatalog(local, committed, $settingsSaveStatus)) {
+      isLoadingModels = false
+      modelFetchError =
+        'Save provider settings before refreshing the model catalog. Retry any failed settings save first.'
+      return
+    }
     if (aiProvider === 'openai' && !openaiApiKey) {
-      aiModels = []
+      isLoadingModels = false
       modelFetchError =
         'Add an OpenAI API key to fetch OpenAI models. You can still enter a custom model ID.'
       return
@@ -142,12 +227,24 @@
     isLoadingModels = true
     modelFetchError = ''
     try {
-      aiModels = await window.electron.ipcRenderer.invoke('fetch-ai-models')
-      reconcileReasoningSupport()
+      const result = await window.electron.ipcRenderer.invoke('fetch-ai-models')
+      if (
+        catalogGate.current(request) &&
+        canRefreshModelCatalog(
+          { aiProvider, openaiApiKey, openrouterApiKey },
+          $settingsStore,
+          $settingsSaveStatus
+        ) &&
+        catalogSettingsMatch(committed, $settingsStore)
+      ) {
+        aiModels = result
+        scheduleCatalogExpiry(result, request)
+      }
     } catch (error) {
-      modelFetchError = error instanceof Error ? error.message : 'Failed to fetch models'
+      if (catalogGate.current(request))
+        modelFetchError = error instanceof Error ? error.message : 'Failed to fetch models'
     } finally {
-      isLoadingModels = false
+      if (catalogGate.current(request)) isLoadingModels = false
     }
   }
 
@@ -170,16 +267,125 @@
     window.electron.ipcRenderer.invoke('open-external-url', url)
   }
 
-  let selectedModelSupportsReasoning = $derived(
-    modelSupportsReasoning(aiProvider, selectedAiModel, aiModels)
+  const capabilities = $derived(
+    currentSelectedCapabilities(
+      selectedCapabilities,
+      aiProvider,
+      'chat-completions',
+      selectedAiModel,
+      selectedExpiresAt
+    )
   )
+  $effect(() => {
+    const local = { aiProvider, openaiApiKey, openrouterApiKey }
+    const committed = $settingsStore
+    const model = selectedAiModel
+    const status = $settingsSaveStatus
+    aiModels
+    if (model && canRefreshModelCatalog(local, committed, status)) {
+      void refreshSelectedCapabilities(model, local, committed)
+    } else {
+      selectedGate.invalidate()
+      clearTimeout(capabilityExpiryTimer)
+      selectedCapabilities = undefined
+    }
+  })
+
+  async function refreshSelectedCapabilities(
+    model: string,
+    local: { aiProvider: 'openai' | 'openrouter'; openaiApiKey: string; openrouterApiKey: string },
+    committed: AppSettings
+  ) {
+    if (!canRefreshModelCatalog(local, committed, $settingsSaveStatus)) {
+      selectedGate.invalidate()
+      clearTimeout(capabilityExpiryTimer)
+      selectedCapabilities = undefined
+      return
+    }
+    const request = selectedGate.begin()
+    clearTimeout(capabilityExpiryTimer)
+    selectedCapabilities = undefined
+    selectedExpiresAt = undefined
+    selectedCapabilityError = ''
+    try {
+      const result = (await window.electron.ipcRenderer.invoke('get-ai-model-capabilities', {
+        model,
+        provider: local.aiProvider,
+        purpose: 'chat'
+      })) as SelectedModelCapabilitySnapshot
+      if (
+        selectedGate.current(request) &&
+        selectedAiModel === model &&
+        canRefreshModelCatalog(
+          { aiProvider, openaiApiKey, openrouterApiKey },
+          $settingsStore,
+          $settingsSaveStatus
+        ) &&
+        catalogSettingsMatch(committed, $settingsStore) &&
+        modelCapabilitySnapshotMatches(
+          result.capabilities,
+          local.aiProvider,
+          'chat-completions',
+          model
+        )
+      ) {
+        selectedCapabilities = result.capabilities
+        selectedExpiresAt = result.expiresAt
+        if (result.expiresAt !== undefined && Number.isFinite(result.expiresAt))
+          capabilityExpiryTimer = setTimeout(
+            () => {
+              if (!(
+                selectedGate.current(request) &&
+                selectedAiModel === model &&
+                catalogSettingsMatch(committed, $settingsStore)
+              ))
+                return
+              selectedGate.invalidate()
+              selectedCapabilities = undefined
+              aiModels = []
+              void refreshSelectedCapabilities(
+                model,
+                { aiProvider, openaiApiKey, openrouterApiKey },
+                $settingsStore
+              )
+            },
+            Math.max(0, result.expiresAt - Date.now())
+          )
+      }
+    } catch (error) {
+      if (selectedGate.current(request))
+        selectedCapabilityError =
+          error instanceof Error ? error.message : 'Selected model capabilities unavailable'
+    }
+  }
+
+  const choices = $derived(reasoningChoices(capabilities, false))
+  const reasoningError = $derived(reasoningConfigurationError(capabilities, aiReasoningEffort))
 
   onMount(() => {
     const unsubscribeDraft = settingsDraftStore.subscribe(syncLocalSettings)
+    let previousCommitted = $settingsStore
+    const unsubscribeCommitted = settingsStore.subscribe((settings) => {
+      if (!catalogSettingsMatch(previousCommitted, settings)) {
+        catalogGate.invalidate()
+        selectedGate.invalidate()
+        selectedCapabilities = undefined
+        aiModels = []
+        isLoadingModels = false
+        modelFetchError = 'Provider settings changed. Refresh the model catalog.'
+      }
+      previousCommitted = settings
+    })
     void refreshAiModels()
     window.electron.ipcRenderer.on('resource:changed', handleResourceChanged)
     return () => {
+      catalogGate.invalidate()
+      selectedGate.invalidate()
+      selectedCapabilities = undefined
+      clearTimeout(capabilityExpiryTimer)
+      clearTimeout(catalogExpiryTimer)
       unsubscribeDraft()
+      unsubscribeCommitted()
       window.electron.ipcRenderer.removeListener('resource:changed', handleResourceChanged)
     }
   })
@@ -378,29 +584,42 @@
       onRefresh={refreshAiModels}
       onChange={updateModelValue}
     />
+    {#if selectedCapabilityError}<p class="text-xs text-warning mt-2">
+        {selectedCapabilityError}
+      </p>{/if}
+    {#if !aiModels.some((model) => model.id === selectedAiModel)}
+      <p class="text-xs opacity-70 mt-2">
+        Capabilities describe the API; catalog membership and account access are unverified.
+      </p>
+    {/if}
+    {#if capabilities?.chat === 'unsupported'}
+      <p class="text-sm text-warning mt-2">
+        Text conversation is unsupported through this model API. Choose another model.
+      </p>
+    {/if}
+    {#if !capabilities || capabilities.chat === 'unknown'}
+      <p class="text-xs opacity-70 mt-2">
+        Text conversation capability unknown for this endpoint. Unverified IDs remain usable with
+        provider-default reasoning.
+      </p>
+    {/if}
   </div>
 
   <div class="form-control">
     <!-- svelte-ignore a11y_label_has_associated_control -->
     <label class="label">
       <span class="label-text">Reasoning for $chat</span>
-      {#if !selectedModelSupportsReasoning}
-        <span class="label-text-alt">Not supported by selected model</span>
-      {/if}
+      <span class="label-text-alt">{reasoningCapabilityLabel(capabilities)}</span>
     </label>
-    <select
-      class="select"
-      value={aiReasoningEffort}
-      onchange={updateReasoningEffort}
-      disabled={!selectedModelSupportsReasoning}
-    >
-      <option value="none">None</option>
-      <option value="minimal">Minimal</option>
-      <option value="low">Low</option>
-      <option value="medium">Medium</option>
-      <option value="high">High</option>
-      <option value="xhigh">Extra high</option>
+    <select class="select" value={aiReasoningEffort} onchange={updateReasoningEffort}>
+      {#if reasoningError}
+        <option value={aiReasoningEffort}>Saved choice (unavailable)</option>
+      {/if}
+      {#each choices as choice}
+        <option value={choice.value}>{choice.label}</option>
+      {/each}
     </select>
+    {#if reasoningError}<p class="text-sm text-warning mt-2">{reasoningError}</p>{/if}
   </div>
 
   <div class="form-control">

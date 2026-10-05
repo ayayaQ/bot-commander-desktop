@@ -14,6 +14,23 @@ import { PLAYGROUND_OPTION_NAME } from './optionName'
 
 const FAKE_BOT_ID = '900000000000000003'
 
+const ASSERTION_ROOTS = new Set(['outcome', 'reason', 'errors', 'state', 'effects'])
+
+/** RFC 6901 string pointers, limited to the assertion view's supported roots. */
+function isSupportedAssertionPointer(path: string): boolean {
+  if (path[0] !== '/') return false
+  const rootEnd = path.indexOf('/', 1)
+  if (!ASSERTION_ROOTS.has(path.slice(1, rootEnd === -1 ? path.length : rootEnd))) return false
+  // Every character is examined at most once. Empty tokens and literal slashes
+  // are valid; only a tilde must be followed by the RFC's 0 or 1 escape.
+  for (let index = rootEnd === -1 ? path.length : rootEnd; index < path.length; index++) {
+    if (path[index] !== '~') continue
+    const escape = path[++index]
+    if (escape !== '0' && escape !== '1') return false
+  }
+  return true
+}
+
 /** Descriptor inspection precedes every field read/serialization. No getters/toJSON run. */
 export function copyAgentValidationJSON(value: unknown, maxChars: number): AgentValidationJSON {
   let nodes = 0
@@ -410,7 +427,7 @@ export function validateAgentValidationSuite(value: unknown): AgentValidationSui
         keys(assertion, ['path', 'equals'], 'assertion')
         text(assertion.path, 'assertion.path', 300, true)
         if (!Object.hasOwn(assertion, 'equals')) throw new Error('Assertion requires equals')
-        if (!/^\/(outcome|reason|errors|state|effects)(\/([^~]|~[01])*)*$/.test(assertion.path))
+        if (!isSupportedAssertionPointer(assertion.path))
           throw new Error('Assertion requires a supported JSON Pointer path')
         paths.push(assertion.path)
         if (JSON.stringify(assertion.equals).length > AGENT_VALIDATION_LIMITS.assertionValueChars)

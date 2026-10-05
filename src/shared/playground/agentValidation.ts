@@ -131,6 +131,8 @@ export function runAgentValidation(
   ) as AgentValidationRequest
   if (!request || !['command', 'interaction'].includes(request.candidateKind))
     throw new Error('Invalid validation candidate kind')
+  if (typeof request.wrapEvalInIIFE !== 'boolean')
+    throw new Error('Invalid validation interpreter mode')
   for (const [name, value] of [
     ['candidateHash', request.candidateHash],
     ['fixtureHash', request.fixtureHash]
@@ -162,6 +164,7 @@ export function runAgentValidation(
     candidateHash: request.candidateHash,
     baseRevision: request.baseRevision,
     fixtureHash: request.fixtureHash,
+    wrapEvalInIIFE: request.wrapEvalInIIFE,
     outcome: 'not_run',
     cases: [],
     coverage: {
@@ -225,6 +228,7 @@ export function runAgentValidation(
                     state,
                     commands: [candidate as BCFDCommand],
                     senderId: step.senderId,
+                    wrapEvalInIIFE: request.wrapEvalInIIFE,
                     content: step.content!
                   },
                   factory
@@ -235,6 +239,7 @@ export function runAgentValidation(
                     state,
                     interactions: [candidate as BCFDInteractionCommand],
                     senderId: step.senderId,
+                    wrapEvalInIIFE: request.wrapEvalInIIFE,
                     commandId: candidate.id,
                     options: step.options,
                     messageId: step.messageId,

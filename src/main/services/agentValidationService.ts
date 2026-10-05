@@ -119,6 +119,8 @@ export function createAgentValidationService(options: AgentValidationServiceOpti
           reply.report.candidateHash !== input.candidateHash ||
           reply.report.baseRevision !== input.baseRevision ||
           reply.report.fixtureHash !== input.fixtureHash ||
+          typeof reply.report.wrapEvalInIIFE !== 'boolean' ||
+          reply.report.wrapEvalInIIFE !== input.wrapEvalInIIFE ||
           !Array.isArray(reply.report.cases) ||
           !reply.report.coverage ||
           !['passed', 'failed', 'blocked', 'unmatched', 'unsupported', 'not_run'].includes(

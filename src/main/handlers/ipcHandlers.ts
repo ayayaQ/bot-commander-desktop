@@ -40,14 +40,14 @@ import { getInteractions, setInteractions } from '../services/interactionService
 import { decodeBCFDCommandArray } from '../../shared/commandCodec'
 import type { AgentPlanDecision, AgentStreamEvent } from '../../shared/agentTypes'
 import type { McpConfig } from '../../shared/mcpTypes'
-import { createInteractionPublishBackend } from '../services/slashCommandRegistry'
-import {
-  InteractionPublisher,
-  applyPublicationResults,
-  PublicationFailure
-} from '../services/interactionPublisher'
+import { interactionPublisher } from '../services/interactionPublicationService'
 import { getSettings, setSettings, normalizeSettings } from '../services/settingsService'
-import { fetchAiModels, getAiProvider } from '../services/aiProviderService'
+import {
+  fetchAiModels,
+  getAiProvider,
+  getSelectedModelCapabilities
+} from '../services/aiProviderService'
+import { agentProtocol, type SelectedModelCapabilityRequest } from '../../shared/aiModelTypes'
 import { getBotStatus, setBotStatus } from '../services/statusService'
 import { getStatsInstance } from '../utils/stats'
 import { checkForUpdates } from '../services/updateService'
@@ -92,23 +92,6 @@ import {
   setResourceChangeEventSink,
   withResourceMutationLock
 } from '../services/resourceChangeService'
-
-const interactionPublisher = new InteractionPublisher({
-  read: getInteractions,
-  backend: createInteractionPublishBackend,
-  commit: (results, isCurrent) =>
-    withResourceMutationLock('interactions', async () => {
-      if (!isCurrent()) throw new PublicationFailure({ code: 'connection-changed' })
-      const previous = getInteractions()
-      const updated = structuredClone(previous)
-      const applied = applyPublicationResults(updated, results)
-      if (!applied.length) return applied
-      await saveInteractions(updated)
-      setInteractions(updated)
-      emitResourceChanged('interactions', 'system', updated)
-      return applied
-    })
-})
 
 const agentViewState = new Map<number, boolean>()
 
@@ -322,7 +305,7 @@ export function addIPCHandlers() {
     updateMcpServerConfig(updates)
   )
   ipcMain.handle('mcp:copy-token', async () => {
-    clipboard.writeText(await copyMcpToken())
+    await clipboard.writeText(await copyMcpToken())
     return true
   })
   ipcMain.handle('mcp:rotate-token', () => rotateMcpToken())
@@ -341,11 +324,40 @@ export function addIPCHandlers() {
     commitMemoryMutation(await prepareDeleteMemory(id, expectedRevision))
   )
 
-  ipcMain.handle('fetch-ai-models', async () => {
+  ipcMain.handle('get-ai-model-capabilities', (_, request: SelectedModelCapabilityRequest) => {
+    const settings = getSettings()
+    const provider = getAiProvider(settings)
+    if (
+      !request ||
+      request.provider !== provider ||
+      (request.purpose !== 'agent' && request.purpose !== 'chat')
+    ) {
+      throw new Error('Provider settings changed. Refresh selected model capabilities.')
+    }
+    return getSelectedModelCapabilities(
+      settings,
+      request.model,
+      request.purpose === 'agent' ? agentProtocol(provider) : 'chat-completions'
+    )
+  })
+
+  ipcMain.handle('fetch-ai-models', async (_, options?: { purpose?: string }) => {
     const settings = getSettings()
     const provider = getAiProvider(settings)
     const apiKey = provider === 'openrouter' ? settings.openrouterApiKey : settings.openaiApiKey
-    return await fetchAiModels(provider, apiKey)
+    const models = await fetchAiModels(
+      provider,
+      apiKey,
+      options?.purpose === 'agent' ? agentProtocol(provider) : 'chat-completions'
+    )
+    const current = getSettings()
+    const currentProvider = getAiProvider(current)
+    const currentKey =
+      currentProvider === 'openrouter' ? current.openrouterApiKey : current.openaiApiKey
+    if (provider !== currentProvider || apiKey !== currentKey) {
+      throw new Error('Provider settings changed while loading models. Refresh the model catalog.')
+    }
+    return models
   })
 
   ipcMain.handle('get-bot-status', () => {

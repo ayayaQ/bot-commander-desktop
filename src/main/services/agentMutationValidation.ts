@@ -12,12 +12,14 @@ import {
 import { AGENT_VALIDATION_LIMITS } from '../../shared/agentValidationTypes'
 import { resourceRevision } from './resourceChangeService'
 import { validatePreparedResource } from './agentValidationService'
+import { getSettings } from './settingsService'
 import type { PreparedMutation } from './agentTools'
 
 export type AgentValidationBinding = {
   candidateHash: string
   baseRevision: string | null
   fixtureHash: string
+  wrapEvalInIIFE: boolean
 }
 
 export function validationHash(value: unknown): string {
@@ -42,7 +44,8 @@ function bindingFor(prepared: PreparedMutation): AgentValidationBinding {
   return {
     candidateHash: validationHash(prepared.after),
     baseRevision: prepared.before === null ? null : resourceRevision(prepared.before),
-    fixtureHash: fixtureHash(prepared.arguments.validation)
+    fixtureHash: fixtureHash(prepared.arguments.validation),
+    wrapEvalInIIFE: !getSettings().useLegacyInterpreter
   }
 }
 
@@ -56,14 +59,16 @@ export function assertAgentValidationBinding(
     current.candidateHash !== binding.candidateHash ||
     current.baseRevision !== binding.baseRevision ||
     current.fixtureHash !== binding.fixtureHash ||
+    current.wrapEvalInIIFE !== binding.wrapEvalInIIFE ||
     report.candidateHash !== binding.candidateHash ||
     report.baseRevision !== binding.baseRevision ||
     report.fixtureHash !== binding.fixtureHash ||
+    report.wrapEvalInIIFE !== binding.wrapEvalInIIFE ||
     report.candidateId !== prepared.target.id ||
     report.candidateKind !== prepared.target.type
   )
     throw new Error(
-      'Draft validation is stale; validate the exact current candidate and fixtures again'
+      'Draft validation is stale; validate the exact current candidate, fixtures and interpreter mode again'
     )
 }
 

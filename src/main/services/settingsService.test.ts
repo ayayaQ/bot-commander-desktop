@@ -48,6 +48,18 @@ describe('settingsService', () => {
     })
   })
 
+  it.each(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const)(
+    'keeps saved $chat %s intact, including unknown custom models',
+    async (aiReasoningEffort) => {
+      const { getSettings, setSettings } = await import('./settingsService')
+      setSettings(legacySettings({ selectedAiModel: 'custom-unverified', aiReasoningEffort }))
+      expect(getSettings()).toMatchObject({
+        selectedAiModel: 'custom-unverified',
+        aiReasoningEffort
+      })
+    }
+  )
+
   it('keeps provider-specific selected model values in sync', async () => {
     const { getSettings, setSettings } = await import('./settingsService')
 

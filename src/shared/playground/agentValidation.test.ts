@@ -8,6 +8,7 @@ import { runMessage } from './engine'
 import { runInteraction } from './interactions'
 import { runAgentValidation, validateAgentValidationSuite } from './agentValidation'
 import { copyAgentValidationJSON } from './agentValidationFixtures'
+import { createQuickJSScriptContext } from '../../main/utils/quickJsScriptContext'
 import {
   AGENT_VALIDATION_LIMITS,
   createNotRunAgentValidationReport,
@@ -48,6 +49,7 @@ const request = (patch: Partial<AgentValidationRequest> = {}): AgentValidationRe
   candidateHash: 'candidate-hash',
   baseRevision: 'base-revision',
   fixtureHash: 'fixture-hash',
+  wrapEvalInIIFE: true,
   suite: suite(),
   ...patch
 })
@@ -96,6 +98,170 @@ beforeAll(async () => {
 })
 
 describe('bounded candidate validation runner', () => {
+  it.each([true, false])(
+    'ordinary mode matches production eval declaration scope with wrapping %s',
+    async (wrapEvalInIIFE) => {
+      const snippets = [
+        'var localGreeting = "hello"; botState.first = localGreeting;',
+        'botState.scope = typeof localGreeting; "ignored completion";'
+      ]
+      const production = await createQuickJSScriptContext({ initialContext: { botState: {} } })
+      try {
+        const outputs = snippets.map((code) => {
+          const value = production.evaluate(code, { wrapReturn: wrapEvalInIIFE })
+          return wrapEvalInIIFE && value !== undefined ? String(value) : ''
+        })
+        const expectedState = production.getVariable('botState')
+        const report = runAgentValidation(
+          request({
+            wrapEvalInIIFE,
+            candidate: command({
+              channelMessage: 'result:' + snippets.map((code) => `$eval ${code} $halt`).join('')
+            }),
+            suite: suite([
+              step({
+                assertions: [
+                  { path: '/outcome', equals: 'executed' },
+                  { path: '/effects/messages/0/content', equals: 'result:' + outputs.join('') },
+                  { path: '/state/botState/first', equals: 'hello' },
+                  {
+                    path: '/state/botState/scope',
+                    equals: wrapEvalInIIFE ? 'undefined' : 'string'
+                  }
+                ]
+              })
+            ])
+          }),
+          sandboxFactory
+        )
+        expect(report.outcome).toBe('passed')
+        expect(report.wrapEvalInIIFE).toBe(wrapEvalInIIFE)
+        expect(expectedState).toEqual({
+          first: 'hello',
+          scope: wrapEvalInIIFE ? 'undefined' : 'string'
+        })
+      } finally {
+        production.dispose()
+      }
+    }
+  )
+
+  it('ordinary mode returns normal wrapped values and rejects a top-level global return', async () => {
+    const candidate = command({ channelMessage: '$eval return "reply"; $halt' })
+    const input = request({
+      candidate,
+      suite: suite([
+        step({
+          assertions: [
+            { path: '/outcome', equals: 'executed' },
+            { path: '/effects/messages/0/content', equals: 'reply' }
+          ]
+        })
+      ])
+    })
+    const production = await createQuickJSScriptContext()
+    try {
+      expect(production.evaluate('return "reply";', { wrapReturn: true })).toBe('reply')
+      expect(() => production.evaluate('return "reply";', { wrapReturn: false })).toThrow()
+    } finally {
+      production.dispose()
+    }
+    expect(runAgentValidation(input, sandboxFactory).outcome).toBe('passed')
+    const global = runAgentValidation({ ...input, wrapEvalInIIFE: false }, sandboxFactory)
+    expect(global.outcome).toBe('failed')
+    expect(global.cases[0].steps[0].executionOutcome).toBe('error')
+    expect(global.cases[0].steps[0].effects.messages).toEqual([])
+  })
+
+  it.each([true, false])(
+    'ordinary mode carries eval declaration scope through slash and button steps with wrapping %s',
+    (wrapEvalInIIFE) => {
+      const template = (name: string) =>
+        `${name}:$eval var localGreeting = "hello"; $halt` +
+        `$eval botState.${name}Scope = typeof localGreeting; $halt`
+      const candidate = interaction({
+        rootAction: action({
+          channelMessage: template('slash'),
+          buttons: [
+            {
+              customId: 'go',
+              label: 'Go',
+              style: 1,
+              disabled: false,
+              action: action({ channelMessage: template('button') })
+            }
+          ]
+        })
+      })
+      const report = runAgentValidation(
+        request({
+          candidateKind: 'interaction',
+          candidate,
+          wrapEvalInIIFE,
+          suite: suite(
+            [
+              slash({
+                assertions: [
+                  { path: '/outcome', equals: 'executed' },
+                  { path: '/effects/messages/0/content', equals: 'slash:' },
+                  {
+                    path: '/state/botState/slashScope',
+                    equals: wrapEvalInIIFE ? 'undefined' : 'string'
+                  }
+                ]
+              }),
+              step({
+                kind: 'button',
+                content: undefined,
+                messageId: 1,
+                customId: 'go',
+                assertions: [
+                  { path: '/outcome', equals: 'executed' },
+                  { path: '/effects/messages/0/content', equals: 'button:' },
+                  {
+                    path: '/state/botState/buttonScope',
+                    equals: wrapEvalInIIFE ? 'undefined' : 'string'
+                  }
+                ]
+              })
+            ].map(clean)
+          )
+        }),
+        sandboxFactory
+      )
+      expect(report.outcome).toBe('passed')
+      expect(report.coverage.executed).toBe(2)
+      expect(report.wrapEvalInIIFE).toBe(wrapEvalInIIFE)
+    }
+  )
+
+  it('ordinary mode preserves wrapped eval defaults for existing Playground callers', () => {
+    const state = createPlaygroundState()
+    const message = runMessage(
+      {
+        state,
+        commands: [command({ channelMessage: '$eval return "reply"; $halt' })],
+        senderId,
+        content: '!test'
+      },
+      sandboxFactory
+    )
+    expect(message.state.messages.at(-1)?.content).toBe('reply')
+    const slash = runInteraction(
+      {
+        kind: 'slash',
+        state,
+        interactions: [
+          interaction({ rootAction: action({ channelMessage: '$eval return "reply"; $halt' }) })
+        ],
+        senderId,
+        commandId: 'candidate'
+      },
+      sandboxFactory
+    )
+    expect(slash.state.messages.at(-1)?.content).toBe('reply')
+  })
+
   it.each(['$definitelyNotARealBCFDFunction(no)', 'Bad $definitelyNotARealVariable'])(
     'fails unknown BCFD names rather than classifying them as genuine unsupported: %s',
     (channelMessage) => {

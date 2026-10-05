@@ -12,6 +12,7 @@ import type { ScriptSandbox } from './script'
 import { skipScriptExpression } from './scriptExpressions'
 import { remainingCooldown } from './sessionState'
 import type { CooldownCommand } from './sessionState'
+import { DELETE_MESSAGE_ERRORS, validateDeleteMessageArguments } from '../deleteMessage'
 
 // Documented names plus the production registry's legacy desktop aliases. Unknown
 // names are failures, not an escape into the unsupported-feature approval path.
@@ -40,6 +41,7 @@ export type TemplateContext = {
   trigger: string
   options?: Record<string, string | number | boolean>
   script?: ScriptSandbox
+  wrapEvalInIIFE?: boolean
   setVariable?: (name: string, value: string) => void
   command?: CooldownCommand
   trace?: string[]
@@ -93,6 +95,7 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
     'set',
     'get',
     'chat',
+    'deleteMessage',
     'cooldownRemaining'
   ])
   // Inspect every AST branch before interpreting any value, including inactive branches.
@@ -187,6 +190,21 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
     }
     if (Object.hasOwn(vars, name)) return vars[name]
     switch (name) {
+      case 'deleteMessage': {
+        const validated = validateDeleteMessageArguments(args)
+        if ('error' in validated) return validated.error
+        const message = ctx.state.messages.find(
+          (item) =>
+            String(item.id) === validated.id &&
+            item.kind !== 'dm' &&
+            !item.deleted &&
+            !item.ephemeral
+        )
+        if (!message) return DELETE_MESSAGE_ERRORS.missingMessage
+        message.deleted = true
+        ctx.trace?.push(`Simulated deleteMessage: deleted fake channel message ${validated.id}`)
+        return ''
+      }
       case 'set':
         if (!ctx.script)
           throw new PlaygroundExecutionError('Script sandbox is unavailable', 'unsupported')
@@ -321,7 +339,9 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
                 code.slice(0, replacement.position) +
                 replacement.name +
                 code.slice(replacement.position + replacement.length)
-            output += bounded(ctx.script.evaluate(code))
+            output += bounded(
+              ctx.script.evaluate(code, { wrapReturn: ctx.wrapEvalInIIFE !== false })
+            )
           } catch (error) {
             failed = true
             throw error

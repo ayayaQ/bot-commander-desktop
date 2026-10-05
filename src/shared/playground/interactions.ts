@@ -307,6 +307,7 @@ export function runInteraction(
         state: draft,
         sender: draft.members.find((member) => member.id === request.senderId)!,
         content: '',
+        wrapEvalInIIFE: request.wrapEvalInIIFE,
         trigger: '',
         options,
         command,

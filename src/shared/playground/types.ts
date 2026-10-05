@@ -80,6 +80,8 @@ export type PlaygroundMessageRequest = {
   commands: BCFDCommand[]
   senderId: string
   content: string
+  /** Defaults to wrapped eval for ordinary Playground callers. */
+  wrapEvalInIIFE?: boolean
 }
 export type PlaygroundInteractionRequest = {
   kind: 'slash' | 'button'
@@ -90,6 +92,8 @@ export type PlaygroundInteractionRequest = {
   options?: Record<string, string | number | boolean>
   messageId?: number
   customId?: string
+  /** Defaults to wrapped eval for ordinary Playground callers. */
+  wrapEvalInIIFE?: boolean
 }
 export type PlaygroundRequest = PlaygroundMessageRequest | PlaygroundInteractionRequest
 export const PLAYGROUND_LIMITS = {

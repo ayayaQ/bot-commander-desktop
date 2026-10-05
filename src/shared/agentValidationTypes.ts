@@ -32,6 +32,8 @@ export type AgentValidationRequest = {
   candidateHash: string
   baseRevision: string | null
   fixtureHash: string
+  /** Snapshot of the production eval mode selected when preparing validation. */
+  wrapEvalInIIFE: boolean
   suite: AgentValidationSuite
 }
 export type AgentValidationChange = {
@@ -90,6 +92,7 @@ export type AgentValidationReport = {
   candidateHash: string
   baseRevision: string | null
   fixtureHash: string
+  wrapEvalInIIFE: boolean
   outcome: AgentValidationOutcome
   cases: { name: string; outcome: AgentValidationOutcome; steps: AgentValidationStepReport[] }[]
   coverage: AgentValidationCoverage
@@ -167,6 +170,7 @@ export function createNotRunAgentValidationReport(
     candidateHash: request.candidateHash,
     baseRevision: request.baseRevision,
     fixtureHash: request.fixtureHash,
+    wrapEvalInIIFE: request.wrapEvalInIIFE,
     outcome: 'not_run',
     cases,
     coverage: {

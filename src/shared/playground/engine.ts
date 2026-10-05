@@ -289,6 +289,7 @@ export function runMessage(
         sender,
         mentioned,
         content: request.content,
+        wrapEvalInIIFE: request.wrapEvalInIIFE,
         trigger: command.command,
         command,
         trace: commandTrace

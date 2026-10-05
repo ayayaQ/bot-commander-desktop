@@ -15,7 +15,7 @@ export const AGENT_VALIDATION_DISPLAY_LIMITS = {
 
 export type ValidationReportBinding = Pick<
   AgentValidationReport,
-  'candidateHash' | 'baseRevision' | 'fixtureHash'
+  'candidateHash' | 'baseRevision' | 'fixtureHash' | 'wrapEvalInIIFE'
 >
 
 export type ValidationReportTone = 'success' | 'warning' | 'error'
@@ -191,17 +191,23 @@ export function agentValidationReportView(
     steps.some((step) => step.matched && step.executed && step.executionOutcome === 'executed')
   const hasAssertions = assertions.length > 0
   const currentCandidateId = candidateId(candidate)
-  const hasBinding = !!binding?.candidateHash && !!binding?.fixtureHash
+  const hasBinding =
+    !!binding?.candidateHash &&
+    !!binding?.fixtureHash &&
+    typeof binding?.wrapEvalInIIFE === 'boolean'
   const stale =
     (hasBinding &&
       (binding.candidateHash !== report.candidateHash ||
         binding.baseRevision !== report.baseRevision ||
-        binding.fixtureHash !== report.fixtureHash)) ||
+        binding.fixtureHash !== report.fixtureHash ||
+        binding.wrapEvalInIIFE !== report.wrapEvalInIIFE)) ||
     (currentCandidateId !== null && currentCandidateId !== report.candidateId)
   const warnings: string[] = []
 
   if (stale)
-    warnings.push('This report belongs to a different candidate, revision, or fixture set.')
+    warnings.push(
+      'This report belongs to a different candidate, revision, fixture set, or interpreter mode.'
+    )
   if (!hasBinding || currentCandidateId === null)
     warnings.push('The report identity cannot be verified against this tool candidate.')
   if (!hasExecution) warnings.push('No candidate execution was verified.')
@@ -316,7 +322,11 @@ export function agentValidationReportView(
       { label: 'Candidate', value: boundedText(`${report.candidateKind} · ${report.candidateId}`) },
       { label: 'Candidate hash', value: boundedText(report.candidateHash) },
       { label: 'Base revision', value: boundedText(report.baseRevision ?? '(new resource)') },
-      { label: 'Fixture hash', value: boundedText(report.fixtureHash) }
+      { label: 'Fixture hash', value: boundedText(report.fixtureHash) },
+      {
+        label: 'Interpreter mode',
+        value: report.wrapEvalInIIFE ? 'Wrapped eval' : 'Legacy global eval'
+      }
     ],
     cases,
     caseCount: report.cases.length,

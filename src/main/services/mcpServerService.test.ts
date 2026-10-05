@@ -25,7 +25,24 @@ vi.mock('./mcpConfigService', () => ({
 }))
 
 vi.mock('./agentTools', () => ({
+  agentOnlyToolNames: new Set(['read_host_status', 'read_validation_fixture']),
   mcpAgentToolDefinitions: [
+    {
+      type: 'function',
+      function: {
+        name: 'read_host_status',
+        description: 'Agent-only local readiness',
+        parameters: { type: 'object', properties: {}, additionalProperties: false }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'read_validation_fixture',
+        description: 'Agent-only offline validation fixture',
+        parameters: { type: 'object', properties: {}, additionalProperties: false }
+      }
+    },
     {
       type: 'function',
       function: {
@@ -102,6 +119,11 @@ describe('mcpServerService', () => {
     await client.connect(transport)
     const listed = await client.listTools()
     expect(listed.tools.map((tool) => tool.name)).toEqual(['read_example'])
+    await expect(client.callTool({ name: 'read_host_status', arguments: {} })).rejects.toThrow()
+    await expect(
+      client.callTool({ name: 'read_validation_fixture', arguments: {} })
+    ).rejects.toThrow()
+    expect(mocks.execute).not.toHaveBeenCalled()
     await expect(client.callTool({ name: 'read_example', arguments: {} })).resolves.toMatchObject({
       content: [{ type: 'text' }]
     })
@@ -123,6 +145,11 @@ describe('mcpServerService', () => {
     await client.connect(transport)
     const listed = await client.listTools()
     expect(listed.tools.map((tool) => tool.name)).toEqual(['read_example', 'edit_example'])
+    await expect(client.callTool({ name: 'read_host_status', arguments: {} })).rejects.toThrow()
+    await expect(
+      client.callTool({ name: 'read_validation_fixture', arguments: {} })
+    ).rejects.toThrow()
+    expect(mocks.execute).not.toHaveBeenCalled()
     await client.callTool({ name: 'edit_example', arguments: { value: 'updated' } })
     expect(mocks.execute).toHaveBeenCalledWith('edit_example', { value: 'updated' }, 'mcp')
     await client.close()

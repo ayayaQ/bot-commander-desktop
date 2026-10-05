@@ -31,6 +31,9 @@ function summary(value: unknown): Record<string, unknown> {
     candidateHash: text(report.candidateHash, 64),
     baseRevision: report.baseRevision === null ? null : text(report.baseRevision, 64),
     fixtureHash: text(report.fixtureHash, 64),
+    ...(typeof report.wrapEvalInIIFE === 'boolean'
+      ? { wrapEvalInIIFE: report.wrapEvalInIIFE }
+      : {}),
     timedOut: report.timedOut === true,
     cancelled: report.cancelled === true,
     truncated: true,

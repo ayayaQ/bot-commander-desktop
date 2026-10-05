@@ -66,6 +66,7 @@ interface PublisherDependencies {
 /** One app-wide operation; views may come and go without owning its lifetime. */
 export class InteractionPublisher {
   private state = emptyPublicationState()
+  private observedAt: number | null = null
   private sink?: (state: InteractionPublicationState) => void
 
   constructor(private readonly dependencies: PublisherDependencies) {}
@@ -74,11 +75,16 @@ export class InteractionPublisher {
     return structuredClone(this.state)
   }
 
+  getObservedAt(): number | null {
+    return this.observedAt
+  }
+
   setEventSink(sink: (state: InteractionPublicationState) => void): void {
     this.sink = sink
   }
 
   private update(state: InteractionPublicationState): void {
+    this.observedAt = Date.now()
     this.state = { ...state, revision: this.state.revision + 1 }
     this.sink?.(this.getState())
   }

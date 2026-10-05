@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { lintBCFD } from '../../shared/bcfdLint'
 import { decodeBCFDCommand } from '../../shared/commandCodec'
 import { createPlaygroundState } from '../../shared/playground/types'
@@ -8,6 +8,7 @@ import type {
   AgentValidationSuite
 } from '../../shared/agentValidationTypes'
 import type { AgentStreamEvent } from '../../shared/agentTypes'
+import { resourceRevision } from './resourceChangeService'
 
 const mocks = vi.hoisted(() => ({
   provider: vi.fn(),
@@ -27,10 +28,14 @@ vi.mock('node:fs/promises', () => ({
     rename: mocks.rename
   }
 }))
-vi.mock('openai', () => ({
-  default: class MockOpenAI {
-    responses = { create: mocks.provider }
-  }
+// Observe serialized checkpoints without exercising filesystem faults in this harness.
+vi.mock('./atomicPersistence', () => ({
+  atomicWrite: vi.fn(async (path: string, raw: string, options) => {
+    options?.validate?.(raw)
+    await mocks.writeFile(`${path}.tmp`, raw)
+    await mocks.rename(`${path}.tmp`, path)
+    return { durability: 'confirmed' }
+  })
 }))
 vi.mock('./agentTools', () => ({
   agentToolDefinitions: [
@@ -60,7 +65,7 @@ vi.mock('./agentValidationService', () => ({ validatePreparedResource: mocks.val
 const settings = {
   aiProvider: 'openai' as const,
   openaiApiKey: 'mock-only',
-  selectedAiModel: 'mock-only'
+  selectedAiModel: 'gpt-5.4-nano'
 }
 function validationSuite(): AgentValidationSuite {
   const state = createPlaygroundState()
@@ -149,9 +154,35 @@ describe('draft validation before existing approval/save', () => {
   beforeEach(() => {
     vi.resetModules()
     vi.clearAllMocks()
+    mocks.provider.mockReset()
+    mocks.prepare.mockReset()
+    mocks.commit.mockReset()
+    mocks.lint.mockReset()
+    mocks.validate.mockReset()
+    // Fake HTTP transport for vivi; no SDK internals or live provider calls.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url, init) => {
+        if (String(url) !== 'https://api.openai.com/v1/responses')
+          throw new Error('Unexpected provider URL in fake transport')
+        const request = JSON.parse(init!.body as string)
+        const response = {
+          status: 'completed',
+          ...(await mocks.provider(request, { signal: init!.signal }))
+        }
+        return request.stream
+          ? new Response(`data: ${JSON.stringify({ type: 'response.completed', response })}\n\n`, {
+              headers: { 'Content-Type': 'text/event-stream' }
+            })
+          : new Response(JSON.stringify(response))
+      })
+    )
     mocks.readFile.mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
     mocks.lint.mockResolvedValue([])
-    mocks.commit.mockResolvedValue({ success: true })
+    mocks.commit.mockImplementation(async (prepared, _source, _signal, beforeCommit) => {
+      beforeCommit?.(structuredClone(prepared))
+      return { success: true }
+    })
     mocks.prepare.mockImplementation(async (name, args) => {
       const after = decodeBCFDCommand({
         id: 'normalized-creation-id',
@@ -173,6 +204,11 @@ describe('draft validation before existing approval/save', () => {
     })
     mocks.validate.mockImplementation(async (input) => report(input))
     mocks.provider.mockResolvedValue({ output_text: 'Done.', output: [], usage: {} })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it('shows exact report before manual approval and commits the same normalized creation UUID', async () => {
@@ -207,6 +243,7 @@ describe('draft validation before existing approval/save', () => {
     const run = await begin('auto')
     await run.finished
     expect(mocks.commit).toHaveBeenCalledTimes(1)
+    expect(mocks.commit.mock.calls[0][3]).toBeTypeOf('function')
     expect(run.events.some((event) => event.type === 'approval')).toBe(false)
     expect(mocks.commit.mock.invocationCallOrder[0]).toBeGreaterThan(
       mocks.validate.mock.invocationCallOrder[0]
@@ -259,7 +296,12 @@ describe('draft validation before existing approval/save', () => {
     expect(mocks.prepare).not.toHaveBeenCalled()
     expect(mocks.validate).not.toHaveBeenCalled()
     expect(mocks.commit).not.toHaveBeenCalled()
-    expect(mocks.provider.mock.calls[0][0].tools).toEqual([])
+    const advertised = mocks.provider.mock.calls[0][0].tools.map(
+      (tool: { name: string }) => tool.name
+    )
+    expect(advertised).toContain('calculate')
+    for (const name of ['create_command', 'edit_command', 'create_interaction', 'edit_interaction'])
+      expect(advertised).not.toContain(name)
   })
 
   it('rejects a changed candidate while approval is pending', async () => {
@@ -281,6 +323,71 @@ describe('draft validation before existing approval/save', () => {
       'stale'
     )
   })
+
+  it.each(['base revision', 'fixtures', 'interpreter mode'] as const)(
+    'rejects changed %s while approval is pending on a validated edit',
+    async (change) => {
+      const normalPrepare = mocks.prepare.getMockImplementation()!
+      mocks.prepare.mockImplementation(async (name, args) => {
+        const prepared = await normalPrepare(name, args)
+        prepared.before = { ...prepared.after, channelMessage: 'Before the edit' }
+        return prepared
+      })
+      mocks.provider.mockResolvedValueOnce(
+        turn(
+          'edit-1',
+          {
+            id: 'normalized-creation-id',
+            validation: validationSuite()
+          },
+          'edit_command'
+        )
+      )
+      let seen!: () => void
+      const approval = new Promise<void>((resolve) => {
+        seen = resolve
+      })
+      const run = await begin('manual', (event) => {
+        if (event.type === 'approval') seen()
+      })
+      await approval
+      const prepared = await mocks.prepare.mock.results[0].value
+      const request = mocks.validate.mock.calls[0][0]
+      const approvalCall = run.events.find((event) => event.type === 'approval')!.toolCall!
+      expect(request).toMatchObject({
+        candidate: prepared.after,
+        baseRevision: resourceRevision(prepared.before),
+        wrapEvalInIIFE: true
+      })
+      expect(approvalCall.validationBinding).toMatchObject({
+        candidateHash: request.candidateHash,
+        baseRevision: resourceRevision(prepared.before),
+        fixtureHash: request.fixtureHash,
+        wrapEvalInIIFE: true
+      })
+      if (change === 'base revision') prepared.before.channelMessage = 'A newer base'
+      else if (change === 'fixtures') {
+        // Provider arguments are frozen by vivi; replacing the pending fixture still must
+        // invalidate approval rather than borrowing the original validation report.
+        const changedArguments = structuredClone(prepared.arguments)
+        changedArguments.validation.cases[0].steps[0].assertions[1].equals = 'Different expectation'
+        prepared.arguments = changedArguments
+      } else {
+        const settingsService = await import('./settingsService')
+        settingsService.setSettings({
+          ...settingsService.getSettings(),
+          useLegacyInterpreter: true
+        })
+      }
+      await run.service.resolveAgentApproval(run.session.id, 'edit-1', true)
+      await run.finished
+      expect(mocks.validate).toHaveBeenCalledOnce()
+      expect(mocks.commit).not.toHaveBeenCalled()
+      expect(run.events.filter((event) => event.type === 'tool').at(-1)!.toolCall!.error).toContain(
+        'stale'
+      )
+    }
+  )
 
   it('preserves revision conflicts from the commit boundary after approved validation', async () => {
     mocks.provider.mockResolvedValueOnce(turn())

@@ -1,10 +1,7 @@
 import crypto from 'node:crypto'
+import { readHostStatus } from './hostReadinessService'
 import type { BCFDCommand, BCFDInteractionAction, BCFDInteractionCommand } from '../types/types'
-import type {
-  AgentLintDiagnostic,
-  AgentMemory,
-  AgentPatchOperation
-} from '../../shared/agentTypes'
+import type { AgentLintDiagnostic, AgentMemory, AgentPatchOperation } from '../../shared/agentTypes'
 import { createPlaygroundState } from '../../shared/playground/types'
 import { lintBCFD } from '../../shared/bcfdLint'
 import { decodeBCFDCommand } from '../../shared/commandCodec'
@@ -23,10 +20,7 @@ import {
   getStartupJs,
   updateStartupJsAndRestart
 } from '../utils/virtual'
-import {
-  getRendererConsoleEntries,
-  type ConsoleMessageType
-} from '../utils/rendererConsole'
+import { getRendererConsoleEntries, type ConsoleMessageType } from '../utils/rendererConsole'
 import {
   agentMemoryRevision,
   commitMemoryMutation,
@@ -129,22 +123,27 @@ export const agentToolDefinitions: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'search_documentation',
-      description: 'Search bundled Bot Commander help for commands, fields, BCFD keywords and syntax, tutorials, interactions, setup, and webhooks. Returns the best matching content plus compact alternatives; short exact names or phrases work best.',
-      parameters: objectSchema({
-        query: { type: 'string' },
-        category: {
-          type: 'string',
-          enum: ['creating', 'commands', 'interactions', 'keywords', 'tutorial', 'webhooks']
+      description:
+        'Search bundled Bot Commander help for commands, fields, BCFD keywords and syntax, tutorials, interactions, setup, and webhooks. Returns the best matching content plus compact alternatives; short exact names or phrases work best.',
+      parameters: objectSchema(
+        {
+          query: { type: 'string' },
+          category: {
+            type: 'string',
+            enum: ['creating', 'commands', 'interactions', 'keywords', 'tutorial', 'webhooks']
+          },
+          limit: { type: 'integer', minimum: 1, maximum: 5 }
         },
-        limit: { type: 'integer', minimum: 1, maximum: 5 }
-      }, ['query'])
+        ['query']
+      )
     }
   },
   {
     type: 'function',
     function: {
       name: 'read_documentation',
-      description: 'Read a complete bundled documentation section only when search_documentation marks its best match as truncated or more detail is genuinely required.',
+      description:
+        'Read a complete bundled documentation section only when search_documentation marks its best match as truncated or more detail is genuinely required.',
       parameters: objectSchema({ id: { type: 'string' } }, ['id'])
     }
   },
@@ -152,8 +151,12 @@ export const agentToolDefinitions: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'search_commands',
-      description: 'Search commands by name, description, or textual content. Returns compact matches and revision hashes.',
-      parameters: objectSchema({ query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 50 } }, ['query'])
+      description:
+        'Search commands by name, description, or textual content. Returns compact matches and revision hashes.',
+      parameters: objectSchema(
+        { query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 50 } },
+        ['query']
+      )
     }
   },
   {
@@ -169,7 +172,10 @@ export const agentToolDefinitions: ToolDefinition[] = [
     function: {
       name: 'search_interactions',
       description: 'Search interactions by name, description, or textual content.',
-      parameters: objectSchema({ query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 50 } }, ['query'])
+      parameters: objectSchema(
+        { query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 50 } },
+        ['query']
+      )
     }
   },
   {
@@ -184,15 +190,20 @@ export const agentToolDefinitions: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'keyword_grep',
-      description: 'Search all editable text in commands, interactions, startup JS, developer prompt, memories, and bot state.',
-      parameters: objectSchema({ query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 100 } }, ['query'])
+      description:
+        'Search all editable text in commands, interactions, startup JS, developer prompt, memories, and bot state.',
+      parameters: objectSchema(
+        { query: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 100 } },
+        ['query']
+      )
     }
   },
   {
     type: 'function',
     function: {
       name: 'read_console',
-      description: 'Read recent console entries in chronological order, including their type and timestamp. Use the optional types filter to focus on errors, warnings, events, or other message types.',
+      description:
+        'Read recent console entries in chronological order, including their type and timestamp. Use the optional types filter to focus on errors, warnings, events, or other message types.',
       parameters: objectSchema({
         limit: { type: 'integer', minimum: 1, maximum: 200 },
         types: {
@@ -203,10 +214,48 @@ export const agentToolDefinitions: ToolDefinition[] = [
       })
     }
   },
-  { type: 'function', function: { name: 'read_bot_state', description: 'Read persistent bot state.', parameters: objectSchema({}) } },
-  { type: 'function', function: { name: 'read_startup_js', description: 'Read startup JavaScript.', parameters: objectSchema({}) } },
-  { type: 'function', function: { name: 'read_developer_prompt', description: 'Read the developer prompt used by bot AI functions.', parameters: objectSchema({}) } },
-  { type: 'function', function: { name: 'list_memories', description: 'List persistent user preferences and standing instructions with IDs and current revisions. Read this before editing or deleting a memory.', parameters: objectSchema({}) } },
+  {
+    type: 'function',
+    function: {
+      name: 'read_host_status',
+      description:
+        'Read a redacted local-cache hosting snapshot and fixed guidance to existing Login sidebar/Interactions controls. No credentials, hosting actions or network checks. Remote registration, portal permissions and freshness remain unknown; past publication success is not current remote proof.',
+      parameters: objectSchema({})
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_bot_state',
+      description: 'Read persistent bot state.',
+      parameters: objectSchema({})
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_startup_js',
+      description: 'Read startup JavaScript.',
+      parameters: objectSchema({})
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_developer_prompt',
+      description: 'Read the developer prompt used by bot AI functions.',
+      parameters: objectSchema({})
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_memories',
+      description:
+        'List persistent user preferences and standing instructions with IDs and current revisions. Read this before editing or deleting a memory.',
+      parameters: objectSchema({})
+    }
+  },
   {
     type: 'function',
     function: {
@@ -277,7 +326,10 @@ export const agentToolDefinitions: ToolDefinition[] = [
     function: {
       name: 'edit_bot_state',
       description: 'Patch persistent bot state using JSON Pointer paths.',
-      parameters: objectSchema({ expectedRevision: { type: 'string' }, patches: patchSchema }, ['expectedRevision', 'patches'])
+      parameters: objectSchema({ expectedRevision: { type: 'string' }, patches: patchSchema }, [
+        'expectedRevision',
+        'patches'
+      ])
     }
   },
   {
@@ -285,7 +337,10 @@ export const agentToolDefinitions: ToolDefinition[] = [
     function: {
       name: 'edit_startup_js',
       description: 'Replace startup JavaScript and restart the script engine.',
-      parameters: objectSchema({ expectedRevision: { type: 'string' }, content: { type: 'string' } }, ['expectedRevision', 'content'])
+      parameters: objectSchema(
+        { expectedRevision: { type: 'string' }, content: { type: 'string' } },
+        ['expectedRevision', 'content']
+      )
     }
   },
   {
@@ -293,14 +348,18 @@ export const agentToolDefinitions: ToolDefinition[] = [
     function: {
       name: 'edit_developer_prompt',
       description: 'Replace the developer prompt while preserving other settings.',
-      parameters: objectSchema({ expectedRevision: { type: 'string' }, content: { type: 'string' } }, ['expectedRevision', 'content'])
+      parameters: objectSchema(
+        { expectedRevision: { type: 'string' }, content: { type: 'string' } },
+        ['expectedRevision', 'content']
+      )
     }
   },
   {
     type: 'function',
     function: {
       name: 'create_memory',
-      description: 'Create a concise persistent memory for a clear, durable user preference or standing instruction. Never store secrets, one-off task instructions, or facts already represented by bot resources.',
+      description:
+        'Create a concise persistent memory for a clear, durable user preference or standing instruction. Never store secrets, one-off task instructions, or facts already represented by bot resources.',
       parameters: objectSchema({ content: { type: 'string', maxLength: 1000 } }, ['content'])
     }
   },
@@ -309,11 +368,14 @@ export const agentToolDefinitions: ToolDefinition[] = [
     function: {
       name: 'edit_memory',
       description: 'Replace an existing memory. Use the ID and revision returned by list_memories.',
-      parameters: objectSchema({
-        id: { type: 'string' },
-        expectedRevision: { type: 'string' },
-        content: { type: 'string', maxLength: 1000 }
-      }, ['id', 'expectedRevision', 'content'])
+      parameters: objectSchema(
+        {
+          id: { type: 'string' },
+          expectedRevision: { type: 'string' },
+          content: { type: 'string', maxLength: 1000 }
+        },
+        ['id', 'expectedRevision', 'content']
+      )
     }
   },
   {
@@ -321,10 +383,13 @@ export const agentToolDefinitions: ToolDefinition[] = [
     function: {
       name: 'delete_memory',
       description: 'Delete a persistent memory. Use the ID and revision returned by list_memories.',
-      parameters: objectSchema({
-        id: { type: 'string' },
-        expectedRevision: { type: 'string' }
-      }, ['id', 'expectedRevision'])
+      parameters: objectSchema(
+        {
+          id: { type: 'string' },
+          expectedRevision: { type: 'string' }
+        },
+        ['id', 'expectedRevision']
+      )
     }
   },
   {
@@ -343,9 +408,26 @@ export const agentToolDefinitions: ToolDefinition[] = [
       parameters: objectSchema({ source: { type: 'string' } }, ['source'])
     }
   },
-  { type: 'function', function: { name: 'lint_command', description: 'Lint a complete persisted command.', parameters: objectSchema({ id: { type: 'string' } }, ['id']) } },
-  { type: 'function', function: { name: 'lint_interaction', description: 'Lint a complete persisted interaction.', parameters: objectSchema({ id: { type: 'string' } }, ['id']) } }
+  {
+    type: 'function',
+    function: {
+      name: 'lint_command',
+      description: 'Lint a complete persisted command.',
+      parameters: objectSchema({ id: { type: 'string' } }, ['id'])
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'lint_interaction',
+      description: 'Lint a complete persisted interaction.',
+      parameters: objectSchema({ id: { type: 'string' } }, ['id'])
+    }
+  }
 ]
+
+// Local host readiness and offline draft fixtures belong only to the app's agent.
+export const agentOnlyToolNames = new Set(['read_host_status', 'read_validation_fixture'])
 
 // External MCP clients retain the pre-existing create/edit surface. Offline draft
 // validation and the fixture helper belong only to the built-in agent harness.
@@ -358,7 +440,7 @@ const MCP_MUTATION_DESCRIPTIONS: Record<string, string> = {
   edit_interaction: 'Patch an interaction. Use the revision returned by read_interaction.'
 }
 export const mcpAgentToolDefinitions: ToolDefinition[] = agentToolDefinitions
-  .filter((tool) => tool.function.name !== 'read_validation_fixture')
+  .filter((tool) => !agentOnlyToolNames.has(tool.function.name))
   .map((tool) => {
     const description = MCP_MUTATION_DESCRIPTIONS[tool.function.name]
     if (!description) return tool
@@ -374,17 +456,24 @@ export const mcpAgentToolDefinitions: ToolDefinition[] = agentToolDefinitions
   })
 
 export const mutationToolNames = new Set([
-  'create_command', 'edit_command', 'create_interaction', 'edit_interaction',
-  'edit_bot_state', 'edit_startup_js', 'edit_developer_prompt',
-  'create_memory', 'edit_memory', 'delete_memory'
+  'create_command',
+  'edit_command',
+  'create_interaction',
+  'edit_interaction',
+  'edit_bot_state',
+  'edit_startup_js',
+  'edit_developer_prompt',
+  'create_memory',
+  'edit_memory',
+  'delete_memory'
 ])
 
-const COMMAND_TARGET_TOOLS = new Set([
-  'read_command', 'edit_command', 'lint_command'
-])
+const COMMAND_TARGET_TOOLS = new Set(['read_command', 'edit_command', 'lint_command'])
 
 const INTERACTION_TARGET_TOOLS = new Set([
-  'read_interaction', 'edit_interaction', 'lint_interaction'
+  'read_interaction',
+  'edit_interaction',
+  'lint_interaction'
 ])
 
 function meaningfulText(value: unknown): string | undefined {
@@ -438,9 +527,14 @@ function clone<T>(value: T): T {
   return structuredClone(value)
 }
 
-function textEntries(value: unknown, path = '', entries: Array<{ path: string; value: string }> = []) {
+function textEntries(
+  value: unknown,
+  path = '',
+  entries: Array<{ path: string; value: string }> = []
+) {
   if (typeof value === 'string') entries.push({ path: path || '/', value })
-  else if (Array.isArray(value)) value.forEach((item, index) => textEntries(item, `${path}/${index}`, entries))
+  else if (Array.isArray(value))
+    value.forEach((item, index) => textEntries(item, `${path}/${index}`, entries))
   else if (value && typeof value === 'object') {
     for (const [key, item] of Object.entries(value)) textEntries(item, `${path}/${key}`, entries)
   }
@@ -461,53 +555,114 @@ function emptyEmbed() {
 
 function defaultCommand(): BCFDCommand {
   return {
-    id: crypto.randomUUID(), channelMessage: '', command: '', commandDescription: '',
-    deleteAfter: false, deleteIfStrings: '', deleteNum: 0,
-    ignoreErrorMessage: false, isBan: false, isKick: false, isNSFW: false,
-    requiredRole: '', isVoiceMute: false, isAdmin: false, phrase: false, privateMessage: '',
-    reaction: '', roleToAssign: '',
-    specificChannel: '', specificMessage: '', startsWith: false, type: 0, channelEmbed: emptyEmbed(),
-    privateEmbed: emptyEmbed(), channelWhitelist: '', serverWhitelist: ''
+    id: crypto.randomUUID(),
+    channelMessage: '',
+    command: '',
+    commandDescription: '',
+    deleteAfter: false,
+    deleteIfStrings: '',
+    deleteNum: 0,
+    ignoreErrorMessage: false,
+    isBan: false,
+    isKick: false,
+    isNSFW: false,
+    requiredRole: '',
+    isVoiceMute: false,
+    isAdmin: false,
+    phrase: false,
+    privateMessage: '',
+    reaction: '',
+    roleToAssign: '',
+    specificChannel: '',
+    specificMessage: '',
+    startsWith: false,
+    type: 0,
+    channelEmbed: emptyEmbed(),
+    privateEmbed: emptyEmbed(),
+    channelWhitelist: '',
+    serverWhitelist: ''
   }
 }
 
 function defaultAction(): BCFDInteractionAction {
   return {
-    sendChannelMessage: false, channelMessage: '', sendPrivateMessage: false, privateMessage: '',
-    sendChannelEmbed: false, channelEmbed: emptyEmbed(), sendPrivateEmbed: false, privateEmbed: emptyEmbed(),
-    isRoleAssigner: false, roleToAssign: '', isKick: false, isBan: false, isVoiceMute: false,
-    targetUserOptionName: '', deleteX: false, deleteNum: 0, ephemeral: false, deferReply: false, buttons: []
+    sendChannelMessage: false,
+    channelMessage: '',
+    sendPrivateMessage: false,
+    privateMessage: '',
+    sendChannelEmbed: false,
+    channelEmbed: emptyEmbed(),
+    sendPrivateEmbed: false,
+    privateEmbed: emptyEmbed(),
+    isRoleAssigner: false,
+    roleToAssign: '',
+    isKick: false,
+    isBan: false,
+    isVoiceMute: false,
+    targetUserOptionName: '',
+    deleteX: false,
+    deleteNum: 0,
+    ephemeral: false,
+    deferReply: false,
+    buttons: []
   }
 }
 
 function defaultInteraction(): BCFDInteractionCommand {
-  return { id: crypto.randomUUID(), commandName: '', commandDescription: '', options: [], rootAction: defaultAction(), isRegistered: false }
+  return {
+    id: crypto.randomUUID(),
+    commandName: '',
+    commandDescription: '',
+    options: [],
+    rootAction: defaultAction(),
+    isRegistered: false
+  }
 }
 
 function assertCommand(value: unknown): asserts value is BCFDCommand {
   const command = value as BCFDCommand
-  const validEmbed = (embed: any) => embed && ['title', 'description', 'hexColor', 'imageURL', 'thumbnailURL', 'footer']
-    .every((field) => typeof embed[field] === 'string')
-  if (!command || typeof command !== 'object' || typeof command.command !== 'string' ||
-      typeof command.commandDescription !== 'string' ||
-      !validEmbed(command.channelEmbed) || !validEmbed(command.privateEmbed) ||
-      !Number.isInteger(command.type) || command.type < 0 || command.type > 5) {
+  const validEmbed = (embed: any) =>
+    embed &&
+    ['title', 'description', 'hexColor', 'imageURL', 'thumbnailURL', 'footer'].every(
+      (field) => typeof embed[field] === 'string'
+    )
+  if (
+    !command ||
+    typeof command !== 'object' ||
+    typeof command.command !== 'string' ||
+    typeof command.commandDescription !== 'string' ||
+    !validEmbed(command.channelEmbed) ||
+    !validEmbed(command.privateEmbed) ||
+    !Number.isInteger(command.type) ||
+    command.type < 0 ||
+    command.type > 5
+  ) {
     throw new Error('Invalid command structure')
   }
 }
 
 function assertInteraction(value: unknown): asserts value is BCFDInteractionCommand {
   const interaction = value as BCFDInteractionCommand
-  if (!interaction || typeof interaction !== 'object' || typeof interaction.commandName !== 'string' ||
-      typeof interaction.commandDescription !== 'string' || !Array.isArray(interaction.options) || !interaction.rootAction) {
+  if (
+    !interaction ||
+    typeof interaction !== 'object' ||
+    typeof interaction.commandName !== 'string' ||
+    typeof interaction.commandDescription !== 'string' ||
+    !Array.isArray(interaction.options) ||
+    !interaction.rootAction
+  ) {
     throw new Error('Invalid interaction structure')
   }
 }
 
 function decodePointer(path: string): string[] {
   if (!path.startsWith('/')) throw new Error(`Invalid JSON Pointer: ${path}`)
-  const parts = path.slice(1).split('/').map((part) => part.replace(/~1/g, '/').replace(/~0/g, '~'))
-  if (parts.some((part) => ['__proto__', 'prototype', 'constructor'].includes(part))) throw new Error('Unsafe patch path')
+  const parts = path
+    .slice(1)
+    .split('/')
+    .map((part) => part.replace(/~1/g, '/').replace(/~0/g, '~'))
+  if (parts.some((part) => ['__proto__', 'prototype', 'constructor'].includes(part)))
+    throw new Error('Unsafe patch path')
   return parts
 }
 
@@ -525,8 +680,10 @@ function applyPatches<T>(source: T, patches: AgentPatchOperation[]): T {
       if (Array.isArray(parent)) parent.splice(Number(key), 1)
       else delete parent[key]
     } else {
-      if (patch.op === 'replace' && !(key in parent)) throw new Error(`Patch path does not exist: ${patch.path}`)
-      if (Array.isArray(parent) && patch.op === 'add') parent.splice(key === '-' ? parent.length : Number(key), 0, clone(patch.value))
+      if (patch.op === 'replace' && !(key in parent))
+        throw new Error(`Patch path does not exist: ${patch.path}`)
+      if (Array.isArray(parent) && patch.op === 'add')
+        parent.splice(key === '-' ? parent.length : Number(key), 0, clone(patch.value))
       else parent[key] = clone(patch.value)
     }
   }
@@ -544,14 +701,27 @@ function lintSource(source: string, mode: 'bcfd' | 'js', startupJs = ''): AgentL
 async function lintTextFields(value: unknown): Promise<AgentLintDiagnostic[]> {
   const startup = await getStartupJs()
   return textEntries(value).flatMap((entry) =>
-    lintSource(entry.value, 'bcfd', startup).map((diagnostic) => ({ ...diagnostic, path: entry.path }))
+    lintSource(entry.value, 'bcfd', startup).map((diagnostic) => ({
+      ...diagnostic,
+      path: entry.path
+    }))
   )
 }
 
 async function lintCommandResource(command: BCFDCommand): Promise<AgentLintDiagnostic[]> {
   const diagnostics = await lintTextFields(command)
-  if (!command.commandDescription.trim()) diagnostics.unshift({ severity: 'error', message: 'Command description is required', path: '/commandDescription' })
-  if ([0, 1, 5].includes(command.type) && !command.command.trim()) diagnostics.unshift({ severity: 'error', message: 'Command trigger is required for this command type', path: '/command' })
+  if (!command.commandDescription.trim())
+    diagnostics.unshift({
+      severity: 'error',
+      message: 'Command description is required',
+      path: '/commandDescription'
+    })
+  if ([0, 1, 5].includes(command.type) && !command.command.trim())
+    diagnostics.unshift({
+      severity: 'error',
+      message: 'Command trigger is required for this command type',
+      path: '/command'
+    })
   return diagnostics
 }
 
@@ -559,8 +729,19 @@ async function lintInteractionResource(
   interaction: BCFDInteractionCommand
 ): Promise<AgentLintDiagnostic[]> {
   const diagnostics = await lintTextFields(interaction)
-  if (!/^[a-z0-9_-]{1,32}$/.test(interaction.commandName)) diagnostics.unshift({ severity: 'error', message: 'Interaction name must be 1-32 lowercase characters using letters, numbers, hyphens, or underscores', path: '/commandName' })
-  if (!interaction.commandDescription.trim() || interaction.commandDescription.length > 100) diagnostics.unshift({ severity: 'error', message: 'Interaction description must be 1-100 characters', path: '/commandDescription' })
+  if (!/^[a-z0-9_-]{1,32}$/.test(interaction.commandName))
+    diagnostics.unshift({
+      severity: 'error',
+      message:
+        'Interaction name must be 1-32 lowercase characters using letters, numbers, hyphens, or underscores',
+      path: '/commandName'
+    })
+  if (!interaction.commandDescription.trim() || interaction.commandDescription.length > 100)
+    diagnostics.unshift({
+      severity: 'error',
+      message: 'Interaction description must be 1-100 characters',
+      path: '/commandDescription'
+    })
   const names = new Set<string>()
   interaction.options.forEach((option, index) => {
     if (names.has(option.name))
@@ -575,6 +756,11 @@ async function lintInteractionResource(
 }
 
 export async function executeReadTool(name: string, args: Record<string, any>): Promise<unknown> {
+  if (name === 'read_host_status') {
+    if (!args || Object.keys(args).length)
+      return { success: false, error: 'read_host_status accepts no arguments' }
+    return readHostStatus()
+  }
   const limit = Math.max(1, Math.min(Number(args.limit) || 20, 100))
   if (name === 'search_documentation') {
     return searchDocumentation(
@@ -597,8 +783,17 @@ export async function executeReadTool(name: string, args: Record<string, any>): 
     }
   if (name === 'search_commands') {
     const query = String(args.query || '')
-    return getCommands().bcfdCommands.filter((item) => snippets(item, query).length).slice(0, limit)
-      .map((item) => ({ id: item.id, command: item.command, description: item.commandDescription, type: item.type, revision: revision(item), matches: snippets(item, query) }))
+    return getCommands()
+      .bcfdCommands.filter((item) => snippets(item, query).length)
+      .slice(0, limit)
+      .map((item) => ({
+        id: item.id,
+        command: item.command,
+        description: item.commandDescription,
+        type: item.type,
+        revision: revision(item),
+        matches: snippets(item, query)
+      }))
   }
   if (name === 'read_command') {
     const item = getCommands().bcfdCommands.find((command) => command.id === args.id)
@@ -607,8 +802,16 @@ export async function executeReadTool(name: string, args: Record<string, any>): 
   }
   if (name === 'search_interactions') {
     const query = String(args.query || '')
-    return getInteractions().filter((item) => snippets(item, query).length).slice(0, limit)
-      .map((item) => ({ id: item.id, name: item.commandName, description: item.commandDescription, revision: revision(item), matches: snippets(item, query) }))
+    return getInteractions()
+      .filter((item) => snippets(item, query).length)
+      .slice(0, limit)
+      .map((item) => ({
+        id: item.id,
+        name: item.commandName,
+        description: item.commandDescription,
+        revision: revision(item),
+        matches: snippets(item, query)
+      }))
   }
   if (name === 'read_interaction') {
     const item = getInteractions().find((interaction) => interaction.id === args.id)
@@ -648,12 +851,22 @@ export async function executeReadTool(name: string, args: Record<string, any>): 
       })),
       { type: 'bot-state', value: await readBotState() }
     ]
-    return resources.flatMap((resource) => textEntries(resource.value)
-      .filter((entry) => entry.value.toLowerCase().includes(query))
-      .map((entry) => ({ type: resource.type, id: resource.id, path: entry.path, snippet: entry.value.slice(0, 240) }))).slice(0, limit)
+    return resources
+      .flatMap((resource) =>
+        textEntries(resource.value)
+          .filter((entry) => entry.value.toLowerCase().includes(query))
+          .map((entry) => ({
+            type: resource.type,
+            id: resource.id,
+            path: entry.path,
+            snippet: entry.value.slice(0, 240)
+          }))
+      )
+      .slice(0, limit)
   }
   if (name === 'lint_js') return lintSource(String(args.source || ''), 'js')
-  if (name === 'lint_bcfd') return lintSource(String(args.source || ''), 'bcfd', await getStartupJs())
+  if (name === 'lint_bcfd')
+    return lintSource(String(args.source || ''), 'bcfd', await getStartupJs())
   if (name === 'lint_command') {
     const item = getCommands().bcfdCommands.find((command) => command.id === args.id)
     if (!item) throw new Error('Command not found')
@@ -668,7 +881,8 @@ export async function executeReadTool(name: string, args: Record<string, any>): 
 }
 
 function requireRevision(actual: unknown, expected: unknown) {
-  if (revision(actual) !== expected) throw new Error('Stale resource revision; read the resource again before editing')
+  if (revision(actual) !== expected)
+    throw new Error('Stale resource revision; read the resource again before editing')
 }
 
 export async function prepareMutation(
@@ -678,7 +892,8 @@ export async function prepareMutation(
   if (name === 'create_command') {
     const input = args.command || {}
     const candidate = {
-      ...defaultCommand(), ...input,
+      ...defaultCommand(),
+      ...input,
       channelEmbed: { ...emptyEmbed(), ...(input.channelEmbed || {}) },
       privateEmbed: { ...emptyEmbed(), ...(input.privateEmbed || {}) },
       id: crypto.randomUUID()
@@ -705,9 +920,21 @@ export async function prepareMutation(
   }
   if (name === 'create_interaction') {
     const input = args.interaction || {}
-    const after = { ...defaultInteraction(), ...input, rootAction: { ...defaultAction(), ...(input.rootAction || {}) }, id: crypto.randomUUID(), isRegistered: false }
+    const after = {
+      ...defaultInteraction(),
+      ...input,
+      rootAction: { ...defaultAction(), ...(input.rootAction || {}) },
+      id: crypto.randomUUID(),
+      isRegistered: false
+    }
     assertInteraction(after)
-    return { name, arguments: args, before: null, after, target: { type: 'interaction', id: after.id } }
+    return {
+      name,
+      arguments: args,
+      before: null,
+      after,
+      target: { type: 'interaction', id: after.id }
+    }
   }
   if (name === 'edit_interaction') {
     const before = getInteractions().find((item) => item.id === args.id)
@@ -728,7 +955,8 @@ export async function prepareMutation(
     const before = await readBotState()
     requireRevision(before, args.expectedRevision)
     const after = applyPatches(before, args.patches || [])
-    if (!after || typeof after !== 'object' || Array.isArray(after)) throw new Error('Bot state must remain an object')
+    if (!after || typeof after !== 'object' || Array.isArray(after))
+      throw new Error('Bot state must remain an object')
     return { name, arguments: args, before, after, target: { type: 'bot-state' } }
   }
   if (name === 'edit_startup_js') {
@@ -745,7 +973,13 @@ export async function prepareMutation(
   }
   if (name === 'create_memory') {
     const mutation = await prepareCreateMemory(String(args.content ?? ''), 'agent')
-    return { name, arguments: args, before: mutation.before, after: mutation.after, target: { type: 'memory', id: mutation.after!.id } }
+    return {
+      name,
+      arguments: args,
+      before: mutation.before,
+      after: mutation.after,
+      target: { type: 'memory', id: mutation.after!.id }
+    }
   }
   if (name === 'edit_memory') {
     const mutation = await prepareUpdateMemory(
@@ -754,14 +988,26 @@ export async function prepareMutation(
       String(args.content ?? ''),
       'agent'
     )
-    return { name, arguments: args, before: mutation.before, after: mutation.after, target: { type: 'memory', id: String(args.id || '') } }
+    return {
+      name,
+      arguments: args,
+      before: mutation.before,
+      after: mutation.after,
+      target: { type: 'memory', id: String(args.id || '') }
+    }
   }
   if (name === 'delete_memory') {
     const mutation = await prepareDeleteMemory(
       String(args.id || ''),
       String(args.expectedRevision || '')
     )
-    return { name, arguments: args, before: mutation.before, after: mutation.after, target: { type: 'memory', id: String(args.id || '') } }
+    return {
+      name,
+      arguments: args,
+      before: mutation.before,
+      after: mutation.after,
+      target: { type: 'memory', id: String(args.id || '') }
+    }
   }
   throw new Error(`Unknown mutation tool: ${name}`)
 }
@@ -894,19 +1140,21 @@ async function changedResourceValue(kind: ResourceChangeKind): Promise<unknown> 
 
 export async function commitMutation(
   prepared: PreparedMutation,
-  source: ResourceChangeSource = 'agent'
+  source: ResourceChangeSource = 'agent',
+  signal?: AbortSignal,
+  beforeCommit?: (snapshot: PreparedMutation) => void
 ): Promise<unknown> {
   // Approval/retry objects may be reused by callers while this mutation waits its turn.
   prepared = structuredClone(prepared)
   const kind = mutationResourceKind(prepared)
   return withResourceMutationLock(kind, async () => {
+    // A cancellation while queued must not start a fresh mutation after lock admission.
+    if (signal?.aborted) throw new Error('Agent execution cancelled before mutation started')
+    // Recheck validation against the captured snapshot and current runtime settings
+    // after queue admission, immediately before starting the save.
+    beforeCommit?.(prepared)
     const result = await commitMutationUnlocked(prepared)
-    emitResourceChanged(
-      kind,
-      source,
-      await changedResourceValue(kind),
-      prepared.target.id
-    )
+    emitResourceChanged(kind, source, await changedResourceValue(kind), prepared.target.id)
     return result
   })
 }
@@ -916,6 +1164,9 @@ export async function executeAgentTool(
   args: Record<string, unknown>,
   source: ResourceChangeSource = 'agent'
 ): Promise<unknown> {
+  if (source === 'mcp' && agentOnlyToolNames.has(name)) {
+    return { success: false, error: 'Tool is available only to the desktop agent' }
+  }
   if (!mutationToolNames.has(name)) return executeReadTool(name, args)
   if (source === 'mcp' && Object.hasOwn(args, 'validation'))
     throw new Error(

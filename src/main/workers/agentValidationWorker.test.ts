@@ -52,6 +52,7 @@ function inspectBundle(source: string): { strings: string[]; imports: string[] }
 function request(template: string): AgentValidationRequest {
   const state = createPlaygroundState()
   return {
+    wrapEvalInIIFE: true,
     candidateKind: 'command',
     candidate: decodeBCFDCommand({
       id: 'offline-candidate',

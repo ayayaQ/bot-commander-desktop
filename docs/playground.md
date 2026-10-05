@@ -34,11 +34,30 @@ network ordering, delivery latency and typing duration are not reproduced. The s
 command effects atomically on a cloned fixture; live runtime operations can partially succeed.
 Missing roles are explained in the trace rather than generating the production error reply.
 
-Reactions, specific-message targeting, unknown channels and unlisted BCFD expressions fail closed. Every branch of an evaluated template
+Reactions, unknown channels and unlisted BCFD expressions fail closed. Every branch of an evaluated template
 is inspected, including inactive conditional branches; JavaScript strings, comments and template
 literal static parts remain literal, matching production expression pre-resolution. A failed command leaves no command outputs
 or fake mutations; the user's input remains, and other matching commands may run. Completed earlier matching commands remain in the pending turn, but a worker failure, timeout,
 reset, navigation or stale completion prevents the entire pending turn from reaching the renderer.
+
+### Delete a specific fake message
+
+`$deleteMessage(MessageId)` targets one regular message in the current fake channel only. Each
+transcript entry shows its **Fake message ID**; use that local positive integer as a string,
+for example `$deleteMessage(1)` or `$deleteMessage($args(0))` with an input such as `!delete 1`.
+Real Discord snowflakes do not identify these fake entries. Reset starts the local IDs over.
+
+The keyword evaluates exactly one argument, trims whitespace, then requires a canonical positive
+decimal ID no greater than `18446744073709551615`. A successful simulation marks just that entry
+deleted, adds a `Simulated deleteMessage` trace entry and contributes no response text. Repeating
+the deletion, targeting a fake DM/ephemeral entry, or targeting an unknown local ID returns
+`[BCFD Error: deleteMessage message not found in the current channel]`. Invalid IDs and argument
+counts use the same inline BCFD errors as production. These keyword errors are response text;
+they do not change the simulator's existing atomic rollback behavior for execution failures.
+
+This local simulation assumes the bot can delete regular fake channel messages, independently
+of the invoking member's permissions. It cannot reproduce Discord access, permission or network
+failures. No live messages, saved data, credentials or Discord APIs are used.
 
 ## Verification
 
@@ -192,9 +211,14 @@ assertions for an overall `passed` result. Otherwise the compact report says `fa
 `unmatched`, `unsupported` or `not_run`. Timeout, cancellation and oversized report details do
 not produce a passing report.
 
-Reports carry the exact candidate SHA-256, existing base revision (or null for a creation) and
+Assertion paths use RFC 6901 string pointers under the supported report roots. Empty tokens
+and `~0`/`~1` escapes are supported; invalid escapes are rejected with a bounded linear scan.
+
+Validation snapshots the configured interpreter mode from application settings. `$eval` uses
+the same wrapped-return or legacy global-scope behavior as production. Reports carry that mode
+alongside the exact candidate SHA-256, existing base revision (or null for a creation) and
 fixture SHA-256. The harness checks that binding again before approval/commit; any changed
-candidate or fixture invalidates the evidence. Reports include expected/actual values, explicit
+candidate, fixture or selected interpreter mode invalidates the evidence. Reports include expected/actual values, explicit
 matched/executed resource coverage, local effects/state differences, traces/errors and simulation
 limitations, bounded below the agent tool-result limit. Diagnostic fields and the complete
 result envelope are bounded too; oversized results stay valid JSON and retain outcome, save/

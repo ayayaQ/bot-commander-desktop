@@ -84,6 +84,39 @@ it.each(['resource mutation', 'direct write'])(
 )
 
 describe('failed shutdown recovery', () => {
+  it('drains agent jobs before sealing writes and restores agent ingress on failure', async () => {
+    const events: string[] = []
+    await expect(
+      finishPersistenceBeforeQuit({
+        pauseResources: () => {},
+        pauseRuntime: () => {},
+        pauseAgents: () => events.push('pause agents'),
+        checkpointAndStopRuntime: async () => {},
+        drainResources: async () => {},
+        drainAgents: async () => {
+          events.push('drain agents')
+          throw new Error('Final agent checkpoint failed')
+        },
+        saveStats: async () => {},
+        stopServer: async () => {},
+        closeAndDrainWrites: async () => {
+          events.push('close writes')
+        },
+        resumeResources: () => {},
+        resumeRuntime: () => {},
+        resumeAgents: () => events.push('resume agents'),
+        reopenWrites: () => events.push('reopen writes')
+      })
+    ).rejects.toThrow('Could not finish persistence')
+    expect(events).toEqual([
+      'pause agents',
+      'drain agents',
+      'close writes',
+      'reopen writes',
+      'resume agents'
+    ])
+  })
+
   it('waits for all jobs and reopens mutation and write ingress after failure', async () => {
     const entered = deferred()
     const gate = deferred()

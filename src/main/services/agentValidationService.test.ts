@@ -33,6 +33,7 @@ function request(): AgentValidationRequest {
     candidateHash: 'candidate-hash',
     baseRevision: 'revision',
     fixtureHash: 'fixture-hash',
+    wrapEvalInIIFE: true,
     suite: {
       cases: [
         {
@@ -84,6 +85,30 @@ function fixture() {
 afterEach(() => vi.useRealTimers())
 
 describe('disposable agent validation main bridge (headless)', () => {
+  it('ordinary mode snapshots the request mode before caller changes', async () => {
+    const { validate, launches, reply } = fixture()
+    const input = request()
+    input.wrapEvalInIIFE = false
+    const expected = createNotRunAgentValidationReport(input, 'selected global mode')
+    const pending = validate(input)
+    input.wrapEvalInIIFE = true
+    expect(launches[0].options.workerData.request.wrapEvalInIIFE).toBe(false)
+    reply(0, expected)
+    expect((await pending).wrapEvalInIIFE).toBe(false)
+  })
+
+  it('ordinary mode rejects a worker report from the other eval mode', async () => {
+    const { validate, reply } = fixture()
+    const pending = validate(request())
+    const report = createNotRunAgentValidationReport(request(), 'other eval mode')
+    report.wrapEvalInIIFE = false
+    reply(0, report)
+    const result = await pending
+    expect(result.outcome).toBe('not_run')
+    expect(result.wrapEvalInIIFE).toBe(true)
+    expect(result.limitations.at(-1)).toContain('invalid report')
+  })
+
   it('maps the main archive path to the explicitly unpacked worker artifact', () => {
     expect(agentValidationWorkerEntry('/resources/app.asar/out/main').href).toBe(
       'file:///resources/app.asar.unpacked/out/main/agentValidationWorker.mjs'
