@@ -2,6 +2,7 @@
   import { onMount, tick } from 'svelte'
   import ModelPicker from './ModelPicker.svelte'
   import AgentApprovalDiff from './AgentApprovalDiff.svelte'
+  import AgentRunSummary from './AgentRunSummary.svelte'
   import { renderMarkdown } from '../utils/markdown'
   import { agentToolLabel } from '../utils/agentToolLabel'
   import { settingsStore } from '../stores/settings'
@@ -355,6 +356,9 @@
             {/if}
             {#if $activeAgentSession.error}
               <div class="alert alert-error text-sm">{$activeAgentSession.error}</div>
+            {/if}
+            {#if $activeAgentSession.lastRunMetrics}
+              <AgentRunSummary metrics={$activeAgentSession.lastRunMetrics} />
             {/if}
           </div>
         {/if}

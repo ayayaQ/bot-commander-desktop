@@ -9,6 +9,14 @@ import { initializeAgentHistory } from './agentHistory'
 import { createAgentPersistence, reportAgentPersistenceNotice } from './agentPersistence'
 import { decodeAgentSessions, validAgentDisplayHistory } from './agentSessionPersistence'
 import {
+  createAgentRunMetrics,
+  finishAgentRunMetrics,
+  interruptAgentRunMetrics,
+  reconcileAgentRunUsage,
+  recordAgentRound,
+  recordAgentRunTool
+} from '../../shared/agentRunMetrics'
+import {
   isAgentPersistencePaused,
   withAgentPersistenceOperation
 } from './agentPersistenceLifecycle'
@@ -79,6 +87,11 @@ interface AgentRunContext {
   extensions: ToolRegistry
   documentationPolicy: DocumentationPolicyState
   metrics: AgentRunMetrics
+}
+
+function checkpointRunMetrics(session: AgentSession, context: AgentRunContext): void {
+  context.metrics = { ...context.metrics, checkpointAt: now() }
+  session.lastRunMetrics = clone(context.metrics)
 }
 
 interface PendingApproval {
@@ -300,6 +313,16 @@ async function initializeSessions(): Promise<AgentSessionsData> {
     modelDefaultsByProvider: normalizeModelDefaults(stored.data.modelDefaultsByProvider)
   }
   for (const session of data.sessions) {
+    if (
+      ['running', 'waiting_approval'].includes(session.status) &&
+      typeof session.activeRunId === 'string' &&
+      !!session.activeRunId.trim() &&
+      session.lastRunMetrics &&
+      typeof session.lastRunMetrics.runId === 'string' &&
+      !!session.lastRunMetrics.runId.trim() &&
+      session.lastRunMetrics.runId === session.activeRunId
+    )
+      session.lastRunMetrics = interruptAgentRunMetrics(session.lastRunMetrics)
     try {
       if (!validAgentDisplayHistory(session.messages)) {
         damagedDisplayHistories.set(session, {
@@ -480,7 +503,8 @@ async function awaitApproval(
   session: AgentSession,
   runId: string,
   call: AgentToolCall,
-  prepared: PreparedMutation
+  prepared: PreparedMutation,
+  context: AgentRunContext
 ): Promise<boolean> {
   let resolveApproval!: (approved: boolean) => void
   const approval = new Promise<boolean>((resolve) => {
@@ -497,6 +521,8 @@ async function awaitApproval(
   call.status = 'waiting_approval'
   call.before = prepared.before
   call.after = prepared.after
+  context.metrics = recordAgentRunTool(context.metrics, call)
+  checkpointRunMetrics(session, context)
   emit(session, {
     type: 'approval',
     runId,
@@ -538,13 +564,18 @@ async function runTool(
     status: 'running',
     createdAt: now()
   }
+  context.metrics = recordAgentRunTool(context.metrics, call)
+  checkpointRunMetrics(session, context)
   const message = addMessage(session, {
     role: 'tool',
     content: providerCall.name,
     toolCalls: [call]
   })
-  emit(session, { type: 'tool', runId, toolCall: clone(call) })
+  emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
   try {
+    assertActiveRun(session, runId, signal)
+    // Durably record the attempt before execution; a crashed tool has an unknown outcome.
+    await save()
     assertActiveRun(session, runId, signal)
     let result: unknown
     let extensionContent: string | undefined
@@ -555,7 +586,7 @@ async function runTool(
       call.before = prepared.before
       call.after = prepared.after
       if (mode === 'manual') {
-        const approved = await awaitApproval(session, runId, call, prepared)
+        const approved = await awaitApproval(session, runId, call, prepared, context)
         assertActiveRun(session, runId, signal)
         if (!approved) {
           call.status = 'rejected'
@@ -563,6 +594,13 @@ async function runTool(
         } else {
           assertActiveRun(session, runId, signal)
           call.status = 'approved'
+          session.status = 'running'
+          context.metrics = recordAgentRunTool(context.metrics, call)
+          checkpointRunMetrics(session, context)
+          await save()
+          assertActiveRun(session, runId, signal)
+          emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
+          assertActiveRun(session, runId, signal)
           result = await commitMutation(prepared, 'agent', signal)
         }
       } else {
@@ -602,7 +640,9 @@ async function runTool(
     call.result = result
     message.content = extensionContent ?? stringifyResult(result)
     session.status = 'running'
-    emit(session, { type: 'tool', runId, toolCall: clone(call) })
+    context.metrics = recordAgentRunTool(context.metrics, call)
+    checkpointRunMetrics(session, context)
+    emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
     await save()
     return { toolCall: call, content: message.content }
   } catch (error) {
@@ -615,7 +655,9 @@ async function runTool(
     call.status = 'error'
     call.error = detail
     message.content = JSON.stringify({ success: false, error: detail })
-    emit(session, { type: 'tool', runId, toolCall: clone(call) })
+    context.metrics = recordAgentRunTool(context.metrics, call)
+    checkpointRunMetrics(session, context)
+    emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
     await save()
     return { toolCall: call, content: message.content }
   }
@@ -662,17 +704,7 @@ async function startAgentSession(
       agentToolDefinitions.map((tool) => tool.function.name)
     ),
     documentationPolicy: createDocumentationPolicyState(),
-    metrics: {
-      runId,
-      providerRounds: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      totalTokens: 0,
-      documentationCalls: 0,
-      uniqueDocumentationCalls: 0,
-      duplicateDocumentationCalls: 0,
-      documentationResultChars: 0
-    }
+    metrics: createAgentRunMetrics(runId, now())
   }
   const mode = session.mode
   const controller = new AbortController()
@@ -681,6 +713,7 @@ async function startAgentSession(
   session.status = 'running'
   session.planReady = false
   session.error = undefined
+  checkpointRunMetrics(session, context)
   if (session.messages.length === 0) session.title = userContent.trim().slice(0, 48)
   session.history ??= []
   session.history.push({ kind: 'message', role: 'user', content: userContent.trim() })
@@ -692,6 +725,7 @@ async function startAgentSession(
     session.status = 'error'
     session.activeRunId = undefined
     session.error = errorDetail(error)
+    session.lastRunMetrics = finishAgentRunMetrics(context.metrics, 'error', now())
     throw error
   }
   emitSession(session, runId)
@@ -749,16 +783,41 @@ async function startAgentSession(
             // Partial output is display-only and must never become persisted history.
             emit(session, { type: 'progress_reset', runId })
           }
+          if (event.type === 'tool_started') {
+            context.metrics = recordAgentRunTool(context.metrics, {
+              ...event.call,
+              status: 'running',
+              createdAt: now()
+            })
+          }
+          if (event.type === 'tool_completed') {
+            const recorded = context.metrics.tools?.find((tool) => tool.id === event.message.callId)
+            // Core can reject an unadvertised tool without invoking the host executor.
+            // Keep richer host completion/rejection/lint evidence when it was recorded.
+            if (recorded?.status === 'running')
+              context.metrics = recordAgentRunTool(context.metrics, {
+                id: event.message.callId,
+                name: event.message.name,
+                arguments: {},
+                status: event.message.isError ? 'error' : 'completed',
+                createdAt: now()
+              })
+          }
           if (event.type === 'round_completed') {
-            context.metrics.providerRounds += 1
-            context.metrics.inputTokens += event.usage?.inputTokens || 0
-            context.metrics.outputTokens += event.usage?.outputTokens || 0
-            context.metrics.totalTokens += event.usage?.totalTokens || 0
-            session.tokenCount += event.usage?.totalTokens || 0
+            context.metrics = recordAgentRound(
+              context.metrics,
+              context.metrics.providerRounds + 1,
+              event.usage
+            )
+            session.tokenCount = initialTokenCount + context.metrics.totalTokens
+            checkpointRunMetrics(session, context)
+            await save()
+            emitSession(session, runId)
           }
           if (event.type === 'assistant' || event.type === 'tool_completed') {
             session.history!.push(clone(event.message))
             // Checkpoint calls before execution, then each result; recovery never replays them.
+            checkpointRunMetrics(session, context)
             await save()
           }
         }
@@ -766,10 +825,7 @@ async function startAgentSession(
       // Cancellation/error may close unexecuted calls without emitting further events.
       if (result.error?.code !== 'invalid_input')
         session.history = result.history.slice(prefix.length)
-      context.metrics.providerRounds = result.rounds
-      context.metrics.inputTokens = result.usage.inputTokens
-      context.metrics.outputTokens = result.usage.outputTokens
-      context.metrics.totalTokens = result.usage.totalTokens
+      context.metrics = reconcileAgentRunUsage(context.metrics, result)
       session.tokenCount = initialTokenCount + result.usage.totalTokens
       settleInterruptedToolCalls(session)
       if (result.status === 'error')
@@ -782,6 +838,7 @@ async function startAgentSession(
       session.status = 'completed'
       session.planReady = response.planReady
       session.activeRunId = undefined
+      context.metrics = finishAgentRunMetrics(context.metrics, 'completed', now())
       session.lastRunMetrics = clone(context.metrics)
       await save()
       emit(session, { type: 'done', runId, session: clone(session) })
@@ -790,12 +847,14 @@ async function startAgentSession(
       session.status = aborted ? 'cancelled' : 'error'
       session.error = aborted ? undefined : errorDetail(error)
       session.activeRunId = undefined
+      context.metrics = finishAgentRunMetrics(context.metrics, session.status, now())
       session.lastRunMetrics = clone(context.metrics)
       try {
         await save()
       } catch (persistenceError) {
         session.status = 'error'
         session.error = `Failed to save agent session: ${errorDetail(persistenceError)}`
+        session.lastRunMetrics = finishAgentRunMetrics(context.metrics, 'error', now())
       }
       emit(
         session,

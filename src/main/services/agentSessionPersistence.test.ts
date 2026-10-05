@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { createAgentRunMetrics } from '../../shared/agentRunMetrics'
 import { decodeAgentSessions, validAgentDisplayHistory } from './agentSessionPersistence'
 
 const session = {
@@ -17,6 +18,39 @@ const session = {
 }
 
 describe('agent session persistence validation', () => {
+  it('loads legacy metrics and optional cache values without replacing absence with zero', () => {
+    const {
+      startedAt: _start,
+      checkpointAt: _checkpoint,
+      tools: _tools,
+      status: _status,
+      usageReconciled: _reconciled,
+      ...legacy
+    } = createAgentRunMetrics('legacy-run', '2026-10-05T01:00:00Z')
+    const result = decodeAgentSessions(
+      JSON.stringify({
+        sessions: [
+          { ...session, id: 'legacy', lastRunMetrics: legacy },
+          {
+            ...session,
+            id: 'known',
+            lastRunMetrics: { ...legacy, cachedInputTokens: 0, cacheWriteInputTokens: 12 }
+          },
+          { ...session, id: 'absent' }
+        ]
+      })
+    )
+    expect(result.sessions[0].lastRunMetrics).toEqual(legacy)
+    expect(result.sessions[0].lastRunMetrics).not.toHaveProperty('cachedInputTokens')
+    expect(result.sessions[0].lastRunMetrics).not.toHaveProperty('cacheWriteInputTokens')
+    expect(result.sessions[1].lastRunMetrics).toMatchObject({
+      cachedInputTokens: 0,
+      cacheWriteInputTokens: 12
+    })
+    expect(result.sessions[2].lastRunMetrics).toBeUndefined()
+    expect(decodeAgentSessions(JSON.stringify(result))).toEqual(result)
+  })
+
   it('rejects duplicate renderer keys but allows legacy call IDs repeated across messages', () => {
     const call = {
       id: 'legacy-call',

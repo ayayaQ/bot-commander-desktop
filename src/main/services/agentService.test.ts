@@ -1,4 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  agentRunElapsed,
+  agentRunValidationSummary,
+  createAgentRunMetrics
+} from '../../shared/agentRunMetrics'
 
 const mocks = vi.hoisted(() => ({
   responsesCreate: vi.fn(),
@@ -39,6 +44,7 @@ vi.mock('./agentTools', () => ({
     'read_bot_state',
     'search_documentation',
     'read_command',
+    'lint_js',
     'edit_command'
   ].map((name) => ({
     type: 'function',
@@ -255,6 +261,7 @@ describe('desktop agent service shared-provider integration', () => {
         'read_bot_state',
         'search_documentation',
         'read_command',
+        'lint_js',
         'edit_command'
       ])
       for (const [request] of mocks.responsesCreate.mock.calls) {
@@ -308,6 +315,9 @@ describe('desktop agent service shared-provider integration', () => {
       isError: true,
       content: expect.stringContaining('unavailable_tool')
     })
+    expect(stored.lastRunMetrics!.tools).toEqual([
+      { id: 'call_unknown_extension', name: 'calculate_unknown', status: 'error' }
+    ])
     expect(stored.messages.filter((item) => item.role === 'tool')).toHaveLength(0)
   })
 
@@ -672,12 +682,22 @@ describe('desktop agent service shared-provider integration', () => {
             arguments: '{"query":"$set"}'
           }
         ],
-        usage: { input_tokens: 100, output_tokens: 20, total_tokens: 120 }
+        usage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          total_tokens: 120,
+          input_tokens_details: { cached_tokens: 0, cache_write_tokens: 5 }
+        }
       })
       .mockResolvedValueOnce({
         output_text: 'Created the command.',
         output: [],
-        usage: { input_tokens: 180, output_tokens: 10, total_tokens: 190 }
+        usage: {
+          input_tokens: 180,
+          output_tokens: 10,
+          total_tokens: 190,
+          input_tokens_details: { cached_tokens: 20, cache_write_tokens: 0 }
+        }
       })
 
     const service = await import('./agentService')
@@ -707,10 +727,22 @@ describe('desktop agent service shared-provider integration', () => {
       inputTokens: 280,
       outputTokens: 30,
       totalTokens: 310,
+      cachedInputTokens: 20,
+      cacheWriteInputTokens: 5,
+      status: 'completed',
+      usageReconciled: true,
+      tools: [{ id: 'call_docs', name: 'search_documentation', status: 'completed' }],
       documentationCalls: 1,
       uniqueDocumentationCalls: 1,
       duplicateDocumentationCalls: 0
     })
+    expect(stored.lastRunMetrics!.finishedAt).toBeDefined()
+    expect(agentRunValidationSummary(stored.lastRunMetrics!)).toBe(
+      'No validation evidence recorded'
+    )
+    const durable = JSON.parse(mocks.writeFile.mock.calls.at(-1)![1]).sessions[0]
+    expect(durable.lastRunMetrics).toEqual(stored.lastRunMetrics)
+    expect(durable.tokenCount).toBe(310)
     expect(stored.lastRunMetrics!.documentationResultChars).toBeGreaterThan(0)
     const firstRequest = mocks.responsesCreate.mock.calls[0][0]
     const systemPrompt = firstRequest.input[0].content
@@ -729,6 +761,269 @@ describe('desktop agent service shared-provider integration', () => {
     })
     service.setAgentEventSink(null)
   })
+
+  it('keeps completed-round usage durable while a later provider request fails', async () => {
+    mocks.executeReadTool.mockResolvedValue({ value: 1 })
+    mocks.responsesCreate
+      .mockResolvedValueOnce({
+        output_text: '',
+        output: [
+          {
+            type: 'function_call',
+            call_id: 'read-before-error',
+            name: 'read_bot_state',
+            arguments: '{}'
+          }
+        ],
+        usage: {
+          input_tokens: 30,
+          output_tokens: 5,
+          total_tokens: 35,
+          input_tokens_details: { cached_tokens: 0 }
+        }
+      })
+      .mockImplementationOnce(async () => {
+        const checkpoint = JSON.parse(mocks.writeFile.mock.calls.at(-1)![1]).sessions[0]
+        expect(checkpoint.lastRunMetrics).toMatchObject({
+          providerRounds: 1,
+          totalTokens: 35,
+          cachedInputTokens: 0,
+          usageReconciled: false
+        })
+        expect(checkpoint.tokenCount).toBe(35)
+        throw new Error('Fake provider failure')
+      })
+    const service = await import('./agentService')
+    const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+    const session = await service.createAgentSession(settings)
+    const done = new Promise<void>((resolve) =>
+      service.setAgentEventSink((event) => {
+        if (event.type === 'error') resolve()
+      })
+    )
+    await service.runAgentSession(session.id, 'Read before failure', settings)
+    await done
+    const stored = (await service.loadAgentSessions()).sessions[0]
+    expect(stored.status).toBe('error')
+    expect(stored.tokenCount).toBe(35)
+    expect(stored.lastRunMetrics).toMatchObject({
+      providerRounds: 1,
+      inputTokens: 30,
+      outputTokens: 5,
+      totalTokens: 35,
+      cachedInputTokens: 0,
+      status: 'error',
+      usageReconciled: true
+    })
+    expect(stored.lastRunMetrics).not.toHaveProperty('cacheWriteInputTokens')
+    const raw = mocks.writeFile.mock.calls.at(-1)![1]
+    vi.resetModules()
+    mocks.readFile.mockResolvedValueOnce(raw)
+    const reloaded = (await (await import('./agentService')).loadAgentSessions()).sessions[0]
+    expect(reloaded.lastRunMetrics).toEqual(stored.lastRunMetrics)
+    expect(reloaded.tokenCount).toBe(35)
+  })
+
+  it('records actual lint diagnostics without claiming runtime validation', async () => {
+    mocks.executeReadTool.mockResolvedValue([
+      { severity: 'warning', message: 'Check this expression' }
+    ])
+    mocks.responsesCreate
+      .mockResolvedValueOnce({
+        output_text: '',
+        output: [
+          {
+            type: 'function_call',
+            call_id: 'lint-evidence',
+            name: 'lint_js',
+            arguments: '{"source":"let x"}'
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ output_text: 'Checked syntax only.', output: [] })
+    const service = await import('./agentService')
+    const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+    const session = await service.createAgentSession(settings)
+    const done = new Promise<void>((resolve) =>
+      service.setAgentEventSink((event) => {
+        if (event.type === 'done') resolve()
+      })
+    )
+    await service.runAgentSession(session.id, 'Lint the source', settings)
+    await done
+    const stored = (await service.loadAgentSessions()).sessions[0]
+    expect(stored.lastRunMetrics!.tools).toEqual([
+      {
+        id: 'lint-evidence',
+        name: 'lint_js',
+        status: 'completed',
+        lint: { errors: 0, warnings: 1 }
+      }
+    ])
+    expect(agentRunValidationSummary(stored.lastRunMetrics!)).toBe(
+      'Lint only: 1 checks, 0 errors, 1 warnings. No runtime validation recorded.'
+    )
+  })
+
+  it.each([
+    [undefined, {}],
+    [undefined, 1],
+    [undefined, 'legacy analytics'],
+    [undefined, []],
+    [undefined, { runId: 'previous-run' }],
+    ['', { runId: '' }],
+    [' ', { runId: ' ' }],
+    ['active-run', { runId: '' }],
+    ['', { runId: 'previous-run' }]
+  ])(
+    'leaves unknown analytics unchanged when interrupted recovery has no recorded matching IDs: %j / %j',
+    async (activeRunId, lastRunMetrics) => {
+      const stored = {
+        id: 'missing-run-identity',
+        title: 'Legacy checkpoint',
+        mode: 'manual',
+        model: 'fixture',
+        reasoningEffort: 'none',
+        status: 'running',
+        activeRunId,
+        lastRunMetrics,
+        createdAt: '',
+        updatedAt: '',
+        tokenCount: 0,
+        messages: [],
+        history: [],
+        planReady: false
+      }
+      mocks.readFile.mockResolvedValueOnce(
+        JSON.stringify({
+          sessions: [stored],
+          activeSessionId: stored.id,
+          modelDefaultsByProvider: {}
+        })
+      )
+      const service = await import('./agentService')
+      const recovered = (await service.loadAgentSessions()).sessions[0]
+      expect(recovered.status).toBe('interrupted')
+      expect(recovered.activeRunId).toBeUndefined()
+      expect(recovered.lastRunMetrics).toEqual(lastRunMetrics)
+      expect(JSON.parse(mocks.writeFile.mock.calls.at(-1)![1]).sessions[0].lastRunMetrics).toEqual(
+        lastRunMetrics
+      )
+    }
+  )
+
+  it('resets per-run cache evidence and adds cumulative tokens exactly once across turns', async () => {
+    mocks.responsesCreate
+      .mockResolvedValueOnce({
+        output_text: 'First result',
+        output: [],
+        usage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          total_tokens: 120,
+          input_tokens_details: { cached_tokens: 60, cache_write_tokens: 10 }
+        }
+      })
+      .mockResolvedValueOnce({
+        output_text: 'Second result',
+        output: [],
+        usage: { input_tokens: 180, output_tokens: 10, total_tokens: 190 }
+      })
+    const service = await import('./agentService')
+    const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+    const session = await service.createAgentSession(settings)
+    let terminal!: () => void
+    service.setAgentEventSink((event) => {
+      if (event.type === 'done') terminal()
+    })
+    let done = new Promise<void>((resolve) => {
+      terminal = resolve
+    })
+    const first = await service.runAgentSession(session.id, 'First turn', settings)
+    await done
+    const firstStored = (await service.loadAgentSessions()).sessions[0]
+    expect(firstStored.tokenCount).toBe(120)
+    expect(firstStored.lastRunMetrics).toMatchObject({
+      runId: first.runId,
+      providerRounds: 1,
+      totalTokens: 120,
+      cachedInputTokens: 60,
+      cacheWriteInputTokens: 10
+    })
+    done = new Promise<void>((resolve) => {
+      terminal = resolve
+    })
+    const second = await service.runAgentSession(session.id, 'Second turn', settings)
+    await done
+    expect(second.runId).not.toBe(first.runId)
+    const secondStored = (await service.loadAgentSessions()).sessions[0]
+    expect(secondStored.tokenCount).toBe(310)
+    expect(secondStored.lastRunMetrics).toMatchObject({
+      runId: second.runId,
+      providerRounds: 1,
+      inputTokens: 180,
+      outputTokens: 10,
+      totalTokens: 190,
+      tools: [],
+      usageReconciled: true
+    })
+    expect(secondStored.lastRunMetrics).not.toHaveProperty('cachedInputTokens')
+    expect(secondStored.lastRunMetrics).not.toHaveProperty('cacheWriteInputTokens')
+    const raw = mocks.writeFile.mock.calls.at(-1)![1]
+    vi.resetModules()
+    mocks.readFile.mockResolvedValueOnce(raw)
+    const reloaded = (await (await import('./agentService')).loadAgentSessions()).sessions[0]
+    expect(reloaded.tokenCount).toBe(310)
+    expect(reloaded.lastRunMetrics).toEqual(secondStored.lastRunMetrics)
+  })
+
+  it.each([{}, [null], [{}], 'damaged tool metadata'])(
+    'keeps malformed optional metric metadata from blocking healthy session recovery: %j',
+    async (tools) => {
+      const template = {
+        id: 'metrics-damaged',
+        title: 'Metrics metadata',
+        mode: 'manual',
+        model: 'fixture',
+        reasoningEffort: 'none',
+        status: 'running',
+        activeRunId: 'interrupted-metrics',
+        createdAt: '',
+        updatedAt: '',
+        tokenCount: 0,
+        messages: [],
+        history: [],
+        planReady: false,
+        lastRunMetrics: {
+          ...createAgentRunMetrics('interrupted-metrics', '2026-10-05T01:00:00Z'),
+          tools
+        }
+      }
+      mocks.readFile.mockResolvedValueOnce(
+        JSON.stringify({
+          sessions: [
+            template,
+            {
+              ...template,
+              id: 'healthy-neighbor',
+              status: 'idle',
+              activeRunId: undefined,
+              lastRunMetrics: undefined
+            }
+          ],
+          activeSessionId: template.id,
+          modelDefaultsByProvider: {}
+        })
+      )
+      const service = await import('./agentService')
+      const loaded = await service.loadAgentSessions()
+      expect(loaded.sessions.map((item) => item.status)).toEqual(['interrupted', 'idle'])
+      expect(loaded.sessions[0].lastRunMetrics!.tools).toEqual(tools)
+      expect(agentRunValidationSummary(loaded.sessions[0].lastRunMetrics!)).toBe(
+        'Unavailable (invalid recorded evidence)'
+      )
+    }
+  )
 
   it('formats memory context in update order and preserves content as data', async () => {
     const { formatAgentMemoryContext } = await import('./agentService')
@@ -1290,6 +1585,51 @@ describe('desktop agent service shared-provider integration', () => {
     expect(JSON.parse(result)).toMatchObject({ truncated: true })
   })
 
+  it('does not dispatch a manual mutation when the approved tool event cancels its run', async () => {
+    mocks.responsesCreate.mockResolvedValueOnce({
+      output_text: '',
+      output: [
+        {
+          type: 'function_call',
+          call_id: 'cancel-on-approved',
+          name: 'edit_command',
+          arguments: '{}'
+        }
+      ],
+      usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 }
+    })
+    const service = await import('./agentService')
+    const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+    const session = await service.createAgentSession(settings)
+    const done = new Promise<void>((resolve) =>
+      service.setAgentEventSink((event) => {
+        if (event.type === 'approval')
+          void service.resolveAgentApproval(session.id, event.toolCall!.id, true)
+        if (event.type === 'tool' && event.toolCall?.status === 'approved')
+          service.cancelAgentRun(session.id)
+        if (event.type === 'done') resolve()
+      })
+    )
+    await service.runAgentSession(session.id, 'Edit', settings)
+    await done
+    expect(mocks.commitMutation).not.toHaveBeenCalled()
+    expect(mocks.responsesCreate).toHaveBeenCalledOnce()
+    const stored = (await service.loadAgentSessions()).sessions[0]
+    expect(stored.status).toBe('cancelled')
+    expect(stored.tokenCount).toBe(12)
+    expect(stored.lastRunMetrics).toMatchObject({
+      providerRounds: 1,
+      totalTokens: 12,
+      usageReconciled: true,
+      tools: [{ id: 'cancel-on-approved', status: 'unknown' }]
+    })
+    expect(stored.history!.at(-1)).toMatchObject({
+      kind: 'tool_result',
+      callId: 'cancel-on-approved',
+      isError: true
+    })
+  })
+
   it('marks an approved but unfinished commit as interrupted with an unknown outcome', async () => {
     let finishCommit!: (value: unknown) => void
     mocks.commitMutation.mockImplementation(
@@ -1299,7 +1639,13 @@ describe('desktop agent service shared-provider integration', () => {
       output_text: '',
       output: [
         { type: 'function_call', call_id: 'commit_pending', name: 'edit_command', arguments: '{}' }
-      ]
+      ],
+      usage: {
+        input_tokens: 100,
+        output_tokens: 20,
+        total_tokens: 120,
+        input_tokens_details: { cached_tokens: 0, cache_write_tokens: 10 }
+      }
     })
     const service = await import('./agentService')
     const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
@@ -1313,9 +1659,30 @@ describe('desktop agent service shared-provider integration', () => {
     )
     await service.runAgentSession(session.id, 'Edit', settings)
     await vi.waitFor(() => expect(mocks.commitMutation).toHaveBeenCalledTimes(1))
+    const pending = (await service.loadAgentSessions()).sessions[0]
+    expect(pending.lastRunMetrics).toMatchObject({
+      providerRounds: 0,
+      totalTokens: 0,
+      usageReconciled: false,
+      tools: [{ id: 'commit_pending', status: 'approved' }]
+    })
+    expect(pending.lastRunMetrics).not.toHaveProperty('cachedInputTokens')
     service.cancelAgentRun(session.id)
     await done
     const stored = (await service.loadAgentSessions()).sessions[0]
+    expect(stored.tokenCount).toBe(120)
+    expect(stored.lastRunMetrics).toMatchObject({
+      providerRounds: 1,
+      inputTokens: 100,
+      outputTokens: 20,
+      totalTokens: 120,
+      cachedInputTokens: 0,
+      cacheWriteInputTokens: 10,
+      status: 'cancelled',
+      usageReconciled: true,
+      tools: [{ id: 'commit_pending', status: 'unknown' }]
+    })
+    const raw = mocks.writeFile.mock.calls.at(-1)![1]
     const tool = stored.messages.find((message) => message.role === 'tool')!
     expect(tool.toolCalls![0]).toMatchObject({
       status: 'error',
@@ -1333,6 +1700,13 @@ describe('desktop agent service shared-provider integration', () => {
         (message) => message.role === 'tool'
       )!.toolCalls![0].status
     ).toBe('error')
+    vi.resetModules()
+    mocks.readFile.mockResolvedValueOnce(raw)
+    const reloadedService = await import('./agentService')
+    const reloaded = (await reloadedService.loadAgentSessions()).sessions[0]
+    expect(reloaded.tokenCount).toBe(120)
+    expect(reloaded.lastRunMetrics).toEqual(stored.lastRunMetrics)
+    expect(mocks.commitMutation).toHaveBeenCalledOnce()
   })
 
   it('recovers an approved pending commit on reload without replay or a rollback claim', async () => {
@@ -1346,9 +1720,20 @@ describe('desktop agent service shared-provider integration', () => {
             model: 'gpt-test',
             reasoningEffort: 'none',
             status: 'running',
+            activeRunId: 'interrupted-run',
+            lastRunMetrics: {
+              ...createAgentRunMetrics('interrupted-run', '2026-10-05T01:00:00Z'),
+              checkpointAt: '2026-10-05T01:00:05Z',
+              providerRounds: 1,
+              inputTokens: 8,
+              outputTokens: 2,
+              totalTokens: 10,
+              cachedInputTokens: 0,
+              tools: [{ id: 'reload_call', name: 'edit_command', status: 'approved' }]
+            },
             createdAt: '',
             updatedAt: '',
-            tokenCount: 0,
+            tokenCount: 10,
             messages: [
               {
                 id: 'm1',
@@ -1382,6 +1767,21 @@ describe('desktop agent service shared-provider integration', () => {
     const service = await import('./agentService')
     const stored = (await service.loadAgentSessions()).sessions[0]
     expect(stored.status).toBe('interrupted')
+    expect(stored.tokenCount).toBe(10)
+    expect(stored.lastRunMetrics).toMatchObject({
+      providerRounds: 1,
+      totalTokens: 10,
+      cachedInputTokens: 0,
+      usageReconciled: false,
+      status: 'interrupted',
+      tools: [{ id: 'reload_call', status: 'unknown' }]
+    })
+    expect(stored.lastRunMetrics).not.toHaveProperty('finishedAt')
+    expect(stored.lastRunMetrics).not.toHaveProperty('cacheWriteInputTokens')
+    expect(agentRunElapsed(stored.lastRunMetrics!)).toBe('0:05')
+    expect(agentRunValidationSummary(stored.lastRunMetrics!)).toBe(
+      'No validation evidence recorded'
+    )
     expect(stored.messages[0].toolCalls![0]).toMatchObject({
       status: 'error',
       error: expect.stringContaining('outcome may be unknown')
