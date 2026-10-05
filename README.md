@@ -187,7 +187,7 @@ For the full language reference, see [`SPECIFICATION.md`](src/main/services/bcfd
 ### Install
 
 Use Node.js 22 or newer. The shared agent loop, canonical history helpers and
-OpenAI/OpenRouter provider factories use the exact npm release `@ayayaq/vivi@0.2.0`.
+OpenAI/OpenRouter provider factories use the exact npm release `@ayayaq/vivi@0.3.0`.
 Its registry artifact was verified against the reviewed release bytes; the immutable
 registry URL and SHA-512 integrity are recorded in the lockfile. Publish and verify a
 compatible shared dependency before updating this pin. Do not commit npm pack outputs
@@ -203,6 +203,19 @@ $ npm run typecheck
 The installed shared dependency is packaged with its own source, LICENSE, NOTICE and
 attribution records. Obsolete tracked vendor snapshots can be recovered from Git.
 Changing the shared dependency does not release or deploy the desktop application.
+
+The desktop agent explicitly imports the shared bounded arithmetic `calculate` tool
+from `@ayayaq/vivi/extensions/calculator` in that published registry release. Its
+executable registry is snapshotted per run and reserves every built-in tool name before
+planning mode filters mutation tools. This pure calculator is available in manual,
+auto and planning modes without mutation approval; normal host tools keep their
+existing mutation, revision and approval policy. The desktop host owns tool display,
+bounded result content, persisted history, cancellation and recovery.
+
+Extensions are trusted explicit code imports, not a plugin loader or sandbox. Vivi
+0.3.0 supplies only an `AbortSignal` in the execution context, with no permissions or
+capability API. No filesystem, network or other host-capable extensions are enabled.
+The calculator is not added to the external MCP server.
 
 ### Development
 

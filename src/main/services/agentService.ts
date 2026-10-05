@@ -2,6 +2,8 @@ import { app } from 'electron'
 import { join } from 'node:path'
 import crypto from 'node:crypto'
 import { runAgent, type HistoryMessage, type ToolCall } from '@ayayaq/vivi'
+import type { ToolRegistry } from '@ayayaq/vivi/extensions'
+import { createAgentExtensionRegistry } from './agentExtensions'
 import { createAgentProvider } from './agentProviderAdapter'
 import { initializeAgentHistory } from './agentHistory'
 import { createAgentPersistence, reportAgentPersistenceNotice } from './agentPersistence'
@@ -74,6 +76,7 @@ When the user asks to forget a saved preference or change how it is remembered, 
 In planning mode, investigate with read and lint tools and never make mutations. Ask concise questions without special markup whenever more user input is needed. Once the plan is decision-complete, return the plan inside exactly one <proposed_plan>...</proposed_plan> block with no text outside the block. Do not use that block for questions, partial plans, or ordinary discussion.`
 
 interface AgentRunContext {
+  extensions: ToolRegistry
   documentationPolicy: DocumentationPolicyState
   metrics: AgentRunMetrics
 }
@@ -451,13 +454,18 @@ function addMessage(
 }
 
 function stringifyResult(result: unknown): string {
-  const content = JSON.stringify(result) ?? 'null'
-  return content.length > MAX_TOOL_RESULT_CHARS
-    ? JSON.stringify({
-        truncated: true,
-        preview: content.slice(0, Math.floor((MAX_TOOL_RESULT_CHARS - 100) / 2))
-      })
-    : content
+  return boundToolContent(JSON.stringify(result) ?? 'null')
+}
+
+function boundToolContent(content: string): string {
+  if (content.length <= MAX_TOOL_RESULT_CHARS) return content
+  const preview = (length: number): string =>
+    JSON.stringify({ truncated: true, preview: content.slice(0, length) })
+  const candidate = preview(Math.floor((MAX_TOOL_RESULT_CHARS - 100) / 2))
+  // Raw extension text may contain control characters that need six JSON characters each.
+  return candidate.length <= MAX_TOOL_RESULT_CHARS
+    ? candidate
+    : preview(Math.floor((MAX_TOOL_RESULT_CHARS - 100) / 6))
 }
 
 export function parseProposedPlan(content: string): { content: string; planReady: boolean } {
@@ -520,7 +528,7 @@ async function runTool(
   providerCall: ToolCall,
   context: AgentRunContext,
   signal: AbortSignal
-): Promise<{ toolCall: AgentToolCall; result: unknown }> {
+): Promise<{ toolCall: AgentToolCall; content: string }> {
   const targetLabel = agentToolTargetLabel(providerCall.name, providerCall.arguments)
   const call: AgentToolCall = {
     id: providerCall.id || id('tool'),
@@ -539,6 +547,7 @@ async function runTool(
   try {
     assertActiveRun(session, runId, signal)
     let result: unknown
+    let extensionContent: string | undefined
     if (mutationToolNames.has(call.name)) {
       if (mode === 'planning') throw new Error('Mutation tools are disabled in planning mode')
       const prepared = await prepareMutation(call.name, call.arguments)
@@ -560,6 +569,22 @@ async function runTool(
         assertActiveRun(session, runId, signal)
         result = await commitMutation(prepared, 'agent', signal)
       }
+    } else if (context.extensions.has(call.name)) {
+      const output = await context.extensions.executeTool(providerCall, { signal })
+      extensionContent = boundToolContent(output.content)
+      try {
+        result = JSON.parse(extensionContent)
+      } catch {
+        result = extensionContent
+      }
+      if (output.isError) {
+        call.status = 'error'
+        const error =
+          result && typeof result === 'object'
+            ? (result as { error?: { message?: unknown } }).error
+            : undefined
+        call.error = typeof error?.message === 'string' ? error.message : extensionContent
+      }
     } else {
       result = isDocumentationTool(call.name)
         ? await executeDocumentationCall(
@@ -573,23 +598,26 @@ async function runTool(
         : await executeReadTool(call.name, call.arguments)
     }
     assertActiveRun(session, runId, signal)
-    if (call.status !== 'rejected') call.status = 'completed'
+    if (call.status !== 'rejected' && call.status !== 'error') call.status = 'completed'
     call.result = result
-    message.content = stringifyResult(result)
+    message.content = extensionContent ?? stringifyResult(result)
     session.status = 'running'
     emit(session, { type: 'tool', runId, toolCall: clone(call) })
     await save()
-    return { toolCall: call, result }
+    return { toolCall: call, content: message.content }
   } catch (error) {
     const detail = errorDetail(error)
     if (!isActiveRun(session, runId, signal))
-      return { toolCall: call, result: { success: false, error: 'Agent execution cancelled' } }
+      return {
+        toolCall: call,
+        content: JSON.stringify({ success: false, error: 'Agent execution cancelled' })
+      }
     call.status = 'error'
     call.error = detail
     message.content = JSON.stringify({ success: false, error: detail })
     emit(session, { type: 'tool', runId, toolCall: clone(call) })
     await save()
-    return { toolCall: call, result: { success: false, error: detail } }
+    return { toolCall: call, content: message.content }
   }
 }
 
@@ -629,6 +657,10 @@ async function startAgentSession(
 
   const runId = id('run')
   const context: AgentRunContext = {
+    // Reserve every built-in before planning mode filters mutation tools from advertisement.
+    extensions: createAgentExtensionRegistry(
+      agentToolDefinitions.map((tool) => tool.function.name)
+    ),
     documentationPolicy: createDocumentationPolicyState(),
     metrics: {
       runId,
@@ -694,16 +726,19 @@ async function startAgentSession(
       const result = await runAgent({
         provider: createAgentProvider(settings, runModel, { stream: true }),
         messages: [...prefix, ...session.history!],
-        tools: tools.map((tool) => ({
-          name: tool.function.name,
-          description: tool.function.description,
-          parameters: JSON.parse(JSON.stringify(tool.function.parameters))
-        })),
+        tools: [
+          ...tools.map((tool) => ({
+            name: tool.function.name,
+            description: tool.function.description,
+            parameters: JSON.parse(JSON.stringify(tool.function.parameters))
+          })),
+          ...context.extensions.tools
+        ],
         signal: controller.signal,
         maxRounds: MAX_TOOL_ROUNDS,
         executeTool: async (call, { signal }) => {
-          const { toolCall, result } = await runTool(session, runId, mode, call, context, signal)
-          return { content: stringifyResult(result), isError: toolCall.status === 'error' }
+          const { toolCall, content } = await runTool(session, runId, mode, call, context, signal)
+          return { content, isError: toolCall.status === 'error' }
         },
         onEvent: async (event) => {
           assertActiveRun(session, runId, controller.signal)
