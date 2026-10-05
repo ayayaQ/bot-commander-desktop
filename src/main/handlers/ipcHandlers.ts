@@ -40,12 +40,7 @@ import { getInteractions, setInteractions } from '../services/interactionService
 import { decodeBCFDCommandArray } from '../../shared/commandCodec'
 import type { AgentPlanDecision, AgentStreamEvent } from '../../shared/agentTypes'
 import type { McpConfig } from '../../shared/mcpTypes'
-import { createInteractionPublishBackend } from '../services/slashCommandRegistry'
-import {
-  InteractionPublisher,
-  applyPublicationResults,
-  PublicationFailure
-} from '../services/interactionPublisher'
+import { interactionPublisher } from '../services/interactionPublicationService'
 import { getSettings, setSettings, normalizeSettings } from '../services/settingsService'
 import { fetchAiModels, getAiProvider } from '../services/aiProviderService'
 import { getBotStatus, setBotStatus } from '../services/statusService'
@@ -92,23 +87,6 @@ import {
   setResourceChangeEventSink,
   withResourceMutationLock
 } from '../services/resourceChangeService'
-
-const interactionPublisher = new InteractionPublisher({
-  read: getInteractions,
-  backend: createInteractionPublishBackend,
-  commit: (results, isCurrent) =>
-    withResourceMutationLock('interactions', async () => {
-      if (!isCurrent()) throw new PublicationFailure({ code: 'connection-changed' })
-      const previous = getInteractions()
-      const updated = structuredClone(previous)
-      const applied = applyPublicationResults(updated, results)
-      if (!applied.length) return applied
-      await saveInteractions(updated)
-      setInteractions(updated)
-      emitResourceChanged('interactions', 'system', updated)
-      return applied
-    })
-})
 
 const agentViewState = new Map<number, boolean>()
 
