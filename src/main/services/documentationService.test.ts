@@ -1,7 +1,12 @@
 import fs from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import documentationIndex from '../generated/documentationIndex.json'
-import { readDocumentation, searchDocumentation } from './documentationService'
+import {
+  documentationTableOfContents,
+  readDocumentation,
+  searchDocumentation
+} from './documentationService'
+import { supplementalDocumentationRecords } from './documentationSupplement'
 
 describe('documentation service', () => {
   it('ships a valid functional documentation index with stable unique IDs', () => {
@@ -78,7 +83,7 @@ describe('documentation service', () => {
     const registered = [...interpreter.matchAll(/registry\.set\(\s*['"]([^'"]+)/g)].map(
       (match) => match[1]
     )
-    const keywordText = documentationIndex.records
+    const keywordText = [...documentationIndex.records, ...supplementalDocumentationRecords]
       .filter((record) => record.category === 'keywords')
       .map((record) => record.searchableText)
       .join('\n')
@@ -90,6 +95,22 @@ describe('documentation service', () => {
     expect(
       registered.filter((name) => !compatibilityAliases.has(name) && !documented.has(name))
     ).toEqual([])
+  })
+
+  it('exposes release-only message deletion to agent search, read and catalog without editing generated help', () => {
+    const result = searchDocumentation('$deleteMessage', 'keywords', 1)
+    expect(result.bestMatch).toMatchObject({
+      id: 'keywords:delete-message',
+      title: '$deleteMessage(MessageId)',
+      category: 'keywords'
+    })
+    const complete = readDocumentation(result.bestMatch!.id)
+    expect(complete.content).toContain('empty string on success')
+    expect(complete.content).toContain('current channel')
+    expect(complete.content).toContain('Fake message IDs')
+    expect(complete.content).toContain('18446744073709551615')
+    expect(documentationTableOfContents).toContain('$deleteMessage(MessageId)')
+    expect(documentationIndex.records.some((record) => record.id === complete.id)).toBe(false)
   })
 
   it('covers agent-editable modern command fields in the commands category', () => {

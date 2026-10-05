@@ -391,6 +391,12 @@ export const bcfdItems: BCFDLanguageItem[] = [
   { name: 'second', syntax: 'variable', description: 'Current second (00-59)' },
   { name: 'message', syntax: 'variable', description: 'Full message content' },
   { name: 'messageAfterCommand', syntax: 'variable', description: 'Message after command' },
+  {
+    name: 'deleteMessage',
+    syntax: 'function-paren',
+    description: 'Delete one message by ID in the current channel; returns no text on success',
+    insertText: 'deleteMessage(MessageId)'
+  },
   { name: 'argsCount', syntax: 'variable', description: 'Number of arguments' },
 
   {

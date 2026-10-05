@@ -347,7 +347,7 @@
             class="p-3 rounded bg-base-200 break-words {message.deleted ? 'opacity-40' : ''}"
           >
             <p class="text-xs font-semibold">
-              {message.author}{message.kind === 'dm'
+              {message.author} · Fake message ID: {message.id}{message.kind === 'dm'
                 ? ` · Fake DM to ${world.members.find((member) => member.id === message.recipient)?.name ?? message.recipient}`
                 : ''}{message.replyTo ? ` · Reply to #${message.replyTo}` : ''}{message.deleted
                 ? ' · Deleted'
