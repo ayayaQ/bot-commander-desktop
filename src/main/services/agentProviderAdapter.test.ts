@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HistoryMessage, ProviderProgress, ToolDefinition } from '@ayayaq/vivi'
 import type { AgentSession } from '../../shared/agentTypes'
 import type { AiRuntimeSettings } from './aiProviderService'
+import { modelCapabilityCatalog } from './modelCapabilityService'
 import { createAgentProvider, executeAgentProviderTurn } from './agentProviderAdapter'
 
 const settings: AiRuntimeSettings = { aiProvider: 'openai', openaiApiKey: 'fake-openai-key' }
@@ -11,7 +12,7 @@ const routerSettings: AiRuntimeSettings = {
   openrouterApiKey: 'fake-router-key'
 }
 const session: Pick<AgentSession, 'model' | 'reasoningEffort'> = {
-  model: 'gpt-session',
+  model: 'gpt-5.4-nano',
   reasoningEffort: 'low'
 }
 const tools: ToolDefinition[] = [
@@ -38,10 +39,25 @@ function request() {
 
 beforeEach(() => {
   fetchMock.mockReset()
-  fetchMock.mockResolvedValue(
-    new Response(JSON.stringify({ status: 'completed', output: [], output_text: 'Done' }))
+  fetchMock.mockImplementation(
+    async () =>
+      new Response(JSON.stringify({ status: 'completed', output: [], output_text: 'Done' }))
   )
   vi.stubGlobal('fetch', fetchMock)
+  const generation = modelCapabilityCatalog.begin('openrouter', routerSettings.openrouterApiKey)
+  modelCapabilityCatalog.complete('openrouter', routerSettings.openrouterApiKey, generation, [
+    {
+      id: 'anthropic/session-model',
+      supported_parameters: ['tools', 'reasoning'],
+      reasoning: { mandatory: false, supported_efforts: ['low', 'medium', 'high'] },
+      architecture: { input_modalities: ['text'], output_modalities: ['text'] }
+    },
+    {
+      id: session.model,
+      supported_parameters: ['tools', 'reasoning'],
+      reasoning: { mandatory: false, supported_efforts: ['low'] }
+    }
+  ])
 })
 afterEach(() => vi.unstubAllGlobals())
 
@@ -53,7 +69,7 @@ describe('desktop shared-provider settings bridge', () => {
     expect(url).toBe('https://api.openai.com/v1/responses')
     expect(new Headers(init!.headers).get('Authorization')).toBe('Bearer fake-openai-key')
     expect(body).toMatchObject({
-      model: 'gpt-session',
+      model: 'gpt-5.4-nano',
       input: [
         { role: 'system', content: 'Inspect carefully' },
         { role: 'user', content: 'Inspect state' }
@@ -110,9 +126,12 @@ describe('desktop shared-provider settings bridge', () => {
   )
 
   it.each(['minimal', 'low', 'medium', 'high', 'xhigh'] as const)(
-    'preserves the existing %s effort selection',
+    'sends the documented %s effort selection',
     async (reasoningEffort) => {
-      await run(settings, { ...session, reasoningEffort })
+      await run(settings, {
+        model: reasoningEffort === 'minimal' ? 'gpt-5' : 'gpt-5.4-nano',
+        reasoningEffort
+      })
       expect(request().body.reasoning).toEqual({ effort: reasoningEffort })
     }
   )
@@ -203,5 +222,133 @@ describe('desktop shared-provider settings bridge', () => {
     expect(result.content).toBe('Visible answer')
     expect(request().body.stream).toBe(true)
     expect(messages).toEqual(original)
+  })
+  it('maps explicit OpenAI disable separately from legacy provider-default omission', async () => {
+    await run(settings, { model: 'gpt-5.1', reasoningEffort: 'disabled' })
+    expect(request().body.reasoning).toEqual({ effort: 'none' })
+    await run(settings, { model: 'gpt-5.1', reasoningEffort: 'none' })
+    expect(request().body).not.toHaveProperty('reasoning')
+  })
+
+  it('supports optional OpenRouter disable without inventing an effort selector', async () => {
+    const generation = modelCapabilityCatalog.begin('openrouter', routerSettings.openrouterApiKey)
+    modelCapabilityCatalog.complete('openrouter', routerSettings.openrouterApiKey, generation, [
+      {
+        id: 'vendor/token-budget',
+        supported_parameters: ['reasoning'],
+        reasoning: { mandatory: false, supports_max_tokens: true }
+      }
+    ])
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: 'Done' } }] })
+      )
+    )
+    await run(routerSettings, { model: 'vendor/token-budget', reasoningEffort: 'disabled' })
+    expect(request().body.reasoning).toEqual({ enabled: false })
+    expect(request().body).not.toHaveProperty('tools')
+    await expect(
+      run(routerSettings, { model: 'vendor/token-budget', reasoningEffort: 'high' })
+    ).rejects.toThrow('unsupported')
+  })
+
+  it.each([
+    ['gpt-5', 'disabled', 'unsupported'],
+    ['gpt-5', 'xhigh', 'unsupported'],
+    ['gpt-5-next-unverified', 'high', 'unverified'],
+    ['o3-pro', 'low', 'unverified']
+  ] as const)(
+    'rejects saved explicit %s/%s without erasing it or starting transport',
+    async (model, reasoningEffort, error) => {
+      const saved = { model, reasoningEffort }
+      await expect(run(settings, saved)).rejects.toThrow(error)
+      expect(saved).toEqual({ model, reasoningEffort })
+      expect(fetchMock).not.toHaveBeenCalled()
+    }
+  )
+
+  it('keeps an unknown exact ID usable with default reasoning and no tools', async () => {
+    await run(settings, { model: 'gpt-5-next-unverified', reasoningEffort: 'none' })
+    expect(request().body.model).toBe('gpt-5-next-unverified')
+    expect(request().body).not.toHaveProperty('reasoning')
+    expect(request().body).not.toHaveProperty('tools')
+  })
+
+  it('forces non-stream transport only when unsupported, retaining unknown stream preference', async () => {
+    await createAgentProvider(
+      settings,
+      { model: 'o3-pro', reasoningEffort: 'none' },
+      { stream: true }
+    ).generate({ messages, tools }, new AbortController().signal)
+    expect(request().body.stream).toBe(false)
+    expect(request().body.tools).toHaveLength(1)
+    fetchMock.mockResolvedValue(
+      new Response(
+        'data: ' +
+          JSON.stringify({
+            type: 'response.completed',
+            response: { status: 'completed', output: [], output_text: 'Done' }
+          }) +
+          '\n\n',
+        { headers: { 'Content-Type': 'text/event-stream' } }
+      )
+    )
+    await createAgentProvider(
+      settings,
+      { model: 'unknown/future', reasoningEffort: 'none' },
+      { stream: true }
+    ).generate({ messages, tools }, new AbortController().signal)
+    expect(request().body.stream).toBe(true)
+    expect(request().body).not.toHaveProperty('tools')
+  })
+
+  it('detaches capability options before the transport is created', async () => {
+    const { modelCapabilities } = await import('./modelCapabilityService')
+    const metadata = structuredClone(modelCapabilities('openai', 'responses', { id: 'gpt-5.1' }))
+    const provider = createAgentProvider(
+      settings,
+      { model: 'gpt-5.1', reasoningEffort: 'low' },
+      { capabilities: metadata }
+    )
+    metadata.tools = 'unsupported'
+    metadata.reasoning.efforts = []
+    await provider.generate({ messages, tools }, new AbortController().signal)
+    expect(request().body.tools).toHaveLength(1)
+    expect(request().body.reasoning).toEqual({ effort: 'low' })
+  })
+
+  it('allows provider default on mandatory gateway reasoning and omits explicitly unsupported tools', async () => {
+    const generation = modelCapabilityCatalog.begin('openrouter', routerSettings.openrouterApiKey)
+    modelCapabilityCatalog.complete('openrouter', routerSettings.openrouterApiKey, generation, [
+      {
+        id: 'vendor/mandatory-no-tools',
+        supported_parameters: ['reasoning'],
+        reasoning: { mandatory: true, supported_efforts: ['none', 'high'] }
+      }
+    ])
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: 'Done' } }] })
+        )
+    )
+    await run(routerSettings, { model: 'vendor/mandatory-no-tools', reasoningEffort: 'none' })
+    expect(request().body).not.toHaveProperty('reasoning')
+    expect(request().body).not.toHaveProperty('tools')
+    fetchMock.mockClear()
+    await expect(
+      run(routerSettings, { model: 'vendor/mandatory-no-tools', reasoningEffort: 'disabled' })
+    ).rejects.toThrow('unsupported')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('sends max only when the exact model metadata documents it', async () => {
+    await run(settings, { model: 'gpt-6-astra', reasoningEffort: 'max' })
+    expect(request().body.reasoning).toEqual({ effort: 'max' })
+    fetchMock.mockClear()
+    await expect(run(settings, { model: 'gpt-5.4-nano', reasoningEffort: 'max' })).rejects.toThrow(
+      'unsupported'
+    )
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

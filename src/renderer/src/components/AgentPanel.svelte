@@ -1,12 +1,33 @@
 <script lang="ts">
+  import type { ModelCapabilities } from '@ayayaq/vivi/providers/models'
+  import type { AppSettings } from '../types/types'
   import { onMount, tick } from 'svelte'
   import ModelPicker from './ModelPicker.svelte'
   import AgentApprovalDiff from './AgentApprovalDiff.svelte'
   import AgentRunSummary from './AgentRunSummary.svelte'
   import { renderMarkdown } from '../utils/markdown'
   import { agentToolLabel } from '../utils/agentToolLabel'
+  import {
+    agentProtocol,
+    type AiModelInfo,
+    type SelectedModelCapabilitySnapshot
+  } from '../../../shared/aiModelTypes'
+  import {
+    currentSelectedCapabilities,
+    reasoningChoices,
+    reasoningConfigurationError,
+    reasoningCapabilityLabel,
+    ModelCatalogRequestGate,
+    catalogSettingsMatch,
+    modelCapabilitySnapshotMatches
+  } from '../utils/aiModelCapabilities'
   import { settingsStore } from '../stores/settings'
-  import type { AgentMode, AgentPlanDecision, AgentToolCall } from '../../../shared/agentTypes'
+  import type {
+    AgentMode,
+    AgentPlanDecision,
+    AgentToolCall,
+    AgentReasoningEffort
+  } from '../../../shared/agentTypes'
   import {
     activeAgentSession,
     activeAgentProgress,
@@ -25,7 +46,14 @@
   let input = $state('')
   let inputElement: HTMLTextAreaElement = $state()
   let messagesElement: HTMLDivElement = $state()
-  let models: Array<{ id: string; name?: string; supportsReasoning?: boolean }> = $state([])
+  let models: AiModelInfo[] = $state([])
+  const catalogGate = new ModelCatalogRequestGate()
+  const selectedGate = new ModelCatalogRequestGate()
+  let selectedCapabilities: ModelCapabilities | undefined = $state()
+  let selectedCapabilityError = $state('')
+  let selectedExpiresAt: number | undefined = $state()
+  let capabilityExpiryTimer: ReturnType<typeof setTimeout> | undefined
+  let catalogExpiryTimer: ReturnType<typeof setTimeout> | undefined
   let loadingModels = $state(false)
   let modelError = $state('')
   let currentTime = $state(Date.now())
@@ -34,6 +62,83 @@
   let planActionError = $state('')
   let planActionErrorSessionId = $state('')
 
+  const capabilities = $derived(
+    currentSelectedCapabilities(
+      selectedCapabilities,
+      $settingsStore.aiProvider || 'openai',
+      agentProtocol($settingsStore.aiProvider || 'openai'),
+      $activeAgentSession?.model || '',
+      selectedExpiresAt,
+      currentTime
+    )
+  )
+  $effect(() => {
+    const model = $activeAgentSession?.model
+    const settings = $settingsStore
+    // Refetch the pure selected snapshot after a host catalog refresh updates cache metadata.
+    models
+    if (model) void refreshSelectedCapabilities(model, settings)
+    else {
+      selectedGate.invalidate()
+      clearTimeout(capabilityExpiryTimer)
+      selectedCapabilities = undefined
+    }
+  })
+
+  async function refreshSelectedCapabilities(model: string, settings: AppSettings) {
+    const request = selectedGate.begin()
+    clearTimeout(capabilityExpiryTimer)
+    selectedCapabilities = undefined
+    selectedExpiresAt = undefined
+    selectedCapabilityError = ''
+    const provider = settings.aiProvider || 'openai'
+    try {
+      const result = (await window.electron.ipcRenderer.invoke('get-ai-model-capabilities', {
+        model,
+        provider,
+        purpose: 'agent'
+      })) as SelectedModelCapabilitySnapshot
+      if (
+        selectedGate.current(request) &&
+        $activeAgentSession?.model === model &&
+        catalogSettingsMatch(settings, $settingsStore) &&
+        modelCapabilitySnapshotMatches(
+          result.capabilities,
+          provider,
+          agentProtocol(provider),
+          model
+        )
+      ) {
+        selectedCapabilities = result.capabilities
+        selectedExpiresAt = result.expiresAt
+        if (result.expiresAt !== undefined && Number.isFinite(result.expiresAt))
+          capabilityExpiryTimer = setTimeout(
+            () => {
+              if (!(
+                selectedGate.current(request) &&
+                $activeAgentSession?.model === model &&
+                catalogSettingsMatch(settings, $settingsStore)
+              ))
+                return
+              selectedGate.invalidate()
+              selectedCapabilities = undefined
+              models = []
+              void refreshSelectedCapabilities(model, $settingsStore)
+            },
+            Math.max(0, result.expiresAt - Date.now())
+          )
+      }
+    } catch (error) {
+      if (selectedGate.current(request))
+        selectedCapabilityError =
+          error instanceof Error ? error.message : 'Selected model capabilities unavailable'
+    }
+  }
+
+  const choices = $derived(reasoningChoices(capabilities))
+  const reasoningError = $derived(
+    reasoningConfigurationError(capabilities, $activeAgentSession?.reasoningEffort || 'none')
+  )
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
   const running = $derived(
@@ -59,7 +164,28 @@
       await tick()
       scrollToBottom()
     })
-    void refreshModels()
+    let provider: string | undefined
+    let key: string | undefined
+    const unsubscribeSettings = settingsStore.subscribe((settings) => {
+      const nextProvider = settings.aiProvider || 'openai'
+      const nextKey =
+        nextProvider === 'openrouter' ? settings.openrouterApiKey : settings.openaiApiKey
+      if (provider === nextProvider && key === nextKey) return
+      provider = nextProvider
+      key = nextKey
+      catalogGate.invalidate()
+      selectedGate.invalidate()
+      selectedCapabilities = undefined
+      models = []
+      void refreshModels()
+    })
+    return () => {
+      catalogGate.invalidate()
+      selectedGate.invalidate()
+      clearTimeout(capabilityExpiryTimer)
+      clearTimeout(catalogExpiryTimer)
+      unsubscribeSettings()
+    }
   })
 
   onMount(() => {
@@ -85,16 +211,67 @@
       : `${minutes}:${seconds.toString().padStart(2, '0')}`
   }
 
+  function scheduleCatalogExpiry(result: AiModelInfo[], request: number) {
+    clearTimeout(catalogExpiryTimer)
+    const expiries = result
+      .map((model) => model.capabilityExpiresAt)
+      .filter((at): at is number => Number.isFinite(at))
+    if (!expiries.length) return
+    catalogExpiryTimer = setTimeout(
+      () => {
+        if (!catalogGate.current(request)) return
+        catalogGate.invalidate()
+        models = []
+        loadingModels = false
+        modelError = 'Provider catalog metadata expired. Refresh the model catalog.'
+        selectedGate.invalidate()
+        selectedCapabilities = undefined
+        if ($activeAgentSession)
+          void refreshSelectedCapabilities($activeAgentSession.model, $settingsStore)
+      },
+      Math.max(0, Math.min(...expiries) - Date.now())
+    )
+  }
+
   async function refreshModels() {
+    const request = catalogGate.begin()
+    clearTimeout(catalogExpiryTimer)
     loadingModels = true
+    models = []
     modelError = ''
     try {
-      models = await window.electron.ipcRenderer.invoke('fetch-ai-models')
+      const result = await window.electron.ipcRenderer.invoke('fetch-ai-models', {
+        purpose: 'agent'
+      })
+      if (catalogGate.current(request)) {
+        models = result
+        scheduleCatalogExpiry(result, request)
+      }
     } catch (error) {
-      modelError = error instanceof Error ? error.message : String(error)
+      if (catalogGate.current(request))
+        modelError = error instanceof Error ? error.message : String(error)
     } finally {
-      loadingModels = false
+      if (catalogGate.current(request)) loadingModels = false
     }
+  }
+
+  function updateReasoningChoice(event: Event) {
+    if (!$activeAgentSession) return
+    const value = (event.currentTarget as HTMLSelectElement).value as AgentReasoningEffort
+    const current = currentSelectedCapabilities(
+      selectedCapabilities,
+      $settingsStore.aiProvider || 'openai',
+      agentProtocol($settingsStore.aiProvider || 'openai'),
+      $activeAgentSession.model,
+      selectedExpiresAt
+    )
+    const error = reasoningConfigurationError(current, value)
+    if (error) {
+      selectedCapabilityError = error
+      void refreshSelectedCapabilities($activeAgentSession.model, $settingsStore)
+      return
+    }
+    void updateAgentSession($activeAgentSession.id, { reasoningEffort: value })
   }
 
   async function submit() {
@@ -248,27 +425,48 @@
           class="select select-bordered select-sm w-28"
           value={$activeAgentSession.reasoningEffort}
           disabled={running || resolvingPlan}
-          onchange={(event) =>
-            updateAgentSession($activeAgentSession!.id, {
-              reasoningEffort: event.currentTarget.value as any
-            })}
+          onchange={updateReasoningChoice}
           aria-label="Reasoning effort"
         >
-          <option value="none">Provider default</option>
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
+          {#if reasoningError}
+            <option value={$activeAgentSession.reasoningEffort}>Saved choice (unavailable)</option>
+          {/if}
+          {#each choices as choice}
+            <option value={choice.value}>{choice.label}</option>
+          {/each}
         </select>
         <div class="ml-auto text-xs opacity-60 tabular-nums">
           {$activeAgentSession.tokenCount.toLocaleString()} tokens
         </div>
       </header>
 
+      <div class="px-4 py-2 text-xs border-b border-base-300" aria-live="polite">
+        {reasoningCapabilityLabel(capabilities)} · Tools {capabilities?.tools || 'unknown'}
+        {#if !models.some((model) => model.id === $activeAgentSession.model)}
+          · Catalog membership and account access unverified{/if}
+        {#if !capabilities || capabilities.chat === 'unknown'}
+          · Text conversation capability unknown{/if}
+        {#if capabilities?.stream === 'unsupported'}
+          · Streaming unavailable; using non-stream transport{/if}
+        {#if selectedCapabilityError}<div class="text-warning mt-1">
+            {selectedCapabilityError}
+          </div>{/if}
+        {#if reasoningError}<div class="text-warning mt-1">{reasoningError}</div>{/if}
+      </div>
       <div class="grow overflow-y-auto px-5 py-4" bind:this={messagesElement}>
         {#if $activeAgentSession.messages.length === 0}
           <div class="h-full flex items-center justify-center text-base-content/50">
             <span class="material-symbols-outlined text-3xl mr-3">terminal</span>
-            <span>Ask the agent to inspect or change your bot.</span>
+            <span>
+              {#if capabilities?.chat === 'unsupported'}
+                Choose a model that supports text conversation through this API.
+              {:else if capabilities?.tools === 'supported'}
+                Ask the agent to inspect or change your bot.
+              {:else}
+                Tool support is unverified or unsupported. Try a text conversation with
+                provider-default reasoning.
+              {/if}
+            </span>
           </div>
         {:else}
           <div class="max-w-4xl mx-auto space-y-5">

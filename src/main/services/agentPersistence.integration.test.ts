@@ -10,7 +10,10 @@ vi.mock('@ayayaq/vivi', async (original) => ({
   ...(await original<typeof import('@ayayaq/vivi')>()),
   runAgent: mocks.runAgent
 }))
-vi.mock('./agentProviderAdapter', () => ({ createAgentProvider: vi.fn() }))
+vi.mock('./agentProviderAdapter', async (original) => ({
+  ...(await original<typeof import('./agentProviderAdapter')>()),
+  createAgentProvider: vi.fn()
+}))
 vi.mock('./agentTools', () => ({
   agentToolTargetLabel: vi.fn(),
   agentToolDefinitions: [],

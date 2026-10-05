@@ -44,6 +44,7 @@ const validInvokeChannels = [
   'memory:update',
   'memory:delete',
   'fetch-ai-models',
+  'get-ai-model-capabilities',
   'get-bot-status',
   'save-bot-status',
   // Onboarding

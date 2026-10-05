@@ -66,7 +66,9 @@ export function decodeAgentSessions(raw: string): AgentSessionsData {
       typeof session.mode !== 'string' ||
       !['manual', 'auto', 'planning'].includes(session.mode) ||
       typeof session.reasoningEffort !== 'string' ||
-      !['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(session.reasoningEffort) ||
+      !['none', 'disabled', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(
+        session.reasoningEffort
+      ) ||
       typeof session.status !== 'string' ||
       ![
         'idle',

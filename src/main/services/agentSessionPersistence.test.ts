@@ -18,6 +18,17 @@ const session = {
 }
 
 describe('agent session persistence validation', () => {
+  it.each(['none', 'disabled', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])(
+    'preserves saved %s without changing its meaning or rewriting unknown model IDs',
+    (reasoningEffort) => {
+      const result = decodeAgentSessions(
+        JSON.stringify({ sessions: [{ ...session, reasoningEffort }] })
+      )
+      expect(result.sessions[0]).toMatchObject({ model: 'fixture-model', reasoningEffort })
+      expect(decodeAgentSessions(JSON.stringify(result))).toEqual(result)
+    }
+  )
+
   it('loads legacy metrics and optional cache values without replacing absence with zero', () => {
     const {
       startedAt: _start,

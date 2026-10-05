@@ -1335,7 +1335,7 @@ describe('desktop agent service shared-provider integration', () => {
     const settings = {
       aiProvider: 'openai' as const,
       openaiApiKey: 'test',
-      selectedAiModel: 'gpt-test'
+      selectedAiModel: 'gpt-5.4-nano'
     }
     const session = await service.createAgentSession(settings)
     const first = new Promise<void>((resolve) =>
@@ -2299,5 +2299,86 @@ describe('desktop agent service shared-provider integration', () => {
     const persisted = JSON.parse(mocks.writeFile.mock.calls.at(-1)![1])
     expect(persisted.sessions[0].history).toEqual({ preserve: true })
     expect(persisted.sessions[1].history).toEqual(loaded.sessions[1].history)
+  })
+  it.each(['manual', 'auto', 'planning'] as const)(
+    'keeps an unknown exact model usable in %s while advertising and executing no tools',
+    async (mode) => {
+      mocks.responsesCreate
+        .mockResolvedValueOnce({
+          output_text: '',
+          output: [
+            {
+              type: 'function_call',
+              call_id: 'unknown-call',
+              name: 'edit_command',
+              arguments: '{"id":"c1","expectedRevision":"r1"}'
+            },
+            {
+              type: 'function_call',
+              call_id: 'unknown-calculator',
+              name: 'calculate',
+              arguments: '{"expression":"2+2"}'
+            }
+          ]
+        })
+        .mockResolvedValueOnce({ output_text: 'Tools are unavailable for this model.', output: [] })
+      const service = await import('./agentService')
+      const settings = {
+        aiProvider: 'openai' as const,
+        openaiApiKey: 'test',
+        selectedAiModel: 'gpt-5-next-unverified'
+      }
+      const session = await service.createAgentSession(settings)
+      await service.updateAgentSession(session.id, { mode }, 'openai')
+      const events: string[] = []
+      const done = new Promise<void>((resolve) =>
+        service.setAgentEventSink((event) => {
+          events.push(event.type)
+          if (event.type === 'done' || event.type === 'error') resolve()
+        })
+      )
+      await service.runAgentSession(session.id, 'Edit and calculate', settings)
+      await done
+      expect(mocks.responsesCreate.mock.calls[0][0]).not.toHaveProperty('tools')
+      expect(mocks.responsesCreate.mock.calls[0][0]).not.toHaveProperty('reasoning')
+      expect(mocks.responsesCreate.mock.calls[0][0].input[0].content).toContain(
+        'No tools are available for this model'
+      )
+      expect(mocks.prepareMutation).not.toHaveBeenCalled()
+      expect(mocks.commitMutation).not.toHaveBeenCalled()
+      expect(mocks.executeReadTool).not.toHaveBeenCalled()
+      expect(events).not.toContain('approval')
+      const stored = (await service.loadAgentSessions()).sessions[0]
+      expect(stored.status).toBe('completed')
+      expect(stored.model).toBe('gpt-5-next-unverified')
+      expect(stored.reasoningEffort).toBe('none')
+      expect(stored.history?.filter((entry) => entry.kind === 'tool_result')).toHaveLength(2)
+    }
+  )
+
+  it('preserves a stale explicit persisted choice while reporting an actionable run error', async () => {
+    const service = await import('./agentService')
+    const settings = {
+      aiProvider: 'openai' as const,
+      openaiApiKey: 'test',
+      selectedAiModel: 'gpt-5'
+    }
+    const session = await service.createAgentSession(settings)
+    await service.updateAgentSession(session.id, { reasoningEffort: 'xhigh' }, 'openai')
+    const terminal = new Promise<void>((resolve) =>
+      service.setAgentEventSink((event) => {
+        if (event.type === 'error') resolve()
+      })
+    )
+    await service.runAgentSession(session.id, 'Inspect', settings)
+    await terminal
+    const stored = (await service.loadAgentSessions()).sessions[0]
+    expect(stored).toMatchObject({ model: 'gpt-5', reasoningEffort: 'xhigh', status: 'error' })
+    expect(stored.error).toContain('Choose Provider default')
+    expect(fetch).not.toHaveBeenCalled()
+    expect(
+      JSON.parse(mocks.writeFile.mock.calls.at(-1)![1]).modelDefaultsByProvider.openai
+        .reasoningEffort
+    ).toBe('xhigh')
   })
 })

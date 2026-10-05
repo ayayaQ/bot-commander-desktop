@@ -2,13 +2,15 @@
 
 The generic sequential provider/tool loop lives in the separate
 [ayayaQ/vivi](https://github.com/ayayaQ/vivi) repository. Bot Commander consumes a reviewed,
-exact npm registry release `@ayayaq/vivi@0.2.0`. The published artifact was verified
+exact npm registry release `@ayayaq/vivi@0.4.0`. The published artifact was verified
 byte-for-byte against the reviewed release archive; its immutable registry URL and
 SHA-512 integrity are recorded in the lockfile. Runtime Git authentication/build is
 not required, and npm pack outputs are not committed to this repository.
 
-The published `0.2.0` includes the shared provider subpaths and canonical-history
-helpers used here. The earlier `0.1.0` release contains only the original core.
+The `0.2.0` release added the shared provider subpaths and canonical-history helpers;
+`0.3.0` added the explicit extension registry and shared calculator. Published `0.4.0`
+also includes the pure optional `providers/models` capability normalizer. The earlier
+`0.1.0` release contains only the original core.
 
 ## Responsibilities
 
@@ -29,8 +31,11 @@ rolled back. Existing resource locks and fresh-revision checks remain unchanged.
 
 The app's existing moderation-key configuration guard remains at the full service entry point.
 The generic OpenRouter factory requires only its own key. Desktop attribution stays in the bridge.
-Legacy reasoning `none` continues to mean provider default; its UI label now says so. Existing
-effort controls are an explicit host compatibility assertion rather than discovered model metadata.
+Legacy reasoning `none` continues to mean provider default; its UI label says so. Explicit
+agent disable is a separate selection. Named effort choices now require documented capability
+support; unsupported or unknown saved overrides are preserved and produce an actionable error
+instead of silently substituting a different request. Provider default remains usable without
+asserting whether the model will reason.
 Desktop requests have a finite ten-minute timeout and zero automatic retries, with immediate
 user cancellation. The generic factory's default timeout remains sixty seconds.
 
@@ -51,6 +56,34 @@ already committed or stop a host operation that ignores its signal.
 
 Recovery delegates canonical exchanges to vivi's shared helper. Legacy desktop display-message
 migration remains host-specific, as do persistence, result truncation and context/memory policy.
+
+## Endpoint-aware model capabilities
+
+The optional shared normalizer reports supported, unsupported or unknown for text conversation,
+tools, streaming, reasoning, effort selection and explicit disable. It does not fetch catalogs,
+prove account access, choose a model or change provider requests. Bot Commander owns catalog
+discovery, account isolation, documented host facts, selection and UI policy.
+
+Agent OpenAI requests use Responses. General bot-chat remains on Chat Completions; OpenRouter
+uses its existing Chat Completions gateway. Facts for one endpoint do not establish support on
+another. Exact custom IDs remain usable with provider default when metadata is absent. Unknown
+tool support does not advertise agent tools. Explicitly unsupported streaming selects non-stream
+transport; unknown streaming preserves the host's requested setting without claiming support.
+
+The small shared seed enriches the retained documented Responses registry and its exact
+task-specific exclusions. Separately reviewed Chat Completions facts and the exact default
+`gpt-5.4-nano` alias/snapshot retain endpoint scope and official source dates. No model prefix or
+generated snapshot name supplies capability evidence. The sources describe a reviewed snapshot,
+not current account visibility or guaranteed request success.
+
+Catalog capability metadata stays in memory and is scoped to provider/account identity. Older
+async results cannot replace a newer fetch. Missing, expired or mismatched metadata falls back
+to unknown; credentials and raw catalog properties are not persisted with capability snapshots.
+
+An agent disable request maps the separate documented disable fact into the provider factory's
+`none` capability sentinel, including optional OpenRouter reasoning with no named effort selector.
+General bot-chat does not gain a new disable request. Its existing default omission, valid
+request payloads, endpoint selection and moderation behavior remain host-owned and unchanged.
 
 The returned transcript is authoritative on cancellation/errors, including synthetic results for
 accepted calls that did not finish. The desktop reconciles it before persisting terminal status.
