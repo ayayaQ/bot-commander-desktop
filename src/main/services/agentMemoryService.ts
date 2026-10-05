@@ -1,7 +1,8 @@
 import { app } from 'electron'
 import crypto from 'node:crypto'
-import fs from 'node:fs/promises'
 import { join } from 'node:path'
+import { createAgentPersistence, reportAgentPersistenceNotice } from './agentPersistence'
+import { withAgentPersistenceOperation } from './agentPersistenceLifecycle'
 import type {
   AgentMemoriesData,
   AgentMemory,
@@ -23,6 +24,7 @@ export interface AgentMemoryMutation {
 
 let data: AgentMemoriesData = { version: 1, memories: [] }
 let loaded = false
+let loading: Promise<AgentMemoryListResult> | undefined
 let mutationChain: Promise<unknown> = Promise.resolve()
 let eventSink: ((memories: AgentMemoryListResult) => void) | null = null
 
@@ -53,6 +55,7 @@ function validMemory(value: unknown): value is AgentMemory {
   const memory = value as AgentMemory
   return (
     typeof memory.id === 'string' &&
+    memory.id.trim().length > 0 &&
     typeof memory.content === 'string' &&
     memory.content.trim().length > 0 &&
     memory.content.length <= MAX_AGENT_MEMORY_CHARACTERS &&
@@ -69,12 +72,14 @@ function validateCollection(memories: AgentMemory[]): void {
   }
   const totalCharacters = memories.reduce((total, memory) => total + memory.content.length, 0)
   if (totalCharacters > MAX_AGENT_MEMORY_TOTAL_CHARACTERS) {
-    throw new Error(
-      `Memories cannot exceed ${MAX_AGENT_MEMORY_TOTAL_CHARACTERS} total characters`
-    )
+    throw new Error(`Memories cannot exceed ${MAX_AGENT_MEMORY_TOTAL_CHARACTERS} total characters`)
   }
   const seen = new Map<string, string>()
+  const ids = new Set<string>()
   for (const memory of memories) {
+    if (!validMemory(memory) || ids.has(memory.id))
+      throw new Error('Invalid memory record or duplicate ID')
+    ids.add(memory.id)
     const key = memory.content.trim().toLocaleLowerCase()
     const duplicateId = seen.get(key)
     if (duplicateId) {
@@ -85,11 +90,7 @@ function validateCollection(memories: AgentMemory[]): void {
 }
 
 export function agentMemoryRevision(memory: AgentMemory): string {
-  return crypto
-    .createHash('sha256')
-    .update(JSON.stringify(memory))
-    .digest('hex')
-    .slice(0, 16)
+  return crypto.createHash('sha256').update(JSON.stringify(memory)).digest('hex').slice(0, 16)
 }
 
 function listResult(): AgentMemoryListResult {
@@ -106,30 +107,48 @@ function listResult(): AgentMemoryListResult {
   }
 }
 
-async function persist(next: AgentMemoriesData): Promise<void> {
-  const output = memoryPath()
-  const temporary = `${output}.tmp`
-  await fs.writeFile(temporary, JSON.stringify(next, null, 2))
-  await fs.rename(temporary, output)
+function decodeMemories(raw: string): AgentMemoriesData {
+  const parsed: unknown = JSON.parse(raw)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+    throw new Error('Agent memory store must be an object')
+  const collection = parsed as Partial<AgentMemoriesData>
+  if (
+    (collection.version !== undefined && collection.version !== 1) ||
+    !Array.isArray(collection.memories)
+  )
+    throw new Error('Invalid or unsupported agent memory store')
+  validateCollection(collection.memories)
+  return { ...collection, version: 1, memories: collection.memories }
 }
+
+const persistence = createAgentPersistence<AgentMemoriesData>({
+  path: memoryPath,
+  label: 'Agent memories',
+  decode: decodeMemories,
+  empty: () => ({ version: 1, memories: [] })
+})
 
 export async function loadAgentMemories(): Promise<AgentMemoryListResult> {
   if (loaded) return clone(listResult())
-  try {
-    const parsed = JSON.parse(await fs.readFile(memoryPath(), 'utf-8')) as Partial<AgentMemoriesData>
-    data = {
-      version: 1,
-      memories: Array.isArray(parsed.memories) ? parsed.memories.filter(validMemory) : []
+  if (!loading) loading = initializeMemories()
+  return clone(await loading)
+}
+
+async function initializeMemories(): Promise<AgentMemoryListResult> {
+  const stored = await persistence.load()
+  data = stored.data
+  if (stored.writable) {
+    try {
+      await withAgentPersistenceOperation(() => persistence.save(data))
+    } catch (error) {
+      reportAgentPersistenceNotice({
+        level: 'error',
+        message: `Could not checkpoint agent memory recovery: ${String(error)}. Existing saved data has been kept; retry saving or restart after resolving the file problem.`
+      })
     }
-    validateCollection(data.memories)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      console.error('Failed to load agent memories:', error)
-    }
-    data = { version: 1, memories: [] }
   }
   loaded = true
-  return clone(listResult())
+  return listResult()
 }
 
 export function setAgentMemoryEventSink(
@@ -143,6 +162,7 @@ export async function prepareCreateMemory(
   actor: AgentMemoryActor
 ): Promise<AgentMemoryMutation> {
   await loadAgentMemories()
+  persistence.assertWritable()
   const timestamp = new Date().toISOString()
   const memory: AgentMemory = {
     id: crypto.randomUUID(),
@@ -163,6 +183,7 @@ export async function prepareUpdateMemory(
   actor: AgentMemoryActor
 ): Promise<AgentMemoryMutation> {
   await loadAgentMemories()
+  persistence.assertWritable()
   const before = data.memories.find((memory) => memory.id === id)
   if (!before) throw new Error('Memory not found')
   if (agentMemoryRevision(before) !== expectedRevision) {
@@ -183,6 +204,7 @@ export async function prepareDeleteMemory(
   expectedRevision: string
 ): Promise<AgentMemoryMutation> {
   await loadAgentMemories()
+  persistence.assertWritable()
   const before = data.memories.find((memory) => memory.id === id)
   if (!before) throw new Error('Memory not found')
   if (agentMemoryRevision(before) !== expectedRevision) {
@@ -191,11 +213,18 @@ export async function prepareDeleteMemory(
   return { kind: 'delete', before: clone(before), after: null, expectedRevision }
 }
 
-export async function commitMemoryMutation(
+export function commitMemoryMutation(
+  mutation: AgentMemoryMutation
+): Promise<AgentMemoryListResult> {
+  return withAgentPersistenceOperation(() => commitAcceptedMemoryMutation(mutation))
+}
+
+async function commitAcceptedMemoryMutation(
   mutation: AgentMemoryMutation
 ): Promise<AgentMemoryListResult> {
   const operation = mutationChain.then(async () => {
     await loadAgentMemories()
+    persistence.assertWritable()
     let nextData: AgentMemoriesData
     if (mutation.kind === 'create') {
       if (!mutation.after) throw new Error('Invalid memory creation')
@@ -210,7 +239,9 @@ export async function commitMemoryMutation(
       const current = data.memories.find((memory) => memory.id === mutation.before!.id)
       if (!current) throw new Error('Memory not found')
       if (agentMemoryRevision(current) !== mutation.expectedRevision) {
-        throw new Error(`Stale memory revision; refresh memories before ${mutation.kind === 'update' ? 'editing' : 'deleting'}`)
+        throw new Error(
+          `Stale memory revision; refresh memories before ${mutation.kind === 'update' ? 'editing' : 'deleting'}`
+        )
       }
       const next =
         mutation.kind === 'update'
@@ -221,10 +252,14 @@ export async function commitMemoryMutation(
       validateCollection(next)
       nextData = { version: 1, memories: next }
     }
-    await persist(nextData)
+    await persistence.save(nextData)
     data = nextData
     const result = listResult()
-    eventSink?.(clone(result))
+    try {
+      eventSink?.(clone(result))
+    } catch (error) {
+      console.error('Could not report committed memory mutation:', error)
+    }
     return result
   })
   mutationChain = operation.catch(() => undefined)

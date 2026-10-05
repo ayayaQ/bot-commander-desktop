@@ -1,10 +1,15 @@
 import { app } from 'electron'
-import fs from 'node:fs/promises'
 import { join } from 'node:path'
 import crypto from 'node:crypto'
 import { runAgent, type HistoryMessage, type ToolCall } from '@ayayaq/vivi'
 import { createAgentProvider } from './agentProviderAdapter'
 import { initializeAgentHistory } from './agentHistory'
+import { createAgentPersistence, reportAgentPersistenceNotice } from './agentPersistence'
+import { decodeAgentSessions, validAgentDisplayHistory } from './agentSessionPersistence'
+import {
+  isAgentPersistencePaused,
+  withAgentPersistenceOperation
+} from './agentPersistenceLifecycle'
 
 export { executeAgentProviderTurn } from './agentProviderAdapter'
 import type {
@@ -87,13 +92,22 @@ let data: AgentSessionsData = {
   modelDefaultsByProvider: {}
 }
 let loaded = false
+let loading: Promise<AgentSessionsData> | undefined
 const controllers = new Map<string, AbortController>()
 const approvals = new Map<string, PendingApproval>()
 const deletedSessionIds = new Set<string>()
+const deletingSessionIds = new Set<string>()
 // Derived on load, never serialized over the preserved damaged transcript.
 const historyRecoveryErrors = new WeakMap<AgentSession, string>()
+// Invalid display history has a safe live projection, while all persistence keeps the evidence.
+const damagedDisplayHistories = new WeakMap<AgentSession, { present: boolean; value: unknown }>()
 let eventSink: ((event: AgentStreamEvent) => void) | null = null
-let saveChain: Promise<void> = Promise.resolve()
+const persistence = createAgentPersistence<AgentSessionsData>({
+  path,
+  label: 'Agent sessions',
+  decode: decodeAgentSessions,
+  empty: () => ({ sessions: [], activeSessionId: null, modelDefaultsByProvider: {} })
+})
 
 function path(): string {
   return join(app.getPath('userData'), AGENT_SESSIONS_FILENAME)
@@ -166,23 +180,98 @@ function settleInterruptedToolCalls(session: AgentSession): void {
 
 function emit(session: AgentSession, event: Omit<AgentStreamEvent, 'sessionId'>) {
   if (deletedSessionIds.has(session.id)) return
-  eventSink?.({ sessionId: session.id, ...event })
+  try {
+    eventSink?.({ sessionId: session.id, ...event })
+  } catch (error) {
+    console.error('Could not report agent session update:', error)
+  }
 }
 
 function emitSession(session: AgentSession, runId?: string) {
   emit(session, { type: 'session', runId, session: clone(session) })
 }
 
-async function save(): Promise<void> {
-  saveChain = saveChain
-    .catch(() => undefined)
-    .then(async () => {
-      const output = path()
-      const temp = `${output}.tmp`
-      await fs.writeFile(temp, JSON.stringify(data, null, 2))
-      await fs.rename(temp, output)
+function persistentSnapshot(value: AgentSessionsData = data): AgentSessionsData {
+  const snapshot = clone(value)
+  for (const session of snapshot.sessions) {
+    const current = data.sessions.find((item) => item.id === session.id)
+    const original = current && damagedDisplayHistories.get(current)
+    if (!original) continue
+    if (original.present) session.messages = clone(original.value) as AgentMessage[]
+    else delete (session as Partial<AgentSession>).messages
+  }
+  return snapshot
+}
+
+let sessionWriteChain: Promise<unknown> = Promise.resolve()
+let checkpointFailed = false
+function queueSessionWrite<T>(operation: () => Promise<T>): Promise<T> {
+  return withAgentPersistenceOperation(() => {
+    const next = sessionWriteChain.catch(() => undefined).then(operation)
+    sessionWriteChain = next
+    return next
+  })
+}
+
+function save(): Promise<void> {
+  return queueSessionWrite(async () => {
+    // Metadata jobs publish only after commit. Snapshot after earlier jobs have published,
+    // so a run checkpoint cannot remove a newly-created session or undo an accepted edit.
+    const snapshot = persistentSnapshot()
+    snapshot.sessions = snapshot.sessions.filter((session) => !deletedSessionIds.has(session.id))
+    if (snapshot.activeSessionId && deletedSessionIds.has(snapshot.activeSessionId))
+      snapshot.activeSessionId = snapshot.sessions[0]?.id ?? null
+    try {
+      await persistence.save(snapshot)
+      checkpointFailed = false
+    } catch (error) {
+      // Runs keep live progress/error state even when a checkpoint rejects. Quit must retry
+      // that state rather than silently exiting with only the earlier durable checkpoint.
+      checkpointFailed = true
+      throw error
+    }
+  })
+}
+
+/** Called after agent ingress is paused and all accepted jobs have drained. */
+export async function checkpointAgentSessionsBeforeQuit(): Promise<void> {
+  if (!checkpointFailed) return
+  await persistence.save(persistentSnapshot())
+  checkpointFailed = false
+}
+
+// Metadata requests serialize, and only publish live state after a committed save.
+function editSessions<T>(change: (next: AgentSessionsData) => T): Promise<T> {
+  return queueSessionWrite(async () => {
+    await loadAgentSessions()
+    persistence.assertWritable()
+    const before = clone(data)
+    const next = clone(before)
+    const result = change(next)
+    await persistence.save(persistentSnapshot(next))
+    // Keep active run object identities, including their derived quarantine markers.
+    const current = new Map(data.sessions.map((session) => [session.id, session]))
+    data.sessions = next.sessions.map((session) => {
+      const existing = current.get(session.id)
+      if (!existing) return session
+      // Only changed metadata is published; an active run may have advanced meanwhile.
+      const original = before.sessions.find((item) => item.id === session.id)!
+      for (const key of [
+        'title',
+        'mode',
+        'model',
+        'reasoningEffort',
+        'planReady',
+        'updatedAt'
+      ] as const) {
+        if (session[key] !== original[key]) Object.assign(existing, { [key]: session[key] })
+      }
+      return existing
     })
-  await saveChain
+    data.activeSessionId = next.activeSessionId
+    data.modelDefaultsByProvider = next.modelDefaultsByProvider
+    return clone(result)
+  })
 }
 
 export function setAgentEventSink(sink: ((event: AgentStreamEvent) => void) | null) {
@@ -191,20 +280,32 @@ export function setAgentEventSink(sink: ((event: AgentStreamEvent) => void) | nu
 
 export async function loadAgentSessions(): Promise<AgentSessionsData> {
   if (loaded) return clone(data)
-  try {
-    const parsed = JSON.parse(await fs.readFile(path(), 'utf-8')) as AgentSessionsData
-    data = {
-      sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
-      activeSessionId: typeof parsed.activeSessionId === 'string' ? parsed.activeSessionId : null,
-      modelDefaultsByProvider: normalizeModelDefaults(parsed.modelDefaultsByProvider)
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
-      console.error('Failed to load agent sessions:', error)
-    data = { sessions: [], activeSessionId: null, modelDefaultsByProvider: {} }
+  if (!loading) loading = initializeSessions()
+  return clone(await loading)
+}
+
+async function initializeSessions(): Promise<AgentSessionsData> {
+  const stored = await persistence.load()
+  data = {
+    ...stored.data,
+    sessions: stored.data.sessions.map((session) => ({
+      ...session,
+      tokenCount: session.tokenCount ?? 0,
+      planReady: session.planReady ?? false
+    })),
+    activeSessionId: stored.data.activeSessionId ?? null,
+    modelDefaultsByProvider: normalizeModelDefaults(stored.data.modelDefaultsByProvider)
   }
   for (const session of data.sessions) {
     try {
+      if (!validAgentDisplayHistory(session.messages)) {
+        damagedDisplayHistories.set(session, {
+          present: Object.hasOwn(session, 'messages'),
+          value: clone(session.messages)
+        })
+        session.messages = []
+        throw new Error('Existing agent display history is malformed')
+      }
       initializeAgentHistory(session)
     } catch (error) {
       const diagnostic =
@@ -228,8 +329,19 @@ export async function loadAgentSessions(): Promise<AgentSessionsData> {
     }
     settleInterruptedToolCalls(session)
   }
+  // Blocked recovery still exposes the shell. A failed migration must not erase the input.
+  if (stored.writable) {
+    try {
+      await withAgentPersistenceOperation(() => persistence.save(persistentSnapshot()))
+    } catch (error) {
+      checkpointFailed = true
+      reportAgentPersistenceNotice({
+        level: 'error',
+        message: `Could not checkpoint agent session recovery: ${errorDetail(error)}. Existing saved data has been kept; retry saving or restart after resolving the file problem.`
+      })
+    }
+  }
   loaded = true
-  await save()
   return clone(data)
 }
 
@@ -237,41 +349,49 @@ export async function createAgentSession(
   settings: AiRuntimeSettings,
   title = 'New agent'
 ): Promise<AgentSession> {
-  await loadAgentSessions()
-  const timestamp = now()
-  const provider = getAiProvider(settings)
-  const modelDefaults = data.modelDefaultsByProvider[provider]
-  const session: AgentSession = {
-    id: id('agent'),
-    title,
-    mode: 'manual',
-    model: modelDefaults?.model || getSelectedAiModel(settings),
-    reasoningEffort: modelDefaults?.reasoningEffort || 'none',
-    status: 'idle',
-    messages: [],
-    history: [],
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    planReady: false,
-    tokenCount: 0
-  }
-  data.sessions.unshift(session)
-  deletedSessionIds.delete(session.id)
-  data.activeSessionId = session.id
-  await save()
-  return clone(session)
+  return editSessions((next) => {
+    const timestamp = now()
+    const provider = getAiProvider(settings)
+    const modelDefaults = next.modelDefaultsByProvider[provider]
+    const session: AgentSession = {
+      id: id('agent'),
+      title,
+      mode: 'manual',
+      model: modelDefaults?.model || getSelectedAiModel(settings),
+      reasoningEffort: modelDefaults?.reasoningEffort || 'none',
+      status: 'idle',
+      messages: [],
+      history: [],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      planReady: false,
+      tokenCount: 0
+    }
+    next.sessions.unshift(session)
+    next.activeSessionId = session.id
+    return session
+  })
 }
 
 export async function deleteAgentSession(sessionId: string): Promise<boolean> {
-  await loadAgentSessions()
-  if (controllers.has(sessionId)) cancelAgentRun(sessionId)
-  const index = data.sessions.findIndex((item) => item.id === sessionId)
-  if (index < 0) return false
-  deletedSessionIds.add(sessionId)
-  data.sessions.splice(index, 1)
-  if (data.activeSessionId === sessionId) data.activeSessionId = data.sessions[0]?.id || null
-  await save()
-  return true
+  return withAgentPersistenceOperation(async () => {
+    await loadAgentSessions()
+    persistence.assertWritable()
+    if (!data.sessions.some((session) => session.id === sessionId)) return false
+    deletingSessionIds.add(sessionId)
+    cancelAgentRun(sessionId)
+    try {
+      const deleted = await editSessions((next) => {
+        next.sessions = next.sessions.filter((session) => session.id !== sessionId)
+        if (next.activeSessionId === sessionId) next.activeSessionId = next.sessions[0]?.id || null
+        return true
+      })
+      deletedSessionIds.add(sessionId)
+      return deleted
+    } finally {
+      deletingSessionIds.delete(sessionId)
+    }
+  })
 }
 
 export async function updateAgentSession(
@@ -279,30 +399,34 @@ export async function updateAgentSession(
   updates: Partial<Pick<AgentSession, 'title' | 'mode' | 'model' | 'reasoningEffort'>>,
   provider: AgentProvider
 ): Promise<AgentSession> {
-  await loadAgentSessions()
-  const session = getSessionOrThrow(sessionId)
-  if (updates.title !== undefined) session.title = updates.title.slice(0, 80)
-  if (updates.mode && ['manual', 'auto', 'planning'].includes(updates.mode))
-    session.mode = updates.mode as AgentMode
-  if (updates.mode && updates.mode !== 'planning') session.planReady = false
-  if (updates.model) session.model = updates.model
-  if (updates.reasoningEffort) session.reasoningEffort = updates.reasoningEffort
-  if (updates.model !== undefined || updates.reasoningEffort !== undefined) {
-    data.modelDefaultsByProvider[provider] = {
-      model: session.model,
-      reasoningEffort: session.reasoningEffort
+  await editSessions((next) => {
+    const session = next.sessions.find((item) => item.id === sessionId)
+    if (!session) throw new Error('Agent session not found')
+    if (updates.title !== undefined) session.title = updates.title.slice(0, 80)
+    if (updates.mode && ['manual', 'auto', 'planning'].includes(updates.mode))
+      session.mode = updates.mode
+    if (updates.mode && updates.mode !== 'planning') session.planReady = false
+    if (updates.model) session.model = updates.model
+    if (updates.reasoningEffort) session.reasoningEffort = updates.reasoningEffort
+    if (updates.model !== undefined || updates.reasoningEffort !== undefined) {
+      next.modelDefaultsByProvider[provider] = {
+        model: session.model,
+        reasoningEffort: session.reasoningEffort
+      }
     }
-  }
-  session.updatedAt = now()
-  await save()
+    session.updatedAt = now()
+  })
+  const session = getSessionOrThrow(sessionId)
   emitSession(session)
   return clone(session)
 }
 
 export async function setActiveAgentSession(sessionId: string | null): Promise<void> {
-  await loadAgentSessions()
-  data.activeSessionId = sessionId
-  await save()
+  await editSessions((next) => {
+    if (sessionId !== null && !next.sessions.some((session) => session.id === sessionId))
+      throw new Error('Agent session not found')
+    next.activeSessionId = sessionId
+  })
 }
 
 export function formatAgentMemoryContext(
@@ -469,13 +593,28 @@ async function runTool(
   }
 }
 
-export async function runAgentSession(
+export function runAgentSession(
+  sessionId: string,
+  userContent: string,
+  settings: AiRuntimeSettings
+): Promise<{ runId: string }> {
+  return withAgentPersistenceOperation(() => startAgentSession(sessionId, userContent, settings))
+}
+
+/** Stop active providers/approvals, then let their admitted final checkpoints drain. */
+export function stopAgentRuns(): void {
+  for (const sessionId of controllers.keys()) cancelAgentRun(sessionId)
+}
+
+async function startAgentSession(
   sessionId: string,
   userContent: string,
   settings: AiRuntimeSettings
 ): Promise<{ runId: string }> {
   await loadAgentSessions()
+  persistence.assertWritable()
   const session = getSessionOrThrow(sessionId)
+  if (deletingSessionIds.has(sessionId)) throw new Error('Agent session is being deleted')
   const historyError = historyRecoveryErrors.get(session)
   if (historyError) throw new Error(historyError)
   if (controllers.has(sessionId))
@@ -484,6 +623,9 @@ export async function runAgentSession(
   // App policy remains here; a standalone vivi OpenRouter provider needs only its own key.
   const configError = validateAiConfiguration(settings)
   if (configError) throw new Error(configError)
+  // An admitted request may still be loading when shutdown sweeps existing controllers.
+  // Do not register a new provider run after that sweep; it has not changed any state yet.
+  if (isAgentPersistencePaused()) throw new Error('The app is shutting down; agent runs are paused')
 
   const runId = id('run')
   const context: AgentRunContext = {
@@ -522,7 +664,7 @@ export async function runAgentSession(
   }
   emitSession(session, runId)
 
-  void (async () => {
+  void withAgentPersistenceOperation(async () => {
     try {
       const memoryContext = formatAgentMemoryContext((await loadAgentMemories()).memories)
       const hasMemories = memoryContext !== 'Saved user memories: none.'
@@ -548,6 +690,7 @@ export async function runAgentSession(
       ]
       const initialTokenCount = session.tokenCount
       const runModel = { model: session.model, reasoningEffort: session.reasoningEffort }
+      assertActiveRun(session, runId, controller.signal)
       const result = await runAgent({
         provider: createAgentProvider(settings, runModel, { stream: true }),
         messages: [...prefix, ...session.history!],
@@ -634,12 +777,20 @@ export async function runAgentSession(
         }
       }
     }
-  })()
+  })
 
   return { runId }
 }
 
-export async function resolveAgentPlan(
+export function resolveAgentPlan(
+  sessionId: string,
+  decision: AgentPlanDecision,
+  settings: AiRuntimeSettings
+): Promise<AgentSession | { runId: string }> {
+  return withAgentPersistenceOperation(() => decideAgentPlan(sessionId, decision, settings))
+}
+
+async function decideAgentPlan(
   sessionId: string,
   decision: AgentPlanDecision,
   settings: AiRuntimeSettings
@@ -655,17 +806,26 @@ export async function resolveAgentPlan(
   )
     throw new Error('This session does not have a completed plan awaiting a decision')
 
-  session.planReady = false
+  await editSessions((next) => {
+    const pending = next.sessions.find((item) => item.id === sessionId)!
+    // Decisions may queue behind an in-flight save. Recheck the decision gate against the
+    // latest committed metadata so a duplicate cannot change mode or start another run.
+    if (
+      !pending?.planReady ||
+      pending.mode !== 'planning' ||
+      pending.status !== 'completed' ||
+      controllers.has(sessionId)
+    )
+      throw new Error('This session does not have a completed plan awaiting a decision')
+    pending.planReady = false
+    if (decision !== 'continue') pending.mode = decision
+    pending.updatedAt = now()
+  })
   if (decision === 'continue') {
-    session.updatedAt = now()
-    await save()
     emitSession(session)
     return clone(session)
   }
 
-  session.mode = decision
-  session.updatedAt = now()
-  await save()
   emitSession(session)
   return runAgentSession(sessionId, 'Implement the plan.', settings)
 }

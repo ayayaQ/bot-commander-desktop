@@ -22,6 +22,17 @@ vi.mock('node:fs/promises', () => ({
   }
 }))
 
+// These provider fixtures observe serialized checkpoints; disk faults are covered by the
+// recovery adapter and service integration tests with the real atomic writer.
+vi.mock('./atomicPersistence', () => ({
+  atomicWrite: vi.fn(async (path: string, raw: string, options) => {
+    options?.validate?.(raw)
+    await mocks.writeFile(`${path}.tmp`, raw)
+    await mocks.rename(`${path}.tmp`, path)
+    return { durability: 'confirmed' }
+  })
+}))
+
 vi.mock('./agentTools', () => ({
   agentToolTargetLabel: mocks.agentToolTargetLabel,
   agentToolDefinitions: [

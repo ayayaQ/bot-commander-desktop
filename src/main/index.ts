@@ -13,6 +13,13 @@ import {
   resumeRuntime
 } from './utils/virtual'
 import { finishPersistenceBeforeQuit } from './utils/gracefulShutdown'
+import { stopAgentRuns, checkpointAgentSessionsBeforeQuit } from './services/agentService'
+import { setAgentPersistenceNoticeHandler } from './services/agentPersistence'
+import {
+  pauseAgentPersistence,
+  drainAgentPersistence,
+  resumeAgentPersistence
+} from './services/agentPersistenceLifecycle'
 import {
   closeAndDrainAtomicWrites,
   reopenAtomicWrites,
@@ -160,6 +167,17 @@ function createTray() {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(async () => {
+  setAgentPersistenceNoticeHandler(({ level, message }) => {
+    if (level === 'error') {
+      rendererConsole.error(message)
+      dialog.showErrorBox('Agent storage recovery required', message)
+    } else {
+      rendererConsole.warning(message)
+      void dialog
+        .showMessageBox({ type: 'warning', title: 'Agent storage recovered', message })
+        .catch((error) => console.error('Could not show agent recovery warning:', error))
+    }
+  })
   setAtomicWriteNoticeHandler(({ level, message }) => {
     rendererConsole[level](message)
     if (level === 'error') dialog.showErrorBox('Save durability could not be confirmed', message)
@@ -220,13 +238,22 @@ app.whenReady().then(async () => {
       await finishPersistenceBeforeQuit({
         pauseResources: stopResourceMutations,
         pauseRuntime,
+        pauseAgents: () => {
+          pauseAgentPersistence()
+          stopAgentRuns()
+        },
         checkpointAndStopRuntime: stopRuntimeAndCheckpoint,
         drainResources: drainResourceMutations,
+        drainAgents: async () => {
+          await drainAgentPersistence()
+          await checkpointAgentSessionsBeforeQuit()
+        },
         saveStats,
         stopServer: stopMcpServer,
         closeAndDrainWrites: closeAndDrainAtomicWrites,
         resumeResources: resumeResourceMutations,
         resumeRuntime,
+        resumeAgents: resumeAgentPersistence,
         reopenWrites: reopenAtomicWrites
       })
       app.exit(0)
