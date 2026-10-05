@@ -16,7 +16,7 @@ import {
 } from '@modelcontextprotocol/node'
 import type { McpActivityEntry, McpConfig, McpServerStatus } from '../../shared/mcpTypes'
 import {
-  agentToolDefinitions,
+  mcpAgentToolDefinitions,
   agentOnlyToolNames,
   agentToolTargetLabel,
   executeAgentTool,
@@ -137,7 +137,7 @@ export function createBotCommanderMcpServer(
     { name: 'bot-commander', version: app.getVersion() },
     { instructions: SERVER_INSTRUCTIONS }
   )
-  const definitions = agentToolDefinitions.filter(
+  const definitions = mcpAgentToolDefinitions.filter(
     (definition) =>
       !agentOnlyToolNames.has(definition.function.name) &&
       (accessMode === 'read-write' || !mutationToolNames.has(definition.function.name))

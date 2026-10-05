@@ -46,13 +46,42 @@ export type PlaygroundState = {
   messages: PlaygroundMessage[]
   nextId: number
 }
-export type PlaygroundResult = { state: PlaygroundState; trace: string[]; errors: string[] }
+export type PlaygroundExecutionOutcome =
+  'executed' | 'blocked' | 'error' | 'unmatched' | 'unsupported' | 'not_run'
+export type PlaygroundResourceResult = {
+  resourceId: string
+  kind: 'command' | 'interaction'
+  matched: boolean
+  executed: boolean
+  outcome: PlaygroundExecutionOutcome
+  reason?: string
+  error?: string
+}
+export type PlaygroundResult = {
+  state: PlaygroundState
+  trace: string[]
+  errors: string[]
+  /** Explicit engine coverage. Optional only for older UI fixtures; validation fails closed without it. */
+  resources?: PlaygroundResourceResult[]
+}
+
+/** Structured engine failures retain the existing user-facing error text. */
+export class PlaygroundExecutionError extends Error {
+  constructor(
+    message: string,
+    readonly outcome: 'blocked' | 'unmatched' | 'unsupported' | 'error'
+  ) {
+    super(message)
+  }
+}
 export type PlaygroundMessageRequest = {
   kind?: 'message'
   state: PlaygroundState
   commands: BCFDCommand[]
   senderId: string
   content: string
+  /** Defaults to wrapped eval for ordinary Playground callers. */
+  wrapEvalInIIFE?: boolean
 }
 export type PlaygroundInteractionRequest = {
   kind: 'slash' | 'button'
@@ -63,6 +92,8 @@ export type PlaygroundInteractionRequest = {
   options?: Record<string, string | number | boolean>
   messageId?: number
   customId?: string
+  /** Defaults to wrapped eval for ordinary Playground callers. */
+  wrapEvalInIIFE?: boolean
 }
 export type PlaygroundRequest = PlaygroundMessageRequest | PlaygroundInteractionRequest
 export const PLAYGROUND_LIMITS = {

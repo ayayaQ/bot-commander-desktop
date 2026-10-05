@@ -4,6 +4,7 @@
   import { onMount, tick } from 'svelte'
   import ModelPicker from './ModelPicker.svelte'
   import AgentApprovalDiff from './AgentApprovalDiff.svelte'
+  import AgentValidationReport from './AgentValidationReport.svelte'
   import AgentRunSummary from './AgentRunSummary.svelte'
   import { renderMarkdown } from '../utils/markdown'
   import { agentToolLabel } from '../utils/agentToolLabel'
@@ -502,6 +503,13 @@
                             : 'badge-ghost'}">{call.status.replace('_', ' ')}</span
                       >
                     </div>
+                    {#if call.validation}
+                      <AgentValidationReport
+                        report={call.validation}
+                        binding={call.validationBinding}
+                        candidate={call.after}
+                      />
+                    {/if}
                     {#if call.status === 'waiting_approval'}
                       <AgentApprovalDiff before={call.before} after={call.after} />
                       <div class="p-3 border-t border-base-300 flex justify-end gap-2">

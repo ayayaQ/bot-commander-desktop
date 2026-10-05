@@ -1,3 +1,4 @@
+import type { AgentValidationReport } from './agentValidationTypes'
 import type { HistoryMessage } from '@ayayaq/vivi'
 import type { DesktopReasoningEffort } from './aiModelTypes'
 
@@ -16,6 +17,14 @@ export interface AgentToolCall {
   status: 'running' | 'waiting_approval' | 'approved' | 'rejected' | 'completed' | 'error'
   result?: unknown
   error?: string
+  validation?: AgentValidationReport
+  validationBinding?: {
+    wrapEvalInIIFE: boolean
+    candidateHash: string
+    baseRevision: string | null
+    fixtureHash: string
+  }
+  diagnostics?: AgentLintDiagnostic[]
   before?: unknown
   after?: unknown
   createdAt: string

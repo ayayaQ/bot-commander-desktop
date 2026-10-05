@@ -6,14 +6,24 @@ import type { HistoryMessage, JsonValue, ToolCall, ToolResult } from '@ayayaq/vi
 import type { AgentMode, AgentSession, AgentStreamEvent } from '../../shared/agentTypes'
 import type { AiRuntimeSettings } from './aiProviderService'
 import type { PreparedMutation } from './agentTools'
+import type { BCFDCommand } from '../types/types'
+import { decodeBCFDCommand } from '../../shared/commandCodec'
+import { createPlaygroundState } from '../../shared/playground/types'
+import { createNotRunAgentValidationReport } from '../../shared/agentValidationTypes'
+import type {
+  AgentValidationRequest,
+  AgentValidationSuite
+} from '../../shared/agentValidationTypes'
 
-// Only Electron's data directory and the host domain/tool seam are replaced. The agent loop,
+// Electron's data directory, host domain/tool seam and offline validation executor are replaced. The agent loop,
 // extension registry, calculator, providers, history recovery and persistence are published/real.
 const host = vi.hoisted(() => ({
   directory: '',
   prepare: vi.fn(),
   commit: vi.fn(),
-  read: vi.fn()
+  read: vi.fn(),
+  lint: vi.fn(),
+  validate: vi.fn()
 }))
 vi.mock('electron', () => ({ app: { getPath: () => host.directory } }))
 vi.mock('./agentTools', () => ({
@@ -42,9 +52,10 @@ vi.mock('./agentTools', () => ({
           properties: {
             id: { type: 'string' },
             expectedRevision: { type: 'string' },
-            patches: { type: 'array' }
+            patches: { type: 'array' },
+            validation: { type: 'object' }
           },
-          required: ['id', 'expectedRevision', 'patches'],
+          required: ['id', 'expectedRevision', 'patches', 'validation'],
           additionalProperties: false
         }
       }
@@ -53,16 +64,15 @@ vi.mock('./agentTools', () => ({
   mutationToolNames: new Set(['edit_command']),
   prepareMutation: host.prepare,
   commitMutation: host.commit,
-  executeReadTool: host.read
+  executeReadTool: host.read,
+  lintPreparedMutation: host.lint
 }))
+
+vi.mock('./agentValidationService', () => ({ validatePreparedResource: host.validate }))
 
 type Provider = 'openai' | 'openrouter'
 type Agents = typeof import('./agentService')
-interface FixtureCommand {
-  id: string
-  name: string
-  channelMessage: string
-}
+type FixtureCommand = BCFDCommand & { name: string }
 interface RecordedRequest {
   url: string
   init: RequestInit
@@ -81,9 +91,17 @@ interface Turn {
 }
 
 const initialCommand: FixtureCommand = {
-  id: 'fixture-command',
-  name: 'Fixture command',
-  channelMessage: 'Before'
+  ...decodeBCFDCommand({
+    id: 'fixture-command',
+    command: '!fixture',
+    commandDescription: 'Fixture command',
+    channelMessage: 'Before',
+    privateMessage: '',
+    channelEmbed: {},
+    privateEmbed: {},
+    type: 0
+  }).command,
+  name: 'Fixture command'
 }
 const requests: RecordedRequest[] = []
 const fetchMock = vi.fn<typeof fetch>()
@@ -133,9 +151,56 @@ async function editCall(id = 'edit-call', content = 'After'): Promise<ToolCall> 
     arguments: {
       id: initialCommand.id,
       expectedRevision: resourceRevision(await readCommand()),
-      patches: [{ op: 'replace', path: '/channelMessage', value: content }]
+      patches: [{ op: 'replace', path: '/channelMessage', value: content }],
+      validation: JSON.parse(JSON.stringify(mutationValidationSuite(content))) as JsonValue
     }
   }
+}
+
+function mutationValidationSuite(content: string): AgentValidationSuite {
+  const state = createPlaygroundState()
+  return {
+    cases: [
+      {
+        name: 'updated fixture reply',
+        state,
+        steps: [
+          {
+            kind: 'message',
+            senderId: state.members[0].id,
+            content: initialCommand.command,
+            assertions: [
+              { path: '/outcome', equals: 'executed' },
+              { path: '/effects/messages/0/content', equals: content }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
+
+function passingValidationReport(input: AgentValidationRequest) {
+  const report = createNotRunAgentValidationReport(input, 'mock execution')
+  report.outcome = 'passed'
+  report.coverage.executed = 1
+  report.coverage.matched = 1
+  report.coverage.notRun = 0
+  report.cases[0].outcome = 'passed'
+  Object.assign(report.cases[0].steps[0], {
+    outcome: 'passed',
+    executionOutcome: 'executed',
+    matched: true,
+    executed: true,
+    assertions: input.suite.cases[0].steps[0].assertions.map((assertion) => ({
+      path: assertion.path,
+      expected: assertion.equals,
+      actual: assertion.equals,
+      actualPresent: true,
+      passed: true
+    }))
+  })
+  return report
 }
 
 function sse(frames: (JsonValue | '[DONE]')[]): Response {
@@ -377,6 +442,10 @@ beforeEach(async () => {
   host.prepare.mockReset()
   host.commit.mockReset()
   host.read.mockReset()
+  host.lint.mockReset()
+  host.validate.mockReset()
+  host.lint.mockResolvedValue([])
+  host.validate.mockImplementation(async (input) => passingValidationReport(input))
   fetchMock.mockReset()
   requests.length = 0
   vi.stubGlobal('fetch', fetchMock)
@@ -411,10 +480,16 @@ beforeEach(async () => {
     } satisfies PreparedMutation
   })
   host.commit.mockImplementation(
-    async (prepared: PreparedMutation, actor: string, signal: AbortSignal) =>
+    async (
+      prepared: PreparedMutation,
+      actor: string,
+      signal: AbortSignal,
+      beforeCommit?: (snapshot: PreparedMutation) => void
+    ) =>
       withResourceMutationLock('commands', async () => {
         expect(actor).toBe('agent')
         signal.throwIfAborted()
+        beforeCommit?.(structuredClone(prepared))
         const current = await readCommand()
         if (resourceRevision(current) !== prepared.arguments.expectedRevision) {
           throw new Error('Resource revision is stale; read again')
@@ -536,6 +611,16 @@ describe('published registry calculator in the recoverable desktop agent', () =>
         }
       ])
       expect(host.commit).not.toHaveBeenCalled()
+      expect(host.validate).toHaveBeenCalledOnce()
+      expect(displayCalls(pending)[1].validation).toMatchObject({
+        outcome: 'passed',
+        candidateId: initialCommand.id
+      })
+      const { resourceRevision } = await import('./resourceChangeService')
+      expect(displayCalls(pending)[1].validationBinding).toMatchObject({
+        baseRevision: resourceRevision(initialCommand),
+        wrapEvalInIIFE: true
+      })
       expect(await readCommand()).toEqual(initialCommand)
       expect(await agents.resolveAgentApproval(session.id, mutation.id, approved)).toBe(true)
       const completed = await observed.terminal
@@ -583,6 +668,10 @@ describe('published registry calculator in the recoverable desktop agent', () =>
     expect(host.read).toHaveBeenCalledOnce()
     expect(host.prepare).toHaveBeenCalledOnce()
     expect(host.commit).toHaveBeenCalledOnce()
+    expect(host.validate).toHaveBeenCalledOnce()
+    expect(host.commit.mock.invocationCallOrder[0]).toBeGreaterThan(
+      host.validate.mock.invocationCallOrder[0]
+    )
     expect(displayCalls(completed).map((call) => call.status)).toEqual([
       'completed',
       'completed',

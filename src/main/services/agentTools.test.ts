@@ -94,6 +94,23 @@ vi.mock('../utils/rendererConsole', () => ({
 }))
 
 describe('agent resource tools', () => {
+  it('returns fresh offline fixtures without saved state and lints an unsaved draft without saving', async () => {
+    const tools = await import('./agentTools')
+    const first = (await tools.executeReadTool('read_validation_fixture', {})) as any
+    first.state.botState.count = 99
+    const second = (await tools.executeReadTool('read_validation_fixture', {})) as any
+    expect(second.state.botState).toEqual({})
+    expect(second.state.variables).toEqual({})
+    expect(second.state.botState).not.toEqual(mocks.state.botState)
+    const prepared = await tools.prepareMutation('create_command', {
+      command: { command: '!ping', commandDescription: 'Ping', channelMessage: 'Pong!' }
+    })
+    expect(await tools.lintPreparedMutation(prepared)).toEqual([])
+    expect(mocks.state.commands.bcfdCommands).toEqual([])
+    expect(mocks.saveCommands).not.toHaveBeenCalled()
+    expect(mocks.restartJsEngine).not.toHaveBeenCalled()
+  })
+
   beforeEach(() => {
     mocks.state.commands = { bcfdCommands: [], bcfdSlashCommands: [] }
     mocks.state.interactions = []
@@ -202,6 +219,44 @@ describe('agent resource tools', () => {
     ).toBe('new-interaction')
     expect(agentToolTargetLabel('read_command', { id: 'missing' })).toBeUndefined()
     expect(agentToolTargetLabel('read_bot_state', {})).toBeUndefined()
+  })
+
+  it('keeps validation schema/promises in the built-in catalog and out of MCP', async () => {
+    const { agentToolDefinitions, mcpAgentToolDefinitions } = await import('./agentTools')
+    expect(
+      agentToolDefinitions.some((tool) => tool.function.name === 'read_validation_fixture')
+    ).toBe(true)
+    expect(
+      mcpAgentToolDefinitions.some((tool) => tool.function.name === 'read_validation_fixture')
+    ).toBe(false)
+    for (const name of [
+      'create_command',
+      'edit_command',
+      'create_interaction',
+      'edit_interaction'
+    ]) {
+      const builtin = agentToolDefinitions.find((tool) => tool.function.name === name)!
+      const external = mcpAgentToolDefinitions.find((tool) => tool.function.name === name)!
+      expect(builtin.function.parameters.properties).toHaveProperty('validation')
+      expect(external.function.parameters.properties).not.toHaveProperty('validation')
+      expect(external.function.description).not.toContain('validation')
+    }
+  })
+
+  it('rejects supplied MCP validation instead of silently ignoring a failing suite and saving', async () => {
+    const { executeAgentTool } = await import('./agentTools')
+    await expect(
+      executeAgentTool(
+        'create_command',
+        {
+          command: { command: '!ping', commandDescription: 'Ping', channelMessage: 'Pong!' },
+          validation: { cases: [] }
+        },
+        'mcp'
+      )
+    ).rejects.toThrow('built-in agent panel')
+    expect(mocks.saveCommands).not.toHaveBeenCalled()
+    expect(mocks.state.commands.bcfdCommands).toEqual([])
   })
 
   it('creates canonical commands and returns automatic lint diagnostics', async () => {
@@ -381,8 +436,8 @@ describe('agent resource tools', () => {
     const { withResourceMutationLock } = await import('./resourceChangeService')
     let release!: () => void
     let entered!: () => void
-    const started = new Promise<void>((resolve) => entered = resolve)
-    const barrier = new Promise<void>((resolve) => release = resolve)
+    const started = new Promise<void>((resolve) => (entered = resolve))
+    const barrier = new Promise<void>((resolve) => (release = resolve))
     const holding = withResourceMutationLock('commands', async () => {
       entered()
       await barrier
@@ -405,4 +460,80 @@ describe('agent resource tools', () => {
     expect(mocks.saveCommands).toHaveBeenCalledOnce()
   })
 
+  it('rechecks validated interpreter mode after waiting for the resource lock', async () => {
+    const { commitMutation, prepareMutation } = await import('./agentTools')
+    const { withResourceMutationLock } = await import('./resourceChangeService')
+    const { assertAgentValidationBinding, validationHash } =
+      await import('./agentMutationValidation')
+    const { createNotRunAgentValidationReport } = await import('../../shared/agentValidationTypes')
+    const { createPlaygroundState } = await import('../../shared/playground/types')
+    const state = createPlaygroundState()
+    const validation = {
+      cases: [
+        {
+          name: 'reply',
+          state,
+          steps: [
+            {
+              kind: 'message' as const,
+              senderId: state.members[0].id,
+              content: '!ping',
+              assertions: [
+                { path: '/outcome', equals: 'executed' },
+                { path: '/effects/messages/0/content', equals: 'Pong!' }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+    const prepared = await prepareMutation('create_command', {
+      command: { command: '!ping', channelMessage: 'Pong!' },
+      validation
+    })
+    const binding = {
+      candidateHash: validationHash(prepared.after),
+      baseRevision: null,
+      fixtureHash: validationHash(validation),
+      wrapEvalInIIFE: true
+    }
+    const report = createNotRunAgentValidationReport(
+      {
+        candidateKind: 'command',
+        candidate: prepared.after as import('../types/types').BCFDCommand,
+        ...binding,
+        suite: validation
+      },
+      'binding fixture only'
+    )
+    const guard = vi.fn((snapshot) => {
+      expect(snapshot).not.toBe(prepared)
+      assertAgentValidationBinding(snapshot, binding, report)
+    })
+    let release!: () => void
+    let entered!: () => void
+    const started = new Promise<void>((resolve) => (entered = resolve))
+    const barrier = new Promise<void>((resolve) => (release = resolve))
+    const holding = withResourceMutationLock('commands', async () => {
+      entered()
+      await barrier
+    })
+    await started
+    const pending = commitMutation(prepared, 'agent', undefined, guard)
+    const rejected = expect(pending).rejects.toThrow('stale')
+    expect(guard).not.toHaveBeenCalled()
+    mocks.state.settings.useLegacyInterpreter = true
+    release()
+    await holding
+    await rejected
+    expect(guard).toHaveBeenCalledOnce()
+    expect(mocks.saveCommands).not.toHaveBeenCalled()
+    expect(mocks.state.commands.bcfdCommands).toEqual([])
+
+    mocks.state.settings.useLegacyInterpreter = false
+    await expect(commitMutation(prepared, 'agent', undefined, guard)).resolves.toMatchObject({
+      success: true
+    })
+    expect(mocks.saveCommands).toHaveBeenCalledOnce()
+  })
 })

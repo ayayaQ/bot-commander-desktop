@@ -48,16 +48,28 @@ import {
   agentToolTargetLabel,
   agentToolDefinitions,
   commitMutation,
+  lintPreparedMutation,
   executeReadTool,
   mutationToolNames,
   prepareMutation,
   type PreparedMutation
 } from './agentTools'
 import { loadAgentMemories } from './agentMemoryService'
+import {
+  boundAgentToolResult,
+  MAX_AGENT_TOOL_RESULT_CHARS,
+  clipAgentLintDiagnostics,
+  stringifyAgentToolResult
+} from './agentToolResult'
+import {
+  assertAgentValidationBinding,
+  isValidatedResourceMutation,
+  validateAgentMutation
+} from './agentMutationValidation'
 
 const AGENT_SESSIONS_FILENAME = 'agent-sessions.json'
 const MAX_TOOL_ROUNDS = 25
-const MAX_TOOL_RESULT_CHARS = 24_000
+const MAX_DRAFT_VALIDATION_FAILURES = 3
 const REASONING_EFFORTS = new Set<AgentReasoningEffort>([
   'none',
   'disabled',
@@ -71,7 +83,10 @@ const REASONING_EFFORTS = new Set<AgentReasoningEffort>([
 
 const SYSTEM_PROMPT = `You are the Bot Commander agent harness. Help the user inspect and modify their bot configuration.
 The initial context intentionally contains no bot resources. For create or edit tasks, search for a similar persisted command or interaction first, then use exact read tools before editing. Existing resources are preferred synthesis examples, but lint new work and do not copy mistakes blindly.
-Every edit requires the current revision returned by an exact read. After an edit, inspect the returned lint diagnostics and repair meaningful errors.
+Every edit requires the current revision returned by an exact read. Supply a validation suite on create_command, edit_command, create_interaction and edit_interaction before proposing a supported draft. First read_validation_fixture for a complete fresh fake state. Use explicit expected /outcome plus meaningful response, state, moderation or error assertions; do not infer success from empty errors or no output. Include a happy execution and relevant missing argument/option, permission, channel/NSFW, cooldown or button cases. Each case starts a fresh fake session; sequence steps may advanceClockMs without real waiting. Assertion paths address {outcome,reason,errors,state,effects}; for example /effects/messages/0/content equals the intended reply, and /state/botState/count equals the intended state value.
+Validation runs on the exact normalized unsaved draft before approval or auto-save. Failed or missing-fixture validation returns a compact report without saving. Inspect it, correct the draft/fixtures and retry at most three failed validations per resource per run; then stop and explain the remaining issue. Never weaken an expectation just to make an unintended behavior pass. Explicit expected-negative cases require a specific nonempty /reason or /errors/N assertion plus an effects assertion proving no unintended outputs; an unmatched or unsupported case is not an executed success. Event-command dispatch and genuinely unsupported features remain editable with a clearly labeled not-validated report and explicit user approval, including in auto mode. Failed supported assertions, unknown/typo BCFD names, malformed fixtures and unmatched inputs do not qualify for this exception. Startup-dependent scripts and unsupported effects are not validated; simulated AI never validates a real provider. Offline validation is bounded simulation, not Discord delivery, registration or permission-hierarchy proof.
+After an edit, inspect the returned lint diagnostics and repair meaningful errors.
+
 For hosting questions, use read_host_status. It reports local cached evidence only; remote registration, portal permissions and freshness remain unknown. Follow its guidance to the existing Login sidebar and Interactions controls. Never request credentials in chat or claim to connect, disconnect, publish or change portal settings through this tool.
 Use keyword_grep for cross-resource references. Never invent IDs or revisions. Keep final answers concise and state what changed and what verification found.
 The bundled documentation table of contents is listed below. Use its titles to choose a targeted search_documentation query; the outline contains titles only, not the documentation content.
@@ -87,6 +102,7 @@ When the user asks to forget a saved preference or change how it is remembered, 
 In planning mode, investigate with read and lint tools and never make mutations. Ask concise questions without special markup whenever more user input is needed. Once the plan is decision-complete, return the plan inside exactly one <proposed_plan>...</proposed_plan> block with no text outside the block. Do not use that block for questions, partial plans, or ordinary discussion.`
 
 interface AgentRunContext {
+  validationFailures: Map<string, number>
   extensions: ToolRegistry
   documentationPolicy: DocumentationPolicyState
   metrics: AgentRunMetrics
@@ -480,18 +496,18 @@ function addMessage(
 }
 
 function stringifyResult(result: unknown): string {
-  return boundToolContent(JSON.stringify(result) ?? 'null')
+  return stringifyAgentToolResult(result)
 }
 
 function boundToolContent(content: string): string {
-  if (content.length <= MAX_TOOL_RESULT_CHARS) return content
+  if (content.length <= MAX_AGENT_TOOL_RESULT_CHARS) return content
   const preview = (length: number): string =>
     JSON.stringify({ truncated: true, preview: content.slice(0, length) })
-  const candidate = preview(Math.floor((MAX_TOOL_RESULT_CHARS - 100) / 2))
+  const candidate = preview(Math.floor((MAX_AGENT_TOOL_RESULT_CHARS - 100) / 2))
   // Raw extension text may contain control characters that need six JSON characters each.
-  return candidate.length <= MAX_TOOL_RESULT_CHARS
+  return candidate.length <= MAX_AGENT_TOOL_RESULT_CHARS
     ? candidate
-    : preview(Math.floor((MAX_TOOL_RESULT_CHARS - 100) / 6))
+    : preview(Math.floor((MAX_AGENT_TOOL_RESULT_CHARS - 100) / 6))
 }
 
 export function parseProposedPlan(content: string): { content: string; planReady: boolean } {
@@ -588,27 +604,81 @@ async function runTool(
       assertActiveRun(session, runId, signal)
       call.before = prepared.before
       call.after = prepared.after
-      if (mode === 'manual') {
-        const approved = await awaitApproval(session, runId, call, prepared, context)
+      let validationFailed = false
+      let validationNeedsApproval = false
+      if (isValidatedResourceMutation(prepared)) {
+        call.diagnostics = clipAgentLintDiagnostics(await lintPreparedMutation(prepared))
         assertActiveRun(session, runId, signal)
-        if (!approved) {
-          call.status = 'rejected'
-          result = { success: false, denied: true, message: 'The user rejected this mutation' }
+        const candidate = prepared.after as { command?: string; commandName?: string }
+        const failureKey = `${prepared.target.type}:${
+          prepared.before === null
+            ? (candidate.command ?? candidate.commandName ?? '')
+            : prepared.target.id
+        }`
+        const failures = context.validationFailures.get(failureKey) ?? 0
+        if (failures >= MAX_DRAFT_VALIDATION_FAILURES)
+          throw new Error(
+            'Draft validation repair limit reached after three failures; explain the remaining issue'
+          )
+        const validation = await validateAgentMutation(prepared, signal)
+        validationNeedsApproval = validation.requiresApproval
+        if (validationNeedsApproval)
+          validation.report.limitations.push(
+            'This candidate uses a genuinely unsupported feature and is not validated; explicit approval is required, including in auto mode'
+          )
+        call.validation = validation.report
+        call.validationBinding = validation.binding
+        assertActiveRun(session, runId, signal)
+        assertAgentValidationBinding(prepared, validation.binding, validation.report)
+        if (!validation.canCommit) {
+          context.validationFailures.set(failureKey, failures + 1)
+          validationFailed = true
+          call.status = 'error'
+          result = {
+            success: false,
+            saved: false,
+            validation: validation.report,
+            diagnostics: call.diagnostics,
+            attemptsRemaining: MAX_DRAFT_VALIDATION_FAILURES - failures - 1,
+            message:
+              'Draft validation did not pass; inspect the report and repair before proposing this change'
+          }
+        }
+      }
+      if (!validationFailed) {
+        const beforeCommit = (snapshot: PreparedMutation) => {
+          assertActiveRun(session, runId, signal)
+          if (call.validation && call.validationBinding)
+            assertAgentValidationBinding(snapshot, call.validationBinding, call.validation)
+        }
+        if (mode === 'manual' || validationNeedsApproval) {
+          const approved = await awaitApproval(session, runId, call, prepared, context)
+          assertActiveRun(session, runId, signal)
+          if (!approved) {
+            call.status = 'rejected'
+            result = { success: false, denied: true, message: 'The user rejected this mutation' }
+          } else {
+            assertActiveRun(session, runId, signal)
+            call.status = 'approved'
+            session.status = 'running'
+            context.metrics = recordAgentRunTool(context.metrics, call)
+            checkpointRunMetrics(session, context)
+            await save()
+            assertActiveRun(session, runId, signal)
+            emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
+            assertActiveRun(session, runId, signal)
+            if (call.validation && call.validationBinding)
+              assertAgentValidationBinding(prepared, call.validationBinding, call.validation)
+            result = await commitMutation(prepared, 'agent', signal, beforeCommit)
+          }
         } else {
           assertActiveRun(session, runId, signal)
-          call.status = 'approved'
-          session.status = 'running'
-          context.metrics = recordAgentRunTool(context.metrics, call)
-          checkpointRunMetrics(session, context)
-          await save()
-          assertActiveRun(session, runId, signal)
-          emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
-          assertActiveRun(session, runId, signal)
-          result = await commitMutation(prepared, 'agent', signal)
+          if (call.validation && call.validationBinding)
+            assertAgentValidationBinding(prepared, call.validationBinding, call.validation)
+          result = await commitMutation(prepared, 'agent', signal, beforeCommit)
         }
-      } else {
-        assertActiveRun(session, runId, signal)
-        result = await commitMutation(prepared, 'agent', signal)
+        if (call.validation && result && typeof result === 'object')
+          result = { ...result, diagnostics: call.diagnostics, validation: call.validation }
       }
     } else if (context.extensions.has(call.name)) {
       const output = await context.extensions.executeTool(providerCall, { signal })
@@ -638,6 +708,7 @@ async function runTool(
           )
         : await executeReadTool(call.name, call.arguments)
     }
+    result = boundAgentToolResult(result)
     assertActiveRun(session, runId, signal)
     if (call.status !== 'rejected' && call.status !== 'error') call.status = 'completed'
     call.result = result
@@ -702,6 +773,7 @@ async function startAgentSession(
 
   const runId = id('run')
   const context: AgentRunContext = {
+    validationFailures: new Map(),
     // Reserve every built-in before planning mode filters mutation tools from advertisement.
     extensions: createAgentExtensionRegistry(
       agentToolDefinitions.map((tool) => tool.function.name)

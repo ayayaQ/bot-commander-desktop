@@ -4,12 +4,22 @@ import {
   agentRunValidationSummary,
   createAgentRunMetrics
 } from '../../shared/agentRunMetrics'
+import { decodeBCFDCommand } from '../../shared/commandCodec'
+import { createPlaygroundState } from '../../shared/playground/types'
+import { createNotRunAgentValidationReport } from '../../shared/agentValidationTypes'
+import type {
+  AgentValidationRequest,
+  AgentValidationSuite
+} from '../../shared/agentValidationTypes'
+import { resourceRevision } from './resourceChangeService'
 
 const mocks = vi.hoisted(() => ({
   responsesCreate: vi.fn(),
   executeReadTool: vi.fn(),
   prepareMutation: vi.fn(),
   commitMutation: vi.fn(),
+  lintPreparedMutation: vi.fn(),
+  validatePreparedResource: vi.fn(),
   agentToolTargetLabel: vi.fn(),
   readFile: vi.fn(),
   writeFile: vi.fn(),
@@ -53,7 +63,8 @@ vi.mock('./agentTools', () => ({
   mutationToolNames: new Set(['edit_command']),
   commitMutation: mocks.commitMutation,
   executeReadTool: mocks.executeReadTool,
-  prepareMutation: mocks.prepareMutation
+  prepareMutation: mocks.prepareMutation,
+  lintPreparedMutation: mocks.lintPreparedMutation
 }))
 
 vi.mock('./agentMemoryService', () => ({
@@ -67,6 +78,78 @@ vi.mock('./agentMemoryService', () => ({
   }))
 }))
 
+vi.mock('./agentValidationService', () => ({
+  validatePreparedResource: mocks.validatePreparedResource
+}))
+
+function fixtureCommand(channelMessage: string) {
+  return decodeBCFDCommand({
+    id: 'c1',
+    command: '!ping',
+    commandDescription: 'Ping',
+    channelMessage,
+    privateMessage: '',
+    channelEmbed: {},
+    privateEmbed: {},
+    type: 0
+  }).command
+}
+
+function mutationValidationSuite(): AgentValidationSuite {
+  const state = createPlaygroundState()
+  return {
+    cases: [
+      {
+        name: 'updated reply',
+        state,
+        steps: [
+          {
+            kind: 'message',
+            senderId: state.members[0].id,
+            content: '!ping',
+            assertions: [
+              { path: '/outcome', equals: 'executed' },
+              { path: '/effects/messages/0/content', equals: 'Pong!' }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
+
+function mutationArguments(): string {
+  return JSON.stringify({
+    id: 'c1',
+    expectedRevision: resourceRevision(fixtureCommand('Old reply')),
+    patch: { channelMessage: 'Pong!' },
+    validation: mutationValidationSuite()
+  })
+}
+
+function passingValidationReport(input: AgentValidationRequest) {
+  const report = createNotRunAgentValidationReport(input, 'mock execution')
+  report.outcome = 'passed'
+  report.coverage.executed = 1
+  report.coverage.matched = 1
+  report.coverage.notRun = 0
+  report.cases[0].outcome = 'passed'
+  Object.assign(report.cases[0].steps[0], {
+    outcome: 'passed',
+    executionOutcome: 'executed',
+    matched: true,
+    executed: true,
+    assertions: input.suite.cases[0].steps[0].assertions.map((assertion) => ({
+      path: assertion.path,
+      expected: assertion.equals,
+      actual: assertion.equals,
+      actualPresent: true,
+      passed: true
+    }))
+  })
+  return report
+}
+
 describe('desktop agent service shared-provider integration', () => {
   beforeEach(() => {
     vi.resetModules()
@@ -75,6 +158,8 @@ describe('desktop agent service shared-provider integration', () => {
     mocks.executeReadTool.mockReset()
     mocks.prepareMutation.mockReset()
     mocks.commitMutation.mockReset()
+    mocks.lintPreparedMutation.mockReset()
+    mocks.validatePreparedResource.mockReset()
     // Fake HTTP transport only. Keep request/response fixtures independent of SDK internals.
     vi.stubGlobal(
       'fetch',
@@ -98,13 +183,18 @@ describe('desktop agent service shared-provider integration', () => {
     )
     mocks.readFile.mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
     mocks.memories = []
-    mocks.prepareMutation.mockResolvedValue({
-      name: 'edit_command',
-      arguments: {},
-      before: { command: 'old' },
-      after: { command: 'new' },
+    // Keep the real validation and binding helper. Only offline execution is mocked.
+    mocks.lintPreparedMutation.mockResolvedValue([])
+    mocks.validatePreparedResource.mockImplementation(async (input) =>
+      passingValidationReport(input)
+    )
+    mocks.prepareMutation.mockImplementation(async (name, arguments_) => ({
+      name,
+      arguments: arguments_,
+      before: fixtureCommand('Old reply'),
+      after: fixtureCommand('Pong!'),
       target: { type: 'command', id: 'c1' }
-    })
+    }))
     mocks.commitMutation.mockResolvedValue({ success: true, saved: true })
   })
   afterEach(() => {
@@ -619,7 +709,7 @@ describe('desktop agent service shared-provider integration', () => {
       id: 'session_1',
       title: 'Luna',
       mode: 'manual',
-      model: 'gpt-5.6-luna',
+      model: 'gpt-5.4-nano',
       reasoningEffort: 'low',
       status: 'running',
       messages: [],
@@ -645,7 +735,7 @@ describe('desktop agent service shared-provider integration', () => {
 
     expect(mocks.responsesCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        model: 'gpt-5.6-luna',
+        model: 'gpt-5.4-nano',
         reasoning: { effort: 'low' },
         tools: [
           expect.objectContaining({
@@ -704,7 +794,7 @@ describe('desktop agent service shared-provider integration', () => {
     const session = await service.createAgentSession({
       aiProvider: 'openai',
       openaiApiKey: 'test',
-      selectedAiModel: 'gpt-5.6-luna'
+      selectedAiModel: 'gpt-5.4-nano'
     })
     const completed = new Promise<void>((resolve) => {
       service.setAgentEventSink((event) => {
@@ -1072,7 +1162,7 @@ describe('desktop agent service shared-provider integration', () => {
     const session = await service.createAgentSession({
       aiProvider: 'openai',
       openaiApiKey: 'test',
-      selectedAiModel: 'gpt-5.6-luna'
+      selectedAiModel: 'gpt-5.4-nano'
     })
     await service.updateAgentSession(session.id, { mode: 'planning' }, 'openai')
     const completed = new Promise<void>((resolve) => {
@@ -1122,7 +1212,7 @@ describe('desktop agent service shared-provider integration', () => {
       const session = await service.createAgentSession({
         aiProvider: 'openai',
         openaiApiKey: 'test',
-        selectedAiModel: 'gpt-5.6-luna'
+        selectedAiModel: 'gpt-5.4-nano'
       })
       await service.updateAgentSession(session.id, { mode: 'planning' }, 'openai')
       let completionCount = 0
@@ -1185,7 +1275,7 @@ describe('desktop agent service shared-provider integration', () => {
     const session = await service.createAgentSession({
       aiProvider: 'openai',
       openaiApiKey: 'test',
-      selectedAiModel: 'gpt-5.6-luna'
+      selectedAiModel: 'gpt-5.4-nano'
     })
     const completed = new Promise<void>((resolve) => {
       service.setAgentEventSink((event) => {
@@ -1387,7 +1477,12 @@ describe('desktop agent service shared-provider integration', () => {
         .mockResolvedValueOnce({
           output_text: '',
           output: [
-            { type: 'function_call', call_id: 'call_manual', name: 'edit_command', arguments: '{}' }
+            {
+              type: 'function_call',
+              call_id: 'call_manual',
+              name: 'edit_command',
+              arguments: mutationArguments()
+            }
           ]
         })
         .mockResolvedValueOnce({ output_text: 'Done', output: [] })
@@ -1418,14 +1513,24 @@ describe('desktop agent service shared-provider integration', () => {
       .mockResolvedValueOnce({
         output_text: '',
         output: [
-          { type: 'function_call', call_id: 'call_auto', name: 'edit_command', arguments: '{}' }
+          {
+            type: 'function_call',
+            call_id: 'call_auto',
+            name: 'edit_command',
+            arguments: mutationArguments()
+          }
         ]
       })
       .mockResolvedValueOnce({ output_text: 'Done', output: [] })
       .mockResolvedValueOnce({
         output_text: '',
         output: [
-          { type: 'function_call', call_id: 'call_planning', name: 'edit_command', arguments: '{}' }
+          {
+            type: 'function_call',
+            call_id: 'call_planning',
+            name: 'edit_command',
+            arguments: mutationArguments()
+          }
         ]
       })
       .mockResolvedValueOnce({ output_text: 'Cannot mutate while planning', output: [] })
@@ -1464,7 +1569,12 @@ describe('desktop agent service shared-provider integration', () => {
     mocks.responsesCreate.mockResolvedValueOnce({
       output_text: '',
       output: [
-        { type: 'function_call', call_id: 'call_cancel_1', name: 'edit_command', arguments: '{}' },
+        {
+          type: 'function_call',
+          call_id: 'call_cancel_1',
+          name: 'edit_command',
+          arguments: mutationArguments()
+        },
         { type: 'function_call', call_id: 'call_cancel_2', name: 'read_bot_state', arguments: '{}' }
       ]
     })
@@ -1498,7 +1608,12 @@ describe('desktop agent service shared-provider integration', () => {
     mocks.responsesCreate.mockResolvedValueOnce({
       output_text: '',
       output: [
-        { type: 'function_call', call_id: 'call_slow', name: 'edit_command', arguments: '{}' }
+        {
+          type: 'function_call',
+          call_id: 'call_slow',
+          name: 'edit_command',
+          arguments: mutationArguments()
+        }
       ]
     })
     const service = await import('./agentService')
@@ -1593,7 +1708,7 @@ describe('desktop agent service shared-provider integration', () => {
           type: 'function_call',
           call_id: 'cancel-on-approved',
           name: 'edit_command',
-          arguments: '{}'
+          arguments: mutationArguments()
         }
       ],
       usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 }
@@ -1638,7 +1753,12 @@ describe('desktop agent service shared-provider integration', () => {
     mocks.responsesCreate.mockResolvedValueOnce({
       output_text: '',
       output: [
-        { type: 'function_call', call_id: 'commit_pending', name: 'edit_command', arguments: '{}' }
+        {
+          type: 'function_call',
+          call_id: 'commit_pending',
+          name: 'edit_command',
+          arguments: mutationArguments()
+        }
       ],
       usage: {
         input_tokens: 100,

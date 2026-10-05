@@ -19,6 +19,7 @@ files:
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:
   - resources/**
+  - out/main/agentValidationWorker.mjs
 win:
   executableName: 'Bot Commander for Discord'
   icon: resources/icon.ico

@@ -1,3 +1,6 @@
+import { PlaygroundExecutionError } from './types'
+import { bcfdItemNames } from '../bcfdLanguage'
+
 // This intentionally imports only the production parser, never the privileged interpreter.
 import { parse } from '../../main/services/bcfdLang/parser'
 import { NodeType } from '../../main/services/bcfdLang/types'
@@ -11,6 +14,25 @@ import { remainingCooldown } from './sessionState'
 import type { CooldownCommand } from './sessionState'
 import { DELETE_MESSAGE_ERRORS, validateDeleteMessageArguments } from '../deleteMessage'
 
+// Documented names plus the production registry's legacy desktop aliases. Unknown
+// names are failures, not an escape into the unsupported-feature approval path.
+const knownBCFDNames = new Set([
+  ...bcfdItemNames,
+  'id',
+  'defaultavatar',
+  'hours',
+  'minutes',
+  'seconds'
+])
+function unsupportedExpression(name: string): never {
+  if (!knownBCFDNames.has(name))
+    throw new Error(`Unknown BCFD expression: $${name}. No effect was applied`)
+  throw new PlaygroundExecutionError(
+    `Unsupported playground expression: $${name}. No effect was applied`,
+    'unsupported'
+  )
+}
+
 export type TemplateContext = {
   state: PlaygroundState
   sender: FakeMember
@@ -19,6 +41,7 @@ export type TemplateContext = {
   trigger: string
   options?: Record<string, string | number | boolean>
   script?: ScriptSandbox
+  wrapEvalInIIFE?: boolean
   setVariable?: (name: string, value: string) => void
   command?: CooldownCommand
   trace?: string[]
@@ -94,7 +117,8 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
       if (++visited > PLAYGROUND_LIMITS.nodes)
         throw new Error('Template work exceeds the playground limit')
       if (node.type === NodeType.EVAL_BLOCK) {
-        if (!ctx.script) throw new Error('Script sandbox is unavailable')
+        if (!ctx.script)
+          throw new PlaygroundExecutionError('Script sandbox is unavailable', 'unsupported')
         // Match production: literal strings, comment text and template static parts stay literal.
         preflight(
           node.innerNodes.filter(
@@ -109,7 +133,7 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
         (node.type === NodeType.VARIABLE || node.type === NodeType.FUNCTION_CALL) &&
         !allowed.has(node.name)
       )
-        throw new Error(`Unsupported playground expression: $${node.name}. No effect was applied`)
+        unsupportedExpression(node.name)
       if (node.type === NodeType.FUNCTION_CALL)
         node.arguments.forEach((argument) => preflight(argument, depth + 1))
       if (node.type === NodeType.PROGRAM) preflight(node.children, depth + 1)
@@ -182,14 +206,16 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
         return ''
       }
       case 'set':
-        if (!ctx.script) throw new Error('Script sandbox is unavailable')
+        if (!ctx.script)
+          throw new PlaygroundExecutionError('Script sandbox is unavailable', 'unsupported')
         if (args.length >= 2) {
           if (ctx.setVariable) ctx.setVariable(args[0], args[1])
           else ctx.script.set(args[0], args[1])
         }
         return ''
       case 'get':
-        if (!ctx.script) throw new Error('Script sandbox is unavailable')
+        if (!ctx.script)
+          throw new PlaygroundExecutionError('Script sandbox is unavailable', 'unsupported')
         return args.length ? ctx.script.get(args[0]) : ''
       case 'chat':
         if (!args.length) return ''
@@ -262,7 +288,7 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
         return String(Math.floor(Math.random() * (max - min + 1)) + min)
       }
       default:
-        throw new Error(`Unsupported playground expression: $${name}. No effect was applied`)
+        unsupportedExpression(name)
     }
   }
   const nodes = (list: ASTNode[], depth: number): string => {
@@ -296,7 +322,8 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
           break
         }
         case NodeType.EVAL_BLOCK: {
-          if (!ctx.script) throw new Error('Script sandbox is unavailable')
+          if (!ctx.script)
+            throw new PlaygroundExecutionError('Script sandbox is unavailable', 'unsupported')
           const replacements: { position: number; length: number; name: string }[] = []
           let code = node.code
           let failed = false
@@ -312,7 +339,9 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): string {
                 code.slice(0, replacement.position) +
                 replacement.name +
                 code.slice(replacement.position + replacement.length)
-            output += bounded(ctx.script.evaluate(code))
+            output += bounded(
+              ctx.script.evaluate(code, { wrapReturn: ctx.wrapEvalInIIFE !== false })
+            )
           } catch (error) {
             failed = true
             throw error

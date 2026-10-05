@@ -6,13 +6,14 @@ import type { TemplateContext } from './template'
 import type { ScriptSandboxFactory } from './script'
 import { executionContext } from './executionContext'
 import { recordCooldown, remainingCooldown, validateSessionState } from './sessionState'
-import { PLAYGROUND_LIMITS } from './types'
+import { PLAYGROUND_LIMITS, PlaygroundExecutionError } from './types'
 import type {
   FakeMember,
   FakePermission,
   PlaygroundMessage,
   PlaygroundMessageRequest,
   PlaygroundResult,
+  PlaygroundResourceResult,
   PlaygroundState
 } from './types'
 
@@ -106,7 +107,7 @@ function executeCommand(
   inputId: number,
   trace: string[],
   ctx: TemplateContext
-): void {
+): { outcome: 'executed' | 'blocked'; reason?: string } {
   const sender = state.members.find((member) => member.id === senderId)!
   const mentionedId = /<@!?(\d+)>/.exec(content)?.[1]
   const mentioned = state.members.find((member) => member.id === mentionedId)
@@ -119,7 +120,7 @@ function executeCommand(
       .includes(state.channelId)
   ) {
     trace.push('Skipped: fake channel is not whitelisted')
-    return
+    return { outcome: 'blocked', reason: 'Fake channel is not whitelisted' }
   }
   if (
     command.serverWhitelist?.trim() &&
@@ -129,19 +130,19 @@ function executeCommand(
       .includes(state.guildId)
   ) {
     trace.push('Skipped: fake server is not whitelisted')
-    return
+    return { outcome: 'blocked', reason: 'Fake server is not whitelisted' }
   }
   if (command.requiredRole?.trim() && !hasFakeRole(state, sender, command.requiredRole)) {
     trace.push('Blocked: missing required fake role')
-    return
+    return { outcome: 'blocked', reason: 'Missing required fake role' }
   }
   if (command.isAdmin && !hasPermission(sender, 'admin')) {
     trace.push('Blocked: administrator required')
-    return
+    return { outcome: 'blocked', reason: 'Administrator required' }
   }
   if (command.isNSFW && !state.nsfw) {
     trace.push('Blocked: fake channel is not NSFW')
-    return
+    return { outcome: 'blocked', reason: 'Fake channel is not NSFW' }
   }
   if ((command.cooldown ?? 0) > 0 && command.cooldownType) {
     const remaining = remainingCooldown(state, command, senderId)
@@ -156,17 +157,22 @@ function executeCommand(
             : `This command is on cooldown. Try again in ${remaining}s.`
         })
       trace.push(`Blocked: ${command.cooldownType.toLowerCase()} cooldown; ${remaining}s remaining`)
-      return
+      return { outcome: 'blocked', reason: `Cooldown; ${remaining}s remaining` }
     }
   }
   if (command.specificChannel?.trim() && command.specificChannel !== state.channelId)
-    throw new Error('Specific channel is outside the fake channel')
-  if (command.specificMessage?.trim()) throw new Error('Specific-message effects are unsupported')
-  if (command.reaction?.trim()) throw new Error('Reaction effects are unsupported')
+    throw new PlaygroundExecutionError(
+      'Specific channel is outside the fake channel',
+      'unsupported'
+    )
+  if (command.specificMessage?.trim())
+    throw new PlaygroundExecutionError('Specific-message effects are unsupported', 'unsupported')
+  if (command.reaction?.trim())
+    throw new PlaygroundExecutionError('Reaction effects are unsupported', 'unsupported')
   if (command.deleteNum > 0) {
     if (!hasPermission(sender, 'manageMessages')) {
       trace.push('Blocked: Manage Messages required')
-      return
+      return { outcome: 'blocked', reason: 'Manage Messages required' }
     }
     if (!Number.isInteger(command.deleteNum) || command.deleteNum > 100)
       throw new Error('Deletion count must be from 1 to 100')
@@ -241,6 +247,7 @@ function executeCommand(
     trace.push('Typing is simulated; no network activity')
   recordCooldown(state, command, senderId)
   trace.push(`Executed ${command.command}`)
+  return { outcome: 'executed' }
 }
 
 export function runMessage(
@@ -259,8 +266,17 @@ export function runMessage(
     errors: string[] = []
   const input = addMessage(state, { kind: 'user', author: sender.name, content: request.content })
   const matching = request.commands.filter((command) => matches(command, request.content))
+  const resources: PlaygroundResourceResult[] = request.commands.map((command) => ({
+    resourceId: command.id,
+    kind: 'command',
+    matched: matching.includes(command),
+    executed: false,
+    outcome: command.type === 0 ? 'unmatched' : 'unsupported',
+    reason: command.type === 0 ? 'Message trigger did not match' : 'Event command is not simulated'
+  }))
   trace.push(`${matching.length} matching saved message command(s)`)
   for (const command of matching) {
+    const resource = resources[request.commands.indexOf(command)]
     const draft = structuredClone(state),
       commandTrace: string[] = []
     const sender = draft.members.find((member) => member.id === request.senderId)!
@@ -273,6 +289,7 @@ export function runMessage(
         sender,
         mentioned,
         content: request.content,
+        wrapEvalInIIFE: request.wrapEvalInIIFE,
         trigger: command.command,
         command,
         trace: commandTrace
@@ -280,7 +297,7 @@ export function runMessage(
       factory
     )
     try {
-      executeCommand(
+      const execution = executeCommand(
         draft,
         command,
         request.senderId,
@@ -290,9 +307,15 @@ export function runMessage(
         scope.context
       )
       scope.commit()
+      resource.outcome = execution.outcome
+      resource.executed = execution.outcome === 'executed'
+      resource.reason = execution.reason
       state = draft
       trace.push(...commandTrace)
     } catch (error) {
+      resource.outcome = error instanceof PlaygroundExecutionError ? error.outcome : 'error'
+      resource.reason = error instanceof Error ? error.message : 'Execution failed'
+      resource.error = resource.reason
       errors.push(
         `${command.command}: ${error instanceof Error ? error.message : 'Execution failed'}`
       )
@@ -301,5 +324,5 @@ export function runMessage(
       scope.dispose()
     }
   }
-  return { state, trace, errors }
+  return { state, trace, errors, resources }
 }
