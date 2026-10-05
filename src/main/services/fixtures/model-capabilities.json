@@ -1,0 +1,3397 @@
+{
+  "apiVersion": 1,
+  "provenance": {
+    "cli": {
+      "commit": "01e6445d921773ecd3112d97d6327334abf931d3",
+      "tree": "4e17f07d1ac447985b3ec00772bd5e55c6ea8ed0",
+      "sourcePath": "src/models.ts",
+      "sourceBlob": "16cf103443d4c700b266f7bf5877abc004fef9e6",
+      "sourceSha256": "b7b14af7f388d4cb9e7255ec1c553798b4205138d8268d2821fb1a97cd562fe0",
+      "url": "https://github.com/ayayaQ/vivi-cli/blob/01e6445d921773ecd3112d97d6327334abf931d3/src/models.ts"
+    },
+    "shared": {
+      "version": "0.4.0",
+      "commit": "c0d6ccbc29afb3c225992dd94a39d773b9d1630a",
+      "sourcePath": "src/providers/models.ts",
+      "sourceBlob": "bdd41e24064672c69529245892b42125fe35c049",
+      "contractPath": "CAPABILITIES.md",
+      "contractBlob": "cc322d1859ebc777376bb32b20b5d7c44327af82",
+      "pairedFixturePath": "test/fixtures/capability-host-pairs.json",
+      "pairedFixtureBlob": "d966506412d25d78ec3d9b60dd54b3b1159c9594",
+      "reviewedOn": "2026-10-05"
+    },
+    "baseline": "Captured by invoking the pinned CLI source before adoption edits. These are host facts, not a new provider-documentation review."
+  },
+  "baselineOpenAI": [
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-6-astra",
+        "name": "gpt-6-astra",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-6.1-sol",
+        "name": "gpt-6.1-sol",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-6-sol",
+        "name": "gpt-6-sol",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-6-luna",
+        "name": "gpt-6-luna",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5.6-sol",
+        "name": "gpt-5.6-sol",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5.6-terra",
+        "name": "gpt-5.6-terra",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5.6-luna",
+        "name": "gpt-5.6-luna",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5.6",
+        "name": "gpt-5.6",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5",
+        "name": "gpt-5",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5-2025-08-07",
+        "name": "gpt-5-2025-08-07",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5-mini",
+        "name": "gpt-5-mini",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5-mini-2025-08-07",
+        "name": "gpt-5-mini-2025-08-07",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5-nano",
+        "name": "gpt-5-nano",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5-nano-2025-08-07",
+        "name": "gpt-5-nano-2025-08-07",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5-pro",
+        "name": "gpt-5-pro",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "high"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5-pro-2025-10-06",
+        "name": "gpt-5-pro-2025-10-06",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "high"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5.1",
+        "name": "gpt-5.1",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "none",
+          "low",
+          "medium",
+          "high"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5.1-2025-11-13",
+        "name": "gpt-5.1-2025-11-13",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "none",
+          "low",
+          "medium",
+          "high"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5.2",
+        "name": "gpt-5.2",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5.2-2025-12-11",
+        "name": "gpt-5.2-2025-12-11",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5.4",
+        "name": "gpt-5.4",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5.4-2026-03-05",
+        "name": "gpt-5.4-2026-03-05",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5.4-mini",
+        "name": "gpt-5.4-mini",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5.4-mini-2026-03-17",
+        "name": "gpt-5.4-mini-2026-03-17",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5.5",
+        "name": "gpt-5.5",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5.5-2026-04-23",
+        "name": "gpt-5.5-2026-04-23",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "none",
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5.2-pro",
+        "name": "gpt-5.2-pro",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5.2-pro-2025-12-11",
+        "name": "gpt-5.2-pro-2025-12-11",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5.4-pro",
+        "name": "gpt-5.4-pro",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5.4-pro-2026-03-05",
+        "name": "gpt-5.4-pro-2026-03-05",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5.5-pro",
+        "name": "gpt-5.5-pro",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "unsupported",
+        "efforts": [
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-5.5-pro-2026-04-23",
+        "name": "gpt-5.5-pro-2026-04-23",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "unsupported",
+        "efforts": [
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "o3",
+        "name": "o3",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "o3-2025-04-16",
+        "name": "o3-2025-04-16",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "o3-mini",
+        "name": "o3-mini",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "o3-mini-2025-01-31",
+        "name": "o3-mini-2025-01-31",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "o4-mini",
+        "name": "o4-mini",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "o4-mini-2025-04-16",
+        "name": "o4-mini-2025-04-16",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "o3-pro",
+        "name": "o3-pro",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "unsupported",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "o3-pro-2025-06-10",
+        "name": "o3-pro-2025-06-10",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "unsupported",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-4.1",
+        "name": "gpt-4.1",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-4.1-2025-04-14",
+        "name": "gpt-4.1-2025-04-14",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-4.1-mini",
+        "name": "gpt-4.1-mini",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-4.1-mini-2025-04-14",
+        "name": "gpt-4.1-mini-2025-04-14",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-4.1-nano",
+        "name": "gpt-4.1-nano",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-4.1-nano-2025-04-14",
+        "name": "gpt-4.1-nano-2025-04-14",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-4o",
+        "name": "gpt-4o",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-4o-2024-05-13",
+        "name": "gpt-4o-2024-05-13",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-4o-2024-08-06",
+        "name": "gpt-4o-2024-08-06",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-4o-2024-11-20",
+        "name": "gpt-4o-2024-11-20",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-4o-mini",
+        "name": "gpt-4o-mini",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    },
+    {
+      "selected": true,
+      "model": {
+        "id": "gpt-4o-mini-2024-07-18",
+        "name": "gpt-4o-mini-2024-07-18",
+        "tools": "supported",
+        "conversation": "supported",
+        "streaming": "supported",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Official OpenAI Responses model documentation"
+      }
+    }
+  ],
+  "baselineOpenAIExclusions": [
+    {
+      "selected": false,
+      "model": {
+        "id": "text-embedding-3-small",
+        "name": "text-embedding-3-small",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "text-embedding-3-large",
+        "name": "text-embedding-3-large",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "text-embedding-ada-002",
+        "name": "text-embedding-ada-002",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-image-1",
+        "name": "gpt-image-1",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-image-1-mini",
+        "name": "gpt-image-1-mini",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-image-1.5",
+        "name": "gpt-image-1.5",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-image-1.5-2025-12-16",
+        "name": "gpt-image-1.5-2025-12-16",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-image-2",
+        "name": "gpt-image-2",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-image-2.5-sunburst",
+        "name": "gpt-image-2.5-sunburst",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-image-2.5-flare",
+        "name": "gpt-image-2.5-flare",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "chatgpt-image-latest",
+        "name": "chatgpt-image-latest",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "dall-e-2",
+        "name": "dall-e-2",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "dall-e-3",
+        "name": "dall-e-3",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "whisper-1",
+        "name": "whisper-1",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-transcribe",
+        "name": "gpt-transcribe",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-transcribe",
+        "name": "gpt-4o-transcribe",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-mini-transcribe",
+        "name": "gpt-4o-mini-transcribe",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-transcribe-diarize",
+        "name": "gpt-4o-transcribe-diarize",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-mini-transcribe-2025-03-20",
+        "name": "gpt-4o-mini-transcribe-2025-03-20",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-mini-transcribe-2025-12-15",
+        "name": "gpt-4o-mini-transcribe-2025-12-15",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-mini-tts",
+        "name": "gpt-4o-mini-tts",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-mini-tts-2025-03-20",
+        "name": "gpt-4o-mini-tts-2025-03-20",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-mini-tts-2025-12-15",
+        "name": "gpt-4o-mini-tts-2025-12-15",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "tts-1",
+        "name": "tts-1",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "tts-1-hd",
+        "name": "tts-1-hd",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-live-1",
+        "name": "gpt-live-1",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-live-transcribe",
+        "name": "gpt-live-transcribe",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-realtime-whisper",
+        "name": "gpt-realtime-whisper",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-realtime-translate",
+        "name": "gpt-realtime-translate",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-realtime",
+        "name": "gpt-realtime",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-realtime-mini",
+        "name": "gpt-realtime-mini",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-realtime-1.5",
+        "name": "gpt-realtime-1.5",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-realtime-2",
+        "name": "gpt-realtime-2",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-realtime-2.1",
+        "name": "gpt-realtime-2.1",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-realtime-2.1-mini",
+        "name": "gpt-realtime-2.1-mini",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-realtime-2025-08-28",
+        "name": "gpt-realtime-2025-08-28",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-realtime-mini-2025-10-06",
+        "name": "gpt-realtime-mini-2025-10-06",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-realtime-mini-2025-12-15",
+        "name": "gpt-realtime-mini-2025-12-15",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-audio",
+        "name": "gpt-audio",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-audio-mini",
+        "name": "gpt-audio-mini",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-audio-1.5",
+        "name": "gpt-audio-1.5",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-audio-2025-08-28",
+        "name": "gpt-audio-2025-08-28",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-audio-mini-2025-10-06",
+        "name": "gpt-audio-mini-2025-10-06",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-audio-mini-2025-12-15",
+        "name": "gpt-audio-mini-2025-12-15",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-audio-preview",
+        "name": "gpt-4o-audio-preview",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-audio-preview-2024-10-01",
+        "name": "gpt-4o-audio-preview-2024-10-01",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-audio-preview-2024-12-17",
+        "name": "gpt-4o-audio-preview-2024-12-17",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-audio-preview-2025-06-03",
+        "name": "gpt-4o-audio-preview-2025-06-03",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-mini-audio-preview",
+        "name": "gpt-4o-mini-audio-preview",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-mini-audio-preview-2024-12-17",
+        "name": "gpt-4o-mini-audio-preview-2024-12-17",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-realtime-preview",
+        "name": "gpt-4o-realtime-preview",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-realtime-preview-2024-10-01",
+        "name": "gpt-4o-realtime-preview-2024-10-01",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-realtime-preview-2024-12-17",
+        "name": "gpt-4o-realtime-preview-2024-12-17",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-realtime-preview-2025-06-03",
+        "name": "gpt-4o-realtime-preview-2025-06-03",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-mini-realtime-preview",
+        "name": "gpt-4o-mini-realtime-preview",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-mini-realtime-preview-2024-12-17",
+        "name": "gpt-4o-mini-realtime-preview-2024-12-17",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "omni-moderation-latest",
+        "name": "omni-moderation-latest",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "omni-moderation-2024-09-26",
+        "name": "omni-moderation-2024-09-26",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "text-moderation-latest",
+        "name": "text-moderation-latest",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "text-moderation-stable",
+        "name": "text-moderation-stable",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "text-moderation-007",
+        "name": "text-moderation-007",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "sora-2",
+        "name": "sora-2",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "sora-2-pro",
+        "name": "sora-2-pro",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "babbage-002",
+        "name": "babbage-002",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "davinci-002",
+        "name": "davinci-002",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-3.5-turbo-instruct",
+        "name": "gpt-3.5-turbo-instruct",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-search-preview",
+        "name": "gpt-4o-search-preview",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-search-preview-2025-03-11",
+        "name": "gpt-4o-search-preview-2025-03-11",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-mini-search-preview",
+        "name": "gpt-4o-mini-search-preview",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-4o-mini-search-preview-2025-03-11",
+        "name": "gpt-4o-mini-search-preview-2025-03-11",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "gpt-5-search-api",
+        "name": "gpt-5-search-api",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    },
+    {
+      "selected": false,
+      "model": {
+        "id": "chatgpt-4o-latest",
+        "name": "chatgpt-4o-latest",
+        "tools": "unknown",
+        "conversation": "unsupported",
+        "streaming": "unknown",
+        "efforts": [],
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "source": "Capability metadata unavailable"
+      }
+    }
+  ],
+  "corrections": [
+    {
+      "ids": [
+        "gpt-4.1",
+        "gpt-4.1-2025-04-14"
+      ],
+      "field": "reasoning",
+      "from": "unknown",
+      "to": "unsupported",
+      "url": "https://developers.openai.com/api/docs/models/gpt-4.1",
+      "reviewedOn": "2026-10-05"
+    },
+    {
+      "ids": [
+        "o3-pro",
+        "o3-pro-2025-06-10"
+      ],
+      "field": "reasoning",
+      "from": "unknown",
+      "to": "supported",
+      "url": "https://developers.openai.com/api/docs/models/o3-pro",
+      "reviewedOn": "2026-10-05"
+    }
+  ],
+  "cases": [
+    {
+      "name": "Responses-only model is different from general desktop chat",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openai",
+        "protocol": "responses",
+        "model": {
+          "id": "gpt-5-pro"
+        }
+      },
+      "expected": {
+        "chat": "supported",
+        "tools": "supported",
+        "stream": "supported",
+        "reasoning": {
+          "support": "supported",
+          "effortSelection": "supported",
+          "efforts": [
+            "high"
+          ],
+          "requirement": "required",
+          "disable": "unsupported"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "supported",
+        "tools": "supported",
+        "streaming": "supported",
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "efforts": [
+          "high"
+        ]
+      }
+    },
+    {
+      "name": "Responses-only model is different from general desktop chat (Chat Completions endpoint)",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openai",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "gpt-5-pro"
+        }
+      },
+      "expected": {
+        "chat": "unsupported",
+        "tools": "unsupported",
+        "stream": "unsupported",
+        "reasoning": {
+          "support": "unsupported",
+          "effortSelection": "unsupported",
+          "efforts": [],
+          "requirement": "optional",
+          "disable": "unsupported"
+        }
+      }
+    },
+    {
+      "name": "Reasoning support does not imply documented effort or streaming support",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openai",
+        "protocol": "responses",
+        "model": {
+          "id": "o3-pro"
+        }
+      },
+      "expected": {
+        "chat": "supported",
+        "tools": "supported",
+        "stream": "unsupported",
+        "reasoning": {
+          "support": "supported",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "unknown",
+          "disable": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "supported",
+        "tools": "supported",
+        "streaming": "unsupported",
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "An exact non-reasoning model has an explicit unsupported state",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openai",
+        "protocol": "responses",
+        "model": {
+          "id": "gpt-4.1"
+        }
+      },
+      "expected": {
+        "chat": "supported",
+        "tools": "supported",
+        "stream": "supported",
+        "reasoning": {
+          "support": "unsupported",
+          "effortSelection": "unsupported",
+          "efforts": [],
+          "requirement": "optional",
+          "disable": "unsupported"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "supported",
+        "tools": "supported",
+        "streaming": "supported",
+        "reasoning": "unsupported",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "A future name matching a known prefix remains unverified",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openai",
+        "protocol": "responses",
+        "model": {
+          "id": "gpt-5-next-unverified"
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "unknown",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "unknown",
+          "disable": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "A reasoning parameter without effort metadata does not mean unsupported reasoning",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/model:free",
+          "supported_parameters": [
+            "tools",
+            "reasoning"
+          ],
+          "architecture": {
+            "input_modalities": [
+              "text"
+            ],
+            "output_modalities": [
+              "text"
+            ]
+          }
+        }
+      },
+      "expected": {
+        "chat": "supported",
+        "tools": "supported",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "supported",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "unknown",
+          "disable": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "supported",
+        "tools": "supported",
+        "streaming": "unknown",
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "Mandatory gateway reasoning has model-specific effort choices",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "google/gemini-3.5-flash",
+          "supported_parameters": [
+            "tools",
+            "reasoning"
+          ],
+          "architecture": {
+            "input_modalities": [
+              "text",
+              "image"
+            ],
+            "output_modalities": [
+              "text"
+            ]
+          },
+          "reasoning": {
+            "supported_efforts": [
+              "high",
+              "medium",
+              "low",
+              "minimal"
+            ],
+            "mandatory": true
+          }
+        }
+      },
+      "expected": {
+        "chat": "supported",
+        "tools": "supported",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "supported",
+          "effortSelection": "supported",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "requirement": "required",
+          "disable": "unsupported"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "supported",
+        "tools": "supported",
+        "streaming": "unknown",
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high"
+        ]
+      }
+    },
+    {
+      "name": "Absent metadata is not a false capability assertion",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/unknown"
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "unknown",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "unknown",
+          "disable": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "Text output alone does not prove text conversation input",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/transcriber",
+          "supported_parameters": [],
+          "architecture": {
+            "input_modalities": [
+              "audio"
+            ],
+            "output_modalities": [
+              "text"
+            ]
+          }
+        }
+      },
+      "expected": {
+        "chat": "unsupported",
+        "tools": "unsupported",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "unsupported",
+          "effortSelection": "unsupported",
+          "efforts": [],
+          "requirement": "optional",
+          "disable": "unsupported"
+        }
+      },
+      "cli": {
+        "selected": false
+      }
+    },
+    {
+      "name": "Dynamic routers without reasoning metadata remain unknown",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "openrouter/auto",
+          "supported_parameters": [
+            "tools"
+          ],
+          "architecture": {
+            "input_modalities": [
+              "text"
+            ],
+            "output_modalities": [
+              "text"
+            ]
+          }
+        }
+      },
+      "expected": {
+        "chat": "supported",
+        "tools": "supported",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "unknown",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "unknown",
+          "disable": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "supported",
+        "tools": "supported",
+        "streaming": "unknown",
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "Optional token-budget reasoning has disable support without named efforts",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "reasoning": {
+            "mandatory": false,
+            "supports_max_tokens": true
+          }
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "supported",
+          "disable": "supported",
+          "effortSelection": "unsupported",
+          "efforts": [],
+          "requirement": "optional"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "efforts": [
+          "none"
+        ]
+      }
+    },
+    {
+      "name": "Mandatory token-budget reasoning never offers disable",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "reasoning": {
+            "mandatory": true,
+            "supports_max_tokens": true
+          }
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "supported",
+          "disable": "unsupported",
+          "effortSelection": "unsupported",
+          "efforts": [],
+          "requirement": "required"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "efforts": []
+      }
+    },
+    {
+      "name": "Token-budget control alone does not verify disable",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "reasoning": {
+            "supports_max_tokens": true
+          }
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "supported",
+          "disable": "unknown",
+          "effortSelection": "unsupported",
+          "efforts": [],
+          "requirement": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "Optional empty effort selector still permits explicit disable",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "reasoning": {
+            "mandatory": false,
+            "supported_efforts": []
+          }
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "supported",
+          "disable": "supported",
+          "effortSelection": "supported",
+          "efforts": [],
+          "requirement": "optional"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "efforts": [
+          "none"
+        ]
+      }
+    },
+    {
+      "name": "Optional named efforts need a separate disable sentinel",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "reasoning": {
+            "mandatory": false,
+            "supported_efforts": [
+              "high",
+              "low",
+              "future"
+            ]
+          }
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "supported",
+          "disable": "supported",
+          "effortSelection": "supported",
+          "efforts": [
+            "low",
+            "high"
+          ],
+          "requirement": "optional"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "efforts": [
+          "none",
+          "low",
+          "high"
+        ]
+      }
+    },
+    {
+      "name": "Named effort choices alone leave disable unverified",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "reasoning": {
+            "supported_efforts": [
+              "high"
+            ]
+          }
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "supported",
+          "disable": "unknown",
+          "effortSelection": "supported",
+          "efforts": [
+            "high"
+          ],
+          "requirement": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "efforts": [
+          "high"
+        ]
+      }
+    },
+    {
+      "name": "None in an accepted effort list verifies disable",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "reasoning": {
+            "supported_efforts": [
+              "high",
+              "none",
+              "future"
+            ]
+          }
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "supported",
+          "disable": "supported",
+          "effortSelection": "supported",
+          "efforts": [
+            "none",
+            "high"
+          ],
+          "requirement": "optional"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "efforts": [
+          "none",
+          "high"
+        ]
+      }
+    },
+    {
+      "name": "Mandatory null effort metadata includes only enabled choices",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "reasoning": {
+            "mandatory": true,
+            "supported_efforts": null
+          }
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "supported",
+          "disable": "unsupported",
+          "effortSelection": "supported",
+          "efforts": [
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "requirement": "required"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "efforts": [
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      }
+    },
+    {
+      "name": "Null effort metadata documents all gateway choices",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "reasoning": {
+            "supported_efforts": null
+          }
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "supported",
+          "disable": "supported",
+          "effortSelection": "supported",
+          "efforts": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "requirement": "optional"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "efforts": [
+          "none",
+          "minimal",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ]
+      }
+    },
+    {
+      "name": "Empty accepted effort list proves reasoning but no named choices",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "reasoning": {
+            "supported_efforts": []
+          }
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "supported",
+          "disable": "unknown",
+          "effortSelection": "supported",
+          "efforts": [],
+          "requirement": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "Null reasoning object stays unknown rather than false",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "supported_parameters": [],
+          "reasoning": null
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unsupported",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "unknown",
+          "disable": "unknown",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unsupported",
+        "streaming": "unknown",
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "Malformed effort selector without other evidence remains unknown",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "reasoning": {
+            "supported_efforts": "high"
+          }
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "unknown",
+          "disable": "unknown",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "Reasoning parameter verifies support despite a malformed effort selector",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "supported_parameters": [
+            "reasoning"
+          ],
+          "reasoning": {
+            "supported_efforts": [
+              12
+            ]
+          }
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unsupported",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "supported",
+          "disable": "unknown",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unsupported",
+        "streaming": "unknown",
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "Mandatory fact survives a malformed effort selector",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "reasoning": {
+            "mandatory": true,
+            "supported_efforts": "high"
+          }
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "supported",
+          "disable": "unsupported",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "required"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "supported",
+        "reasoningMandatory": true,
+        "efforts": []
+      }
+    },
+    {
+      "name": "Optional fact survives a malformed effort selector",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "reasoning": {
+            "mandatory": false,
+            "supported_efforts": "high"
+          }
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "supported",
+          "disable": "supported",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "optional"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "efforts": [
+          "none"
+        ]
+      }
+    },
+    {
+      "name": "Malformed supported parameter lists establish no false capability",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "supported_parameters": [
+            12
+          ]
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "unknown",
+          "disable": "unknown",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "Empty reasoning object has no recognized evidence",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "supported_parameters": [],
+          "reasoning": {}
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unsupported",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "unknown",
+          "disable": "unknown",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unsupported",
+        "streaming": "unknown",
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "Empty complete parameter list verifies ordinary model limitations",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "supported_parameters": []
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unsupported",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "unsupported",
+          "disable": "unsupported",
+          "effortSelection": "unsupported",
+          "efforts": [],
+          "requirement": "optional"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unsupported",
+        "streaming": "unknown",
+        "reasoning": "unsupported",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "Dynamic free router stays unknown without reasoning metadata",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "openrouter/free",
+          "supported_parameters": [
+            "tools"
+          ]
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "supported",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "unknown",
+          "disable": "unknown",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "supported",
+        "streaming": "unknown",
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "Dynamic auto router may advertise configurable reasoning",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "openrouter/auto",
+          "supported_parameters": [
+            "tools",
+            "reasoning"
+          ]
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "supported",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "supported",
+          "disable": "unknown",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "supported",
+        "streaming": "unknown",
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "Include reasoning parameter verifies support independently of effort choices",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "supported_parameters": [
+            "include_reasoning"
+          ]
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unsupported",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "supported",
+          "disable": "unknown",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unsupported",
+        "streaming": "unknown",
+        "reasoning": "supported",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "Malformed modality lists do not prove conversation",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "architecture": {
+            "input_modalities": [
+              "text",
+              12
+            ],
+            "output_modalities": [
+              "text"
+            ]
+          }
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "unknown",
+          "disable": "unknown",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "A valid nontext modality disproves conversation despite malformed other side",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "chat-completions",
+        "model": {
+          "id": "vendor/reasoning",
+          "architecture": {
+            "input_modalities": null,
+            "output_modalities": [
+              "image"
+            ]
+          }
+        }
+      },
+      "expected": {
+        "chat": "unsupported",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "unknown",
+          "disable": "unknown",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "unknown"
+        }
+      },
+      "cli": {
+        "selected": false
+      }
+    },
+    {
+      "name": "OpenRouter Responses metadata is outside reviewed gateway scope",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openrouter",
+        "protocol": "responses",
+        "model": {
+          "id": "vendor/reasoning",
+          "supported_parameters": [
+            "tools",
+            "reasoning"
+          ],
+          "reasoning": {
+            "mandatory": false,
+            "supported_efforts": null
+          }
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "unknown",
+          "disable": "unknown",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "unknown"
+        }
+      }
+    },
+    {
+      "name": "Unknown exact OpenAI ID stays unverified: gpt-4.1-future",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openai",
+        "protocol": "responses",
+        "model": {
+          "id": "gpt-4.1-future"
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "unknown",
+          "disable": "unknown",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "Unknown exact OpenAI ID stays unverified: o3-pro-future",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openai",
+        "protocol": "responses",
+        "model": {
+          "id": "o3-pro-future"
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "unknown",
+          "disable": "unknown",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "Unknown exact OpenAI ID stays unverified: ft:gpt-5:unverified",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openai",
+        "protocol": "responses",
+        "model": {
+          "id": "ft:gpt-5:unverified"
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "unknown",
+          "disable": "unknown",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    },
+    {
+      "name": "Unknown exact OpenAI ID stays unverified: openai/gpt-5",
+      "input": {
+        "apiVersion": 1,
+        "provider": "openai",
+        "protocol": "responses",
+        "model": {
+          "id": "openai/gpt-5"
+        }
+      },
+      "expected": {
+        "chat": "unknown",
+        "tools": "unknown",
+        "stream": "unknown",
+        "reasoning": {
+          "support": "unknown",
+          "disable": "unknown",
+          "effortSelection": "unknown",
+          "efforts": [],
+          "requirement": "unknown"
+        }
+      },
+      "cli": {
+        "selected": true,
+        "conversation": "unknown",
+        "tools": "unknown",
+        "streaming": "unknown",
+        "reasoning": "unknown",
+        "reasoningMandatory": false,
+        "efforts": []
+      }
+    }
+  ]
+}

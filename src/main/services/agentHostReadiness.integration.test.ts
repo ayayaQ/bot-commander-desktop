@@ -37,7 +37,11 @@ vi.mock('./interactionService', () => ({
   setInteractions: host.save
 }))
 vi.mock('./slashCommandRegistry', () => ({ createInteractionPublishBackend: host.backend }))
-vi.mock('./settingsService', () => ({ getSettings: host.settings, setSettings: host.save }))
+vi.mock('./settingsService', () => ({
+  getSettings: host.settings,
+  setSettings: host.save,
+  onSettingsChanged: () => () => {}
+}))
 vi.mock('./fileService', () => ({
   saveCommands: host.save,
   saveInteractions: host.save,

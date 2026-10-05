@@ -144,7 +144,7 @@ export type AppSettings = {
   selectedAiModel?: string
   selectedOpenAiModel?: string
   selectedOpenRouterModel?: string
-  aiReasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+  aiReasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   openaiModel: string
   developerPrompt: string
   useCustomApi: boolean

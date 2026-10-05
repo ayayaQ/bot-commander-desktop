@@ -7,56 +7,94 @@ import type {
 } from '@ayayaq/vivi'
 import { createOpenAIProvider } from '@ayayaq/vivi/providers/openai'
 import { createOpenRouterProvider } from '@ayayaq/vivi/providers/openrouter'
+import type { ModelCapabilities } from '@ayayaq/vivi/providers/models'
 import type { AgentSession } from '../../shared/agentTypes'
+import { agentProtocol } from '../../shared/aiModelTypes'
+import {
+  providerReasoningEfforts,
+  reasoningConfigurationError,
+  reasoningSelection
+} from '../../shared/modelReasoningControls'
 import type { AiRuntimeSettings } from './aiProviderService'
-import { getAiProvider } from './aiProviderService'
+import { getAiProvider, getProviderApiKey } from './aiProviderService'
+import { immutableModelCapabilities, modelCapabilityCatalog } from './modelCapabilityService'
 
 type SessionModel = Pick<AgentSession, 'model' | 'reasoningEffort'>
-
-// Existing desktop controls allow these efforts without storing model capability metadata.
-// This is a host compatibility assertion, not discovered per-model capability support.
-// Preserve existing selections; the remote provider remains authoritative on support.
-const LEGACY_REASONING_EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const
-// Allow longer reasoning runs while bounding both transports; cancellation remains immediate.
 const AGENT_REQUEST_TIMEOUT_MS = 10 * 60_000
 
-/** The host owns settings, app policy and sessions; vivi owns protocol and native history. */
+export function getAgentModelCapabilities(
+  settings: AiRuntimeSettings,
+  id: string
+): ModelCapabilities {
+  const provider = getAiProvider(settings)
+  return modelCapabilityCatalog.get(
+    provider,
+    getProviderApiKey(settings),
+    agentProtocol(provider),
+    id
+  )
+}
+
+/** The host owns account metadata/policy; vivi owns protocol and native history. */
 export function createAgentProvider(
   settings: AiRuntimeSettings,
   session: SessionModel,
-  options: { stream?: boolean } = {}
+  options: { stream?: boolean; capabilities?: ModelCapabilities } = {}
 ): ModelProvider {
-  const reasoning =
-    session.reasoningEffort === 'none'
-      ? ({ mode: 'default' } as const)
-      : ({ mode: 'effort', effort: session.reasoningEffort } as const)
+  const provider = getAiProvider(settings)
+  const apiKey = getProviderApiKey(settings)
+  if (!apiKey.trim()) {
+    throw new Error(
+      `${provider === 'openai' ? 'OpenAI' : 'OpenRouter'} API key not configured. Please add it in Settings.`
+    )
+  }
+  const capabilities = immutableModelCapabilities(
+    options.capabilities ?? getAgentModelCapabilities(settings, session.model)
+  )
+  if (
+    capabilities.provider !== provider ||
+    capabilities.protocol !== agentProtocol(provider) ||
+    capabilities.id !== session.model
+  )
+    throw new Error('Model capability snapshot does not match the selected provider and API')
+  if (capabilities.chat === 'unsupported') {
+    throw new Error(
+      'This model does not support text conversation through the agent API. Choose another model.'
+    )
+  }
+  const error = reasoningConfigurationError(capabilities, session.reasoningEffort)
+  if (error) throw new Error(error)
   const common = {
     model: session.model,
-    reasoning,
-    supportedReasoningEfforts: LEGACY_REASONING_EFFORTS,
-    stream: options.stream ?? false,
+    reasoning: reasoningSelection(session.reasoningEffort),
+    supportedReasoningEfforts: providerReasoningEfforts(capabilities),
+    stream: capabilities.stream === 'unsupported' ? false : (options.stream ?? false),
     timeoutMs: AGENT_REQUEST_TIMEOUT_MS
   }
-  if (getAiProvider(settings) === 'openrouter') {
-    if (!settings.openrouterApiKey?.trim()) {
-      throw new Error('OpenRouter API key not configured. Please add it in Settings.')
-    }
-    return createOpenRouterProvider({
-      ...common,
-      apiKey: settings.openrouterApiKey,
-      attribution: {
-        referer: 'https://github.com/ayayaQ/bot-commander-desktop',
-        title: 'Bot Commander for Discord'
-      }
-    })
+  const transport =
+    provider === 'openrouter'
+      ? createOpenRouterProvider({
+          ...common,
+          apiKey,
+          attribution: {
+            referer: 'https://github.com/ayayaQ/bot-commander-desktop',
+            title: 'Bot Commander for Discord'
+          }
+        })
+      : createOpenAIProvider({ ...common, apiKey })
+  return {
+    generate: (input, signal, generateOptions) =>
+      transport.generate(
+        {
+          ...input,
+          tools: capabilities.tools === 'supported' ? input.tools : []
+        },
+        signal,
+        generateOptions
+      )
   }
-  if (!settings.openaiApiKey?.trim()) {
-    throw new Error('OpenAI API key not configured. Please add it in Settings.')
-  }
-  return createOpenAIProvider({ ...common, apiKey: settings.openaiApiKey })
 }
 
-/** Convenience entry point for one non-streaming provider turn outside the full service. */
 export async function executeAgentProviderTurn(
   settings: AiRuntimeSettings,
   session: SessionModel,

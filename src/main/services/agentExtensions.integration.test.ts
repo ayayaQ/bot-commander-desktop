@@ -100,7 +100,7 @@ function settings(provider: Provider = 'openai'): AiRuntimeSettings {
     aiProvider: provider,
     openaiApiKey: 'ordinary-fake-openai-string',
     openrouterApiKey: 'ordinary-fake-openrouter-string',
-    selectedOpenAiModel: 'fixture-openai-model',
+    selectedOpenAiModel: 'gpt-5.4-nano',
     selectedOpenRouterModel: 'fixture-openrouter-model'
   }
 }
@@ -363,6 +363,16 @@ function assertNativeContinuation(provider: Provider, request: RecordedRequest):
 
 beforeEach(async () => {
   vi.resetModules()
+  const { modelCapabilityCatalog } = await import('./modelCapabilityService')
+  const key = settings('openrouter').openrouterApiKey
+  const generation = modelCapabilityCatalog.begin('openrouter', key)
+  modelCapabilityCatalog.complete('openrouter', key, generation, [
+    {
+      id: 'fixture-openrouter-model',
+      supported_parameters: ['tools'],
+      architecture: { input_modalities: ['text'], output_modalities: ['text'] }
+    }
+  ])
   host.directory = await fs.mkdtemp(join(tmpdir(), 'agent-registry-integration-'))
   host.prepare.mockReset()
   host.commit.mockReset()
@@ -677,7 +687,7 @@ describe('published registry calculator in the recoverable desktop agent', () =>
       id: 'interrupted-session',
       title: 'Interrupted calculator',
       mode: 'auto',
-      model: 'fixture-openai-model',
+      model: 'gpt-5.4-nano',
       reasoningEffort: 'none',
       status: 'running',
       activeRunId: 'old-run',

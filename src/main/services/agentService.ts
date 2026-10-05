@@ -4,7 +4,7 @@ import crypto from 'node:crypto'
 import { runAgent, type HistoryMessage, type ToolCall } from '@ayayaq/vivi'
 import type { ToolRegistry } from '@ayayaq/vivi/extensions'
 import { createAgentExtensionRegistry } from './agentExtensions'
-import { createAgentProvider } from './agentProviderAdapter'
+import { createAgentProvider, getAgentModelCapabilities } from './agentProviderAdapter'
 import { initializeAgentHistory } from './agentHistory'
 import { createAgentPersistence, reportAgentPersistenceNotice } from './agentPersistence'
 import { decodeAgentSessions, validAgentDisplayHistory } from './agentSessionPersistence'
@@ -60,11 +60,13 @@ const MAX_TOOL_ROUNDS = 25
 const MAX_TOOL_RESULT_CHARS = 24_000
 const REASONING_EFFORTS = new Set<AgentReasoningEffort>([
   'none',
+  'disabled',
   'minimal',
   'low',
   'medium',
   'high',
-  'xhigh'
+  'xhigh',
+  'max'
 ])
 
 const SYSTEM_PROMPT = `You are the Bot Commander agent harness. Help the user inspect and modify their bot configuration.
@@ -735,6 +737,8 @@ async function startAgentSession(
     try {
       const memoryContext = formatAgentMemoryContext((await loadAgentMemories()).memories)
       const hasMemories = memoryContext !== 'Saved user memories: none.'
+      const runModel = { model: session.model, reasoningEffort: session.reasoningEffort }
+      const capabilities = getAgentModelCapabilities(settings, runModel.model)
       const tools =
         mode === 'planning'
           ? agentToolDefinitions.filter((tool) => !mutationToolNames.has(tool.function.name))
@@ -743,7 +747,11 @@ async function startAgentSession(
         {
           kind: 'message',
           role: 'system',
-          content: `${SYSTEM_PROMPT}\n\nCurrent execution mode: ${mode}.`
+          content: `${SYSTEM_PROMPT}\n\nCurrent execution mode: ${mode}.${
+            capabilities.tools === 'supported'
+              ? ''
+              : '\n\nNo tools are available for this model: tool support is unsupported or unverified. You cannot inspect or change bot resources, run calculations, or save memories. State this limitation clearly when relevant and never claim to have performed those actions.'
+          }`
         },
         ...(hasMemories
           ? [
@@ -756,19 +764,21 @@ async function startAgentSession(
           : [])
       ]
       const initialTokenCount = session.tokenCount
-      const runModel = { model: session.model, reasoningEffort: session.reasoningEffort }
       assertActiveRun(session, runId, controller.signal)
       const result = await runAgent({
-        provider: createAgentProvider(settings, runModel, { stream: true }),
+        provider: createAgentProvider(settings, runModel, { stream: true, capabilities }),
         messages: [...prefix, ...session.history!],
-        tools: [
-          ...tools.map((tool) => ({
-            name: tool.function.name,
-            description: tool.function.description,
-            parameters: JSON.parse(JSON.stringify(tool.function.parameters))
-          })),
-          ...context.extensions.tools
-        ],
+        tools:
+          capabilities.tools === 'supported'
+            ? [
+                ...tools.map((tool) => ({
+                  name: tool.function.name,
+                  description: tool.function.description,
+                  parameters: JSON.parse(JSON.stringify(tool.function.parameters))
+                })),
+                ...context.extensions.tools
+              ]
+            : [],
         signal: controller.signal,
         maxRounds: MAX_TOOL_ROUNDS,
         executeTool: async (call, { signal }) => {

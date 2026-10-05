@@ -1,8 +1,18 @@
 import OpenAI from 'openai'
 import type { AppSettings } from '../types/types'
+import type { ApiProtocol } from '@ayayaq/vivi/providers/models'
+import type {
+  AiModelInfo,
+  ChatReasoningEffort,
+  SelectedModelCapabilitySnapshot
+} from '../../shared/aiModelTypes'
+import { modelCapabilities, modelCapabilityCatalog } from './modelCapabilityService'
+import { nonConversationOpenAI } from './openAiResponsesRegistry'
+import { reasoningConfigurationError } from '../../shared/modelReasoningControls'
+export type { AiModelInfo } from '../../shared/aiModelTypes'
 
 export type AiProvider = 'openai' | 'openrouter'
-export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+export type ReasoningEffort = ChatReasoningEffort
 export type AiRuntimeSettings = Partial<AppSettings> & {
   openaiApiKey: string
   openaiModel?: string
@@ -13,55 +23,9 @@ export type AiRuntimeSettings = Partial<AppSettings> & {
   aiProvider?: AiProvider
 }
 
-export interface AiModelInfo {
-  id: string
-  name: string
-  description?: string
-  contextLength?: number
-  supportedParameters?: string[]
-  outputModalities?: string[]
-  supportsStructuredOutputs?: boolean
-  supportsReasoning?: boolean
-  pricing?: {
-    prompt?: string
-    completion?: string
-    request?: string
-    image?: string
-    webSearch?: string
-    internalReasoning?: string
-    inputCacheRead?: string
-    inputCacheWrite?: string
-  }
-}
-
 export interface AiChatMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
-}
-
-interface OpenRouterModelsResponse {
-  data?: OpenRouterModel[]
-}
-
-interface OpenRouterModel {
-  id: string
-  name?: string
-  description?: string
-  context_length?: number
-  supported_parameters?: string[]
-  pricing?: {
-    prompt?: string
-    completion?: string
-    request?: string
-    image?: string
-    web_search?: string
-    internal_reasoning?: string
-    input_cache_read?: string
-    input_cache_write?: string
-  }
-  architecture?: {
-    output_modalities?: string[]
-  }
 }
 
 interface OpenRouterErrorResponse {
@@ -153,86 +117,102 @@ export async function classifySpamWithOpenRouter(
   return { probability: spam.noul, model: json.model }
 }
 
-const OPENAI_TEXT_MODEL_PREFIXES = [/^gpt-/, /^o\d/, /^chatgpt-/]
-const OPENAI_NON_TEXT_MODEL_PATTERNS = [
-  /^o\d/,
-  /(^|[-/])audio($|[-/])/,
-  /(^|[-/])realtime($|[-/])/,
-  /(^|[-/])search($|[-/])/,
-  /(^|[-/])pro($|[-/])/,
-  /(^|[-/])transcribe($|[-/])/,
-  /(^|[-/])tts($|[-/])/,
-  /(^|[-/])image($|[-/])/,
-  /^gpt-image/,
-  /^dall-e/,
-  /^tts-/,
-  /^whisper-/
-]
-const OPENAI_REASONING_MODEL_PREFIXES = [/^gpt-5(?:\.|-|$)/, /^o\d/]
+const CHAT_POLICY_PRO_IDS = new Set([
+  'gpt-5-pro',
+  'gpt-5-pro-2025-10-06',
+  'gpt-5.2-pro',
+  'gpt-5.2-pro-2025-12-11',
+  'gpt-5.4-pro',
+  'gpt-5.4-pro-2026-03-05',
+  'gpt-5.5-pro',
+  'gpt-5.5-pro-2026-04-23',
+  'o3-pro',
+  'o3-pro-2025-06-10'
+])
 
-function includesOpenRouterParameter(model: OpenRouterModel, parameter: string): boolean {
-  return model.supported_parameters?.includes(parameter) === true
+function textField(value: unknown, max = 300): string | undefined {
+  return typeof value === 'string' &&
+    value.length <= max &&
+    !/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/.test(value)
+    ? value
+    : undefined
 }
 
-function hasTextOutput(model: OpenRouterModel): boolean {
-  const outputModalities = model.architecture?.output_modalities
-  return !outputModalities || outputModalities.length === 0 || outputModalities.includes('text')
+function stringList(value: unknown): string[] | undefined {
+  return Array.isArray(value) &&
+    value.length <= 100 &&
+    value.every((item) => typeof item === 'string')
+    ? value
+    : undefined
 }
 
-function toAiModelInfo(model: OpenRouterModel): AiModelInfo {
-  const supportsStructuredOutputs =
-    includesOpenRouterParameter(model, 'response_format') ||
-    includesOpenRouterParameter(model, 'structured_outputs')
-
-  return {
-    id: model.id,
-    name: model.name || model.id,
-    description: model.description,
-    contextLength: model.context_length,
-    supportedParameters: model.supported_parameters || [],
-    outputModalities: model.architecture?.output_modalities || [],
-    supportsStructuredOutputs,
-    supportsReasoning:
-      includesOpenRouterParameter(model, 'reasoning') ||
-      includesOpenRouterParameter(model, 'include_reasoning'),
-    pricing: model.pricing
-      ? {
-          prompt: model.pricing.prompt,
-          completion: model.pricing.completion,
-          request: model.pricing.request,
-          image: model.pricing.image,
-          webSearch: model.pricing.web_search,
-          internalReasoning: model.pricing.internal_reasoning,
-          inputCacheRead: model.pricing.input_cache_read,
-          inputCacheWrite: model.pricing.input_cache_write
-        }
-      : undefined
+/** Preserve exact IDs and endpoint evidence; incomplete metadata stays unknown. */
+export function parseAiModelCatalog(
+  provider: AiProvider,
+  protocol: ApiProtocol,
+  data: unknown
+): AiModelInfo[] {
+  if (!Array.isArray(data) || data.length > 5000) {
+    throw new Error('Model catalog has an unsupported format or size')
   }
-}
-
-function isOpenAiTextGenerationModel(id: string): boolean {
-  return (
-    OPENAI_TEXT_MODEL_PREFIXES.some((pattern) => pattern.test(id)) &&
-    !OPENAI_NON_TEXT_MODEL_PATTERNS.some((pattern) => pattern.test(id))
+  const models = new Map<string, AiModelInfo>()
+  for (const raw of data) {
+    let capabilities
+    try {
+      capabilities = modelCapabilities(provider, protocol, raw)
+    } catch {
+      continue
+    }
+    if (capabilities.chat === 'unsupported') continue
+    // Preserve the desktop's text-only catalog policy independently of endpoint
+    // capability facts. Custom IDs remain possible; Responses exclusions are not
+    // converted into false Chat Completions assertions.
+    if (
+      provider === 'openai' &&
+      protocol === 'chat-completions' &&
+      (nonConversationOpenAI.has(capabilities.id) || CHAT_POLICY_PRO_IDS.has(capabilities.id))
+    )
+      continue
+    const model = isRecord(raw) ? raw : {}
+    const parameters = stringList(model.supported_parameters)
+    const architecture = isRecord(model.architecture) ? model.architecture : {}
+    const pricing = isRecord(model.pricing) ? model.pricing : undefined
+    const price = (key: string): string | undefined => pricing && textField(pricing[key])
+    models.set(capabilities.id, {
+      id: capabilities.id,
+      name: textField(model.name) || capabilities.id,
+      description: textField(model.description, 5000),
+      contextLength:
+        typeof model.context_length === 'number' &&
+        Number.isFinite(model.context_length) &&
+        model.context_length > 0
+          ? model.context_length
+          : undefined,
+      supportedParameters: parameters,
+      outputModalities: stringList(architecture.output_modalities),
+      supportsStructuredOutputs: parameters
+        ? parameters.includes('response_format') || parameters.includes('structured_outputs')
+        : undefined,
+      capabilities,
+      pricing: pricing
+        ? {
+            prompt: price('prompt'),
+            completion: price('completion'),
+            request: price('request'),
+            image: price('image'),
+            webSearch: price('web_search'),
+            internalReasoning: price('internal_reasoning'),
+            inputCacheRead: price('input_cache_read'),
+            inputCacheWrite: price('input_cache_write')
+          }
+        : undefined
+    })
+  }
+  return [...models.values()].sort(
+    provider === 'openai'
+      ? (a, b) => b.id.localeCompare(a.id, undefined, { numeric: true })
+      : (a, b) => a.name.localeCompare(b.name)
   )
-}
-
-function openAiModelSupportsReasoning(id: string): boolean {
-  return OPENAI_REASONING_MODEL_PREFIXES.some((pattern) => pattern.test(id))
-}
-
-function toOpenAiModelInfo(id: string): AiModelInfo {
-  const supportsReasoning = openAiModelSupportsReasoning(id)
-  return {
-    id,
-    name: id,
-    outputModalities: ['text'],
-    supportsReasoning,
-    supportsStructuredOutputs: true,
-    supportedParameters: supportsReasoning
-      ? ['reasoning_effort', 'response_format']
-      : ['response_format']
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -330,39 +310,68 @@ export function validateAiConfiguration(settings: AiRuntimeSettings): string | n
   return null
 }
 
-export async function fetchAiModels(provider: AiProvider, apiKey?: string): Promise<AiModelInfo[]> {
-  if (provider === 'openrouter') {
-    const params = new URLSearchParams({ output_modalities: 'text' })
-    const response = await fetch(`${OPENROUTER_BASE_URL}/models?${params.toString()}`, {
-      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined
-    })
-    if (!response.ok) {
-      const errorText = formatOpenRouterError(
-        await response.text(),
-        response.status,
-        response.headers.get('Retry-After')
-      )
-      throw new Error(`OpenRouter models request failed (${response.status}): ${errorText}`)
+/** Exact selected-ID facts do not assert membership or account access and perform no fetch. */
+export function getSelectedModelCapabilities(
+  settings: AiRuntimeSettings,
+  id: string,
+  protocol: ApiProtocol
+): SelectedModelCapabilitySnapshot {
+  if (typeof id !== 'string') throw new TypeError('Selected model must contain an exact ID')
+  const provider = getAiProvider(settings)
+  const apiKey = getProviderApiKey(settings)
+  if (apiKey && id.includes(apiKey)) throw new Error('Selected model ID is invalid')
+  return modelCapabilityCatalog.selectedSnapshot(provider, apiKey, protocol, id)
+}
+
+export async function fetchAiModels(
+  provider: AiProvider,
+  apiKey?: string,
+  protocol: ApiProtocol = 'chat-completions'
+): Promise<AiModelInfo[]> {
+  const generation = modelCapabilityCatalog.begin(provider, apiKey)
+  let data: unknown
+  try {
+    if (provider === 'openrouter') {
+      const params = new URLSearchParams({ output_modalities: 'text' })
+      const response = await fetch(`${OPENROUTER_BASE_URL}/models?${params.toString()}`, {
+        headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined
+      })
+      if (!response.ok) throw new Error(`Model catalog unavailable (HTTP ${response.status})`)
+      const json: unknown = await response.json()
+      data = isRecord(json) ? json.data : undefined
+    } else {
+      if (!apiKey) throw new Error('OpenAI API key is required to fetch OpenAI models')
+      const openai = new OpenAI({ apiKey })
+      const page = await openai.models.list()
+      data = page.data
     }
-    const json = (await response.json()) as OpenRouterModelsResponse
-    return (json.data || [])
-      .filter((model) => model.id && hasTextOutput(model))
-      .map(toAiModelInfo)
-      .sort((a, b) => a.name.localeCompare(b.name))
+    const models = parseAiModelCatalog(provider, protocol, data)
+    if (apiKey && JSON.stringify(models).includes(apiKey)) {
+      throw new Error('Model catalog contained invalid credential-bearing metadata')
+    }
+    if (!modelCapabilityCatalog.complete(provider, apiKey, generation, data as unknown[])) {
+      throw new Error('Model catalog request was superseded; refresh for the current provider')
+    }
+    if (provider === 'openrouter')
+      for (const model of models) {
+        model.capabilityExpiresAt = modelCapabilityCatalog.selectedSnapshot(
+          provider,
+          apiKey,
+          protocol,
+          model.id
+        ).expiresAt
+      }
+    return models
+  } catch (error) {
+    // Catalog transport/provider failures can contain keys or response bodies.
+    const message =
+      error instanceof Error &&
+      (error.message.startsWith('Model catalog ') ||
+        error.message === 'OpenAI API key is required to fetch OpenAI models')
+        ? error.message
+        : 'Model catalog could not be loaded; check your connection and provider key'
+    throw new Error(message)
   }
-
-  if (!apiKey) {
-    throw new Error('OpenAI API key is required to fetch OpenAI models')
-  }
-
-  const openai = new OpenAI({ apiKey })
-  const page = await openai.models.list()
-  const ids = page.data
-    .map((model) => model.id)
-    .filter(isOpenAiTextGenerationModel)
-    .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
-
-  return ids.map(toOpenAiModelInfo)
 }
 
 export async function moderateTextWithOpenAI(
@@ -392,6 +401,22 @@ export async function createAiChatCompletion(
 ): Promise<{ content: string; tokenCount: number }> {
   const configError = validateAiConfiguration(settings)
   if (configError) throw new Error(configError)
+  if (options.reasoningEffort && options.reasoningEffort !== 'none') {
+    if (!['minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(options.reasoningEffort)) {
+      throw new Error(
+        'Saved chat reasoning choice is invalid. Choose Provider default or a documented reasoning choice.'
+      )
+    }
+    const provider = getAiProvider(settings)
+    const capabilities = modelCapabilityCatalog.get(
+      provider,
+      getProviderApiKey(settings),
+      'chat-completions',
+      model
+    )
+    const reasoningError = reasoningConfigurationError(capabilities, options.reasoningEffort)
+    if (reasoningError) throw new Error(reasoningError)
+  }
 
   if (getAiProvider(settings) === 'openrouter') {
     const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {

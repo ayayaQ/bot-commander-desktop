@@ -1,9 +1,10 @@
 import type { HistoryMessage } from '@ayayaq/vivi'
+import type { DesktopReasoningEffort } from './aiModelTypes'
 
 export type AgentMode = 'manual' | 'auto' | 'planning'
 export type AgentPlanDecision = 'auto' | 'manual' | 'continue'
 export type AgentProvider = 'openai' | 'openrouter'
-export type AgentReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+export type AgentReasoningEffort = DesktopReasoningEffort
 export type AgentRunStatus =
   'idle' | 'running' | 'waiting_approval' | 'completed' | 'error' | 'cancelled' | 'interrupted'
 
