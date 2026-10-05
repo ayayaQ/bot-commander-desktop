@@ -87,6 +87,8 @@ class FakeClient {
   pendingLogin = deferred<string>()
   login = vi.fn(() => this.pendingLogin.promise)
   destroy = vi.fn(async () => {})
+  gatewayReady = false
+  isReady = vi.fn(() => this.gatewayReady)
   user = { username: 'test-bot', avatarURL: () => 'test-avatar', setPresence: vi.fn() }
   users = { cache: { size: 2 } }
   guilds = { cache: { size: 1 } }
@@ -103,6 +105,7 @@ class FakeClient {
   }
 
   async ready() {
+    this.gatewayReady = true
     const ready = this.emit(Events.ClientReady)
     this.pendingLogin.resolve('test-token')
     await ready
@@ -515,5 +518,169 @@ describe('botService Connect', () => {
     await Disconnect(ipcEvent())
     resumeSpamProtection()
     expect(mocks.spamStart).toHaveBeenCalledOnce()
+  })
+
+  it('observes never/pending/initializing/serving/stale/recovery/disconnected without side effects', async () => {
+    const loading = deferred<void>()
+    mocks.loadBotState.mockReturnValueOnce(loading.promise)
+    const { Connect, Disconnect, getHostConnectionObservation } = await import('./botService')
+    expect(getHostConnectionObservation()).toEqual({
+      attempt: 'never-attempted',
+      failure: null,
+      observedAt: null,
+      servingReady: false,
+      gatewayReady: false,
+      guildCount: null
+    })
+    Connect(ipcEvent(), 'secret-test-token')
+    expect(getHostConnectionObservation()).toMatchObject({
+      attempt: 'pending',
+      servingReady: false,
+      gatewayReady: false
+    })
+    const ready = clients[0].ready()
+    expect(getHostConnectionObservation()).toMatchObject({
+      attempt: 'initializing',
+      servingReady: false,
+      gatewayReady: true
+    })
+    loading.resolve(undefined)
+    await ready
+    expect(getHostConnectionObservation()).toMatchObject({
+      attempt: 'ready',
+      failure: null,
+      servingReady: true,
+      gatewayReady: true,
+      guildCount: 1
+    })
+    clients[0].gatewayReady = false
+    expect(getHostConnectionObservation()).toMatchObject({
+      attempt: 'ready',
+      servingReady: true,
+      gatewayReady: false
+    })
+    clients[0].gatewayReady = true
+    const settled = getHostConnectionObservation()
+    for (const key of ['token', 'user'])
+      Object.defineProperty(clients[0], key, {
+        get: () => {
+          throw new Error('secret-client-property')
+        }
+      })
+    vi.clearAllMocks()
+    expect(getHostConnectionObservation()).toEqual(settled)
+    expect(getHostConnectionObservation()).toEqual(settled)
+    expect(mocks.setCookie).not.toHaveBeenCalled()
+    expect(mocks.loadBotState).not.toHaveBeenCalled()
+    expect(mocks.saveBotState).not.toHaveBeenCalled()
+    expect(clients[0].login).not.toHaveBeenCalled()
+    expect(clients[0].destroy).not.toHaveBeenCalled()
+    await Disconnect(ipcEvent())
+    expect(getHostConnectionObservation()).toMatchObject({
+      attempt: 'disconnected',
+      failure: null,
+      servingReady: false,
+      gatewayReady: false,
+      guildCount: null
+    })
+  })
+
+  it('retains only current token-free login failure and clears it on retry', async () => {
+    const { Connect, getHostConnectionObservation } = await import('./botService')
+    Connect(ipcEvent(), 'first-secret-token')
+    clients[0].pendingLogin.reject(new Error('raw-secret-failure https://user:secret@example.test'))
+    await flushLogin()
+    const failed = getHostConnectionObservation()
+    expect(failed).toMatchObject({
+      attempt: 'failed',
+      failure: 'login-failed',
+      servingReady: false
+    })
+    expect(JSON.stringify(failed)).not.toContain('secret')
+    Connect(ipcEvent(), 'new-secret-token')
+    expect(getHostConnectionObservation()).toMatchObject({ attempt: 'pending', failure: null })
+    await clients[0].ready()
+    expect(getHostConnectionObservation()).toMatchObject({
+      attempt: 'pending',
+      failure: null,
+      servingReady: false
+    })
+    await clients[1].ready()
+    expect(getHostConnectionObservation()).toMatchObject({
+      attempt: 'ready',
+      failure: null,
+      servingReady: true
+    })
+  })
+
+  it('cannot let superseded login rejection or state-load failure replace current readiness', async () => {
+    const loading = deferred<void>()
+    mocks.loadBotState.mockReturnValueOnce(loading.promise)
+    const { Connect, getHostConnectionObservation } = await import('./botService')
+    Connect(ipcEvent(), 'old-token')
+    const oldReady = clients[0].ready()
+    Connect(ipcEvent(), 'pending-token')
+    Connect(ipcEvent(), 'current-token')
+    await clients[2].ready()
+    const current = getHostConnectionObservation()
+    clients[1].pendingLogin.reject(new Error('old-secret-login'))
+    loading.reject(new Error('old-secret-load'))
+    await oldReady
+    await flushLogin()
+    expect(getHostConnectionObservation()).toEqual(current)
+  })
+
+  it('records current state-load failure and prevents disconnected initialization from restoring it', async () => {
+    mocks.loadBotState.mockRejectedValueOnce(new Error('secret-disk-error'))
+    const { Connect, Disconnect, getHostConnectionObservation } = await import('./botService')
+    Connect(ipcEvent(), 'token')
+    await clients[0].ready()
+    expect(getHostConnectionObservation()).toMatchObject({
+      attempt: 'failed',
+      failure: 'state-load-failed',
+      servingReady: false
+    })
+    expect(JSON.stringify(getHostConnectionObservation())).not.toContain('secret')
+    const loading = deferred<void>()
+    mocks.loadBotState.mockReturnValueOnce(loading.promise)
+    Connect(ipcEvent(), 'token')
+    const ready = clients[1].ready()
+    await Disconnect(ipcEvent())
+    const disconnected = getHostConnectionObservation()
+    loading.resolve(undefined)
+    await ready
+    expect(getHostConnectionObservation()).toEqual(disconnected)
+  })
+
+  it('does not let a delayed disconnect checkpoint overwrite newer observed readiness', async () => {
+    const { Connect, Disconnect, getHostConnectionObservation } = await import('./botService')
+    Connect(ipcEvent(), 'old-token')
+    await clients[0].ready()
+    const checkpoint = deferred<void>()
+    mocks.saveBotState.mockReturnValueOnce(checkpoint.promise)
+    const disconnect = Disconnect(ipcEvent())
+    Connect(ipcEvent(), 'new-token')
+    await clients[1].ready()
+    const current = getHostConnectionObservation()
+    checkpoint.reject(new Error('old-secret-checkpoint-error'))
+    await disconnect
+    expect(getHostConnectionObservation()).toEqual(current)
+    expect(current).toMatchObject({ attempt: 'ready', failure: null, servingReady: true })
+  })
+
+  it('observes the existing connected Connect toggle as a disconnect without a new login', async () => {
+    const { Connect, getHostConnectionObservation } = await import('./botService')
+    Connect(ipcEvent(), 'old-token')
+    await clients[0].ready()
+    mocks.setCookie.mockClear()
+    Connect(ipcEvent(), 'unused-token')
+    expect(getHostConnectionObservation()).toMatchObject({
+      attempt: 'disconnected',
+      failure: null,
+      servingReady: false,
+      gatewayReady: false
+    })
+    expect(clients).toHaveLength(1)
+    expect(mocks.setCookie).not.toHaveBeenCalled()
   })
 })

@@ -25,7 +25,16 @@ vi.mock('./mcpConfigService', () => ({
 }))
 
 vi.mock('./agentTools', () => ({
+  agentOnlyToolNames: new Set(['read_host_status']),
   agentToolDefinitions: [
+    {
+      type: 'function',
+      function: {
+        name: 'read_host_status',
+        description: 'Agent-only local readiness',
+        parameters: { type: 'object', properties: {}, additionalProperties: false }
+      }
+    },
     {
       type: 'function',
       function: {
@@ -102,6 +111,8 @@ describe('mcpServerService', () => {
     await client.connect(transport)
     const listed = await client.listTools()
     expect(listed.tools.map((tool) => tool.name)).toEqual(['read_example'])
+    await expect(client.callTool({ name: 'read_host_status', arguments: {} })).rejects.toThrow()
+    expect(mocks.execute).not.toHaveBeenCalled()
     await expect(client.callTool({ name: 'read_example', arguments: {} })).resolves.toMatchObject({
       content: [{ type: 'text' }]
     })
