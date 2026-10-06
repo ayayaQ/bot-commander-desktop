@@ -347,13 +347,13 @@ describe('desktop agent service shared-provider integration', () => {
       )
       await service.runAgentSession(session.id, 'Calculate', settings)
       await done
-      expect(createRegistry).toHaveBeenCalledWith([
-        'read_bot_state',
-        'search_documentation',
-        'read_command',
-        'lint_js',
-        'edit_command'
-      ])
+      expect(createRegistry).toHaveBeenCalledWith(
+        ['read_bot_state', 'search_documentation', 'read_command', 'lint_js', 'edit_command'],
+        expect.objectContaining({
+          catalog: expect.any(Object),
+          authorizeRead: expect.any(Function)
+        })
+      )
       for (const [request] of mocks.responsesCreate.mock.calls) {
         expect(request.tools).toContainEqual(
           expect.objectContaining({ name: 'calculate', description })

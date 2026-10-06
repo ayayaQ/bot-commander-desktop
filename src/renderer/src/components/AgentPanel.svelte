@@ -6,6 +6,7 @@
   import AgentApprovalDiff from './AgentApprovalDiff.svelte'
   import AgentValidationReport from './AgentValidationReport.svelte'
   import AgentRunSummary from './AgentRunSummary.svelte'
+  import AgentSkillsPanel from './AgentSkillsPanel.svelte'
   import { renderMarkdown } from '../utils/markdown'
   import { agentToolLabel } from '../utils/agentToolLabel'
   import {
@@ -393,6 +394,7 @@
         </div>
       {/each}
     </div>
+    <AgentSkillsPanel />
   </aside>
 
   {#if $activeAgentSession}
@@ -511,6 +513,17 @@
                       />
                     {/if}
                     {#if call.status === 'waiting_approval'}
+                      {#if call.name === 'save_skill'}
+                        <div class="px-3 py-2 text-xs break-all border-t border-base-300">
+                          Write destination: {String(
+                            (call.after as { destination?: string })?.destination || 'Unavailable'
+                          )}
+                          <div class="opacity-70">
+                            Exact SKILL.md {call.before === null ? 'creation' : 'replacement'}.
+                            Available next turn.
+                          </div>
+                        </div>
+                      {/if}
                       <AgentApprovalDiff before={call.before} after={call.after} />
                       <div class="p-3 border-t border-base-300 flex justify-end gap-2">
                         <button class="btn btn-sm btn-ghost" onclick={() => decide(call, false)}

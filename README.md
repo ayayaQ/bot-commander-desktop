@@ -251,6 +251,17 @@ $ npm run build:mac
 $ npm run build:linux
 ```
 
+## App-wide Agent Skills
+
+The Agent panel's Skills control lists standard SKILL.md folders, the bundled read-only
+skill creator, and format/compatibility diagnostics. Use the owned app-wide store or select
+existing folders read-only. Skills load progressively, remain instruction-only and use the
+same format as vivi-cli. This inspection draft does not advertise agent saves on any platform: a validated
+handle-bound filesystem adapter is still needed. The creator drafts standard SKILL.md
+for manual saving. The review/approval writer prototype is covered only by ordinary
+temporary-folder fixtures; Windows/macOS/Linux save workflows are not accepted. Changes apply on a future turn. See
+[Agent Skills](docs/AGENT_SKILLS.md) for limits and filesystem/persistence behavior.
+
 ## External agent access (optional)
 
 Open **Settings → External agent access**, enable the authenticated loopback MCP server, and copy the generated token. The server is disabled by default, binds only to `127.0.0.1`, and stores its token with the operating system's secure credential storage. Keep clients in read-only mode unless you explicitly want an agent to edit the app.

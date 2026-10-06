@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   handle: vi.fn(),
+  listSkills: vi.fn(),
+  skillFolder: vi.fn(),
+  chooseSkillFolder: vi.fn(),
   on: vi.fn(),
   copyMcpToken: vi.fn(),
   writeText: vi.fn(),
@@ -18,9 +21,15 @@ const mocks = vi.hoisted(() => ({
   memorySink: null as ((result: unknown) => void) | null
 }))
 
+vi.mock('../services/agentSkillService', () => ({
+  loadAgentSkills: mocks.listSkills,
+  configureAgentSkillFolder: mocks.skillFolder
+}))
+
 // Register the real handlers without loading Electron or any live application services.
 vi.mock('electron', () => ({
   clipboard: { writeText: mocks.writeText },
+  dialog: { showOpenDialog: mocks.chooseSkillFolder },
   BrowserWindow: { getAllWindows: () => [{ webContents: { send: mocks.send } }] }
 }))
 vi.mock('./ipcSecurity', () => ({
@@ -284,5 +293,37 @@ describe('persistent memory IPC compatibility', () => {
     } finally {
       log.mockRestore()
     }
+  })
+})
+
+describe('explicit read-only skills folder IPC', () => {
+  beforeEach(() => vi.clearAllMocks())
+  async function handler(channel: string) {
+    const { addIPCHandlers } = await import('./ipcHandlers')
+    addIPCHandlers()
+    return mocks.handle.mock.calls.find(([name]) => name === channel)![1]
+  }
+  it('lists skills and adds only the folder returned by the user dialog', async () => {
+    const status = {
+      ownedRoot: '/app/agent-skills',
+      externalRoots: [],
+      skills: [],
+      diagnostics: []
+    }
+    mocks.listSkills.mockResolvedValue(status)
+    expect(await (await handler('skills:list'))({})).toEqual(status)
+    mocks.chooseSkillFolder.mockResolvedValue({ canceled: false, filePaths: ['/selected/skills'] })
+    mocks.skillFolder.mockResolvedValue(status)
+    expect(await (await handler('skills:choose-root'))({}, '/ignored/model/path')).toEqual(status)
+    expect(mocks.skillFolder).toHaveBeenCalledWith('/selected/skills', true)
+    await (
+      await handler('skills:remove-root')
+    )({}, '/selected/skills')
+    expect(mocks.skillFolder).toHaveBeenLastCalledWith('/selected/skills', false)
+  })
+  it('does not change configuration after dialog cancellation', async () => {
+    mocks.chooseSkillFolder.mockResolvedValue({ canceled: true, filePaths: [] })
+    expect(await (await handler('skills:choose-root'))({})).toBeNull()
+    expect(mocks.skillFolder).not.toHaveBeenCalled()
   })
 })

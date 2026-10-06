@@ -7,6 +7,7 @@ export type {
   SelectedModelCapabilitySnapshot
 } from '../shared/aiModelTypes'
 export type { ModelCapabilities } from '@ayayaq/vivi/providers/models'
+export type { AgentSkillsStatus, AgentSkillReceipt } from '../shared/agentSkillTypes'
 export type { InteractionPublicationState } from '../shared/interactionPublication'
 
 declare global {

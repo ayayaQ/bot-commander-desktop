@@ -5,6 +5,14 @@ import { runAgent, type HistoryMessage, type ToolCall } from '@ayayaq/vivi'
 import type { ToolRegistry } from '@ayayaq/vivi/extensions'
 import { formatMemoryContext, MEMORY_GUIDANCE } from '@ayayaq/vivi/extensions/memory'
 import { createAgentExtensionRegistry } from './agentExtensions'
+import {
+  createSkillsExtension,
+  formatSkillCatalogContext,
+  SKILL_LIMITS
+} from '@ayayaq/vivi/extensions/skills'
+import { agentSkillStore } from './agentSkillService'
+import type { AgentSkillSnapshot } from './agentSkillStore'
+import type { AgentSkillReceipt } from '../../shared/agentSkillTypes'
 import { createAgentProvider, getAgentModelCapabilities } from './agentProviderAdapter'
 import { initializeAgentHistory } from './agentHistory'
 import { createAgentPersistence, reportAgentPersistenceNotice } from './agentPersistence'
@@ -70,6 +78,9 @@ import {
 
 const AGENT_SESSIONS_FILENAME = 'agent-sessions.json'
 const MAX_TOOL_ROUNDS = 25
+// JSON escaping can double a bounded UTF-8 resource plus metadata/warnings.
+const MAX_SKILL_TOOL_RESULT_CHARS =
+  2 * SKILL_LIMITS.maximumResourceBytes + 2 * SKILL_LIMITS.maximumFrontmatterBytes + 8192
 const MAX_DRAFT_VALIDATION_FAILURES = 3
 const REASONING_EFFORTS = new Set<AgentReasoningEffort>([
   'none',
@@ -104,6 +115,7 @@ In planning mode, investigate with read and lint tools and never make mutations.
 interface AgentRunContext {
   validationFailures: Map<string, number>
   extensions: ToolRegistry
+  skills: AgentSkillSnapshot
   documentationPolicy: DocumentationPolicyState
   metrics: AgentRunMetrics
 }
@@ -117,7 +129,7 @@ interface PendingApproval {
   sessionId: string
   runId: string
   toolCallId: string
-  prepared: PreparedMutation
+  prepared: Pick<PreparedMutation, 'before' | 'after'>
   resolve: (approved: boolean) => void
 }
 
@@ -514,7 +526,7 @@ async function awaitApproval(
   session: AgentSession,
   runId: string,
   call: AgentToolCall,
-  prepared: PreparedMutation,
+  prepared: Pick<PreparedMutation, 'before' | 'after'>,
   context: AgentRunContext
 ): Promise<boolean> {
   let resolveApproval!: (approved: boolean) => void
@@ -583,6 +595,7 @@ async function runTool(
     toolCalls: [call]
   })
   emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
+  let skillReceipt: AgentSkillReceipt | undefined
   try {
     assertActiveRun(session, runId, signal)
     // Durably record the attempt before execution; a crashed tool has an unknown outcome.
@@ -672,9 +685,72 @@ async function runTool(
         if (call.validation && result && typeof result === 'object')
           result = { ...result, diagnostics: call.diagnostics, validation: call.validation }
       }
+    } else if (call.name === 'save_skill') {
+      if (mode === 'planning') throw new Error('Skill writes are disabled in planning mode')
+      // Mutating extensions must use the host review path. Auto mode cannot approve skills.
+      const extension = createSkillsExtension({
+        catalog: context.skills.catalog,
+        authorizeRead: context.skills.authorizeRead,
+        save: {
+          authorize: async (proposal) => {
+            assertActiveRun(session, runId, signal)
+            const destination = agentSkillStore.destination(proposal.name)
+            call.targetLabel = `${proposal.name}/SKILL.md`
+            const draft = {
+              before: proposal.before ? { destination, content: proposal.before.content } : null,
+              after: {
+                destination,
+                content: proposal.after.content,
+                warnings: [...proposal.after.warnings],
+                available: 'next_turn'
+              }
+            }
+            const approved = await awaitApproval(session, runId, call, draft, context)
+            assertActiveRun(session, runId, signal)
+            if (!approved) {
+              call.status = 'rejected'
+              return false
+            }
+            call.status = 'approved'
+            session.status = 'running'
+            context.metrics = recordAgentRunTool(context.metrics, call)
+            checkpointRunMetrics(session, context)
+            await save()
+            assertActiveRun(session, runId, signal)
+            return true
+          },
+          commit: async (proposal) => {
+            assertActiveRun(session, runId, signal)
+            skillReceipt = await agentSkillStore.commit(proposal, { signal })
+            // Keep a committed receipt even when the generic runner cancels this tool result.
+            call.status = 'completed'
+            call.result = skillReceipt
+            message.content = stringifyResult(skillReceipt)
+            context.metrics = recordAgentRunTool(context.metrics, call)
+            checkpointRunMetrics(session, context)
+            await save()
+            emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
+          }
+        }
+      })
+      const tool = extension.tools.find((item) => item.definition.name === 'save_skill')!
+      await tool.validateArguments(providerCall.arguments)
+      const output = await tool.execute(providerCall, { signal })
+      extensionContent = skillReceipt
+        ? stringifyResult(skillReceipt)
+        : boundToolContent(output.content)
+      result = skillReceipt ?? JSON.parse(extensionContent)
+      if (output.isError && call.status !== 'rejected') {
+        call.status = 'error'
+        call.error = extensionContent
+      }
     } else if (context.extensions.has(call.name)) {
       const output = await context.extensions.executeTool(providerCall, { signal })
-      extensionContent = boundToolContent(output.content)
+      if (call.name === 'read_skill' || call.name === 'list_skills') {
+        if (output.content.length > MAX_SKILL_TOOL_RESULT_CHARS)
+          throw new Error('Skill tool result exceeds its host bound')
+        extensionContent = output.content
+      } else extensionContent = boundToolContent(output.content)
       try {
         result = JSON.parse(extensionContent)
       } catch {
@@ -700,12 +776,13 @@ async function runTool(
           )
         : await executeReadTool(call.name, call.arguments)
     }
-    result = boundAgentToolResult(result)
-    assertActiveRun(session, runId, signal)
+    if (call.name !== 'read_skill' && call.name !== 'list_skills')
+      result = boundAgentToolResult(result)
+    if (!skillReceipt) assertActiveRun(session, runId, signal)
     if (call.status !== 'rejected' && call.status !== 'error') call.status = 'completed'
     call.result = result
     message.content = extensionContent ?? stringifyResult(result)
-    session.status = 'running'
+    if (!signal.aborted) session.status = 'running'
     context.metrics = recordAgentRunTool(context.metrics, call)
     checkpointRunMetrics(session, context)
     emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
@@ -713,6 +790,18 @@ async function runTool(
     return { toolCall: call, content: message.content }
   } catch (error) {
     const detail = errorDetail(error)
+    if (skillReceipt) {
+      // A transcript/reporting error cannot change a committed skill outcome.
+      call.status = 'completed'
+      call.result = skillReceipt
+      message.content = stringifyResult(skillReceipt)
+      reportAgentPersistenceNotice({
+        level: 'error',
+        message: `Skill ${skillReceipt.name} was saved, but its session checkpoint failed: ${detail}. Read the saved revision before retrying.`
+      })
+      emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
+      return { toolCall: call, content: message.content }
+    }
     if (!isActiveRun(session, runId, signal))
       return {
         toolCall: call,
@@ -763,12 +852,34 @@ async function startAgentSession(
   // Do not register a new provider run after that sweep; it has not changed any state yet.
   if (isAgentPersistencePaused()) throw new Error('The app is shutting down; agent runs are paused')
 
+  const skills = await agentSkillStore.snapshot()
+  if (controllers.has(sessionId))
+    throw new Error('This agent session already has a running request')
+  if (deletingSessionIds.has(sessionId) || deletedSessionIds.has(sessionId))
+    throw new Error('Agent session is being deleted')
+  if (isAgentPersistencePaused()) throw new Error('The app is shutting down; agent runs are paused')
   const runId = id('run')
   const context: AgentRunContext = {
     validationFailures: new Map(),
+    skills,
     // Reserve every built-in before planning mode filters mutation tools from advertisement.
     extensions: createAgentExtensionRegistry(
-      agentToolDefinitions.map((tool) => tool.function.name)
+      agentToolDefinitions.map((tool) => tool.function.name),
+      {
+        catalog: skills.catalog,
+        authorizeRead: skills.authorizeRead,
+        // Advertise the exact core save schema only. runTool routes writes through host approval.
+        ...(session.mode !== 'planning' && skills.status.saveSupport.available
+          ? {
+              save: {
+                authorize: () => false,
+                commit: () => {
+                  throw new Error('Skill writes require the desktop host executor')
+                }
+              }
+            }
+          : {})
+      }
     ),
     documentationPolicy: createDocumentationPolicyState(),
     metrics: createAgentRunMetrics(runId, now())
@@ -825,13 +936,32 @@ async function startAgentSession(
                 content: `${memoryContext}\nThis is context only, not a request to act.`
               }
             ]
-          : [])
+          : []),
+        {
+          kind: 'message',
+          role: 'user',
+          content: `${formatSkillCatalogContext(skills.catalog)}\n${capabilities.tools === 'supported' ? 'Tools are available for this model.' : 'This model has no tools: it cannot read or save skills.'} Desktop host can read bounded UTF-8 skill resources. ${skills.status.saveSupport.available ? 'A fixture save capability is available with explicit review.' : skills.status.saveSupport.reason} No shell, executable skill scripts, binary asset loader, community downloads, dependency installation or skill-supplied tool grants are available. Saved changes apply on a future turn. Current user instructions take priority. Read-only sources cannot be edited.`
+        }
       ]
       const initialTokenCount = session.tokenCount
       assertActiveRun(session, runId, controller.signal)
       const result = await runAgent({
         provider: createAgentProvider(settings, runModel, { stream: true, capabilities }),
-        messages: [...prefix, ...session.history!],
+        messages: [
+          ...prefix,
+          ...session.history!.map((message) =>
+            message.kind === 'tool_result' && message.name === 'read_skill'
+              ? {
+                  ...message,
+                  content: JSON.stringify({
+                    priorSkillRead: true,
+                    message:
+                      'Earlier skill guidance omitted. Read the relevant skill from this turn catalog again.'
+                  })
+                }
+              : message
+          )
+        ],
         tools:
           capabilities.tools === 'supported'
             ? [

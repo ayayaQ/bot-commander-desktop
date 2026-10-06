@@ -692,7 +692,12 @@ describe('published registry calculator in the recoverable desktop agent', () =>
     await start(agents, 'planning')
     const completed = await observed.terminal
     expect(completed).toMatchObject({ status: 'completed', planReady: true })
-    expect(requests[0].body.tools.map((tool) => tool.name)).toEqual(['read_command', 'calculate'])
+    expect(requests[0].body.tools.map((tool) => tool.name)).toEqual([
+      'read_command',
+      'calculate',
+      'list_skills',
+      'read_skill'
+    ])
     expect(displayCalls(completed)).toMatchObject([{ name: 'calculate', result: { result: 42 } }])
     expect(toolResults(completed)[1]).toMatchObject({
       callId: 'edit-call',

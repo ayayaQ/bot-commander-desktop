@@ -25,7 +25,7 @@
     "build:linux": "npm run build && electron-builder --linux"
   },
   "dependencies": {
-    "@ayayaq/vivi": "0.5.0",
+    "@ayayaq/vivi": "0.6.0",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
