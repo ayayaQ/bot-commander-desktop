@@ -57,7 +57,15 @@ export function emitResourceChanged(
     revision: resourceRevision(value),
     ...(targetId ? { targetId } : {})
   }
-  eventSink?.(structuredClone(event))
+  try {
+    eventSink?.(structuredClone(event))
+  } catch (error) {
+    try {
+      console.error('Could not report committed resource change:', error)
+    } catch {
+      // Notification failures cannot change the outcome of a committed mutation.
+    }
+  }
   return event
 }
 

@@ -79,6 +79,136 @@ afterEach(async () => {
 })
 
 describe('recoverable agent service wiring', () => {
+  it('retains loaded memories after an initial checkpoint failure and retries on a later edit', async () => {
+    const memoryPath = join(mocks.directory, 'agent-memories.json')
+    const original = JSON.stringify({ memories: [memory()] })
+    await fs.writeFile(memoryPath, original)
+    const persistence = await import('./agentPersistence')
+    const notice = vi.fn()
+    persistence.setAgentPersistenceNoticeHandler(notice)
+    const rename = fs.rename.bind(fs)
+    let fail = true
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (to === memoryPath && fail) throw new Error('Initial checkpoint failure')
+      return rename(from, to)
+    })
+    const memories = await import('./agentMemoryService')
+    const event = vi.fn()
+    memories.setAgentMemoryEventSink(event)
+    const loaded = await memories.loadAgentMemories()
+    expect(loaded.memories[0]).toMatchObject(memory())
+    expect(await fs.readFile(memoryPath, 'utf8')).toBe(original)
+    expect(event).not.toHaveBeenCalled()
+    expect(notice).toHaveBeenCalledExactlyOnceWith({
+      level: 'error',
+      message: expect.stringContaining('Could not checkpoint agent memory recovery')
+    })
+    fail = false
+    const result = await memories.commitMemoryMutation(
+      await memories.prepareUpdateMemory(
+        loaded.memories[0].id,
+        loaded.memories[0].revision,
+        'Successfully retried preference',
+        'user'
+      )
+    )
+    expect(JSON.parse(await fs.readFile(memoryPath, 'utf8')).memories[0]).toMatchObject({
+      content: 'Successfully retried preference'
+    })
+    expect(event).toHaveBeenCalledExactlyOnceWith(result)
+  })
+
+  it('rejects a cancelled queued memory before saving while retaining the earlier commit', async () => {
+    const memories = await import('./agentMemoryService')
+    await memories.loadAgentMemories()
+    const firstMutation = await memories.prepareCreateMemory('First accepted save', 'user')
+    const secondMutation = await memories.prepareCreateMemory('Cancelled queued save', 'agent')
+    const memoryPath = join(mocks.directory, 'agent-memories.json')
+    const entered = deferred()
+    const gate = deferred()
+    const rename = fs.rename.bind(fs)
+    vi.spyOn(fs, 'rename').mockImplementationOnce(async (from, to) => {
+      entered.resolve()
+      await gate.promise
+      return rename(from, to)
+    })
+    const event = vi.fn()
+    memories.setAgentMemoryEventSink(event)
+    const first = memories.commitMemoryMutation(firstMutation)
+    await entered.promise
+    const controller = new AbortController()
+    const second = memories.commitMemoryMutation(secondMutation, { signal: controller.signal })
+    const cancelled = expect(second).rejects.toThrow('abort')
+    controller.abort()
+    gate.resolve()
+    await Promise.all([first, cancelled])
+    expect((await memories.loadAgentMemories()).memories.map((item) => item.content)).toEqual([
+      'First accepted save'
+    ])
+    expect(JSON.parse(await fs.readFile(memoryPath, 'utf8')).memories).toHaveLength(1)
+    expect(event).toHaveBeenCalledTimes(1)
+    expect((await fs.readdir(mocks.directory)).filter((name) => name.endsWith('.tmp'))).toEqual([])
+  })
+
+  it('drains and publishes an already-started memory save after cancellation', async () => {
+    const memories = await import('./agentMemoryService')
+    await memories.loadAgentMemories()
+    const mutation = await memories.prepareCreateMemory('Started save still commits', 'user')
+    const memoryPath = join(mocks.directory, 'agent-memories.json')
+    const entered = deferred()
+    const gate = deferred()
+    const rename = fs.rename.bind(fs)
+    vi.spyOn(fs, 'rename').mockImplementationOnce(async (from, to) => {
+      entered.resolve()
+      await gate.promise
+      return rename(from, to)
+    })
+    const event = vi.fn()
+    memories.setAgentMemoryEventSink(event)
+    const controller = new AbortController()
+    const saving = memories.commitMemoryMutation(mutation, { signal: controller.signal })
+    await entered.promise
+    controller.abort()
+    const lifecycle = await import('./agentPersistenceLifecycle')
+    lifecycle.pauseAgentPersistence()
+    let drained = false
+    const drain = lifecycle.drainAgentPersistence().then(() => {
+      drained = true
+    })
+    await Promise.resolve()
+    expect(drained).toBe(false)
+    gate.resolve()
+    const [result] = await Promise.all([saving, drain])
+    expect(result.memories[0].content).toBe('Started save still commits')
+    expect(event).toHaveBeenCalledExactlyOnceWith(result)
+    expect(JSON.parse(await fs.readFile(memoryPath, 'utf8')).memories[0].content).toBe(
+      'Started save still commits'
+    )
+    expect(drained).toBe(true)
+  })
+
+  it('continues queued memory commits from unchanged live data after a pre-commit failure', async () => {
+    const memories = await import('./agentMemoryService')
+    await memories.loadAgentMemories()
+    const first = await memories.prepareCreateMemory('Failed proposal', 'user')
+    const second = await memories.prepareCreateMemory('Successful queued proposal', 'agent')
+    const rename = fs.rename.bind(fs)
+    vi.spyOn(fs, 'rename')
+      .mockImplementationOnce(async () => {
+        throw new Error('First save failed before rename')
+      })
+      .mockImplementation(rename)
+    const event = vi.fn()
+    memories.setAgentMemoryEventSink(event)
+    const rejected = expect(memories.commitMemoryMutation(first)).rejects.toThrow('before rename')
+    const result = memories.commitMemoryMutation(second)
+    await rejected
+    expect((await result).memories.map((item) => item.content)).toEqual([
+      'Successful queued proposal'
+    ])
+    expect(event).toHaveBeenCalledTimes(1)
+  })
+
   it('quarantines duplicate display keys and preserves the damaged records on healthy edits', async () => {
     const call = {
       id: 'duplicate-call',
@@ -398,6 +528,15 @@ describe('recoverable agent service wiring', () => {
     atomic.reopenAtomicWrites()
     await expect(atomic.closeAndDrainAtomicWrites()).resolves.toBeUndefined()
     expect(vi.mocked(fs.rename).mock.calls).toHaveLength(beforeRetry)
+    atomic.reopenAtomicWrites()
+    const later = await memories.commitMemoryMutation(
+      await memories.prepareCreateMemory('Later confirmed preference', 'user')
+    )
+    expect(later.memories.map((item) => item.content)).toEqual([
+      'Committed preference',
+      'Later confirmed preference'
+    ])
+    expect(JSON.parse(await fs.readFile(memoryPath, 'utf8')).memories).toHaveLength(2)
   })
 
   it('drains every accepted queued memory save before closing writes and rejects new edits', async () => {
