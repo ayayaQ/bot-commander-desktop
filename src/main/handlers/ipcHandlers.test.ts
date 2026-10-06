@@ -8,11 +8,21 @@ const mocks = vi.hoisted(() => ({
   settings: vi.fn(),
   provider: vi.fn(),
   capabilities: vi.fn(),
-  fetchModels: vi.fn()
+  fetchModels: vi.fn(),
+  send: vi.fn(),
+  listMemories: vi.fn(),
+  createMemory: vi.fn(),
+  updateMemory: vi.fn(),
+  deleteMemory: vi.fn(),
+  commitMemory: vi.fn(),
+  memorySink: null as ((result: unknown) => void) | null
 }))
 
 // Register the real handlers without loading Electron or any live application services.
-vi.mock('electron', () => ({ clipboard: { writeText: mocks.writeText } }))
+vi.mock('electron', () => ({
+  clipboard: { writeText: mocks.writeText },
+  BrowserWindow: { getAllWindows: () => [{ webContents: { send: mocks.send } }] }
+}))
 vi.mock('./ipcSecurity', () => ({
   trustedIpcMain: { handle: mocks.handle, on: mocks.on }
 }))
@@ -39,12 +49,20 @@ vi.mock('../services/updateService', () => ({}))
 vi.mock('./apiAuthHandlers', () => ({ addApiAuthHandlers: vi.fn() }))
 vi.mock('./commandRepoHandlers', () => ({ addCommandRepoHandlers: vi.fn() }))
 vi.mock('../services/agentService', () => ({ setAgentEventSink: vi.fn() }))
-vi.mock('../services/agentMemoryService', () => ({ setAgentMemoryEventSink: vi.fn() }))
+vi.mock('../services/agentMemoryService', () => ({
+  setAgentMemoryEventSink: (sink: (result: unknown) => void) => {
+    mocks.memorySink = sink
+  },
+  loadAgentMemories: mocks.listMemories,
+  prepareCreateMemory: mocks.createMemory,
+  prepareUpdateMemory: mocks.updateMemory,
+  prepareDeleteMemory: mocks.deleteMemory,
+  commitMemoryMutation: mocks.commitMemory
+}))
 vi.mock('../services/mcpServerService', () => ({
   setMcpEventSinks: vi.fn(),
   copyMcpToken: mocks.copyMcpToken
 }))
-vi.mock('../services/resourceChangeService', () => ({ setResourceChangeEventSink: vi.fn() }))
 
 async function copyTokenHandler(): Promise<() => Promise<boolean>> {
   const { addIPCHandlers } = await import('./ipcHandlers')
@@ -166,5 +184,105 @@ describe('selected model capability IPC', () => {
     finish([])
     await rejected
     expect(mocks.fetchModels).toHaveBeenCalledWith('openai', 'host-only-fixture-key', 'responses')
+  })
+})
+
+describe('persistent memory IPC compatibility', () => {
+  const result = {
+    memories: [{ id: 'legacy', content: 'Saved preference', revision: '0123456789abcdef' }],
+    limits: {
+      maximumMemories: 100,
+      maximumMemoryCharacters: 1000,
+      maximumTotalCharacters: 20000
+    }
+  }
+  const proposal = { kind: 'create', before: null, after: { id: 'legacy' } }
+
+  async function handler(channel: string) {
+    const { addIPCHandlers } = await import('./ipcHandlers')
+    addIPCHandlers()
+    return mocks.handle.mock.calls.find(([name]) => name === channel)![1]
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.send.mockReset()
+    mocks.listMemories.mockResolvedValue(result)
+    mocks.createMemory.mockResolvedValue(proposal)
+    mocks.updateMemory.mockResolvedValue(proposal)
+    mocks.deleteMemory.mockResolvedValue(proposal)
+    mocks.commitMemory.mockImplementation(async () => {
+      // Model the facade's committed-only, listener-safe notification contract.
+      try {
+        mocks.memorySink?.(result)
+      } catch {}
+      return result
+    })
+  })
+
+  it('keeps list results and direct create/update/delete arguments unchanged', async () => {
+    expect(await (await handler('memory:list'))({})).toEqual(result)
+    expect(mocks.listMemories).toHaveBeenCalledExactlyOnceWith()
+    expect(mocks.send).not.toHaveBeenCalled()
+    await (
+      await handler('memory:create')
+    )({}, 'Preference')
+    expect(mocks.createMemory).toHaveBeenCalledExactlyOnceWith('Preference', 'user')
+    await (
+      await handler('memory:update')
+    )({}, 'legacy', 'exact-revision', 'New preference')
+    expect(mocks.updateMemory).toHaveBeenCalledExactlyOnceWith(
+      'legacy',
+      'exact-revision',
+      'New preference',
+      'user'
+    )
+    await (
+      await handler('memory:delete')
+    )({}, 'legacy', 'delete-revision')
+    expect(mocks.deleteMemory).toHaveBeenCalledExactlyOnceWith('legacy', 'delete-revision')
+    expect(mocks.commitMemory).toHaveBeenCalledTimes(3)
+  })
+
+  it.each(['create', 'update', 'delete'])(
+    'emits each memory and resource notification once after a direct %s commit',
+    async (kind) => {
+      const mutation = await handler(`memory:${kind}`)
+      const committed = await mutation({}, 'legacy', 'revision', 'Preference')
+      expect(committed).toEqual(result)
+      expect(mocks.send.mock.calls.map(([channel]) => channel)).toEqual([
+        'memory:changed',
+        'resource:changed'
+      ])
+      expect(mocks.send).toHaveBeenCalledWith('memory:changed', result)
+      expect(mocks.send).toHaveBeenCalledWith('resource:changed', {
+        kind: 'memories',
+        source: 'system',
+        revision: expect.stringMatching(/^[a-f0-9]{16}$/)
+      })
+    }
+  )
+
+  it('emits no notifications when the memory commit fails', async () => {
+    mocks.commitMemory.mockRejectedValueOnce(new Error('Save failed before commit'))
+    const create = await handler('memory:create')
+    await expect(create({}, 'Preference')).rejects.toThrow('Save failed before commit')
+    expect(mocks.send).not.toHaveBeenCalled()
+  })
+
+  it('returns the committed IPC result when a resource listener and its logger fail', async () => {
+    const create = await handler('memory:create')
+    mocks.send.mockImplementation((channel: string) => {
+      if (channel === 'resource:changed') throw new Error('Window closed')
+    })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {
+      throw new Error('Log unavailable')
+    })
+    try {
+      await expect(create({}, 'Preference')).resolves.toEqual(result)
+      expect(mocks.send).toHaveBeenCalledTimes(2)
+    } finally {
+      log.mockRestore()
+    }
   })
 })

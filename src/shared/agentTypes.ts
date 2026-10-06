@@ -1,5 +1,12 @@
 import type { AgentValidationReport } from './agentValidationTypes'
 import type { HistoryMessage } from '@ayayaq/vivi'
+import type {
+  MemoriesData,
+  Memory,
+  MemoryActor,
+  MemoryListResult,
+  MemoryWithRevision
+} from '@ayayaq/vivi/extensions/memory'
 import type { DesktopReasoningEffort } from './aiModelTypes'
 
 export type AgentMode = 'manual' | 'auto' | 'planning'
@@ -100,34 +107,11 @@ export interface AgentSessionsData {
   modelDefaultsByProvider: Partial<Record<AgentProvider, AgentModelDefaults>>
 }
 
-export type AgentMemoryActor = 'agent' | 'user'
-
-export interface AgentMemory {
-  id: string
-  content: string
-  createdAt: string
-  updatedAt: string
-  createdBy: AgentMemoryActor
-  updatedBy: AgentMemoryActor
-}
-
-export interface AgentMemoryWithRevision extends AgentMemory {
-  revision: string
-}
-
-export interface AgentMemoriesData {
-  version: 1
-  memories: AgentMemory[]
-}
-
-export interface AgentMemoryListResult {
-  memories: AgentMemoryWithRevision[]
-  limits: {
-    maximumMemories: number
-    maximumMemoryCharacters: number
-    maximumTotalCharacters: number
-  }
-}
+export type AgentMemoryActor = MemoryActor
+export type AgentMemory = Memory
+export type AgentMemoryWithRevision = MemoryWithRevision
+export type AgentMemoriesData = MemoriesData
+export type AgentMemoryListResult = MemoryListResult
 
 export interface AgentPatchOperation {
   op: 'add' | 'replace' | 'remove'

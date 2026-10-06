@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 
 const memoryPath = join('/user-data', 'agent-memories.json')
 
@@ -147,5 +148,106 @@ describe('agentMemoryService', () => {
     ).rejects.toThrow('read-only')
     expect(JSON.parse(mocks.files.get(memoryPath)!).memories).toHaveLength(2)
     expect(mocks.writes).toEqual([])
+  })
+
+  it.each([1, undefined])(
+    'keeps legacy records, extras and exact revision bytes with version %s',
+    async (version) => {
+      const record = {
+        content: '  Prefer examples.\n  ',
+        extra: { retained: [true, 42] },
+        updatedBy: 'agent' as const,
+        id: 'legacy-memory-id',
+        createdAt: 'legacy timestamp',
+        revision: 'retained extra field',
+        createdBy: 'user' as const,
+        updatedAt: ''
+      }
+      const original = { rootExtra: ['retained'], version, memories: [record] }
+      mocks.files.set(memoryPath, JSON.stringify(original))
+      const service = await import('./agentMemoryService')
+      const listed = await service.loadAgentMemories()
+      const revision = createHash('sha256')
+        .update(JSON.stringify(record))
+        .digest('hex')
+        .slice(0, 16)
+      expect(listed.memories).toEqual([{ ...record, revision }])
+      const checkpoint = JSON.parse(mocks.files.get(memoryPath)!)
+      expect(checkpoint).toEqual({ ...original, version: 1 })
+      expect(JSON.stringify(checkpoint.memories[0])).toBe(JSON.stringify(record))
+      listed.memories[0].content = 'A caller must not change the store'
+      expect((await service.loadAgentMemories()).memories[0].content).toBe(record.content)
+    }
+  )
+
+  it.each(['duplicate IDs', 'duplicate content', 'record count', 'record size', 'total size'])(
+    'keeps invalid legacy %s read-only without discarding evidence',
+    async (reason) => {
+      const record = (id: string, content = `Preference ${id}`) => ({
+        id,
+        content,
+        createdAt: '',
+        updatedAt: '',
+        createdBy: 'user',
+        updatedBy: 'agent'
+      })
+      const records =
+        reason === 'duplicate IDs'
+          ? [record('same', 'First preference'), record('same', 'Second preference')]
+          : reason === 'duplicate content'
+            ? [record('one', 'Preference'), record('two', '  PREFERENCE  ')]
+            : reason === 'record count'
+              ? Array.from({ length: 101 }, (_, index) => record(String(index)))
+              : reason === 'record size'
+                ? [record('oversized', 'x'.repeat(1001))]
+                : Array.from({ length: 21 }, (_, index) =>
+                    record(String(index), String(index).padEnd(1000, 'x'))
+                  )
+      const raw = JSON.stringify({ version: 1, memories: records })
+      mocks.files.set(memoryPath, raw)
+      const service = await import('./agentMemoryService')
+      expect((await service.loadAgentMemories()).memories).toEqual([])
+      await expect(service.prepareCreateMemory('Keep the original', 'user')).rejects.toThrow(
+        'read-only'
+      )
+      expect(mocks.files.get(memoryPath)).toBe(raw)
+      expect(mocks.writes).toEqual([])
+    }
+  )
+
+  it('captures a proposal at facade admission before its asynchronous callback runs', async () => {
+    const service = await import('./agentMemoryService')
+    const proposal = await service.prepareCreateMemory('Approved exact content', 'user')
+    const committed = service.commitMemoryMutation(proposal)
+    proposal.after!.content = 'Unapproved replacement'
+    expect((await committed).memories[0].content).toBe('Approved exact content')
+    expect(JSON.parse(mocks.files.get(memoryPath)!).memories[0].content).toBe(
+      'Approved exact content'
+    )
+  })
+
+  it('keeps committed results successful even when memory notification and logging fail', async () => {
+    const service = await import('./agentMemoryService')
+    const listener = vi.fn(() => {
+      throw new Error('Listener unavailable')
+    })
+    service.setAgentMemoryEventSink(listener)
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {
+      throw new Error('Log unavailable')
+    })
+    try {
+      await expect(
+        service.commitMemoryMutation(await service.prepareCreateMemory('First save', 'user'))
+      ).resolves.toMatchObject({ memories: [{ content: 'First save' }] })
+      await expect(
+        service.commitMemoryMutation(await service.prepareCreateMemory('Second save', 'agent'))
+      ).resolves.toMatchObject({
+        memories: [{ content: 'First save' }, { content: 'Second save' }]
+      })
+      expect(listener).toHaveBeenCalledTimes(2)
+      expect(JSON.parse(mocks.files.get(memoryPath)!).memories).toHaveLength(2)
+    } finally {
+      log.mockRestore()
+    }
   })
 })

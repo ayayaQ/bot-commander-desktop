@@ -198,7 +198,6 @@ export function addIPCHandlers() {
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send('memory:changed', memories)
     }
-    emitResourceChanged('memories', 'system', memories)
   })
 
   ipcMain.on('agent:view-state', (event, active: boolean) => {
@@ -312,17 +311,26 @@ export function addIPCHandlers() {
   ipcMain.handle('mcp:clear-activity', () => clearMcpActivity())
 
   ipcMain.handle('memory:list', () => loadAgentMemories())
-  ipcMain.handle('memory:create', async (_, content: string) =>
-    commitMemoryMutation(await prepareCreateMemory(content, 'user'))
-  )
+  ipcMain.handle('memory:create', async (_, content: string) => {
+    const result = await commitMemoryMutation(await prepareCreateMemory(content, 'user'))
+    emitResourceChanged('memories', 'system', result)
+    return result
+  })
   ipcMain.handle(
     'memory:update',
-    async (_, id: string, expectedRevision: string, content: string) =>
-      commitMemoryMutation(await prepareUpdateMemory(id, expectedRevision, content, 'user'))
+    async (_, id: string, expectedRevision: string, content: string) => {
+      const result = await commitMemoryMutation(
+        await prepareUpdateMemory(id, expectedRevision, content, 'user')
+      )
+      emitResourceChanged('memories', 'system', result)
+      return result
+    }
   )
-  ipcMain.handle('memory:delete', async (_, id: string, expectedRevision: string) =>
-    commitMemoryMutation(await prepareDeleteMemory(id, expectedRevision))
-  )
+  ipcMain.handle('memory:delete', async (_, id: string, expectedRevision: string) => {
+    const result = await commitMemoryMutation(await prepareDeleteMemory(id, expectedRevision))
+    emitResourceChanged('memories', 'system', result)
+    return result
+  })
 
   ipcMain.handle('get-ai-model-capabilities', (_, request: SelectedModelCapabilityRequest) => {
     const settings = getSettings()

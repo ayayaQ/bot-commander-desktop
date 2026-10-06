@@ -63,9 +63,17 @@ vi.mock('./agentTools', () => ({
           additionalProperties: false
         }
       }
-    }
+    },
+    ...['list_memories', 'create_memory', 'edit_memory', 'delete_memory'].map((name) => ({
+      type: 'function',
+      function: {
+        name,
+        description: name,
+        parameters: { type: 'object', properties: {}, additionalProperties: false }
+      }
+    }))
   ],
-  mutationToolNames: new Set(['edit_example']),
+  mutationToolNames: new Set(['edit_example', 'create_memory', 'edit_memory', 'delete_memory']),
   agentToolTargetLabel: () => 'example',
   executeAgentTool: mocks.execute
 }))
@@ -118,7 +126,9 @@ describe('mcpServerService', () => {
     const { client, transport } = createClient(mocks.config.port)
     await client.connect(transport)
     const listed = await client.listTools()
-    expect(listed.tools.map((tool) => tool.name)).toEqual(['read_example'])
+    expect(listed.tools.map((tool) => tool.name)).toEqual(['read_example', 'list_memories'])
+    for (const name of ['create_memory', 'edit_memory', 'delete_memory'])
+      await expect(client.callTool({ name, arguments: {} })).rejects.toThrow()
     await expect(client.callTool({ name: 'read_host_status', arguments: {} })).rejects.toThrow()
     await expect(
       client.callTool({ name: 'read_validation_fixture', arguments: {} })
@@ -144,7 +154,14 @@ describe('mcpServerService', () => {
     const { client, transport } = createClient(mocks.config.port)
     await client.connect(transport)
     const listed = await client.listTools()
-    expect(listed.tools.map((tool) => tool.name)).toEqual(['read_example', 'edit_example'])
+    expect(listed.tools.map((tool) => tool.name)).toEqual([
+      'read_example',
+      'edit_example',
+      'list_memories',
+      'create_memory',
+      'edit_memory',
+      'delete_memory'
+    ])
     await expect(client.callTool({ name: 'read_host_status', arguments: {} })).rejects.toThrow()
     await expect(
       client.callTool({ name: 'read_validation_fixture', arguments: {} })
@@ -152,6 +169,16 @@ describe('mcpServerService', () => {
     expect(mocks.execute).not.toHaveBeenCalled()
     await client.callTool({ name: 'edit_example', arguments: { value: 'updated' } })
     expect(mocks.execute).toHaveBeenCalledWith('edit_example', { value: 'updated' }, 'mcp')
+    for (const name of ['create_memory', 'edit_memory', 'delete_memory']) {
+      await client.callTool({ name, arguments: {} })
+      expect(mocks.execute).toHaveBeenCalledWith(name, {}, 'mcp')
+      expect(listed.tools.find((tool) => tool.name === name)?.annotations).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: name === 'delete_memory'
+      })
+    }
+    await client.callTool({ name: 'list_memories', arguments: {} })
+    expect(mocks.execute).toHaveBeenCalledWith('list_memories', {}, 'mcp')
     await client.close()
   })
 })

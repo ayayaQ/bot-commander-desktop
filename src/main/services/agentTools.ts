@@ -1021,7 +1021,10 @@ export async function lintPreparedMutation(
   return []
 }
 
-async function commitMutationUnlocked(prepared: PreparedMutation): Promise<unknown> {
+async function commitMutationUnlocked(
+  prepared: PreparedMutation,
+  signal?: AbortSignal
+): Promise<unknown> {
   const args = prepared.arguments as Record<string, any>
   if (prepared.name === 'create_command') {
     const current = getCommands()
@@ -1083,25 +1086,30 @@ async function commitMutationUnlocked(prepared: PreparedMutation): Promise<unkno
     await saveSettings(next)
     setSettings(next)
   } else if (prepared.name === 'create_memory') {
-    await commitMemoryMutation({
-      kind: 'create',
-      before: null,
-      after: prepared.after as AgentMemory
-    })
+    await commitMemoryMutation(
+      { kind: 'create', before: null, after: prepared.after as AgentMemory },
+      { signal }
+    )
   } else if (prepared.name === 'edit_memory') {
-    await commitMemoryMutation({
-      kind: 'update',
-      before: prepared.before as AgentMemory,
-      after: prepared.after as AgentMemory,
-      expectedRevision: String(args.expectedRevision || '')
-    })
+    await commitMemoryMutation(
+      {
+        kind: 'update',
+        before: prepared.before as AgentMemory,
+        after: prepared.after as AgentMemory,
+        expectedRevision: String(args.expectedRevision || '')
+      },
+      { signal }
+    )
   } else if (prepared.name === 'delete_memory') {
-    await commitMemoryMutation({
-      kind: 'delete',
-      before: prepared.before as AgentMemory,
-      after: null,
-      expectedRevision: String(args.expectedRevision || '')
-    })
+    await commitMemoryMutation(
+      {
+        kind: 'delete',
+        before: prepared.before as AgentMemory,
+        after: null,
+        expectedRevision: String(args.expectedRevision || '')
+      },
+      { signal }
+    )
   }
 
   let diagnostics: AgentLintDiagnostic[] = []
@@ -1153,7 +1161,7 @@ export async function commitMutation(
     // Recheck validation against the captured snapshot and current runtime settings
     // after queue admission, immediately before starting the save.
     beforeCommit?.(prepared)
-    const result = await commitMutationUnlocked(prepared)
+    const result = await commitMutationUnlocked(prepared, signal)
     emitResourceChanged(kind, source, await changedResourceValue(kind), prepared.target.id)
     return result
   })
