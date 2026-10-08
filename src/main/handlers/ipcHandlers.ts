@@ -42,6 +42,7 @@ import type { AgentPlanDecision, AgentStreamEvent } from '../../shared/agentType
 import type { McpConfig } from '../../shared/mcpTypes'
 import { interactionPublisher } from '../services/interactionPublicationService'
 import { getSettings, setSettings, normalizeSettings } from '../services/settingsService'
+import { registerAgentDecisionSecret } from '../services/agentDecisionPrivacy'
 import {
   fetchAiModels,
   getAiProvider,
@@ -64,7 +65,9 @@ import {
   runAgentSession,
   setActiveAgentSession,
   setAgentEventSink,
-  updateAgentSession
+  updateAgentSession,
+  enrollAgentAutoReview,
+  inspectAgentAutoReviewAudit
 } from '../services/agentService'
 import {
   getAgentNotificationDetails,
@@ -425,7 +428,9 @@ export function addIPCHandlers() {
       url: 'https://discord.com',
       name: 'token'
     })
-    return cookies[0]?.value ?? ''
+    const token = cookies[0]?.value ?? ''
+    registerAgentDecisionSecret(token)
+    return token
   })
 
   ipcMain.handle('getBotState', () => readBotState())
@@ -588,6 +593,12 @@ export function addIPCHandlers() {
   ipcMain.handle('agent:update', async (_, sessionId: string, updates) =>
     updateAgentSession(sessionId, updates, getAiProvider(getSettings()))
   )
+  ipcMain.handle('agent:enroll-auto-review', async (_, sessionId: string, acknowledgement) =>
+    enrollAgentAutoReview(sessionId, acknowledgement)
+  )
+  ipcMain.handle('agent:inspect-auto-review-audit', async (_, sessionId: string) =>
+    inspectAgentAutoReviewAudit(sessionId)
+  )
   ipcMain.handle('agent:set-active', async (_, sessionId: string | null) => {
     await setActiveAgentSession(sessionId)
     return true
@@ -595,13 +606,15 @@ export function addIPCHandlers() {
   ipcMain.handle('agent:send', async (_, sessionId: string, content: string) =>
     runAgentSession(sessionId, content, getSettings())
   )
-  ipcMain.handle('agent:resolve-plan', async (_, sessionId: string, decision: AgentPlanDecision) =>
-    resolveAgentPlan(sessionId, decision, getSettings())
+  ipcMain.handle(
+    'agent:resolve-plan',
+    async (_, sessionId: string, decision: AgentPlanDecision, planMessageId?: string) =>
+      resolveAgentPlan(sessionId, decision, getSettings(), planMessageId)
   )
   ipcMain.handle(
     'agent:approve',
-    async (_, sessionId: string, toolCallId: string, approved: boolean) =>
-      resolveAgentApproval(sessionId, toolCallId, approved)
+    async (_, sessionId: string, toolCallId: string, approved: boolean, approvalId?: string) =>
+      resolveAgentApproval(sessionId, toolCallId, approved, approvalId)
   )
   ipcMain.handle('agent:cancel', (_, sessionId: string) => cancelAgentRun(sessionId))
 

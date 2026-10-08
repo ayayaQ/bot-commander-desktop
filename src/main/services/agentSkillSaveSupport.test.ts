@@ -1,43 +1,35 @@
 import { describe, expect, it, vi } from 'vitest'
 import { getAgentSkillSaveSupport } from './agentSkillSaveSupport'
 import { createAgentSkillStore } from './agentSkillStore'
-import { parseSkillDocument } from '@ayayaq/vivi/extensions/skills'
 
 describe('production skill save capability', () => {
-  it('fails closed before any filesystem write, including Windows and macOS', async () => {
+  it('has no writer or destination authority on any platform', () => {
     expect(getAgentSkillSaveSupport()).toMatchObject({ available: false })
     const root = vi.fn(() => {
-      throw new Error('No path should be resolved for an unavailable writer')
+      throw new Error('No path should be resolved')
     })
     const store = createAgentSkillStore({ ownedRoot: root, externalRoots: async () => [] })
-    const content =
-      '---\nname: summary\ndescription: A summary skill\n---\nSummarize supplied text.\n'
-    await expect(
-      store.commit(
-        {
-          name: 'summary',
-          before: null,
-          expectedRevision: null,
-          after: parseSkillDocument(content)
-        },
-        { signal: new AbortController().signal }
-      )
-    ).rejects.toThrow('handle-bound filesystem adapter')
+    expect(Object.keys(store)).toEqual(['snapshot'])
     expect(root).not.toHaveBeenCalled()
   })
 })
 
 // Production harness check: only Electron and HTTP transport are replaced. The save-support
-// module is real here, unlike the explicitly named fixture-writer workflow suite.
+// module is real here; every mode has the same read-only capability.
 vi.mock('electron', () => ({
   app: { getPath: () => production.home },
   BrowserWindow: { getAllWindows: () => [] },
   session: {},
-  safeStorage: {}
+  safeStorage: {
+    isEncryptionAvailable: () => true,
+    getSelectedStorageBackend: () => 'fixture-native',
+    encryptString: (value: string) => Buffer.from(value),
+    decryptString: (value: Buffer) => value.toString()
+  }
 }))
 const production = vi.hoisted(() => ({ home: '' }))
 
-describe('production skill registry without a save adapter', () => {
+describe('production read-only skill registry', () => {
   it.each(['manual', 'auto', 'planning'] as const)(
     'does not advertise or execute agent skill saves in %s mode',
     async (mode) => {
@@ -85,7 +77,16 @@ describe('production skill registry without a save adapter', () => {
           selectedAiModel: 'gpt-5.4-nano'
         }
         const session = await agent.createAgentSession(settings)
-        await agent.updateAgentSession(session.id, { mode }, 'openai')
+        if (mode === 'auto') {
+          const current = await import('./settingsService')
+          const { AUTO_REVIEW_POLICY_REVISION } = await import('../../shared/agentAutoReview')
+          current.setSettings({ ...current.getSettings(), ...settings })
+          await agent.enrollAgentAutoReview(session.id, {
+            policyRevision: AUTO_REVIEW_POLICY_REVISION,
+            provider: 'openai',
+            accountRevision: current.getSettings().agentDecisionAccountRevision!
+          })
+        } else await agent.updateAgentSession(session.id, { mode }, 'openai')
         const done = new Promise<void>((resolve) =>
           agent.setAgentEventSink((event) => {
             events.push(event)

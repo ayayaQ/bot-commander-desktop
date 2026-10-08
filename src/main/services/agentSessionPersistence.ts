@@ -34,9 +34,15 @@ export function validAgentDisplayHistory(value: unknown): boolean {
         !record(call.arguments) ||
         typeof call.createdAt !== 'string' ||
         typeof call.status !== 'string' ||
-        !['running', 'waiting_approval', 'approved', 'rejected', 'completed', 'error'].includes(
-          call.status
-        )
+        ![
+          'running',
+          'reviewing',
+          'waiting_approval',
+          'approved',
+          'rejected',
+          'completed',
+          'error'
+        ].includes(call.status)
       )
         return false
       callIds.add(call.id)

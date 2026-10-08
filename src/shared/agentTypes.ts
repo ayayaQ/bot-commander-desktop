@@ -8,6 +8,7 @@ import type {
   MemoryWithRevision
 } from '@ayayaq/vivi/extensions/memory'
 import type { DesktopReasoningEffort } from './aiModelTypes'
+import type { AgentAutoReviewEnrollment, AgentDecisionDisplay } from './agentAutoReview'
 
 export type AgentMode = 'manual' | 'auto' | 'planning'
 export type AgentPlanDecision = 'auto' | 'manual' | 'continue'
@@ -21,7 +22,10 @@ export interface AgentToolCall {
   name: string
   arguments: Record<string, unknown>
   targetLabel?: string
-  status: 'running' | 'waiting_approval' | 'approved' | 'rejected' | 'completed' | 'error'
+  status:
+    'running' | 'reviewing' | 'waiting_approval' | 'approved' | 'rejected' | 'completed' | 'error'
+  approvalId?: string
+  decision?: AgentDecisionDisplay
   result?: unknown
   error?: string
   validation?: AgentValidationReport
@@ -93,6 +97,8 @@ export interface AgentSession {
   planReady: boolean
   tokenCount: number
   lastRunMetrics?: AgentRunMetrics
+  autoReviewEnrollment?: AgentAutoReviewEnrollment
+  autoReviewMigrationRequired?: boolean
   error?: string
 }
 

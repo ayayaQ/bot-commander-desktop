@@ -61,6 +61,7 @@ import { rendererConsole } from '../utils/rendererConsole'
 import { getSettings, onSettingsChanged } from './settingsService'
 import { classifySpamWithOpenRouter } from './aiProviderService'
 import { SpamProtectionService } from './spamProtectionService'
+import { registerAgentDecisionSecret } from './agentDecisionPrivacy'
 import {
   DiscordLoginLifetime,
   formatDiscordLoginError,
@@ -85,6 +86,11 @@ export function resumeSpamProtection() {
 let client: Client | null = null
 const loginLifetimes = new WeakMap<Client, DiscordLoginLifetime>()
 let connection: boolean = false
+let commandRuntimeGeneration = 0
+
+export function getCommandRuntimeReviewRevision(): number {
+  return commandRuntimeGeneration
+}
 let loginObservation: Pick<HostConnectionObservation, 'attempt' | 'failure' | 'observedAt'> = {
   attempt: 'never-attempted',
   failure: null,
@@ -92,6 +98,7 @@ let loginObservation: Pick<HostConnectionObservation, 'attempt' | 'failure' | 'o
 }
 
 function observeLogin(attempt: HostLoginState, failure: HostLoginFailure | null = null): void {
+  commandRuntimeGeneration++
   loginObservation = { attempt, failure, observedAt: Date.now() }
 }
 
@@ -169,6 +176,7 @@ function disposeDiscordClient(target: Client): void {
 }
 
 export function Connect(event: Electron.IpcMainEvent, token: string) {
+  registerAgentDecisionSecret(token)
   if (connection) {
     if (client) {
       spamProtection.stop()

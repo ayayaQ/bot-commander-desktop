@@ -11,6 +11,11 @@ import {
 } from '@ayayaq/vivi/extensions/memory'
 import { createAgentPersistence, reportAgentPersistenceNotice } from './agentPersistence'
 import { withAgentPersistenceOperation } from './agentPersistenceLifecycle'
+import {
+  resourceRevision,
+  hasResourceMutationLock,
+  withResourceMutationLock
+} from './resourceChangeService'
 import type {
   AgentMemoriesData,
   AgentMemoryActor,
@@ -25,6 +30,9 @@ export type AgentMemoryMutation = MemoryMutation
 export const agentMemoryRevision = memoryRevision
 
 let eventSink: ((memories: AgentMemoryListResult) => void) | null = null
+let reviewRevision: string | undefined
+let commitChain: Promise<unknown> = Promise.resolve()
+let beforeSave: (() => void) | undefined
 
 const persistence = createAgentPersistence<AgentMemoriesData>({
   path: () => join(app.getPath('userData'), AGENT_MEMORIES_FILENAME),
@@ -51,11 +59,20 @@ const memories = createMemoryService({
   },
   assertWritable: persistence.assertWritable,
   // A resolved host save is committed, including reported post-rename sync uncertainty.
-  save: persistence.save
+  save: (value) => {
+    beforeSave?.()
+    return persistence.save(value)
+  }
 })
 
-export function loadAgentMemories(): Promise<AgentMemoryListResult> {
-  return memories.list()
+export async function loadAgentMemories(): Promise<AgentMemoryListResult> {
+  const result = await memories.list()
+  reviewRevision = resourceRevision(result.memories)
+  return result
+}
+
+export function getAgentMemoryReviewRevision(): string | undefined {
+  return reviewRevision
 }
 
 export function setAgentMemoryEventSink(
@@ -89,23 +106,42 @@ export function prepareDeleteMemory(
 
 export function commitMemoryMutation(
   mutation: AgentMemoryMutation,
-  options: { readonly signal?: AbortSignal } = {}
+  options: { readonly signal?: AbortSignal; readonly beforeCommit?: () => void } = {}
 ): Promise<AgentMemoryListResult> {
   // Capture approved work before the asynchronous host admission callback can run.
   const captured = structuredClone(mutation)
   const signal = options.signal
   // Admit BEFORE the shared instance's queue so shutdown drains every accepted job.
-  return withAgentPersistenceOperation(async () => {
-    const result = await memories.commit(captured, { signal })
-    try {
-      eventSink?.(structuredClone(result))
-    } catch (error) {
-      try {
-        console.error('Could not report committed memory mutation:', error)
-      } catch {
-        // A failed listener or log destination cannot undo a committed save.
-      }
+  return withAgentPersistenceOperation(() => {
+    const execute = () => {
+      const pending = commitChain.then(async () => {
+        await loadAgentMemories()
+        if (signal?.aborted) throw new Error('Memory mutation aborted before save')
+        beforeSave = options.beforeCommit
+        let result: AgentMemoryListResult
+        try {
+          options.beforeCommit?.()
+          result = await memories.commit(captured, { signal })
+          reviewRevision = resourceRevision(result.memories)
+        } finally {
+          beforeSave = undefined
+        }
+        try {
+          eventSink?.(structuredClone(result))
+        } catch (error) {
+          try {
+            console.error('Could not report committed memory mutation:', error)
+          } catch {
+            // A failed listener or log destination cannot undo a committed save.
+          }
+        }
+        return result
+      })
+      commitChain = pending.catch(() => {})
+      return pending
     }
-    return result
+    return hasResourceMutationLock('memories')
+      ? execute()
+      : withResourceMutationLock('memories', execute)
   })
 }

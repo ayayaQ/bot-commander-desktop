@@ -8,6 +8,7 @@ import type { AiRuntimeSettings } from './aiProviderService'
 import type { PreparedMutation } from './agentTools'
 import type { BCFDCommand } from '../types/types'
 import { decodeBCFDCommand } from '../../shared/commandCodec'
+import { AUTO_REVIEW_POLICY_REVISION } from '../../shared/agentAutoReview'
 import { createPlaygroundState } from '../../shared/playground/types'
 import { createNotRunAgentValidationReport } from '../../shared/agentValidationTypes'
 import type {
@@ -63,16 +64,48 @@ vi.mock('./agentTools', () => ({
   ],
   mutationToolNames: new Set(['edit_command']),
   prepareMutation: host.prepare,
+  initializeMutationReviewResource: vi.fn(async () => undefined),
+  currentMutationReviewRevision: vi.fn(() => 'fixture-resource-revision'),
   commitMutation: host.commit,
   executeReadTool: host.read,
   lintPreparedMutation: host.lint
+}))
+
+// Ordinary extension regressions retain real host enrollment and commit gates, with
+// an explicitly mocked allow recommendation. Reviewer/ledger behavior is tested separately.
+vi.mock('./agentAutoReview', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./agentAutoReview')>()
+  return {
+    ...actual,
+    reviewAgentMutation: vi.fn(async ({ enrollment }) => {
+      if (!enrollment) throw new Error('Reviewer fixture requires explicit Auto enrollment')
+      return {
+        display: {
+          id: 'mock-reviewed-allow',
+          policyRevision: AUTO_REVIEW_POLICY_REVISION,
+          reasonCode: 'mocked_allow',
+          recommendation: 'allow',
+          source: 'automatic'
+        },
+        automatic: true,
+        assertCurrent: vi.fn(),
+        beginCommit: vi.fn(async () => true),
+        settle: vi.fn(async () => true)
+      }
+    })
+  }
+})
+// Credential encryption/storage is outside the extension transport and fixture writer.
+vi.mock('./fileService', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./fileService')>()),
+  saveSettings: vi.fn(async () => undefined)
 }))
 
 vi.mock('./agentValidationService', () => ({ validatePreparedResource: host.validate }))
 
 type Provider = 'openai' | 'openrouter'
 type Agents = typeof import('./agentService')
-type FixtureCommand = BCFDCommand & { name: string }
+type FixtureCommand = BCFDCommand
 interface RecordedRequest {
   url: string
   init: RequestInit
@@ -100,8 +133,7 @@ const initialCommand: FixtureCommand = {
     channelEmbed: {},
     privateEmbed: {},
     type: 0
-  }).command,
-  name: 'Fixture command'
+  }).command
 }
 const requests: RecordedRequest[] = []
 const fetchMock = vi.fn<typeof fetch>()
@@ -356,7 +388,15 @@ async function start(
   provider: Provider = 'openai'
 ): Promise<AgentSession> {
   const session = await agents.createAgentSession(settings(provider))
-  if (mode !== 'manual') await agents.updateAgentSession(session.id, { mode }, provider)
+  if (mode === 'auto') {
+    const currentSettings = await import('./settingsService')
+    currentSettings.setSettings({ ...currentSettings.getSettings(), ...settings(provider) })
+    await agents.enrollAgentAutoReview(session.id, {
+      policyRevision: AUTO_REVIEW_POLICY_REVISION,
+      provider,
+      accountRevision: currentSettings.getSettings().agentDecisionAccountRevision!
+    })
+  } else if (mode !== 'manual') await agents.updateAgentSession(session.id, { mode }, provider)
   await agents.runAgentSession(
     session.id,
     'Use the calculator and inspect this fixture',
@@ -428,6 +468,8 @@ function assertNativeContinuation(provider: Provider, request: RecordedRequest):
 
 beforeEach(async () => {
   vi.resetModules()
+  const currentSettings = await import('./settingsService')
+  currentSettings.setSettings({ ...currentSettings.getSettings(), ...settings() })
   const { modelCapabilityCatalog } = await import('./modelCapabilityService')
   const key = settings('openrouter').openrouterApiKey
   const generation = modelCapabilityCatalog.begin('openrouter', key)
@@ -622,7 +664,11 @@ describe('published registry calculator in the recoverable desktop agent', () =>
         wrapEvalInIIFE: true
       })
       expect(await readCommand()).toEqual(initialCommand)
-      expect(await agents.resolveAgentApproval(session.id, mutation.id, approved)).toBe(true)
+      const approvalId = observed.events.find((event) => event.type === 'approval')!.toolCall!
+        .approvalId
+      expect(await agents.resolveAgentApproval(session.id, mutation.id, approved, approvalId)).toBe(
+        true
+      )
       const completed = await observed.terminal
       expect(completed.status).toBe('completed')
       expect(displayCalls(completed)[1].status).toBe(approved ? 'completed' : 'rejected')
@@ -638,7 +684,9 @@ describe('published registry calculator in the recoverable desktop agent', () =>
           : { success: false, denied: true }
       )
       assertMatchedHistory(completed.history!)
-      expect(await agents.resolveAgentApproval(session.id, mutation.id, approved)).toBe(false)
+      expect(await agents.resolveAgentApproval(session.id, mutation.id, approved, approvalId)).toBe(
+        false
+      )
       if (approved) {
         expect(
           JSON.parse(await fs.readFile(join(host.directory, 'commands.json.bak'), 'utf8'))
@@ -647,7 +695,7 @@ describe('published registry calculator in the recoverable desktop agent', () =>
     }
   )
 
-  it('auto-commits a mixed read/calculator/mutation batch through the real lock and atomic writer', async () => {
+  it('commits an enrolled Auto mixed batch after a mocked allow review through the real lock and atomic writer', async () => {
     const mutation = await editCall()
     transport('openai', [
       {
@@ -729,7 +777,9 @@ describe('published registry calculator in the recoverable desktop agent', () =>
     const { withResourceMutationLock } = await import('./resourceChangeService')
     const external = { ...initialCommand, channelMessage: 'Changed while approval was pending' }
     await withResourceMutationLock('commands', () => writeCommand(external))
-    expect(await agents.resolveAgentApproval(session.id, mutation.id, true)).toBe(true)
+    const approvalId = observed.events.find((event) => event.type === 'approval')!.toolCall!
+      .approvalId
+    expect(await agents.resolveAgentApproval(session.id, mutation.id, true, approvalId)).toBe(true)
     const completed = await observed.terminal
     expect(completed.status).toBe('completed')
     expect(host.commit).toHaveBeenCalledOnce()

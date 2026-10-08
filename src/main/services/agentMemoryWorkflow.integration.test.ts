@@ -12,6 +12,7 @@ import type {
 } from '../../shared/agentTypes'
 import type { ResourceChangedEvent } from '../../shared/mcpTypes'
 import type { AiRuntimeSettings } from './aiProviderService'
+import { AUTO_REVIEW_POLICY_REVISION } from '../../shared/agentAutoReview'
 
 type ProviderMessage = {
   role?: string
@@ -42,7 +43,8 @@ const mocks = vi.hoisted(() => ({
   provider: vi.fn<(request: ProviderRequest, signal: AbortSignal) => Promise<ProviderReply>>()
 }))
 
-// Only the unavailable Electron shell and provider HTTP transport are substituted.
+// The unavailable Electron shell and provider HTTP transport are substituted.
+// Reviewed Auto uses explicit enrollment and a deterministic reviewer below.
 // The installed vivi runner, desktop tools, shared memory service, host admission,
 // resource notifications, session checkpoints and atomic filesystem writer are real.
 vi.mock('electron', () => ({
@@ -55,6 +57,38 @@ vi.mock('electron', () => ({
   BrowserWindow: { getAllWindows: () => [] },
   session: {},
   safeStorage: {}
+}))
+
+// Mock only eligible memory recommendations; deletes still follow real Manual admission.
+// The dedicated reviewer/ledger tests exercise the actual model recommendation path.
+vi.mock('./agentAutoReview', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./agentAutoReview')>()
+  return {
+    ...actual,
+    reviewAgentMutation: vi.fn(async (options) => {
+      if (!options.enrollment) throw new Error('Reviewer fixture requires explicit Auto enrollment')
+      if (!['create_memory', 'edit_memory'].includes(options.prepared.name))
+        return actual.reviewAgentMutation(options)
+      return {
+        display: {
+          id: 'mock-reviewed-allow',
+          policyRevision: AUTO_REVIEW_POLICY_REVISION,
+          reasonCode: 'mocked_allow',
+          recommendation: 'allow',
+          source: 'automatic'
+        },
+        automatic: true,
+        assertCurrent: vi.fn(),
+        beginCommit: vi.fn(async () => true),
+        settle: vi.fn(async () => true)
+      }
+    })
+  }
+})
+// Credential encryption/storage belongs to separate tests, not this memory-only workflow.
+vi.mock('./fileService', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./fileService')>()),
+  saveSettings: vi.fn(async () => undefined)
 }))
 
 const settings: AiRuntimeSettings = {
@@ -98,6 +132,8 @@ describe('desktop persistent memory workflow with the installed shared package',
 
   beforeEach(async () => {
     vi.resetModules()
+    const currentSettings = await import('./settingsService')
+    currentSettings.setSettings({ ...currentSettings.getSettings(), ...settings })
     mocks.provider.mockReset().mockResolvedValue(textReply())
     mocks.userDataPath = await fs.mkdtemp(join(tmpdir(), 'agent-memory-workflow-'))
     agent = undefined
@@ -186,14 +222,23 @@ describe('desktop persistent memory workflow with the installed shared package',
   async function createSession(mode: AgentSession['mode'] = 'manual', config = settings) {
     const { agent } = await services()
     const session = await agent.createAgentSession(config)
-    await agent.updateAgentSession(session.id, { mode }, config.aiProvider || 'openai')
+    if (mode === 'auto') {
+      const currentSettings = await import('./settingsService')
+      currentSettings.setSettings({ ...currentSettings.getSettings(), ...config })
+      await agent.enrollAgentAutoReview(session.id, {
+        policyRevision: AUTO_REVIEW_POLICY_REVISION,
+        provider: config.aiProvider || 'openai',
+        accountRevision: currentSettings.getSettings().agentDecisionAccountRevision!
+      })
+    } else await agent.updateAgentSession(session.id, { mode }, config.aiProvider || 'openai')
     return session
   }
 
   async function start(
     sessionId: string,
     content = 'Apply the requested preference.',
-    config = settings
+    config = settings,
+    onEvent?: (event: AgentStreamEvent) => void
   ) {
     const { agent } = await services()
     const events: AgentStreamEvent[] = []
@@ -202,6 +247,7 @@ describe('desktop persistent memory workflow with the installed shared package',
     terminals.push(terminal.promise)
     agent.setAgentEventSink((event) => {
       events.push(structuredClone(event))
+      onEvent?.(event)
       if (event.type === 'approval') approval.resolve(event)
       if (event.type === 'done' || event.type === 'error') {
         approval.resolve(event)
@@ -293,7 +339,9 @@ describe('desktop persistent memory workflow with the installed shared package',
       expect(memoryEvents).toEqual([])
       expect(resourceEvents).toEqual([])
       expect(mocks.provider).toHaveBeenCalledTimes(1)
-      expect(await agent.resolveAgentApproval(session.id, callId, approved)).toBe(true)
+      expect(await agent.resolveAgentApproval(session.id, callId, approved, call.approvalId)).toBe(
+        true
+      )
       expect((await run.terminal).session?.status).toBe('completed')
       const completed = latestCall(run.events, callId)
       expect(completed.before).toEqual(call.before)
@@ -381,7 +429,14 @@ describe('desktop persistent memory workflow with the installed shared package',
       )
       memoryEvents.length = 0
       resourceEvents.length = 0
-      expect(await agent.resolveAgentApproval(session.id, 'stale-memory', true)).toBe(true)
+      expect(
+        await agent.resolveAgentApproval(
+          session.id,
+          'stale-memory',
+          true,
+          review.toolCall!.approvalId
+        )
+      ).toBe(true)
       expect((await run.terminal).session?.status).toBe('completed')
       expect(latestCall(run.events, 'stale-memory')).toMatchObject({
         status: 'error',
@@ -401,7 +456,7 @@ describe('desktop persistent memory workflow with the installed shared package',
     }
   )
 
-  it('automatically commits create, edit and delete with one memory and resource event per save', async () => {
+  it('reviews enrolled create/edit automatically and requires Manual delete approval before each save', async () => {
     const { memories } = await services()
     mocks.provider
       .mockResolvedValueOnce(
@@ -423,9 +478,24 @@ describe('desktop persistent memory workflow with the installed shared package',
         })
       })
     const session = await createSession('auto')
-    const run = await start(session.id)
+    const run = await start(
+      session.id,
+      'Remember short replies, update them, then delete.',
+      settings,
+      (event) => {
+        if (event.type === 'approval') {
+          expect(event.toolCall!.name).toBe('delete_memory')
+          void agent!.resolveAgentApproval(
+            session.id,
+            event.toolCall!.id,
+            true,
+            event.toolCall!.approvalId
+          )
+        }
+      }
+    )
     expect((await run.terminal).session?.status).toBe('completed')
-    expect(run.events.some((event) => event.type === 'approval')).toBe(false)
+    expect(run.events.filter((event) => event.type === 'approval')).toHaveLength(1)
     expect(memoryEvents.map((event) => event.memories.map((memory) => memory.content))).toEqual([
       ['Use short replies.'],
       ['Use short examples.'],
@@ -532,6 +602,8 @@ describe('desktop persistent memory workflow with the installed shared package',
               openrouterApiKey: 'mock-only-router',
               selectedOpenRouterModel: 'test/chat-without-tools'
             }
+      const currentSettings = await import('./settingsService')
+      currentSettings.setSettings({ ...currentSettings.getSettings(), ...config })
       if (modelKind === 'chat-without-tools') {
         const { modelCapabilityCatalog } = await import('./modelCapabilityService')
         const generation = modelCapabilityCatalog.begin('openrouter', config.openrouterApiKey)
@@ -619,10 +691,18 @@ describe('desktop persistent memory workflow with the installed shared package',
     })
     const session = await createSession()
     const run = await start(session.id)
-    expect((await run.approval).toolCall?.id).toBe('cancel-first')
+    const review = await run.approval
+    expect(review.toolCall?.id).toBe('cancel-first')
     expect(agent.cancelAgentRun(session.id)).toBe(true)
     expect((await run.terminal).session?.status).toBe('cancelled')
-    expect(await agent.resolveAgentApproval(session.id, 'cancel-first', true)).toBe(false)
+    expect(
+      await agent.resolveAgentApproval(
+        session.id,
+        'cancel-first',
+        true,
+        review.toolCall!.approvalId
+      )
+    ).toBe(false)
     expect(run.events.filter((event) => event.type === 'approval')).toHaveLength(1)
     expect(run.events.some((event) => event.toolCall?.id === 'cancel-second')).toBe(false)
     expect(mocks.provider).toHaveBeenCalledTimes(1)
@@ -641,7 +721,7 @@ describe('desktop persistent memory workflow with the installed shared package',
     )
   })
 
-  it('cancels an admitted memory tool waiting behind a user save without a second commit or event', async () => {
+  it('cancels a memory tool waiting for the shared resource lock without a second commit or event', async () => {
     const { memories } = await services()
     const tools = await import('./agentTools')
     // Complete the host's initial checkpoint before installing a primary-only gate.
@@ -653,7 +733,6 @@ describe('desktop persistent memory workflow with the installed shared package',
     const primary = join(mocks.userDataPath, 'agent-memories.json')
     const renameReached = deferred<void>()
     const releaseRename = deferred<void>()
-    const toolQueued = deferred<void>()
     const originalRename = fs.rename.bind(fs)
     let primaryRenames = 0
     const renameSpy = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
@@ -666,18 +745,6 @@ describe('desktop persistent memory workflow with the installed shared package',
       }
       return originalRename(from, to)
     })
-    const originalCommit = memories.commitMemoryMutation
-    const commitSpy = vi
-      .spyOn(memories, 'commitMemoryMutation')
-      .mockImplementation((mutation, options) => {
-        const committed = originalCommit(mutation, options)
-        if (mutation.after?.id === agentProposal.target.id) {
-          // Host admission queues its microtask before this observation. By the time
-          // it resolves, the real shared memory commit is behind the blocked save.
-          void Promise.resolve().then(() => toolQueued.resolve())
-        }
-        return committed
-      })
     const direct = memories.commitMemoryMutation(userProposal)
     let queued: Promise<unknown> | undefined
     try {
@@ -686,13 +753,11 @@ describe('desktop persistent memory workflow with the installed shared package',
       const admitted = vi.fn()
       queued = tools.commitMutation(agentProposal, 'agent', controller.signal, admitted)
       // Observe rejection now, before aborting, to avoid a detached rejection.
-      const rejected = expect(queued).rejects.toThrow('Cancelled queued memory tool')
-      await toolQueued.promise
-      expect(admitted).toHaveBeenCalledExactlyOnceWith(agentProposal)
-      expect(commitSpy).toHaveBeenLastCalledWith(
-        { kind: 'create', before: null, after: agentProposal.after },
-        { signal: controller.signal }
+      const rejected = expect(queued).rejects.toThrow(
+        'Agent execution cancelled before mutation started'
       )
+      await Promise.resolve()
+      expect(admitted).not.toHaveBeenCalled()
       expect(memoryEvents).toEqual([])
       expect(resourceEvents).toEqual([])
       controller.abort(new Error('Cancelled queued memory tool'))
@@ -714,7 +779,6 @@ describe('desktop persistent memory workflow with the installed shared package',
     } finally {
       releaseRename.resolve()
       await Promise.allSettled([direct, ...(queued ? [queued] : [])])
-      commitSpy.mockRestore()
       renameSpy.mockRestore()
     }
     expect((await reload()).memories.memories.map((memory) => memory.content)).toEqual([

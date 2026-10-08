@@ -2,41 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import {
-  createSkillsExtension,
-  parseSkillDocument,
-  type SkillSaveProposal
-} from '@ayayaq/vivi/extensions/skills'
+import { createSkillsExtension } from '@ayayaq/vivi/extensions/skills'
 import { createAgentSkillStore } from './agentSkillStore'
-import * as atomic from './atomicPersistence'
-import {
-  drainAgentPersistence,
-  pauseAgentPersistence,
-  resumeAgentPersistence
-} from './agentPersistenceLifecycle'
-
-vi.mock('./agentSkillSaveSupport', () => ({
-  getAgentSkillSaveSupport: () => ({
-    available: true,
-    reason: 'Ordinary temporary-folder fixture writer only; not production acceptance'
-  })
-}))
+import { drainAgentPersistence, resumeAgentPersistence } from './agentPersistenceLifecycle'
 
 const source = (name: string, body = 'Return three factual bullets.') =>
   `---\nname: ${name}\ndescription: >-\n  Summarize supplied text.\n  Use for a short summary.\nlicense: Apache-2.0\ncompatibility: Requires supplied text only\nmetadata:\n  author: Example\nallowed-tools: read_skill\ncustom-field: retained\n---\n\n${body}\n`
 const signal = () => new AbortController().signal
-const proposal = (
-  name: string,
-  content: string,
-  before: ReturnType<typeof parseSkillDocument> | null = null
-): SkillSaveProposal => ({
-  name,
-  before,
-  expectedRevision: before?.revision ?? null,
-  after: parseSkillDocument(content, name)
-})
 
-describe('desktop instruction-only skill store with an ordinary temporary-folder fixture writer', () => {
+describe('desktop read-only instruction skill store', () => {
   let home: string
   let roots: string[]
   let store: ReturnType<typeof createAgentSkillStore>
@@ -45,7 +19,6 @@ describe('desktop instruction-only skill store with an ordinary temporary-folder
     roots = []
     await fs.mkdir(join(home, 'state'))
     resumeAgentPersistence()
-    atomic.reopenAtomicWrites()
     store = createAgentSkillStore({
       ownedRoot: () => join(home, 'state/agent-skills'),
       externalRoots: async () => [...roots]
@@ -66,7 +39,9 @@ describe('desktop instruction-only skill store with an ordinary temporary-folder
   it('always includes the portable read-only creator, without scanning cwd or creating folders', async () => {
     const snapshot = await store.snapshot()
     expect(snapshot.catalog.skills.map((skill) => skill.name)).toEqual(['skill-creator'])
-    expect(snapshot.catalog.skills[0].readOnly).toBe(true)
+    expect(snapshot.catalog.skills.every((skill) => skill.readOnly)).toBe(true)
+    expect(snapshot.status.saveSupport.available).toBe(false)
+    expect(Object.keys(store)).toEqual(['snapshot'])
     expect(snapshot.status.ownedRoot).toBe(join(home, 'state/agent-skills'))
     await expect(fs.stat(snapshot.status.ownedRoot)).rejects.toMatchObject({ code: 'ENOENT' })
   })
@@ -148,105 +123,12 @@ describe('desktop instruction-only skill store with an ordinary temporary-folder
     ).toBe(3)
     const extension = createSkillsExtension({
       catalog: snapshot.catalog,
-      authorizeRead: snapshot.authorizeRead,
-      save: {
-        authorize: () => true,
-        commit: (draft, context) => store.commit(draft, context).then(() => undefined)
-      }
+      authorizeRead: snapshot.authorizeRead
     })
-    await expect(
-      extension.tools.at(-1)!.execute(
-        {
-          id: 'readonly',
-          name: 'save_skill',
-          arguments: {
-            name: 'skill-creator',
-            expectedRevision: snapshot.catalog.document('skill-creator')!.revision,
-            content: source('skill-creator')
-          }
-        },
-        { signal: signal() }
-      )
-    ).rejects.toThrow('read-only')
-  })
-  it('saves exact reviewed SKILL.md, retains a backup on update and activates only on a new snapshot', async () => {
-    const first = await store.snapshot()
-    const content = source('new-summary')
-    const receipt = await store.commit(proposal('new-summary', content), { signal: signal() })
-    expect(receipt).toMatchObject({
-      saved: true,
-      available: 'next_turn',
-      destination: join(home, 'state/agent-skills/new-summary/SKILL.md')
-    })
-    expect(first.catalog.document('new-summary')).toBeUndefined()
-    expect(await fs.readFile(receipt.destination, 'utf8')).toBe(content)
-    const next = await store.snapshot()
-    const before = next.catalog.document('new-summary')!
-    await store.commit(
-      proposal('new-summary', source('new-summary', 'Revised instructions.'), before),
-      { signal: signal() }
-    )
-    expect(await fs.readFile(`${receipt.destination}.bak`, 'utf8')).toBe(content)
-    expect(next.catalog.document('new-summary')!.content).toBe(content)
-    expect((await store.snapshot()).catalog.document('new-summary')!.content).toContain(
-      'Revised instructions'
-    )
-  })
-  it('rechecks the on-disk revision after review, preserving later changes and malformed evidence', async () => {
-    const root = await folder(join(home, 'state/agent-skills'), 'summary')
-    const before = (await store.snapshot()).catalog.document('summary')!
-    const reviewed = proposal('summary', source('summary', 'Reviewed edit.'), before)
-    const later = source('summary', 'Later edit.')
-    await fs.writeFile(join(root, 'SKILL.md'), later)
-    await expect(store.commit(reviewed, { signal: signal() })).rejects.toThrow(
-      'revision changed after review'
-    )
-    expect(await fs.readFile(join(root, 'SKILL.md'), 'utf8')).toBe(later)
-    await fs.writeFile(join(root, 'SKILL.md'), 'damaged but preserved')
-    await expect(store.commit(reviewed, { signal: signal() })).rejects.toThrow('frontmatter')
-    expect(await fs.readFile(join(root, 'SKILL.md'), 'utf8')).toBe('damaged but preserved')
-  })
-  it('honors cancellation at the atomic pre-rename boundary and permits a fresh retry', async () => {
-    const controller = new AbortController()
-    const real = atomic.atomicWrite
-    const wrapper = vi.spyOn(atomic, 'atomicWrite').mockImplementation(async (...args) => {
-      controller.abort()
-      return real(...args)
-    })
-    await expect(
-      store.commit(proposal('summary', source('summary')), { signal: controller.signal })
-    ).rejects.toThrow()
-    await expect(fs.stat(join(home, 'state/agent-skills/summary/SKILL.md'))).rejects.toMatchObject({
-      code: 'ENOENT'
-    })
-    wrapper.mockRestore()
-    expect(
-      (await store.commit(proposal('summary', source('summary')), { signal: signal() })).saved
-    ).toBe(true)
-  })
-  it('rejects cancelled or unadmitted saves, and retains an outcome cancelled only after rename', async () => {
-    const controller = new AbortController()
-    controller.abort()
-    await expect(
-      store.commit(proposal('summary', source('summary')), { signal: controller.signal })
-    ).rejects.toThrow()
-    pauseAgentPersistence()
-    await expect(
-      store.commit(proposal('summary', source('summary')), { signal: signal() })
-    ).rejects.toThrow('paused')
-    resumeAgentPersistence()
-    const committed = new AbortController()
-    const real = atomic.atomicWrite
-    vi.spyOn(atomic, 'atomicWrite').mockImplementation(async (...args) => {
-      const result = await real(...args)
-      committed.abort()
-      return result
-    })
-    const receipt = await store.commit(proposal('summary', source('summary')), {
-      signal: committed.signal
-    })
-    expect(receipt.saved).toBe(true)
-    expect(await fs.readFile(receipt.destination, 'utf8')).toBe(source('summary'))
+    expect(extension.tools.map((tool) => tool.definition.name)).toEqual([
+      'list_skills',
+      'read_skill'
+    ])
   })
   it('bounds resource bytes, strictly decodes UTF-8, and protects known state/credential components', async () => {
     roots = [join(home, 'external')]
@@ -275,21 +157,6 @@ describe('desktop instruction-only skill store with an ordinary temporary-folder
         item.message.includes('overlap the app state')
       )
     ).toBe(true)
-  })
-  it('refuses linked documents and preserves the current source on a precommit writer failure', async () => {
-    const root = await folder(join(home, 'state/agent-skills'), 'summary')
-    const before = (await store.snapshot()).catalog.document('summary')!
-    vi.spyOn(atomic, 'atomicWrite').mockRejectedValueOnce(
-      new Error('Fixture filesystem is read-only')
-    )
-    await expect(
-      store.commit(proposal('summary', source('summary', 'Replacement.'), before), {
-        signal: signal()
-      })
-    ).rejects.toThrow('read-only')
-    expect(await fs.readFile(join(root, 'SKILL.md'), 'utf8')).toBe(before.content)
-    await fs.link(join(root, 'SKILL.md'), join(home, 'ordinary-copy.md'))
-    expect((await store.snapshot()).catalog.document('summary')).toBeUndefined()
   })
   it('rechecks registered fixture content policy after asynchronous discovery', async () => {
     roots = [join(home, 'external')]
@@ -341,4 +208,15 @@ describe('desktop instruction-only skill store with an ordinary temporary-folder
       )
     ).rejects.toThrow('relative path')
   })
+  it.skipIf(process.platform !== 'win32')(
+    'accepts ordinary Windows case spelling aliases for read-only folders',
+    async () => {
+      const collection = join(home, 'MixedCaseSkills')
+      await folder(collection, 'summary')
+      roots = [collection.toUpperCase()]
+      const snapshot = await store.snapshot()
+      expect(snapshot.catalog.document('summary')!.content).toBe(source('summary'))
+      expect(snapshot.catalog.skills.find((skill) => skill.name === 'summary')!.readOnly).toBe(true)
+    }
+  )
 })

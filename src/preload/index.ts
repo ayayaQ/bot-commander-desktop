@@ -73,6 +73,8 @@ const validInvokeChannels = [
   'agent:create',
   'agent:delete',
   'agent:update',
+  'agent:enroll-auto-review',
+  'agent:inspect-auto-review-audit',
   'agent:set-active',
   'agent:send',
   'agent:resolve-plan',

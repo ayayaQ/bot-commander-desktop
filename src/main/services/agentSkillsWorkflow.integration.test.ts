@@ -24,12 +24,6 @@ vi.mock('electron', () => ({
   session: {},
   safeStorage: {}
 }))
-vi.mock('./agentSkillSaveSupport', () => ({
-  getAgentSkillSaveSupport: () => ({
-    available: true,
-    reason: 'Ordinary temporary-folder fixture writer only; not production acceptance'
-  })
-}))
 const settings: AiRuntimeSettings = {
   aiProvider: 'openai',
   openaiApiKey: 'mock-only',
@@ -50,7 +44,7 @@ function deferred<T>() {
   }
 }
 
-describe('desktop skills host workflow with installed vivi and a temporary-folder fixture writer', () => {
+describe('desktop read-only skills host workflow with installed vivi', () => {
   let agent: typeof import('./agentService')
   let skills: typeof import('./agentSkillService')
   let terminals: Promise<AgentStreamEvent>[]
@@ -157,8 +151,9 @@ describe('desktop skills host workflow with installed vivi and a temporary-folde
     expect((await run.terminal).session!.status).toBe('completed')
     const first = mocks.provider.mock.calls[0][0]
     expect(first.tools!.map((item) => item.name)).toEqual(
-      expect.arrayContaining(['calculate', 'list_skills', 'read_skill', 'save_skill'])
+      expect.arrayContaining(['calculate', 'list_skills', 'read_skill'])
     )
+    expect(first.tools!.map((item) => item.name)).not.toContain('save_skill')
     const catalog = first.input!.find((message) =>
       message.content?.includes('Available instruction-only skills')
     )!
@@ -219,135 +214,5 @@ describe('desktop skills host workflow with installed vivi and a temporary-folde
       'END-OF-INSTRUCTIONS'
     )
     expect(JSON.stringify(mocks.provider.mock.calls.at(-1)![0].input)).toContain('END-OF-REFERENCE')
-  })
-  it('requires exact manual skill approval in auto mode and activates saves on the next turn only', async () => {
-    const created = await session('auto')
-    mocks.provider
-      .mockReturnValueOnce(
-        tool('save_skill', { name: 'concise-summary', content: source(), expectedRevision: null })
-      )
-      .mockReturnValueOnce(tool('list_skills', {}, 'after-save-list'))
-      .mockReturnValue(text())
-    const run = await start(created.id)
-    const approval = await run.approval
-    expect(approval.type).toBe('approval')
-    expect(approval.toolCall!.after).toMatchObject({
-      content: source(),
-      destination: join(mocks.home, 'agent-skills/concise-summary/SKILL.md'),
-      available: 'next_turn'
-    })
-    await expect(
-      fs.stat(join(mocks.home, 'agent-skills/concise-summary/SKILL.md'))
-    ).rejects.toMatchObject({ code: 'ENOENT' })
-    await agent.resolveAgentApproval(created.id, approval.toolCall!.id, true)
-    expect((await run.terminal).session!.status).toBe('completed')
-    const calls = (await saved(created.id)).messages.flatMap((message) => message.toolCalls || [])
-    expect(calls.find((call) => call.name === 'save_skill')!.result).toMatchObject({
-      saved: true,
-      available: 'next_turn'
-    })
-    expect(
-      (
-        calls.find((call) => call.id === 'after-save-list')!.result as {
-          skills: Array<{ name: string }>
-        }
-      ).skills.map((item) => item.name)
-    ).not.toContain('concise-summary')
-    mocks.provider.mockReset().mockReturnValue(text())
-    await (
-      await start(created.id)
-    ).terminal
-    expect(JSON.stringify(mocks.provider.mock.calls[0][0].input)).toContain('concise-summary')
-    expect(
-      await fs.readFile(join(mocks.home, 'agent-skills/concise-summary/SKILL.md'), 'utf8')
-    ).toBe(source())
-  })
-  it('offers discovery but no save capability in planning mode', async () => {
-    const created = await session('planning')
-    mocks.provider
-      .mockReturnValueOnce(
-        tool('save_skill', { name: 'concise-summary', content: source(), expectedRevision: null })
-      )
-      .mockReturnValue(text())
-    const run = await start(created.id)
-    await run.terminal
-    expect(mocks.provider.mock.calls[0][0].tools!.map((item) => item.name)).toContain('read_skill')
-    expect(mocks.provider.mock.calls[0][0].tools!.map((item) => item.name)).not.toContain(
-      'save_skill'
-    )
-    expect(run.events.some((event) => event.type === 'approval')).toBe(false)
-    await expect(fs.stat(join(mocks.home, 'agent-skills'))).rejects.toMatchObject({
-      code: 'ENOENT'
-    })
-  })
-  it('rejects stale approved updates and preserves newer exact source', async () => {
-    const path = await seed()
-    const created = await session()
-    mocks.provider
-      .mockReturnValueOnce(
-        tool('save_skill', {
-          name: 'concise-summary',
-          content: source('Reviewed replacement.'),
-          expectedRevision: parseSkillDocument(source()).revision
-        })
-      )
-      .mockReturnValue(text())
-    const run = await start(created.id)
-    const approval = await run.approval
-    await fs.writeFile(path, source('Newer user edit.'))
-    await agent.resolveAgentApproval(created.id, approval.toolCall!.id, true)
-    await run.terminal
-    const call = (await saved(created.id)).messages
-      .flatMap((message) => message.toolCalls || [])
-      .find((item) => item.name === 'save_skill')!
-    expect(call.status).toBe('error')
-    expect(call.error).toContain('revision changed after review')
-    expect(await fs.readFile(path, 'utf8')).toBe(source('Newer user edit.'))
-  })
-  it('rejects declined drafts and cancellation while approval is pending without saving', async () => {
-    for (const cancel of [false, true]) {
-      const created = await session('auto')
-      mocks.provider
-        .mockReset()
-        .mockReturnValueOnce(
-          tool('save_skill', { name: 'concise-summary', content: source(), expectedRevision: null })
-        )
-        .mockReturnValue(text())
-      const run = await start(created.id)
-      const approval = await run.approval
-      if (cancel) agent.cancelAgentRun(created.id)
-      else await agent.resolveAgentApproval(created.id, approval.toolCall!.id, false)
-      await run.terminal
-      await expect(
-        fs.stat(join(mocks.home, 'agent-skills/concise-summary/SKILL.md'))
-      ).rejects.toMatchObject({ code: 'ENOENT' })
-    }
-  })
-  it('retains a committed skill receipt when cancellation follows the rename', async () => {
-    const created = await session()
-    mocks.provider
-      .mockReturnValueOnce(
-        tool('save_skill', { name: 'concise-summary', content: source(), expectedRevision: null })
-      )
-      .mockReturnValue(text())
-    const run = await start(created.id, (event) => {
-      if (
-        event.type === 'tool' &&
-        event.toolCall?.name === 'save_skill' &&
-        event.toolCall.status === 'completed'
-      )
-        agent.cancelAgentRun(created.id)
-    })
-    const approval = await run.approval
-    await agent.resolveAgentApproval(created.id, approval.toolCall!.id, true)
-    expect((await run.terminal).session!.status).toBe('cancelled')
-    const call = (await saved(created.id)).messages
-      .flatMap((message) => message.toolCalls || [])
-      .find((item) => item.name === 'save_skill')!
-    expect(call.status).toBe('completed')
-    expect(call.result).toMatchObject({ saved: true, available: 'next_turn' })
-    expect(
-      await fs.readFile(join(mocks.home, 'agent-skills/concise-summary/SKILL.md'), 'utf8')
-    ).toBe(source())
   })
 })

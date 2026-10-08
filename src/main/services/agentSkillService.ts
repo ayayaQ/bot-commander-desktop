@@ -1,10 +1,9 @@
 import { app } from 'electron'
 import { isAbsolute, join, resolve } from 'node:path'
-import fs from 'node:fs/promises'
 import { createAgentPersistence } from './agentPersistence'
 import { withAgentPersistenceOperation } from './agentPersistenceLifecycle'
 import { getSettings } from './settingsService'
-import { createAgentSkillStore, skillPathsOverlap } from './agentSkillStore'
+import { checkedSkillDirectory, createAgentSkillStore, skillPathsOverlap } from './agentSkillStore'
 
 interface SkillFolders {
   version: 1
@@ -45,7 +44,7 @@ export const agentSkillStore = createAgentSkillStore({
       [settings.openaiApiKey, settings.openrouterApiKey].some((key) => key && content.includes(key))
     )
       throw new Error(
-        'Skill text contains a currently configured provider credential; remove it before discovery or saving'
+        'Skill text contains a currently configured provider credential; remove it before discovery'
       )
   }
 })
@@ -62,11 +61,11 @@ export function configureAgentSkillFolder(path: string, add: boolean) {
         if (typeof path !== 'string' || !isAbsolute(path) || resolve(path) !== path)
           throw new Error('Choose an absolute skill folder')
         if (add) {
-          if (skillPathsOverlap(path, app.getPath('userData')))
+          const selected = await checkedSkillDirectory(path)
+          const state = await checkedSkillDirectory(app.getPath('userData'))
+          if (skillPathsOverlap(selected.path, state.path))
             throw new Error('Read-only skill folders cannot overlap the app state folder')
-          const stat = await fs.lstat(path)
-          if (!stat.isDirectory() || stat.isSymbolicLink() || (await fs.realpath(path)) !== path)
-            throw new Error('Choose an ordinary skill folder without symlinks')
+          path = selected.path
         }
         const next = add
           ? [...new Set([...current, path])]

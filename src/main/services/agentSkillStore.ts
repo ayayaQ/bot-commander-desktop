@@ -1,7 +1,6 @@
 import fs from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
-import { randomUUID } from 'node:crypto'
 import {
   createSkillCatalog,
   parseSkillDocument,
@@ -10,18 +9,10 @@ import {
   validateSkillResourcePath,
   type SkillCatalog,
   type SkillReadRequest,
-  type SkillSaveProposal,
   type SkillSource
 } from '@ayayaq/vivi/extensions/skills'
 import { getAgentSkillSaveSupport } from './agentSkillSaveSupport'
-import { atomicWrite } from './atomicPersistence'
-import { reportAgentPersistenceNotice } from './agentPersistence'
-import { withAgentPersistenceOperation } from './agentPersistenceLifecycle'
-import type {
-  AgentSkillDiagnostic,
-  AgentSkillReceipt,
-  AgentSkillsStatus
-} from '../../shared/agentSkillTypes'
+import type { AgentSkillDiagnostic, AgentSkillsStatus } from '../../shared/agentSkillTypes'
 
 const MAX_ROOTS = 8
 const MAX_DIRECTORY_ENTRIES = 1000
@@ -42,7 +33,7 @@ const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
 const isMissing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT'
 const detail = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
-type Identity = { dev: number; ino: number }
+type Identity = { dev: number; ino: number; path: string }
 interface Binding {
   collection: string
   root: string
@@ -52,8 +43,8 @@ interface Binding {
   readOnly: boolean
 }
 
-/** Refuse symlink/reparse aliases, including parents, rather than granting another root. */
-async function checkedDirectory(path: string): Promise<Identity> {
+/** Check ordinary directory ancestry and actual identity; Windows spelling aliases are valid. */
+export async function checkedSkillDirectory(path: string): Promise<Identity> {
   if (!isAbsolute(path) || resolve(path) !== path)
     throw new Error('Skill folder must be an absolute canonical path')
   let current = parse(path).root
@@ -63,13 +54,24 @@ async function checkedDirectory(path: string): Promise<Identity> {
     if (stat.isSymbolicLink() || !stat.isDirectory())
       throw new Error('Skill folders must be ordinary directories without symlinks')
   }
-  if ((await fs.realpath(path)) !== path) throw new Error('Skill folder canonical path changed')
+  const canonical = await fs.realpath(path)
   const stat = await fs.lstat(path)
-  return { dev: stat.dev, ino: stat.ino }
+  const actual = await fs.lstat(canonical)
+  if (
+    stat.isSymbolicLink() ||
+    !stat.isDirectory() ||
+    actual.isSymbolicLink() ||
+    !actual.isDirectory() ||
+    stat.ino === 0 ||
+    actual.dev !== stat.dev ||
+    actual.ino !== stat.ino
+  )
+    throw new Error('Skill folder canonical identity changed')
+  return { dev: stat.dev, ino: stat.ino, path: canonical }
 }
 
 async function assertDirectory(path: string, expected: Identity): Promise<void> {
-  const actual = await checkedDirectory(path)
+  const actual = await checkedSkillDirectory(path)
   if (actual.dev !== expected.dev || actual.ino !== expected.ino)
     throw new Error('Skill folder changed; refresh the skills catalog')
 }
@@ -84,7 +86,7 @@ async function readText(root: string, path: string, expected: Identity): Promise
   let current = root
   for (const part of parts.slice(0, -1)) {
     current = join(current, part)
-    await checkedDirectory(current)
+    await checkedSkillDirectory(current)
   }
   const destination = join(current, parts.at(-1)!)
   const before = await fs.lstat(destination)
@@ -131,66 +133,6 @@ async function readText(root: string, path: string, expected: Identity): Promise
   }
 }
 
-async function withStoreLock<T>(root: string, operation: () => Promise<T>): Promise<T> {
-  const path = join(root, '.agent-skills.lock')
-  const token = randomUUID()
-  let file: Awaited<ReturnType<typeof fs.open>>
-  try {
-    file = await fs.open(path, 'wx', 0o600)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    const recoveryPath = join(root, '.agent-skills-recovery.lock')
-    const recovery = await fs.open(recoveryPath, 'wx', 0o600).catch(() => {
-      throw new Error('Skill store recovery is busy; retry or resolve an interrupted recovery')
-    })
-    try {
-      // A crashed host leaves only an internal lock. Never break a live or unreadable lock.
-      const identity = await checkedDirectory(root)
-      const raw = await readText(root, '.agent-skills.lock', identity)
-      const lock = JSON.parse(raw) as { pid?: unknown }
-      if (!Number.isSafeInteger(lock.pid) || Number(lock.pid) <= 0)
-        throw new Error('Skill store lock needs manual recovery')
-      try {
-        process.kill(Number(lock.pid), 0)
-        throw new Error('Skill store is busy in another process; retry later')
-      } catch (check) {
-        if ((check as NodeJS.ErrnoException).code !== 'ESRCH') throw check
-      }
-      // Recheck exact bytes before recovering a dead process's lock.
-      if ((await readText(root, '.agent-skills.lock', identity)) !== raw)
-        throw new Error('Skill store lock changed; retry later')
-      await fs.unlink(path)
-      file = await fs.open(path, 'wx', 0o600)
-    } finally {
-      await recovery.close()
-      await fs.unlink(recoveryPath).catch(() => undefined)
-    }
-  }
-  try {
-    await file.writeFile(JSON.stringify({ pid: process.pid, token }), 'utf8')
-    await file.sync()
-    return await operation()
-  } finally {
-    await file.close().catch((error) => {
-      reportAgentPersistenceNotice({
-        level: 'warning',
-        message: `Skill store lock close failed: ${detail(error)}. Any committed skill remains saved; inspect its current revision before retrying.`
-      })
-    })
-    // Do not remove a replacement lock owned by another process.
-    try {
-      const identity = await checkedDirectory(root)
-      const raw = await readText(root, '.agent-skills.lock', identity)
-      if ((JSON.parse(raw) as { token?: string }).token === token) await fs.unlink(path)
-    } catch (error) {
-      reportAgentPersistenceNotice({
-        level: 'warning',
-        message: `Skill store lock cleanup failed: ${detail(error)}. Any committed skill remains saved; the next save may need lock recovery.`
-      })
-    }
-  }
-}
-
 export interface AgentSkillSnapshot {
   catalog: SkillCatalog
   status: AgentSkillsStatus
@@ -203,24 +145,7 @@ export function createAgentSkillStore(options: {
   assertContent?: (content: string) => void
 }): {
   snapshot: () => Promise<AgentSkillSnapshot>
-  destination: (name: string) => string
-  commit: (
-    proposal: SkillSaveProposal,
-    context: { signal: AbortSignal }
-  ) => Promise<AgentSkillReceipt>
 } {
-  let chain: Promise<unknown> = Promise.resolve()
-  const destination = (name: string): string => {
-    validateSkillResourcePath(`${name}/SKILL.md`)
-    if (
-      parseSkillDocument(`---\nname: ${name}\ndescription: Check\n---\nCheck.`, name).metadata
-        .name !== name
-    )
-      throw new Error('Skill destination must use its canonical name')
-    if (name === 'skill-creator') throw new Error('The bundled skill creator is read-only')
-    return join(options.ownedRoot(), name, 'SKILL.md')
-  }
-
   async function snapshot(): Promise<AgentSkillSnapshot> {
     const ownedRoot = options.ownedRoot()
     const externalRoots = [...(await options.externalRoots())]
@@ -228,13 +153,18 @@ export function createAgentSkillStore(options: {
     const diagnostics: AgentSkillDiagnostic[] = []
     const candidates: Array<{ name: string; source: SkillSource; binding: Binding }> = []
     let entries = 0
+    const collections = new Set<string>()
     const diagnostic = (source: string, message: string) => diagnostics.push({ source, message })
     for (const collection of [ownedRoot, ...externalRoots]) {
       const readOnly = collection !== ownedRoot
       try {
-        if (readOnly && skillPathsOverlap(collection, dirname(ownedRoot)))
+        const identity = await checkedSkillDirectory(collection)
+        const state = await checkedSkillDirectory(dirname(ownedRoot))
+        if (readOnly && skillPathsOverlap(identity.path, state.path))
           throw new Error('Read-only skill folders cannot overlap the app state folder')
-        await checkedDirectory(collection)
+        const key = `${identity.dev}:${identity.ino}`
+        if (collections.has(key)) continue
+        collections.add(key)
         const folders: string[] = []
         const direct = await fs.lstat(join(collection, 'SKILL.md')).catch((error) => {
           if (!isMissing(error)) throw error
@@ -258,7 +188,7 @@ export function createAgentSkillStore(options: {
           }
           try {
             validateSkillResourcePath(`${basename(root)}/SKILL.md`)
-            const identity = await checkedDirectory(root)
+            const identity = await checkedSkillDirectory(root)
             const content = await readText(root, 'SKILL.md', identity)
             options.assertContent?.(content)
             const document = parseSkillDocument(content, basename(root))
@@ -293,7 +223,7 @@ export function createAgentSkillStore(options: {
               binding,
               source: {
                 content,
-                readOnly,
+                readOnly: true,
                 readResource: async (request, { signal }) => {
                   signal.throwIfAborted()
                   if (!(await authorized(binding)))
@@ -371,121 +301,5 @@ export function createAgentSkillStore(options: {
     return true
   }
 
-  function commit(
-    proposal: SkillSaveProposal,
-    { signal }: { signal: AbortSignal }
-  ): Promise<AgentSkillReceipt> {
-    const captured = structuredClone(proposal)
-    return withAgentPersistenceOperation(() => {
-      const pending = chain
-        .catch(() => undefined)
-        .then(async () => {
-          signal.throwIfAborted()
-          const support = getAgentSkillSaveSupport()
-          if (!support.available) throw new Error(support.reason)
-          const target = destination(captured.name)
-          options.assertContent?.(captured.after.content)
-          const after = parseSkillDocument(captured.after.content, captured.name)
-          if (after.revision !== captured.after.revision)
-            throw new Error('Reviewed skill content changed')
-          const ownedRoot = options.ownedRoot()
-          // Only create the known app-owned root; never create a selected external collection.
-          await checkedDirectory(dirname(ownedRoot))
-          await fs.mkdir(ownedRoot, { recursive: false }).catch((error) => {
-            if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-          })
-          const rootIdentity = await checkedDirectory(ownedRoot)
-          return withStoreLock(ownedRoot, async () => {
-            signal.throwIfAborted()
-            await assertDirectory(ownedRoot, rootIdentity)
-            const folder = dirname(target)
-            let current: string | null = null
-            try {
-              const identity = await checkedDirectory(folder)
-              current = await readText(folder, 'SKILL.md', identity)
-            } catch (error) {
-              if (!isMissing(error)) throw error
-            }
-            const revision =
-              current === null ? null : parseSkillDocument(current, captured.name).revision
-            if (revision !== captured.expectedRevision)
-              throw new Error(
-                'Skill revision changed after review; refresh and review the exact new draft'
-              )
-            let createdFolder = false
-            if (current === null) {
-              // Do not create over an interrupted/externally modified folder or backup.
-              const existing = await fs.lstat(folder).catch((error) => {
-                if (!isMissing(error)) throw error
-                return null
-              })
-              if (existing)
-                throw new Error(
-                  'Skill folder already exists without a valid SKILL.md; resolve it before creating'
-                )
-              await fs.mkdir(folder, { mode: 0o700 })
-              createdFolder = true
-            }
-            try {
-              const identity = await checkedDirectory(folder)
-              for (const leaf of ['SKILL.md', 'SKILL.md.bak']) {
-                const existing = await fs.lstat(join(folder, leaf)).catch((error) => {
-                  if (!isMissing(error)) throw error
-                  return null
-                })
-                if (
-                  existing &&
-                  (existing.isSymbolicLink() || !existing.isFile() || existing.nlink !== 1)
-                )
-                  throw new Error('Skill save files must be ordinary files')
-              }
-              await assertDirectory(ownedRoot, rootIdentity)
-              await assertDirectory(folder, identity)
-              signal.throwIfAborted()
-              const written = await atomicWrite(target, after.content, {
-                validate: (content) => {
-                  parseSkillDocument(content, captured.name)
-                },
-                beforeCommit: async () => {
-                  signal.throwIfAborted()
-                  await assertDirectory(ownedRoot, rootIdentity)
-                  await assertDirectory(folder, identity)
-                  let latest: string | null = null
-                  try {
-                    latest = await readText(folder, 'SKILL.md', identity)
-                  } catch (error) {
-                    if (!isMissing(error)) throw error
-                  }
-                  if (
-                    (latest === null
-                      ? null
-                      : parseSkillDocument(latest, captured.name).revision) !==
-                    captured.expectedRevision
-                  )
-                    throw new Error('Skill revision changed before commit; review again')
-                  options.assertContent?.(after.content)
-                  signal.throwIfAborted()
-                }
-              })
-              // A resolved atomic rename is committed even if cancellation arrives afterwards.
-              return {
-                saved: true as const,
-                name: captured.name,
-                revision: after.revision,
-                destination: target,
-                available: 'next_turn' as const,
-                durability: written.durability
-              }
-            } catch (error) {
-              // Remove only an empty directory this operation created before any commit.
-              if (createdFolder) await fs.rmdir(folder).catch(() => undefined)
-              throw error
-            }
-          })
-        })
-      chain = pending
-      return pending
-    })
-  }
-  return { snapshot, destination, commit }
+  return { snapshot }
 }

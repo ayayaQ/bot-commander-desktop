@@ -1,18 +1,13 @@
 export interface AgentSkillSaveSupport {
-  available: boolean
+  available: false
   reason: string
 }
 
-/**
- * Fail closed on every platform until a host-owned, handle-bound transaction adapter is
- * implemented and independently accepted. Pathname validation plus fs.rename does not pin
- * the mutation operands. Tests may substitute this module for ordinary fixture workflows;
- * no runtime flag, renderer setting, environment variable or skill can enable that path.
- */
+/** This release provides skill reads and creator drafts only, on every platform. */
 export function getAgentSkillSaveSupport(): AgentSkillSaveSupport {
   return {
     available: false,
     reason:
-      'Agent skill saving is unavailable pending a validated handle-bound filesystem adapter. The creator can draft standard SKILL.md content for manual saving.'
+      'Automatic skill saving is disabled on every platform. The creator can draft standard SKILL.md content for manual saving.'
   }
 }

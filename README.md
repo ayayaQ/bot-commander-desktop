@@ -254,13 +254,10 @@ $ npm run build:linux
 ## App-wide Agent Skills
 
 The Agent panel's Skills control lists standard SKILL.md folders, the bundled read-only
-skill creator, and format/compatibility diagnostics. Use the owned app-wide store or select
-existing folders read-only. Skills load progressively, remain instruction-only and use the
-same format as vivi-cli. This inspection draft does not advertise agent saves on any platform: a validated
-handle-bound filesystem adapter is still needed. The creator drafts standard SKILL.md
-for manual saving. The review/approval writer prototype is covered only by ordinary
-temporary-folder fixtures; Windows/macOS/Linux save workflows are not accepted. Changes apply on a future turn. See
-[Agent Skills](docs/AGENT_SKILLS.md) for limits and filesystem/persistence behavior.
+skill creator, and format diagnostics. Skills and text resources load progressively as
+instructions. Use the app-wide folder or explicitly select existing read-only folders.
+The creator drafts SKILL.md content for manual saving. Automatic skill saving is disabled
+on every platform. Scripts do not run. See [Agent Skills](docs/AGENT_SKILLS.md).
 
 ## External agent access (optional)
 

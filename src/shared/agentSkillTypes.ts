@@ -12,12 +12,3 @@ export interface AgentSkillsStatus {
   skills: SkillSummary[]
   diagnostics: AgentSkillDiagnostic[]
 }
-
-export interface AgentSkillReceipt {
-  saved: true
-  name: string
-  revision: string
-  destination: string
-  available: 'next_turn'
-  durability: 'confirmed' | 'unsupported' | 'uncertain'
-}
