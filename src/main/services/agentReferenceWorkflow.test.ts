@@ -254,7 +254,9 @@ describe('agent command reference workflow', () => {
     expect(await fs.readFile(commandsPath, 'utf8')).toBe(initialBytes)
     expect(mocks.provider).toHaveBeenCalledTimes(1)
 
-    expect(await currentService.resolveAgentApproval(session.id, call.id, true)).toBe(true)
+    expect(
+      await currentService.resolveAgentApproval(session.id, call.id, true, call.approvalId)
+    ).toBe(true)
     const done = await terminal
     expect(done.type, done.error).toBe('done')
     expect(done.session?.status).toBe('completed')

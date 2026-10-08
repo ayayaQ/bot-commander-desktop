@@ -12,6 +12,9 @@ import {
   reduceAgentProgress,
   type AgentProgressBySession
 } from '../utils/agentProgress'
+import { AUTO_REVIEW_POLICY_REVISION } from '../../../shared/agentAutoReview'
+import type { AgentDecisionAuditInspection } from '../../../shared/agentAutoReview'
+import { settingsStore, loadSettings } from './settings'
 
 const initial: AgentSessionsData = {
   sessions: [],
@@ -178,22 +181,75 @@ export async function sendAgentMessage(content: string) {
   await window.electron.ipcRenderer.invoke('agent:send', session.id, content)
 }
 
-export async function resolveAgentPlan(decision: AgentPlanDecision) {
+export async function resolveAgentPlan(decision: AgentPlanDecision, planMessageId?: string) {
   const session = get(activeAgentSession)
   if (!session) return
   const result = await window.electron.ipcRenderer.invoke(
     'agent:resolve-plan',
     session.id,
-    decision
+    decision,
+    planMessageId
   )
   if (decision === 'continue') replaceSession(result as AgentSession)
   return result
 }
 
-export async function resolveAgentApproval(toolCallId: string, approved: boolean) {
+export async function resolveAgentApproval(
+  toolCallId: string,
+  approved: boolean,
+  approvalId?: string
+) {
   const session = get(activeAgentSession)
   if (!session) return
-  await window.electron.ipcRenderer.invoke('agent:approve', session.id, toolCallId, approved)
+  await window.electron.ipcRenderer.invoke(
+    'agent:approve',
+    session.id,
+    toolCallId,
+    approved,
+    approvalId
+  )
+}
+
+export async function enrollAgentAutoReview(
+  sessionId: string,
+  expected: {
+    provider: 'openai' | 'openrouter'
+    accountRevision?: string
+    recoveryInspectionId?: string
+  },
+  activate = true
+) {
+  if (!expected.accountRevision)
+    throw new Error('Wait for settings to load, then reopen Auto review')
+  const session: AgentSession = await window.electron.ipcRenderer.invoke(
+    'agent:enroll-auto-review',
+    sessionId,
+    {
+      policyRevision: AUTO_REVIEW_POLICY_REVISION,
+      provider: expected.provider,
+      accountRevision: expected.accountRevision,
+      ...(expected.recoveryInspectionId
+        ? { recoveryInspectionId: expected.recoveryInspectionId }
+        : {}),
+      activate
+    }
+  )
+  // Adopt the checkpoint through the normal draft-safe settings loader.
+  await loadSettings()
+  const current = get(settingsStore)
+  if (
+    session.autoReviewEnrollment?.provider !== (current.aiProvider || 'openai') ||
+    session.autoReviewEnrollment?.accountRevision !== current.agentDecisionAccountRevision
+  )
+    throw new Error('Selected review account changed; reopen Auto review')
+  replaceSession(session)
+  return session
+}
+
+export async function inspectAgentAutoReviewAudit(
+  sessionId: string
+): Promise<AgentDecisionAuditInspection> {
+  return window.electron.ipcRenderer.invoke('agent:inspect-auto-review-audit', sessionId)
 }
 
 export async function cancelAgentRun() {

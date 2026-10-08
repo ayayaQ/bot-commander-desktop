@@ -30,6 +30,11 @@ const unsupportedDirectories = new Set<string>()
 let noticeHandler: ((notice: AtomicWriteNotice) => void) | undefined
 let writesClosed = false
 
+/** A committed rename may still lack confirmed directory durability. */
+export function hasUncertainAtomicWrites(): boolean {
+  return uncertainWrites.size > 0
+}
+
 export function setAtomicWriteNoticeHandler(handler: (notice: AtomicWriteNotice) => void): void {
   noticeHandler = handler
 }

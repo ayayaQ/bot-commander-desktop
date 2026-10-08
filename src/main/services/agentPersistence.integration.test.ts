@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AgentSession } from '../../shared/agentTypes'
+import { AUTO_REVIEW_POLICY_REVISION } from '../../shared/agentAutoReview'
 
 const mocks = vi.hoisted(() => ({ directory: '', runAgent: vi.fn(), commitMutation: vi.fn() }))
 vi.mock('electron', () => ({ app: { getPath: () => mocks.directory } }))
@@ -706,10 +707,26 @@ describe('recoverable agent service wiring', () => {
     planned.mode = 'planning'
     planned.status = 'completed'
     planned.planReady = true
+    planned.messages = [
+      {
+        id: 'completed-plan-fixture',
+        role: 'assistant',
+        content: 'Investigate the fixture.',
+        timestamp
+      }
+    ]
+    planned.history = [{ kind: 'assistant', content: 'Investigate the fixture.', toolCalls: [] }]
     const path = join(mocks.directory, 'agent-sessions.json')
     await fs.writeFile(path, sessions(planned))
     const agents = await import('./agentService')
     await agents.loadAgentSessions()
+    const configuration = await import('./settingsService')
+    await agents.enrollAgentAutoReview('planned', {
+      policyRevision: AUTO_REVIEW_POLICY_REVISION,
+      provider: 'openai',
+      accountRevision: configuration.getSettings().agentDecisionAccountRevision!,
+      activate: false
+    })
     const entered = deferred()
     const gate = deferred()
     const rename = fs.rename.bind(fs)
@@ -724,7 +741,7 @@ describe('recoverable agent service wiring', () => {
     })
     const first = agents.resolveAgentPlan('planned', 'continue', settings)
     await entered.promise
-    const duplicate = agents.resolveAgentPlan('planned', 'auto', settings)
+    const duplicate = agents.resolveAgentPlan('planned', 'auto', settings, 'completed-plan-fixture')
     const refused = expect(duplicate).rejects.toThrow('completed plan')
     gate.resolve()
     await Promise.all([first, refused])

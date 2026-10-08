@@ -8,6 +8,7 @@ export type {
 } from '../shared/aiModelTypes'
 export type { ModelCapabilities } from '@ayayaq/vivi/providers/models'
 export type { InteractionPublicationState } from '../shared/interactionPublication'
+export type { AgentAutoReviewEnrollment, AgentDecisionDisplay } from '../shared/agentAutoReview'
 
 declare global {
   interface Window {

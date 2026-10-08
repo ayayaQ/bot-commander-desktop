@@ -1,4 +1,13 @@
 import { AppSettings } from '../types/types'
+import { randomUUID } from 'node:crypto'
+import { registerAgentDecisionSecret } from './agentDecisionPrivacy'
+
+let observedCredentials: { provider: string; openai: string; openrouter: string; revision: string }
+let settingsGeneration = 0
+
+export function getAgentDecisionSettingsGeneration(): number {
+  return settingsGeneration
+}
 
 let settings: AppSettings = {
   theme: 'light',
@@ -6,6 +15,7 @@ let settings: AppSettings = {
   hideOutput: false,
   language: 'en',
   aiProvider: 'openai',
+  agentDecisionAccountRevision: randomUUID(),
   openaiApiKey: '',
   openrouterApiKey: '',
   spamProtectionEnabled: false,
@@ -115,11 +125,37 @@ export function normalizeSettings(newSettings: AppSettings): AppSettings {
   }
 
   newSettings.spamProtectionEnabled = newSettings.spamProtectionEnabled === true
+  registerAgentDecisionSecret(newSettings.openaiApiKey)
+  registerAgentDecisionSecret(newSettings.openrouterApiKey)
+  const provider = newSettings.aiProvider
+  const openai = newSettings.openaiApiKey
+  const openrouter = newSettings.openrouterApiKey || ''
+  if (
+    !observedCredentials ||
+    observedCredentials.provider !== provider ||
+    observedCredentials.openai !== openai ||
+    observedCredentials.openrouter !== openrouter
+  ) {
+    const stored = newSettings.agentDecisionAccountRevision
+    observedCredentials = {
+      provider,
+      openai,
+      openrouter,
+      // The initial persisted opaque nonce is retained; renderer-provided replacements
+      // never control a credential change after initialization.
+      revision:
+        !observedCredentials && typeof stored === 'string' && /^[a-f0-9-]{36}$/.test(stored)
+          ? stored
+          : randomUUID()
+    }
+  }
+  newSettings.agentDecisionAccountRevision = observedCredentials.revision
   return newSettings
 }
 
 export function setSettings(newSettings: AppSettings) {
   const previous = settings
   settings = normalizeSettings(newSettings)
+  settingsGeneration++
   for (const listener of listeners) listener(settings, previous)
 }

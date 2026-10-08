@@ -9,6 +9,7 @@ import type {
 } from '../../shared/agentValidationTypes'
 import type { AgentStreamEvent } from '../../shared/agentTypes'
 import { resourceRevision } from './resourceChangeService'
+import { AUTO_REVIEW_POLICY_REVISION } from '../../shared/agentAutoReview'
 
 const mocks = vi.hoisted(() => ({
   provider: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock('node:fs/promises', () => ({
 }))
 // Observe serialized checkpoints without exercising filesystem faults in this harness.
 vi.mock('./atomicPersistence', () => ({
+  hasUncertainAtomicWrites: vi.fn(() => false),
   atomicWrite: vi.fn(async (path: string, raw: string, options) => {
     options?.validate?.(raw)
     await mocks.writeFile(`${path}.tmp`, raw)
@@ -55,11 +57,43 @@ vi.mock('./agentTools', () => ({
   ]),
   agentToolTargetLabel: () => '!ping',
   prepareMutation: mocks.prepare,
+  initializeMutationReviewResource: vi.fn(async () => undefined),
+  currentMutationReviewRevision: vi.fn(() => 'fixture-resource-revision'),
   commitMutation: mocks.commit,
   lintPreparedMutation: mocks.lint,
   executeReadTool: vi.fn()
 }))
 vi.mock('./agentMemoryService', () => ({ loadAgentMemories: async () => ({ memories: [] }) }))
+// Ordinary provider/validation regressions use an explicit allow recommendation after
+// real host enrollment. Reviewer/ledger fail-closed behavior has independent coverage.
+vi.mock('./agentAutoReview', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./agentAutoReview')>()
+  return {
+    ...actual,
+    reviewAgentMutation: vi.fn(async ({ enrollment }) => {
+      if (!enrollment) throw new Error('Reviewer fixture requires explicit Auto enrollment')
+      return {
+        display: {
+          id: 'mock-reviewed-allow',
+          policyRevision: AUTO_REVIEW_POLICY_REVISION,
+          reasonCode: 'mocked_allow',
+          recommendation: 'allow',
+          source: 'automatic'
+        },
+        automatic: true,
+        assertCurrent: vi.fn(),
+        beginCommit: vi.fn(async () => true),
+        settle: vi.fn(async () => true)
+      }
+    })
+  }
+})
+// Secure credential persistence is outside these in-memory provider fixtures.
+vi.mock('./fileService', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./fileService')>()),
+  saveSettings: vi.fn(async () => undefined)
+}))
+
 vi.mock('./agentValidationService', () => ({ validatePreparedResource: mocks.validate }))
 
 const settings = {
@@ -137,7 +171,15 @@ async function begin(
 ) {
   const service = await import('./agentService')
   const session = await service.createAgentSession(settings)
-  await service.updateAgentSession(session.id, { mode }, 'openai')
+  if (mode === 'auto') {
+    const currentSettings = await import('./settingsService')
+    currentSettings.setSettings({ ...currentSettings.getSettings(), ...settings })
+    await service.enrollAgentAutoReview(session.id, {
+      policyRevision: AUTO_REVIEW_POLICY_REVISION,
+      provider: 'openai',
+      accountRevision: currentSettings.getSettings().agentDecisionAccountRevision!
+    })
+  } else await service.updateAgentSession(session.id, { mode }, 'openai')
   const events: AgentStreamEvent[] = []
   const finished = new Promise<AgentStreamEvent>((resolve) => {
     service.setAgentEventSink((event) => {
@@ -151,9 +193,15 @@ async function begin(
 }
 
 describe('draft validation before existing approval/save', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules()
     vi.clearAllMocks()
+    const currentSettings = await import('./settingsService')
+    currentSettings.setSettings({
+      ...currentSettings.getSettings(),
+      aiProvider: 'openai',
+      openaiApiKey: 'mock-only'
+    })
     mocks.provider.mockReset()
     mocks.prepare.mockReset()
     mocks.commit.mockReset()
@@ -229,7 +277,12 @@ describe('draft validation before existing approval/save', () => {
       validation: { outcome: 'passed', candidateId: 'normalized-creation-id' }
     })
     expect(approvalCall.after).toMatchObject({ id: 'normalized-creation-id' })
-    await run.service.resolveAgentApproval(run.session.id, approvalCall.id, true)
+    await run.service.resolveAgentApproval(
+      run.session.id,
+      approvalCall.id,
+      true,
+      approvalCall.approvalId
+    )
     await run.finished
     expect(mocks.prepare).toHaveBeenCalledTimes(1)
     expect(mocks.commit.mock.calls[0][0].after).toEqual(approvalCall.after)
@@ -238,10 +291,17 @@ describe('draft validation before existing approval/save', () => {
     )
   })
 
-  it('auto-saves only after passing draft validation without a manual approval event', async () => {
+  it('saves in explicitly enrolled Auto only after passing validation and a mocked allow review', async () => {
     mocks.provider.mockResolvedValueOnce(turn())
     const run = await begin('auto')
     await run.finished
+    const { reviewAgentMutation } = await import('./agentAutoReview')
+    expect(reviewAgentMutation).toHaveBeenCalledOnce()
+    expect(vi.mocked(reviewAgentMutation).mock.calls[0][0]).toMatchObject({
+      enrollment: { policyRevision: AUTO_REVIEW_POLICY_REVISION, provider: 'openai' },
+      prepared: { name: 'create_command', after: { channelMessage: 'Pong!' } },
+      validation: { outcome: 'passed' }
+    })
     expect(mocks.commit).toHaveBeenCalledTimes(1)
     expect(mocks.commit.mock.calls[0][3]).toBeTypeOf('function')
     expect(run.events.some((event) => event.type === 'approval')).toBe(false)
@@ -304,7 +364,7 @@ describe('draft validation before existing approval/save', () => {
       expect(advertised).not.toContain(name)
   })
 
-  it('rejects a changed candidate while approval is pending', async () => {
+  it('isolates the validated candidate from later preparation-fixture changes while approval is pending', async () => {
     mocks.provider.mockResolvedValueOnce(turn())
     let approved!: () => void
     const approval = new Promise<void>((resolve) => {
@@ -316,78 +376,100 @@ describe('draft validation before existing approval/save', () => {
     await approval
     const prepared = await mocks.prepare.mock.results[0].value
     prepared.after.channelMessage = 'Changed after testing'
-    await run.service.resolveAgentApproval(run.session.id, 'change-1', true)
+    await run.service.resolveAgentApproval(
+      run.session.id,
+      'change-1',
+      true,
+      run.events.find((event) => event.type === 'approval')!.toolCall!.approvalId
+    )
     await run.finished
-    expect(mocks.commit).not.toHaveBeenCalled()
-    expect(run.events.filter((event) => event.type === 'tool').at(-1)!.toolCall!.error).toContain(
-      'stale'
+    expect(mocks.commit).toHaveBeenCalledOnce()
+    expect(mocks.commit.mock.calls[0][0].after.channelMessage).toBe('Pong!')
+    expect(run.events.filter((event) => event.type === 'tool').at(-1)!.toolCall!.status).toBe(
+      'completed'
     )
   })
 
-  it.each(['base revision', 'fixtures', 'interpreter mode'] as const)(
-    'rejects changed %s while approval is pending on a validated edit',
-    async (change) => {
-      const normalPrepare = mocks.prepare.getMockImplementation()!
-      mocks.prepare.mockImplementation(async (name, args) => {
-        const prepared = await normalPrepare(name, args)
-        prepared.before = { ...prepared.after, channelMessage: 'Before the edit' }
-        return prepared
-      })
-      mocks.provider.mockResolvedValueOnce(
-        turn(
-          'edit-1',
-          {
-            id: 'normalized-creation-id',
-            validation: validationSuite()
-          },
-          'edit_command'
-        )
+  it.each([
+    { change: 'base revision', result: 'isolates captured base revision' },
+    { change: 'fixtures', result: 'isolates captured fixtures' },
+    { change: 'interpreter mode', result: 'rejects changed interpreter mode' }
+  ] as const)('$result while approval is pending on a validated edit', async ({ change }) => {
+    const normalPrepare = mocks.prepare.getMockImplementation()!
+    mocks.prepare.mockImplementation(async (name, args) => {
+      const prepared = await normalPrepare(name, args)
+      prepared.before = { ...prepared.after, channelMessage: 'Before the edit' }
+      return prepared
+    })
+    mocks.provider.mockResolvedValueOnce(
+      turn(
+        'edit-1',
+        {
+          id: 'normalized-creation-id',
+          validation: validationSuite()
+        },
+        'edit_command'
       )
-      let seen!: () => void
-      const approval = new Promise<void>((resolve) => {
-        seen = resolve
+    )
+    let seen!: () => void
+    const approval = new Promise<void>((resolve) => {
+      seen = resolve
+    })
+    const run = await begin('manual', (event) => {
+      if (event.type === 'approval') seen()
+    })
+    await approval
+    const prepared = await mocks.prepare.mock.results[0].value
+    const request = mocks.validate.mock.calls[0][0]
+    const approvalCall = run.events.find((event) => event.type === 'approval')!.toolCall!
+    expect(request).toMatchObject({
+      candidate: prepared.after,
+      baseRevision: resourceRevision(prepared.before),
+      wrapEvalInIIFE: true
+    })
+    expect(approvalCall.validationBinding).toMatchObject({
+      candidateHash: request.candidateHash,
+      baseRevision: resourceRevision(prepared.before),
+      fixtureHash: request.fixtureHash,
+      wrapEvalInIIFE: true
+    })
+    if (change === 'base revision') prepared.before.channelMessage = 'A newer base'
+    else if (change === 'fixtures') {
+      // Provider arguments are frozen by vivi. The service owns a separate prepared
+      // snapshot, so replacing the fixture cannot change the approved evidence.
+      const changedArguments = structuredClone(prepared.arguments)
+      changedArguments.validation.cases[0].steps[0].assertions[1].equals = 'Different expectation'
+      prepared.arguments = changedArguments
+    } else {
+      const settingsService = await import('./settingsService')
+      settingsService.setSettings({
+        ...settingsService.getSettings(),
+        useLegacyInterpreter: true
       })
-      const run = await begin('manual', (event) => {
-        if (event.type === 'approval') seen()
-      })
-      await approval
-      const prepared = await mocks.prepare.mock.results[0].value
-      const request = mocks.validate.mock.calls[0][0]
-      const approvalCall = run.events.find((event) => event.type === 'approval')!.toolCall!
-      expect(request).toMatchObject({
-        candidate: prepared.after,
-        baseRevision: resourceRevision(prepared.before),
-        wrapEvalInIIFE: true
-      })
-      expect(approvalCall.validationBinding).toMatchObject({
-        candidateHash: request.candidateHash,
-        baseRevision: resourceRevision(prepared.before),
-        fixtureHash: request.fixtureHash,
-        wrapEvalInIIFE: true
-      })
-      if (change === 'base revision') prepared.before.channelMessage = 'A newer base'
-      else if (change === 'fixtures') {
-        // Provider arguments are frozen by vivi; replacing the pending fixture still must
-        // invalidate approval rather than borrowing the original validation report.
-        const changedArguments = structuredClone(prepared.arguments)
-        changedArguments.validation.cases[0].steps[0].assertions[1].equals = 'Different expectation'
-        prepared.arguments = changedArguments
-      } else {
-        const settingsService = await import('./settingsService')
-        settingsService.setSettings({
-          ...settingsService.getSettings(),
-          useLegacyInterpreter: true
-        })
-      }
-      await run.service.resolveAgentApproval(run.session.id, 'edit-1', true)
-      await run.finished
-      expect(mocks.validate).toHaveBeenCalledOnce()
+    }
+    await run.service.resolveAgentApproval(
+      run.session.id,
+      'edit-1',
+      true,
+      run.events.find((event) => event.type === 'approval')!.toolCall!.approvalId
+    )
+    await run.finished
+    expect(mocks.validate).toHaveBeenCalledOnce()
+    if (change === 'interpreter mode') {
       expect(mocks.commit).not.toHaveBeenCalled()
       expect(run.events.filter((event) => event.type === 'tool').at(-1)!.toolCall!.error).toContain(
         'stale'
       )
+    } else {
+      expect(mocks.commit).toHaveBeenCalledOnce()
+      const committed = mocks.commit.mock.calls[0][0]
+      expect(committed.before.channelMessage).toBe('Before the edit')
+      expect(committed.arguments.validation.cases[0].steps[0].assertions[1].equals).toBe('Pong!')
+      expect(run.events.filter((event) => event.type === 'tool').at(-1)!.toolCall!.status).toBe(
+        'completed'
+      )
     }
-  )
+  })
 
   it('preserves revision conflicts from the commit boundary after approved validation', async () => {
     mocks.provider.mockResolvedValueOnce(turn())
@@ -446,7 +528,12 @@ describe('draft validation before existing approval/save', () => {
     expect(call.validation!.limitations.join(' ')).toContain('explicit approval is required')
     expect(mocks.validate).not.toHaveBeenCalled()
     expect(mocks.commit).not.toHaveBeenCalled()
-    await run.service.resolveAgentApproval(run.session.id, 'event', true)
+    await run.service.resolveAgentApproval(
+      run.session.id,
+      'event',
+      true,
+      run.events.find((event) => event.type === 'approval')!.toolCall!.approvalId
+    )
     await run.finished
     expect(mocks.commit).toHaveBeenCalledOnce()
     expect((await run.service.loadAgentSessions()).sessions[0].mode).toBe('auto')
@@ -486,7 +573,12 @@ describe('draft validation before existing approval/save', () => {
       if (event.type === 'approval') seen()
     })
     await approval
-    await run.service.resolveAgentApproval(run.session.id, 'change-1', false)
+    await run.service.resolveAgentApproval(
+      run.session.id,
+      'change-1',
+      false,
+      run.events.find((event) => event.type === 'approval')!.toolCall!.approvalId
+    )
     await run.finished
     expect(mocks.commit).not.toHaveBeenCalled()
     expect(run.events.filter((event) => event.type === 'tool').at(-1)!.toolCall!.status).toBe(

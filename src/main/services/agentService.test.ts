@@ -12,6 +12,7 @@ import type {
   AgentValidationSuite
 } from '../../shared/agentValidationTypes'
 import { resourceRevision } from './resourceChangeService'
+import { AUTO_REVIEW_POLICY_REVISION } from '../../shared/agentAutoReview'
 
 const mocks = vi.hoisted(() => ({
   responsesCreate: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock('node:fs/promises', () => ({
 // These provider fixtures observe serialized checkpoints; disk faults are covered by the
 // recovery adapter and service integration tests with the real atomic writer.
 vi.mock('./atomicPersistence', () => ({
+  hasUncertainAtomicWrites: vi.fn(() => false),
   atomicWrite: vi.fn(async (path: string, raw: string, options) => {
     options?.validate?.(raw)
     await mocks.writeFile(`${path}.tmp`, raw)
@@ -64,6 +66,8 @@ vi.mock('./agentTools', () => ({
   commitMutation: mocks.commitMutation,
   executeReadTool: mocks.executeReadTool,
   prepareMutation: mocks.prepareMutation,
+  initializeMutationReviewResource: vi.fn(async () => undefined),
+  currentMutationReviewRevision: vi.fn(() => 'fixture-resource-revision'),
   lintPreparedMutation: mocks.lintPreparedMutation
 }))
 
@@ -76,6 +80,36 @@ vi.mock('./agentMemoryService', () => ({
       maximumTotalCharacters: 20000
     }
   }))
+}))
+
+// Ordinary provider/validation regressions use an explicit allow recommendation after
+// real host enrollment. Reviewer/ledger fail-closed behavior has independent coverage.
+vi.mock('./agentAutoReview', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./agentAutoReview')>()
+  return {
+    ...actual,
+    reviewAgentMutation: vi.fn(async ({ enrollment }) => {
+      if (!enrollment) throw new Error('Reviewer fixture requires explicit Auto enrollment')
+      return {
+        display: {
+          id: 'mock-reviewed-allow',
+          policyRevision: AUTO_REVIEW_POLICY_REVISION,
+          reasonCode: 'mocked_allow',
+          recommendation: 'allow',
+          source: 'automatic'
+        },
+        automatic: true,
+        assertCurrent: vi.fn(),
+        beginCommit: vi.fn(async () => true),
+        settle: vi.fn(async () => true)
+      }
+    })
+  }
+})
+// Secure credential persistence is outside these in-memory provider fixtures.
+vi.mock('./fileService', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./fileService')>()),
+  saveSettings: vi.fn(async () => undefined)
 }))
 
 vi.mock('./agentValidationService', () => ({
@@ -150,10 +184,31 @@ function passingValidationReport(input: AgentValidationRequest) {
   return report
 }
 
+async function enrollAuto(
+  service: typeof import('./agentService'),
+  sessionId: string,
+  activate = true
+) {
+  const settings = await import('./settingsService')
+  settings.setSettings({ ...settings.getSettings(), aiProvider: 'openai', openaiApiKey: 'test' })
+  return service.enrollAgentAutoReview(sessionId, {
+    policyRevision: AUTO_REVIEW_POLICY_REVISION,
+    provider: 'openai',
+    accountRevision: settings.getSettings().agentDecisionAccountRevision!,
+    activate
+  })
+}
+
 describe('desktop agent service shared-provider integration', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules()
     vi.clearAllMocks()
+    const currentSettings = await import('./settingsService')
+    currentSettings.setSettings({
+      ...currentSettings.getSettings(),
+      aiProvider: 'openai',
+      openaiApiKey: 'test'
+    })
     mocks.responsesCreate.mockReset()
     mocks.executeReadTool.mockReset()
     mocks.prepareMutation.mockReset()
@@ -195,7 +250,10 @@ describe('desktop agent service shared-provider integration', () => {
       after: fixtureCommand('Pong!'),
       target: { type: 'command', id: 'c1' }
     }))
-    mocks.commitMutation.mockResolvedValue({ success: true, saved: true })
+    mocks.commitMutation.mockImplementation(async (prepared, _source, _signal, beforeCommit) => {
+      beforeCommit?.(structuredClone(prepared))
+      return { success: true, saved: true }
+    })
   })
   afterEach(() => {
     vi.restoreAllMocks()
@@ -221,7 +279,8 @@ describe('desktop agent service shared-provider integration', () => {
       const service = await import('./agentService')
       const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
       const session = await service.createAgentSession(settings)
-      await service.updateAgentSession(session.id, { mode }, 'openai')
+      if (mode === 'auto') await enrollAuto(service, session.id)
+      else await service.updateAgentSession(session.id, { mode }, 'openai')
       const events: string[] = []
       const done = new Promise<void>((resolve) =>
         service.setAgentEventSink((event) => {
@@ -1232,10 +1291,19 @@ describe('desktop agent service shared-provider integration', () => {
         openaiApiKey: 'test'
       })
       await firstCompletion
-      await service.resolveAgentPlan(session.id, decision, {
-        aiProvider: 'openai',
-        openaiApiKey: 'test'
-      })
+      if (decision === 'auto') await enrollAuto(service, session.id, false)
+      const planId = (await service.loadAgentSessions()).sessions
+        .find((item) => item.id === session.id)!
+        .messages.at(-1)!.id
+      await service.resolveAgentPlan(
+        session.id,
+        decision,
+        {
+          aiProvider: 'openai',
+          openaiApiKey: 'test'
+        },
+        planId
+      )
       await secondCompletion
 
       const implemented = (await service.loadAgentSessions()).sessions.find(
@@ -1493,7 +1561,12 @@ describe('desktop agent service shared-provider integration', () => {
       const done = new Promise<void>((resolve) =>
         service.setAgentEventSink((event) => {
           if (event.type === 'approval')
-            resolution = service.resolveAgentApproval(session.id, event.toolCall!.id, approved)
+            resolution = service.resolveAgentApproval(
+              session.id,
+              event.toolCall!.id,
+              approved,
+              event.toolCall!.approvalId
+            )
           if (event.type === 'done') resolve()
         })
       )
@@ -1508,7 +1581,7 @@ describe('desktop agent service shared-provider integration', () => {
     }
   )
 
-  it('keeps auto commits and planning execution-time mutation rejection in the host', async () => {
+  it('keeps explicitly enrolled reviewed Auto commits and planning mutation rejection in the host', async () => {
     mocks.responsesCreate
       .mockResolvedValueOnce({
         output_text: '',
@@ -1537,7 +1610,7 @@ describe('desktop agent service shared-provider integration', () => {
     const service = await import('./agentService')
     const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
     const auto = await service.createAgentSession(settings)
-    await service.updateAgentSession(auto.id, { mode: 'auto' }, 'openai')
+    await enrollAuto(service, auto.id)
     let resolveDone!: () => void
     let done = new Promise<void>((resolve) => (resolveDone = resolve))
     service.setAgentEventSink((event) => {
@@ -1619,7 +1692,7 @@ describe('desktop agent service shared-provider integration', () => {
     const service = await import('./agentService')
     const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
     const session = await service.createAgentSession(settings)
-    await service.updateAgentSession(session.id, { mode: 'auto' }, 'openai')
+    await enrollAuto(service, session.id)
     const done = new Promise<void>((resolve) =>
       service.setAgentEventSink((event) => {
         if (event.type === 'done') resolve()
@@ -1719,7 +1792,12 @@ describe('desktop agent service shared-provider integration', () => {
     const done = new Promise<void>((resolve) =>
       service.setAgentEventSink((event) => {
         if (event.type === 'approval')
-          void service.resolveAgentApproval(session.id, event.toolCall!.id, true)
+          void service.resolveAgentApproval(
+            session.id,
+            event.toolCall!.id,
+            true,
+            event.toolCall!.approvalId
+          )
         if (event.type === 'tool' && event.toolCall?.status === 'approved')
           service.cancelAgentRun(session.id)
         if (event.type === 'done') resolve()
@@ -1773,7 +1851,12 @@ describe('desktop agent service shared-provider integration', () => {
     const done = new Promise<void>((resolve) =>
       service.setAgentEventSink((event) => {
         if (event.type === 'approval')
-          void service.resolveAgentApproval(session.id, event.toolCall!.id, true)
+          void service.resolveAgentApproval(
+            session.id,
+            event.toolCall!.id,
+            true,
+            event.toolCall!.approvalId
+          )
         if (event.type === 'done') resolve()
       })
     )
@@ -2320,7 +2403,14 @@ describe('desktop agent service shared-provider integration', () => {
       await expect(service.resolveAgentPlan(damaged.id, 'auto', settings)).rejects.toThrow(
         'completed plan'
       )
-      expect(await service.resolveAgentApproval(damaged.id, 'original_approval', true)).toBe(false)
+      expect(
+        await service.resolveAgentApproval(
+          damaged.id,
+          'original_approval',
+          true,
+          'stale-approval-id'
+        )
+      ).toBe(false)
       expect(fetch).not.toHaveBeenCalled()
       expect(mocks.executeReadTool).not.toHaveBeenCalled()
       expect(mocks.prepareMutation).not.toHaveBeenCalled()
@@ -2449,7 +2539,8 @@ describe('desktop agent service shared-provider integration', () => {
         selectedAiModel: 'gpt-5-next-unverified'
       }
       const session = await service.createAgentSession(settings)
-      await service.updateAgentSession(session.id, { mode }, 'openai')
+      if (mode === 'auto') await enrollAuto(service, session.id)
+      else await service.updateAgentSession(session.id, { mode }, 'openai')
       const events: string[] = []
       const done = new Promise<void>((resolve) =>
         service.setAgentEventSink((event) => {
