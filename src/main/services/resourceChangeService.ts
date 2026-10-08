@@ -10,6 +10,11 @@ let eventSink: ((event: ResourceChangedEvent) => void) | null = null
 const mutationChains = new Map<ResourceChangeKind, Promise<unknown>>()
 let mutationsStopped = false
 const resourceAdmission = new AsyncLocalStorage<boolean>()
+const heldResources = new AsyncLocalStorage<ReadonlySet<ResourceChangeKind>>()
+
+export function hasResourceMutationLock(kind: ResourceChangeKind): boolean {
+  return heldResources.getStore()?.has(kind) ?? false
+}
 
 export function hasResourceMutationAdmission(): boolean {
   return resourceAdmission.getStore() === true
@@ -75,7 +80,11 @@ export async function withResourceMutationLock<T>(
 ): Promise<T> {
   if (mutationsStopped) throw new Error('The app is shutting down; resource edits are paused')
   const previous = mutationChains.get(kind) ?? Promise.resolve()
-  const next = previous.catch(() => undefined).then(() => resourceAdmission.run(true, operation))
+  const owned = new Set(heldResources.getStore() ?? [])
+  owned.add(kind)
+  const next = previous
+    .catch(() => undefined)
+    .then(() => resourceAdmission.run(true, () => heldResources.run(owned, operation)))
   mutationChains.set(kind, next)
   try {
     return await next

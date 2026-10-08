@@ -138,6 +138,8 @@ export type AppSettings = {
   hideOutput: boolean
   language: string
   aiProvider?: 'openai' | 'openrouter'
+  /** Host-owned opaque credential generation; never derived from a credential. */
+  agentDecisionAccountRevision?: string
   openaiApiKey: string
   spamProtectionEnabled?: boolean
   openrouterApiKey?: string

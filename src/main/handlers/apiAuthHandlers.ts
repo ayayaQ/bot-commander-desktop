@@ -1,5 +1,6 @@
 import { session, app } from 'electron'
 import { trustedIpcMain as ipcMain } from './ipcSecurity'
+import { registerAgentDecisionSecret } from '../services/agentDecisionPrivacy'
 
 // API base URL - production when packaged, localhost for development
 const API_BASE_URL = app.isPackaged
@@ -13,6 +14,7 @@ const USERNAME_COOKIE_NAME = 'api-username'
 const COOKIE_EXPIRY_DAYS = 30
 
 async function setAuthCookies(jwt: string, username: string) {
+  registerAgentDecisionSecret(jwt)
   const expirationDate = Date.now() / 1000 + COOKIE_EXPIRY_DAYS * 24 * 60 * 60
 
   await session.defaultSession.cookies.set({
@@ -42,11 +44,15 @@ async function clearAuthCookies() {
 }
 
 async function getStoredAuth(): Promise<{ jwt: string | null; username: string | null }> {
-  const jwtCookies = await session.defaultSession.cookies.get({ url: COOKIE_URL, name: JWT_COOKIE_NAME })
+  const jwtCookies = await session.defaultSession.cookies.get({
+    url: COOKIE_URL,
+    name: JWT_COOKIE_NAME
+  })
   const usernameCookies = await session.defaultSession.cookies.get({
     url: COOKIE_URL,
     name: USERNAME_COOKIE_NAME
   })
+  registerAgentDecisionSecret(jwtCookies[0]?.value)
 
   return {
     jwt: jwtCookies[0]?.value ?? null,
@@ -59,6 +65,7 @@ export function addApiAuthHandlers() {
   ipcMain.handle(
     'api-auth-register',
     async (_event, payload: { username: string; password: string }) => {
+      registerAgentDecisionSecret(payload.password)
       try {
         const response = await fetch(`${API_BASE_URL}/auth/register`, {
           method: 'POST',
@@ -96,6 +103,7 @@ export function addApiAuthHandlers() {
   ipcMain.handle(
     'api-auth-login',
     async (_event, payload: { username: string; password: string }) => {
+      registerAgentDecisionSecret(payload.password)
       try {
         const response = await fetch(`${API_BASE_URL}/auth/login`, {
           method: 'POST',

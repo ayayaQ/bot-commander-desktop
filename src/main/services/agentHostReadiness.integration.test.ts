@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AgentSession, AgentStreamEvent } from '../../shared/agentTypes'
+import { AUTO_REVIEW_POLICY_REVISION } from '../../shared/agentAutoReview'
 
 // Real host read tool, projection, core agent, provider adapter and recoverable persistence.
 // Only domain caches and transport are fixtures; no Electron UI or live hosting is launched.
@@ -40,7 +41,8 @@ vi.mock('./slashCommandRegistry', () => ({ createInteractionPublishBackend: host
 vi.mock('./settingsService', () => ({
   getSettings: host.settings,
   setSettings: host.save,
-  onSettingsChanged: () => () => {}
+  onSettingsChanged: () => () => {},
+  normalizeSettings: (value) => value
 }))
 vi.mock('./fileService', () => ({
   saveCommands: host.save,
@@ -73,7 +75,10 @@ beforeEach(async () => {
   })
   host.commands.mockReturnValue({ bcfdCommands: [{ id: secret, command: secret }] })
   host.interactions.mockReturnValue([{ id: secret, commandName: secret, isRegistered: true }])
-  host.settings.mockReturnValue({})
+  host.settings.mockReturnValue({
+    ...settings,
+    agentDecisionAccountRevision: 'fixture-read-only-generation'
+  })
   fetchMock.mockReset()
   vi.stubGlobal('fetch', fetchMock)
 })
@@ -152,7 +157,15 @@ describe('persisted agent-only hosting guidance', () => {
       })
       const service = await import('./agentService')
       const session = await service.createAgentSession(settings)
-      await service.updateAgentSession(session.id, { mode }, 'openai')
+      if (mode === 'auto') {
+        await service.enrollAgentAutoReview(session.id, {
+          policyRevision: AUTO_REVIEW_POLICY_REVISION,
+          provider: 'openai',
+          accountRevision: 'fixture-read-only-generation'
+        })
+        host.save.mockClear()
+        host.settings.mockClear()
+      } else await service.updateAgentSession(session.id, { mode }, 'openai')
       const events: AgentStreamEvent[] = []
       const done = new Promise<AgentSession>((resolve) =>
         service.setAgentEventSink((event) => {
@@ -186,6 +199,7 @@ describe('persisted agent-only hosting guidance', () => {
       expect(
         completed.messages.filter((message) => message.role === 'assistant').at(-1)!.content
       ).toContain(guidance)
+      expect(host.settings).not.toHaveBeenCalled()
       const disk = await fs.readFile(join(host.directory, 'agent-sessions.json'), 'utf8')
       expect(disk).not.toContain(secret)
       vi.resetModules()
@@ -202,10 +216,11 @@ describe('persisted agent-only hosting guidance', () => {
         host.loadCredentials,
         host.save,
         host.virtual,
-        host.cookie,
-        host.settings
+        host.cookie
       ])
         expect(action).not.toHaveBeenCalled()
+      if (mode === 'auto') expect(host.settings).toHaveBeenCalled()
+      else expect(host.settings).not.toHaveBeenCalled()
     }
   )
 })

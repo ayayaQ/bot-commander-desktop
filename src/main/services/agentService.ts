@@ -53,6 +53,10 @@ import {
   executeReadTool,
   mutationToolNames,
   prepareMutation,
+  initializeMutationReviewResource,
+  currentMutationReviewRevision,
+  currentMutationRuntimeReviewRevision,
+  readDecisionAuditResourceMetadata,
   type PreparedMutation
 } from './agentTools'
 import { loadAgentMemories } from './agentMemoryService'
@@ -67,6 +71,26 @@ import {
   isValidatedResourceMutation,
   validateAgentMutation
 } from './agentMutationValidation'
+import {
+  getSettings,
+  normalizeSettings,
+  onSettingsChanged,
+  setSettings,
+  getAgentDecisionSettingsGeneration
+} from './settingsService'
+import { saveSettings } from './fileService'
+import {
+  reviewAgentMutation,
+  autoReviewSnapshot,
+  decisionBinding,
+  type AgentAutoReviewContext,
+  type AgentAutoReviewResult
+} from './agentAutoReview'
+import { AUTO_REVIEW_POLICY_REVISION } from '../../shared/agentAutoReview'
+import { agentDecisionPrivacyRevision, registerAgentDecisionSecret } from './agentDecisionPrivacy'
+import { AUTO_ELIGIBILITY_EFFECT_VERSION, checkAutoEligibility } from './agentAutoEligibility'
+import { withResourceMutationLock } from './resourceChangeService'
+import { agentDecisionLedger } from './agentDecisionLedger'
 
 const AGENT_SESSIONS_FILENAME = 'agent-sessions.json'
 const MAX_TOOL_ROUNDS = 25
@@ -106,6 +130,9 @@ interface AgentRunContext {
   extensions: ToolRegistry
   documentationPolicy: DocumentationPolicyState
   metrics: AgentRunMetrics
+  autoReview: AgentAutoReviewContext
+  userRequest: { id: string; text: string }
+  acceptedPlan?: { text: string; binding: string }
 }
 
 function checkpointRunMetrics(session: AgentSession, context: AgentRunContext): void {
@@ -118,6 +145,7 @@ interface PendingApproval {
   runId: string
   toolCallId: string
   prepared: PreparedMutation
+  approvalId: string
   resolve: (approved: boolean) => void
 }
 
@@ -202,7 +230,7 @@ function normalizeModelDefaults(
 function settleInterruptedToolCalls(session: AgentSession): void {
   for (const message of session.messages) {
     for (const call of message.toolCalls || []) {
-      if (['running', 'waiting_approval', 'approved'].includes(call.status)) {
+      if (['running', 'reviewing', 'waiting_approval', 'approved'].includes(call.status)) {
         call.status = 'error'
         call.error =
           'Tool call interrupted; the outcome may be unknown. Read current state before retrying.'
@@ -276,7 +304,10 @@ export async function checkpointAgentSessionsBeforeQuit(): Promise<void> {
 }
 
 // Metadata requests serialize, and only publish live state after a committed save.
-function editSessions<T>(change: (next: AgentSessionsData) => T): Promise<T> {
+function editSessions<T>(
+  change: (next: AgentSessionsData) => T,
+  beforePublish?: () => void
+): Promise<T> {
   return queueSessionWrite(async () => {
     await loadAgentSessions()
     persistence.assertWritable()
@@ -284,6 +315,7 @@ function editSessions<T>(change: (next: AgentSessionsData) => T): Promise<T> {
     const next = clone(before)
     const result = change(next)
     await persistence.save(persistentSnapshot(next))
+    beforePublish?.()
     // Keep active run object identities, including their derived quarantine markers.
     const current = new Map(data.sessions.map((session) => [session.id, session]))
     data.sessions = next.sessions.map((session) => {
@@ -297,9 +329,20 @@ function editSessions<T>(change: (next: AgentSessionsData) => T): Promise<T> {
         'model',
         'reasoningEffort',
         'planReady',
-        'updatedAt'
+        'updatedAt',
+        'autoReviewEnrollment',
+        'autoReviewMigrationRequired'
       ] as const) {
-        if (session[key] !== original[key]) Object.assign(existing, { [key]: session[key] })
+        const changed =
+          key === 'autoReviewEnrollment'
+            ? JSON.stringify(session[key]) !== JSON.stringify(original[key])
+            : session[key] !== original[key]
+        if (changed) Object.assign(existing, { [key]: session[key] })
+      }
+      if (existing.mode === 'auto' && !isAutoReviewEnrollmentCurrent(existing)) {
+        existing.mode = 'manual'
+        existing.autoReviewEnrollment = undefined
+        existing.autoReviewMigrationRequired = true
       }
       return existing
     })
@@ -332,6 +375,21 @@ async function initializeSessions(): Promise<AgentSessionsData> {
     modelDefaultsByProvider: normalizeModelDefaults(stored.data.modelDefaultsByProvider)
   }
   for (const session of data.sessions) {
+    if (session.mode === 'auto') {
+      const account = decisionAccount()
+      const ready =
+        isAutoReviewEnrollmentCurrent(session) &&
+        (await agentDecisionLedger.available({
+          provider: account.provider,
+          accountRevision: account.revision,
+          policyRevision: AUTO_REVIEW_POLICY_REVISION
+        }))
+      if (!ready) {
+        session.mode = 'manual'
+        session.autoReviewEnrollment = undefined
+        session.autoReviewMigrationRequired = true
+      }
+    }
     if (
       ['running', 'waiting_approval'].includes(session.status) &&
       typeof session.activeRunId === 'string' &&
@@ -444,12 +502,19 @@ export async function updateAgentSession(
   updates: Partial<Pick<AgentSession, 'title' | 'mode' | 'model' | 'reasoningEffort'>>,
   provider: AgentProvider
 ): Promise<AgentSession> {
+  await loadAgentSessions()
+  const current = getSessionOrThrow(sessionId)
+  if (updates.mode && updates.mode !== current.mode) cancelAgentRun(sessionId)
   await editSessions((next) => {
     const session = next.sessions.find((item) => item.id === sessionId)
     if (!session) throw new Error('Agent session not found')
     if (updates.title !== undefined) session.title = updates.title.slice(0, 80)
-    if (updates.mode && ['manual', 'auto', 'planning'].includes(updates.mode))
+    if (updates.mode && ['manual', 'auto', 'planning'].includes(updates.mode)) {
+      if (updates.mode === 'auto' && !isAutoReviewEnrollmentCurrent(session))
+        throw new Error('Acknowledge the Auto review scope before enabling it')
       session.mode = updates.mode
+      session.autoReviewMigrationRequired = false
+    }
     if (updates.mode && updates.mode !== 'planning') session.planReady = false
     if (updates.model) session.model = updates.model
     if (updates.reasoningEffort) session.reasoningEffort = updates.reasoningEffort
@@ -465,6 +530,176 @@ export async function updateAgentSession(
   emitSession(session)
   return clone(session)
 }
+
+function decisionAccount() {
+  const settings = getSettings()
+  registerAgentDecisionSecret(settings.openaiApiKey)
+  registerAgentDecisionSecret(settings.openrouterApiKey)
+  const provider = getAiProvider(settings)
+  return {
+    provider,
+    revision: settings.agentDecisionAccountRevision || 'uninitialized',
+    apiKey: (provider === 'openrouter' ? settings.openrouterApiKey : settings.openaiApiKey) || ''
+  }
+}
+
+function isAutoReviewEnrollmentCurrent(session: AgentSession): boolean {
+  const account = decisionAccount()
+  const enrollment = session.autoReviewEnrollment
+  return (
+    !!enrollment &&
+    enrollment.policyRevision === AUTO_REVIEW_POLICY_REVISION &&
+    enrollment.provider === account.provider &&
+    enrollment.accountRevision === account.revision &&
+    typeof enrollment.acknowledgedAt === 'string' &&
+    !!enrollment.acknowledgedAt
+  )
+}
+
+export async function enrollAgentAutoReview(
+  sessionId: string,
+  acknowledgement: {
+    policyRevision: string
+    provider: AgentProvider
+    accountRevision: string
+    activate?: boolean
+    recoveryInspectionId?: string
+  }
+): Promise<AgentSession> {
+  await loadAgentSessions()
+  if (
+    !acknowledgement ||
+    typeof acknowledgement.accountRevision !== 'string' ||
+    !acknowledgement.accountRevision ||
+    typeof acknowledgement.provider !== 'string' ||
+    !['openai', 'openrouter'].includes(acknowledgement.provider) ||
+    (acknowledgement.activate !== undefined && typeof acknowledgement.activate !== 'boolean') ||
+    (acknowledgement.recoveryInspectionId !== undefined &&
+      typeof acknowledgement.recoveryInspectionId !== 'string') ||
+    Object.keys(acknowledgement).some(
+      (key) =>
+        ![
+          'policyRevision',
+          'provider',
+          'accountRevision',
+          'activate',
+          'recoveryInspectionId'
+        ].includes(key)
+    )
+  )
+    throw new Error('Read the current Auto review disclosure before acknowledging it')
+  if (controllers.has(sessionId))
+    throw new Error('Wait for the active request before changing Auto review')
+  if (acknowledgement.policyRevision !== AUTO_REVIEW_POLICY_REVISION)
+    throw new Error('Auto review disclosure changed; read and acknowledge it again')
+  await withResourceMutationLock('settings', async () => {
+    const before = decisionAccount()
+    if (
+      before.provider !== acknowledgement.provider ||
+      before.revision !== acknowledgement.accountRevision
+    )
+      throw new Error('Selected review account changed; acknowledge its disclosure again')
+    const auditBinding = () => ({
+      provider: decisionAccount().provider,
+      accountRevision: decisionAccount().revision,
+      policyRevision: AUTO_REVIEW_POLICY_REVISION
+    })
+    if (acknowledgement.recoveryInspectionId) {
+      await withResourceMutationLock('commands', () =>
+        withResourceMutationLock('memories', () =>
+          agentDecisionLedger.acknowledge(
+            acknowledgement.recoveryInspectionId!,
+            readDecisionAuditResourceMetadata,
+            auditBinding
+          )
+        )
+      )
+    }
+    if (!(await agentDecisionLedger.available(auditBinding())))
+      throw new Error(
+        'The audit needs recovery. Inspect current resource revisions and acknowledge the unknown outcomes before enabling Auto review.'
+      )
+    const settings = normalizeSettings({ ...getSettings() })
+    // Persist the opaque generation with the existing credential-storage flow.
+    await saveSettings(settings)
+    if (decisionAccount().revision !== before.revision)
+      throw new Error('Selected review account changed before enrollment was saved')
+    setSettings(settings)
+  })
+  const account = { provider: acknowledgement.provider, revision: acknowledgement.accountRevision }
+  await editSessions(
+    (next) => {
+      const session = next.sessions.find((item) => item.id === sessionId)
+      if (!session) throw new Error('Agent session not found')
+      if (
+        controllers.has(sessionId) ||
+        decisionAccount().revision !== account.revision ||
+        decisionAccount().provider !== account.provider
+      )
+        throw new Error('Selected review account changed before enrollment')
+      session.autoReviewEnrollment = {
+        policyRevision: AUTO_REVIEW_POLICY_REVISION,
+        provider: account.provider,
+        accountRevision: account.revision,
+        acknowledgedAt: now()
+      }
+      session.autoReviewMigrationRequired = false
+      if (acknowledgement.activate !== false) {
+        session.mode = 'auto'
+        session.planReady = false
+      }
+      session.updatedAt = now()
+    },
+    () => {
+      if (
+        controllers.has(sessionId) ||
+        decisionAccount().revision !== account.revision ||
+        decisionAccount().provider !== account.provider
+      )
+        throw new Error('Selected review account changed before enrollment was published')
+    }
+  )
+  const session = getSessionOrThrow(sessionId)
+  emitSession(session)
+  return clone(session)
+}
+
+export async function inspectAgentAutoReviewAudit(sessionId: string) {
+  await loadAgentSessions()
+  getSessionOrThrow(sessionId)
+  return agentDecisionLedger.inspect(readDecisionAuditResourceMetadata, () => ({
+    provider: decisionAccount().provider,
+    accountRevision: decisionAccount().revision,
+    policyRevision: AUTO_REVIEW_POLICY_REVISION
+  }))
+}
+
+onSettingsChanged((next, previous) => {
+  if (
+    next.aiProvider === previous.aiProvider &&
+    next.openaiApiKey === previous.openaiApiKey &&
+    next.openrouterApiKey === previous.openrouterApiKey &&
+    next.agentDecisionAccountRevision === previous.agentDecisionAccountRevision
+  )
+    return
+  for (const session of data.sessions) {
+    cancelAgentRun(session.id)
+    if (session.autoReviewEnrollment || session.mode === 'auto') {
+      session.autoReviewEnrollment = undefined
+      session.autoReviewMigrationRequired = true
+      if (session.mode === 'auto') session.mode = 'manual'
+      emitSession(session)
+    }
+  }
+  if (loaded)
+    void save().catch(() => {
+      reportAgentPersistenceNotice({
+        level: 'error',
+        message:
+          'Auto review account changed. Manual mode is active; its checkpoint could not be saved.'
+      })
+    })
+})
 
 export async function setActiveAgentSession(sessionId: string | null): Promise<void> {
   await editSessions((next) => {
@@ -521,11 +756,13 @@ async function awaitApproval(
   const approval = new Promise<boolean>((resolve) => {
     resolveApproval = resolve
   })
-  approvals.set(call.id, {
+  call.approvalId = crypto.randomUUID()
+  approvals.set(call.approvalId, {
     sessionId: session.id,
     runId,
     toolCallId: call.id,
     prepared,
+    approvalId: call.approvalId,
     resolve: resolveApproval
   })
   session.status = 'waiting_approval'
@@ -570,7 +807,7 @@ async function runTool(
   const call: AgentToolCall = {
     id: providerCall.id || id('tool'),
     name: providerCall.name,
-    arguments: providerCall.arguments,
+    arguments: clone(providerCall.arguments),
     ...(targetLabel ? { targetLabel } : {}),
     status: 'running',
     createdAt: now()
@@ -583,6 +820,9 @@ async function runTool(
     toolCalls: [call]
   })
   emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
+  let reviewed: AgentAutoReviewResult | undefined
+  let resourceCommitted = false
+  let committedResult: unknown
   try {
     assertActiveRun(session, runId, signal)
     // Durably record the attempt before execution; a crashed tool has an unknown outcome.
@@ -592,7 +832,7 @@ async function runTool(
     let extensionContent: string | undefined
     if (mutationToolNames.has(call.name)) {
       if (mode === 'planning') throw new Error('Mutation tools are disabled in planning mode')
-      const prepared = await prepareMutation(call.name, call.arguments)
+      const prepared = clone(await prepareMutation(call.name, call.arguments))
       assertActiveRun(session, runId, signal)
       call.before = prepared.before
       call.after = prepared.after
@@ -638,17 +878,68 @@ async function runTool(
         }
       }
       if (!validationFailed) {
+        if (mode === 'auto' && !validationNeedsApproval) {
+          await initializeMutationReviewResource(prepared)
+          assertActiveRun(session, runId, signal)
+          call.status = 'reviewing'
+          emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
+          reviewed = await reviewAgentMutation({
+            prepared,
+            validation: call.validation,
+            enrollment: session.autoReviewEnrollment,
+            context: context.autoReview,
+            signal,
+            assertActive: () => assertActiveRun(session, runId, signal),
+            account: decisionAccount,
+            snapshot: () =>
+              autoReviewSnapshot({
+                sessionId: session.id,
+                runId,
+                callId: call.id,
+                userRequestId: context.userRequest.id,
+                userRequest: context.userRequest.text,
+                prepared,
+                enrollment: session.autoReviewEnrollment!,
+                validation: call.validation,
+                acceptedPlan: context.acceptedPlan,
+                resourceRevisions: {
+                  resource: currentMutationReviewRevision(prepared),
+                  account: decisionAccount().revision,
+                  provider: decisionAccount().provider,
+                  mode: session.mode,
+                  enrollment: decisionBinding(session.autoReviewEnrollment ?? null),
+                  runtimeWrapEval: !getSettings().useLegacyInterpreter,
+                  hostRuntime: currentMutationRuntimeReviewRevision(prepared),
+                  settingsGeneration: getAgentDecisionSettingsGeneration(),
+                  agentModel: session.model,
+                  agentReasoning: session.reasoningEffort,
+                  effectPolicy: AUTO_ELIGIBILITY_EFFECT_VERSION,
+                  toolset: 'desktop-agent-builtins-v1',
+                  privacy: agentDecisionPrivacyRevision()
+                }
+              })
+          })
+          assertActiveRun(session, runId, signal)
+          call.decision = reviewed.display
+          if (reviewed.automatic) await reviewed.beginCommit()
+        }
         const beforeCommit = (snapshot: PreparedMutation) => {
           assertActiveRun(session, runId, signal)
           if (call.validation && call.validationBinding)
             assertAgentValidationBinding(snapshot, call.validationBinding, call.validation)
+          if (reviewed?.automatic) {
+            if (!checkAutoEligibility(snapshot, call.validation).eligible)
+              throw new Error('This change is no longer eligible for Auto review')
+            reviewed.assertCurrent(snapshot)
+          }
         }
-        if (mode === 'manual' || validationNeedsApproval) {
+        if (mode === 'manual' || validationNeedsApproval || !reviewed?.automatic) {
           const approved = await awaitApproval(session, runId, call, prepared, context)
           assertActiveRun(session, runId, signal)
           if (!approved) {
             call.status = 'rejected'
             result = { success: false, denied: true, message: 'The user rejected this mutation' }
+            await reviewed?.settle('denied', undefined, 'human_rejected')
           } else {
             assertActiveRun(session, runId, signal)
             call.status = 'approved'
@@ -662,12 +953,22 @@ async function runTool(
             if (call.validation && call.validationBinding)
               assertAgentValidationBinding(prepared, call.validationBinding, call.validation)
             result = await commitMutation(prepared, 'agent', signal, beforeCommit)
+            resourceCommitted = true
+            committedResult = result
+            await reviewed?.settle(
+              'committed',
+              (result as { revision?: string })?.revision,
+              'human_once'
+            )
           }
         } else {
           assertActiveRun(session, runId, signal)
           if (call.validation && call.validationBinding)
             assertAgentValidationBinding(prepared, call.validationBinding, call.validation)
           result = await commitMutation(prepared, 'agent', signal, beforeCommit)
+          resourceCommitted = true
+          committedResult = result
+          await reviewed!.settle('committed', (result as { revision?: string })?.revision)
         }
         if (call.validation && result && typeof result === 'object')
           result = { ...result, diagnostics: call.diagnostics, validation: call.validation }
@@ -713,6 +1014,42 @@ async function runTool(
     return { toolCall: call, content: message.content }
   } catch (error) {
     const detail = errorDetail(error)
+    if (resourceCommitted) {
+      const knownResult = boundAgentToolResult(committedResult ?? call.result ?? { success: true })
+      const ownsRun =
+        session.activeRunId === runId &&
+        controllers.get(session.id)?.signal === signal &&
+        !deletedSessionIds.has(session.id)
+      const committedCall = ownsRun ? call : clone(call)
+      committedCall.status = 'completed'
+      committedCall.result = knownResult
+      committedCall.error = signal.aborted
+        ? undefined
+        : 'The resource committed, but its session checkpoint could not be confirmed. Read current state before another change.'
+      if (ownsRun) {
+        message.content = stringifyResult(knownResult)
+        context.metrics = recordAgentRunTool(context.metrics, committedCall)
+        checkpointRunMetrics(session, context)
+        emit(session, {
+          type: 'tool',
+          runId,
+          toolCall: clone(committedCall),
+          session: clone(session)
+        })
+      } else {
+        // Keep retired run objects immutable, while reporting the known save fact.
+        reportAgentPersistenceNotice({
+          level: 'warning',
+          message:
+            'A change from a cancelled agent request finished saving. No retry was made; inspect current resources before another change.'
+        })
+      }
+      return {
+        toolCall: committedCall,
+        content: stringifyResult(knownResult)
+      }
+    }
+    if (!resourceCommitted) await reviewed?.settle(signal.aborted ? 'cancelled' : 'failed')
     if (!isActiveRun(session, runId, signal))
       return {
         toolCall: call,
@@ -732,9 +1069,12 @@ async function runTool(
 export function runAgentSession(
   sessionId: string,
   userContent: string,
-  settings: AiRuntimeSettings
+  settings: AiRuntimeSettings,
+  acceptedPlan?: { text: string; binding: string }
 ): Promise<{ runId: string }> {
-  return withAgentPersistenceOperation(() => startAgentSession(sessionId, userContent, settings))
+  return withAgentPersistenceOperation(() =>
+    startAgentSession(sessionId, userContent, settings, acceptedPlan)
+  )
 }
 
 /** Stop active providers/approvals, then let their admitted final checkpoints drain. */
@@ -745,7 +1085,8 @@ export function stopAgentRuns(): void {
 async function startAgentSession(
   sessionId: string,
   userContent: string,
-  settings: AiRuntimeSettings
+  settings: AiRuntimeSettings,
+  acceptedPlan?: { text: string; binding: string }
 ): Promise<{ runId: string }> {
   await loadAgentSessions()
   persistence.assertWritable()
@@ -771,7 +1112,10 @@ async function startAgentSession(
       agentToolDefinitions.map((tool) => tool.function.name)
     ),
     documentationPolicy: createDocumentationPolicyState(),
-    metrics: createAgentRunMetrics(runId, now())
+    metrics: createAgentRunMetrics(runId, now()),
+    autoReview: { requests: 0 },
+    userRequest: { id: id('request'), text: userContent.trim() },
+    ...(acceptedPlan ? { acceptedPlan: clone(acceptedPlan) } : {})
   }
   const mode = session.mode
   const controller = new AbortController()
@@ -954,15 +1298,19 @@ async function startAgentSession(
 export function resolveAgentPlan(
   sessionId: string,
   decision: AgentPlanDecision,
-  settings: AiRuntimeSettings
+  settings: AiRuntimeSettings,
+  planMessageId?: string
 ): Promise<AgentSession | { runId: string }> {
-  return withAgentPersistenceOperation(() => decideAgentPlan(sessionId, decision, settings))
+  return withAgentPersistenceOperation(() =>
+    decideAgentPlan(sessionId, decision, settings, planMessageId)
+  )
 }
 
 async function decideAgentPlan(
   sessionId: string,
   decision: AgentPlanDecision,
-  settings: AiRuntimeSettings
+  settings: AiRuntimeSettings,
+  planMessageId?: string
 ): Promise<AgentSession | { runId: string }> {
   await loadAgentSessions()
   if (!['auto', 'manual', 'continue'].includes(decision)) throw new Error('Invalid plan decision')
@@ -975,6 +1323,18 @@ async function decideAgentPlan(
   )
     throw new Error('This session does not have a completed plan awaiting a decision')
 
+  const plan = [...session.messages].reverse().find((message) => message.role === 'assistant')
+  if (!plan?.content || (planMessageId !== undefined && planMessageId !== plan.id))
+    throw new Error('The completed plan changed; review it again')
+  if (decision === 'auto' && !isAutoReviewEnrollmentCurrent(session))
+    throw new Error('Acknowledge the Auto review scope before implementing this plan')
+  if (decision === 'auto' && planMessageId === undefined)
+    throw new Error('Select the exact completed plan before implementing with Auto review')
+  const acceptedPlan = {
+    text: plan.content,
+    binding: decisionBinding({ id: plan.id, text: plan.content })
+  }
+
   await editSessions((next) => {
     const pending = next.sessions.find((item) => item.id === sessionId)!
     // Decisions may queue behind an in-flight save. Recheck the decision gate against the
@@ -986,6 +1346,14 @@ async function decideAgentPlan(
       controllers.has(sessionId)
     )
       throw new Error('This session does not have a completed plan awaiting a decision')
+    const latestPlan = [...pending.messages]
+      .reverse()
+      .find((message) => message.role === 'assistant')
+    if (
+      !latestPlan ||
+      decisionBinding({ id: latestPlan.id, text: latestPlan.content }) !== acceptedPlan.binding
+    )
+      throw new Error('The completed plan changed before its decision was saved')
     pending.planReady = false
     if (decision !== 'continue') pending.mode = decision
     pending.updatedAt = now()
@@ -996,17 +1364,28 @@ async function decideAgentPlan(
   }
 
   emitSession(session)
-  return runAgentSession(sessionId, 'Implement the plan.', settings)
+  return runAgentSession(sessionId, 'Implement the plan.', settings, acceptedPlan)
 }
 
 export async function resolveAgentApproval(
   sessionId: string,
   toolCallId: string,
-  approved: boolean
+  approved: boolean,
+  approvalId?: string
 ): Promise<boolean> {
-  const pending = approvals.get(toolCallId)
-  if (!pending || pending.sessionId !== sessionId) return false
-  approvals.delete(toolCallId)
+  if (typeof approved !== 'boolean' || !approvalId) return false
+  const pending = approvals.get(approvalId)
+  const session = data.sessions.find((item) => item.id === sessionId)
+  if (
+    !pending ||
+    pending.sessionId !== sessionId ||
+    pending.toolCallId !== toolCallId ||
+    pending.approvalId !== approvalId ||
+    session?.activeRunId !== pending.runId ||
+    controllers.get(sessionId)?.signal.aborted !== false
+  )
+    return false
+  approvals.delete(approvalId)
   pending.resolve(approved)
   return true
 }

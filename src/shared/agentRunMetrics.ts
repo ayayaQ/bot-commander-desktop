@@ -5,6 +5,7 @@ const cacheKeys = ['cachedInputTokens', 'cacheWriteInputTokens'] as const
 const runStatuses = new Set(['running', 'completed', 'error', 'cancelled', 'interrupted'])
 const toolStatuses = new Set([
   'running',
+  'reviewing',
   'waiting_approval',
   'approved',
   'rejected',
@@ -166,7 +167,8 @@ function settleUnfinishedTools(tools: AgentRunToolMetric[] | undefined) {
   // Optional analytics are not the recovery authority. Preserve damaged metadata safely.
   if (!Array.isArray(tools)) return tools
   return tools.map((tool) =>
-    validTool(tool) && ['running', 'waiting_approval', 'approved'].includes(tool.status)
+    validTool(tool) &&
+    ['running', 'reviewing', 'waiting_approval', 'approved'].includes(tool.status)
       ? { ...tool, status: 'unknown' as const }
       : tool
   )

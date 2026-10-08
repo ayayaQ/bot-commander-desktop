@@ -202,6 +202,7 @@ export type AppSettings = {
   hideOutput: boolean
   language: string
   aiProvider?: 'openai' | 'openrouter'
+  agentDecisionAccountRevision?: string
   openaiApiKey: string
   spamProtectionEnabled?: boolean
   openrouterApiKey?: string

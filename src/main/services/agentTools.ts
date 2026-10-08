@@ -5,7 +5,7 @@ import type { AgentLintDiagnostic, AgentMemory, AgentPatchOperation } from '../.
 import { createPlaygroundState } from '../../shared/playground/types'
 import { lintBCFD } from '../../shared/bcfdLint'
 import { decodeBCFDCommand } from '../../shared/commandCodec'
-import { getCommands, setCommands } from './botService'
+import { getCommands, setCommands, getCommandRuntimeReviewRevision } from './botService'
 import { getInteractions, setInteractions } from './interactionService'
 import { getSettings, setSettings } from './settingsService'
 import { saveCommands, saveInteractions, saveSettings } from './fileService'
@@ -27,7 +27,8 @@ import {
   loadAgentMemories,
   prepareCreateMemory,
   prepareDeleteMemory,
-  prepareUpdateMemory
+  prepareUpdateMemory,
+  getAgentMemoryReviewRevision
 } from './agentMemoryService'
 import type { ResourceChangeKind, ResourceChangeSource } from '../../shared/mcpTypes'
 import {
@@ -42,6 +43,45 @@ export interface PreparedMutation {
   before: unknown
   after: unknown
   target: { type: string; id?: string }
+}
+
+export async function initializeMutationReviewResource(prepared: PreparedMutation): Promise<void> {
+  if (prepared.target.type === 'memory') await loadAgentMemories()
+}
+
+export function currentMutationReviewRevision(prepared: PreparedMutation): string {
+  if (prepared.target.type === 'command') return resourceRevision(getCommands())
+  if (prepared.target.type === 'memory') {
+    const current = getAgentMemoryReviewRevision()
+    if (!current) throw new Error('Memory review state is not loaded')
+    return current
+  }
+  throw new Error('Mutation is outside the Auto review profile')
+}
+
+export function currentMutationRuntimeReviewRevision(prepared: PreparedMutation): number {
+  return prepared.target.type === 'command' ? getCommandRuntimeReviewRevision() : 0
+}
+
+/** Recovery inspection returns identity/revisions only, never resource content. */
+export async function readDecisionAuditResourceMetadata(
+  targetType: 'command' | 'memory',
+  targetId: string
+): Promise<{ resourceRevision: string; targetRevision: string | null }> {
+  if (targetType === 'command') {
+    const commands = getCommands()
+    const target = commands.bcfdCommands.find((item) => item.id === targetId)
+    return {
+      resourceRevision: resourceRevision(commands),
+      targetRevision: target ? resourceRevision(target) : null
+    }
+  }
+  const memories = await loadAgentMemories()
+  const target = memories.memories.find((item) => item.id === targetId)
+  return {
+    resourceRevision: resourceRevision(memories.memories),
+    targetRevision: target?.revision ?? null
+  }
 }
 
 export type ToolDefinition = {
@@ -1023,7 +1063,8 @@ export async function lintPreparedMutation(
 
 async function commitMutationUnlocked(
   prepared: PreparedMutation,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  beforeCommit?: (snapshot: PreparedMutation) => void
 ): Promise<unknown> {
   const args = prepared.arguments as Record<string, any>
   if (prepared.name === 'create_command') {
@@ -1088,7 +1129,7 @@ async function commitMutationUnlocked(
   } else if (prepared.name === 'create_memory') {
     await commitMemoryMutation(
       { kind: 'create', before: null, after: prepared.after as AgentMemory },
-      { signal }
+      { signal, beforeCommit: () => beforeCommit?.(prepared) }
     )
   } else if (prepared.name === 'edit_memory') {
     await commitMemoryMutation(
@@ -1098,7 +1139,7 @@ async function commitMutationUnlocked(
         after: prepared.after as AgentMemory,
         expectedRevision: String(args.expectedRevision || '')
       },
-      { signal }
+      { signal, beforeCommit: () => beforeCommit?.(prepared) }
     )
   } else if (prepared.name === 'delete_memory') {
     await commitMemoryMutation(
@@ -1108,24 +1149,36 @@ async function commitMutationUnlocked(
         after: null,
         expectedRevision: String(args.expectedRevision || '')
       },
-      { signal }
+      { signal, beforeCommit: () => beforeCommit?.(prepared) }
     )
   }
 
   let diagnostics: AgentLintDiagnostic[] = []
-  if (prepared.target.type === 'command')
-    diagnostics = await lintCommandResource(prepared.after as BCFDCommand)
-  if (prepared.target.type === 'interaction')
-    diagnostics = await lintInteractionResource(prepared.after as BCFDInteractionCommand)
-  if (prepared.target.type === 'startup-js')
-    diagnostics = lintSource(prepared.after as string, 'js')
+  let postCommitNotice: string | undefined
+  try {
+    if (prepared.target.type === 'command')
+      diagnostics = await lintCommandResource(prepared.after as BCFDCommand)
+    if (prepared.target.type === 'interaction')
+      diagnostics = await lintInteractionResource(prepared.after as BCFDInteractionCommand)
+    if (prepared.target.type === 'startup-js')
+      diagnostics = lintSource(prepared.after as string, 'js')
+  } catch {
+    // The resource is already saved. A diagnostic failure must not invite a retry.
+    postCommitNotice = 'Resource committed; post-save lint could not be completed'
+  }
   const nextRevision =
     prepared.target.type === 'memory' && prepared.after
       ? agentMemoryRevision(prepared.after as AgentMemory)
       : prepared.after === null
         ? undefined
         : revision(prepared.after)
-  return { success: true, target: prepared.target, revision: nextRevision, diagnostics }
+  return {
+    success: true,
+    target: prepared.target,
+    revision: nextRevision,
+    diagnostics,
+    ...(postCommitNotice ? { postCommitNotice } : {})
+  }
 }
 
 function mutationResourceKind(prepared: PreparedMutation): ResourceChangeKind {
@@ -1161,8 +1214,16 @@ export async function commitMutation(
     // Recheck validation against the captured snapshot and current runtime settings
     // after queue admission, immediately before starting the save.
     beforeCommit?.(prepared)
-    const result = await commitMutationUnlocked(prepared, signal)
-    emitResourceChanged(kind, source, await changedResourceValue(kind), prepared.target.id)
+    const result = await commitMutationUnlocked(prepared, signal, beforeCommit)
+    try {
+      emitResourceChanged(kind, source, await changedResourceValue(kind), prepared.target.id)
+    } catch {
+      // The save already committed; retain its successful outcome.
+      return {
+        ...(result as object),
+        postCommitNotice: 'Resource committed; its change notification could not be confirmed'
+      }
+    }
     return result
   })
 }

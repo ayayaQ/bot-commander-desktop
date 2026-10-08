@@ -41,8 +41,16 @@
     resolveAgentPlan,
     selectAgentSession,
     sendAgentMessage,
-    updateAgentSession
+    updateAgentSession,
+    enrollAgentAutoReview,
+    inspectAgentAutoReviewAudit
   } from '../stores/agent'
+  import {
+    AUTO_REVIEW_DISCLOSURE,
+    AUTO_REVIEW_POLICY_REVISION,
+    autoReviewReasonLabel
+  } from '../../../shared/agentAutoReview'
+  import type { AgentDecisionAuditInspection } from '../../../shared/agentAutoReview'
 
   let input = $state('')
   let inputElement: HTMLTextAreaElement = $state()
@@ -62,6 +70,24 @@
   let resolvingPlan = $state(false)
   let planActionError = $state('')
   let planActionErrorSessionId = $state('')
+  let enrollmentIntent = $state<{
+    sessionId: string
+    forPlan: boolean
+    planId?: string
+    provider: 'openai' | 'openrouter'
+    accountRevision?: string
+  } | null>(null)
+  let enrollmentAcknowledged = $state(false)
+  let enrollmentBusy = $state(false)
+  let enrollmentError = $state('')
+  let auditInspection = $state<AgentDecisionAuditInspection | undefined>()
+  let auditAcknowledged = $state(false)
+  $effect(() => {
+    if (enrollmentIntent && (enrollmentIntent.sessionId !== $activeAgentSession?.id || running)) {
+      enrollmentIntent = null
+      enrollmentAcknowledged = false
+    }
+  })
 
   const capabilities = $derived(
     currentSelectedCapabilities(
@@ -318,17 +344,105 @@
   }
 
   async function setMode(mode: AgentMode) {
-    if ($activeAgentSession) await updateAgentSession($activeAgentSession.id, { mode })
+    if (!$activeAgentSession) return
+    if (mode === 'auto') {
+      beginEnrollment(false)
+      return
+    }
+    enrollmentIntent = null
+    await updateAgentSession($activeAgentSession.id, { mode })
   }
 
-  async function handlePlanDecision(decision: AgentPlanDecision) {
+  function beginEnrollment(forPlan: boolean) {
+    if (!$activeAgentSession || running) return
+    const plan = [...$activeAgentSession.messages]
+      .reverse()
+      .find((message) => message.role === 'assistant')
+    enrollmentIntent = {
+      sessionId: $activeAgentSession.id,
+      forPlan,
+      ...(forPlan && plan ? { planId: plan.id } : {}),
+      provider: $settingsStore.aiProvider || 'openai',
+      accountRevision: $settingsStore.agentDecisionAccountRevision
+    }
+    enrollmentAcknowledged = false
+    enrollmentError = ''
+    auditInspection = undefined
+    auditAcknowledged = false
+  }
+
+  async function inspectAudit() {
+    const intent = enrollmentIntent
+    if (!intent || enrollmentBusy) return
+    enrollmentBusy = true
+    enrollmentError = ''
+    auditAcknowledged = false
+    try {
+      const inspected = await inspectAgentAutoReviewAudit(intent.sessionId)
+      if (enrollmentIntent !== intent || $activeAgentSession?.id !== intent.sessionId) return
+      if (
+        inspected.provider !== intent.provider ||
+        inspected.accountRevision !== intent.accountRevision ||
+        inspected.policyRevision !== AUTO_REVIEW_POLICY_REVISION
+      )
+        throw new Error('Selected review account changed; reopen Auto review')
+      auditInspection = inspected
+    } catch (error) {
+      enrollmentError = error instanceof Error ? error.message : 'Audit inspection failed'
+    } finally {
+      enrollmentBusy = false
+    }
+  }
+
+  async function confirmEnrollment() {
+    const intent = enrollmentIntent
+    if (
+      !intent ||
+      !enrollmentAcknowledged ||
+      (auditInspection?.rows.length && (!auditInspection.canAcknowledge || !auditAcknowledged)) ||
+      enrollmentBusy ||
+      intent.sessionId !== $activeAgentSession?.id
+    )
+      return
+    enrollmentBusy = true
+    try {
+      await enrollAgentAutoReview(
+        intent.sessionId,
+        {
+          provider: intent.provider,
+          accountRevision: intent.accountRevision,
+          ...(auditInspection?.rows.length && auditAcknowledged
+            ? { recoveryInspectionId: auditInspection.id }
+            : {})
+        },
+        !intent.forPlan
+      )
+      enrollmentIntent = null
+      if ($activeAgentSession?.id !== intent.sessionId) return
+      if (intent.forPlan) await handlePlanDecision('auto', intent.planId)
+    } catch (error) {
+      enrollmentError = error instanceof Error ? error.message : 'Auto review enrollment failed'
+    } finally {
+      enrollmentBusy = false
+    }
+  }
+
+  async function handlePlanDecision(decision: AgentPlanDecision, acceptedPlanId?: string) {
     if (!$activeAgentSession || !awaitingPlanDecision || resolvingPlan) return
+    if (decision === 'auto' && acceptedPlanId === undefined) {
+      beginEnrollment(true)
+      return
+    }
     const sessionId = $activeAgentSession.id
     resolvingPlan = true
     planActionError = ''
     planActionErrorSessionId = ''
     try {
-      await resolveAgentPlan(decision)
+      const planId =
+        acceptedPlanId ??
+        [...$activeAgentSession.messages].reverse().find((message) => message.role === 'assistant')
+          ?.id
+      await resolveAgentPlan(decision, planId)
       await tick()
       if (decision === 'continue') inputElement?.focus()
       else scrollToBottom()
@@ -347,7 +461,7 @@
   }
 
   async function decide(call: AgentToolCall, approved: boolean) {
-    await resolveAgentApproval(call.id, approved)
+    await resolveAgentApproval(call.id, approved, call.approvalId)
   }
 </script>
 
@@ -399,13 +513,13 @@
     <section class="grow min-w-0 flex flex-col min-h-0">
       <header class="h-14 px-4 border-b border-base-300 flex items-center gap-3 shrink-0">
         <div class="join shrink-0" aria-label="Agent execution mode">
-          {#each [['manual', 'Manual'], ['auto', 'Auto'], ['planning', 'Planning']] as option}
+          {#each [['manual', 'Manual'], ['auto', 'Auto review'], ['planning', 'Planning']] as option}
             <button
               class="btn btn-sm join-item {$activeAgentSession.mode === option[0]
                 ? 'btn-primary'
                 : 'btn-ghost'}"
               onclick={() => setMode(option[0] as AgentMode)}
-              disabled={running || resolvingPlan}>{option[1]}</button
+              disabled={running || resolvingPlan || enrollmentBusy}>{option[1]}</button
             >
           {/each}
         </div>
@@ -419,13 +533,13 @@
             isLoading={loadingModels}
             onRefresh={refreshModels}
             onChange={(model) => updateAgentSession($activeAgentSession!.id, { model })}
-            disabled={running || resolvingPlan}
+            disabled={running || resolvingPlan || enrollmentBusy}
           />
         </div>
         <select
           class="select select-bordered select-sm w-28"
           value={$activeAgentSession.reasoningEffort}
-          disabled={running || resolvingPlan}
+          disabled={running || resolvingPlan || enrollmentBusy}
           onchange={updateReasoningChoice}
           aria-label="Reasoning effort"
         >
@@ -500,9 +614,55 @@
                           ? 'badge-error'
                           : call.status === 'waiting_approval'
                             ? 'badge-warning'
-                            : 'badge-ghost'}">{call.status.replace('_', ' ')}</span
+                            : 'badge-ghost'}"
+                        >{call.status === 'reviewing'
+                          ? 'Reviewing change'
+                          : call.status.replace('_', ' ')}</span
                       >
                     </div>
+                    {#if call.decision}
+                      <div class="p-3 border-t border-base-300 text-xs space-y-1">
+                        <div>
+                          {call.decision.source === 'automatic'
+                            ? 'Automatic approval'
+                            : call.decision.source === 'human_once'
+                              ? 'Human approved once'
+                              : call.decision.source === 'human_rejected'
+                                ? 'Human rejected'
+                                : call.decision.recommendation === 'deny'
+                                  ? 'AI recommends rejecting; manual approval is available'
+                                  : 'Needs your review'}: {call.decision.reasonCode}
+                        </div>
+                        <div>
+                          Policy {call.decision.policyRevision}{call.decision.model
+                            ? ` · ${call.decision.provider}/${call.decision.model}`
+                            : ''}
+                        </div>
+                        <div>{autoReviewReasonLabel(call.decision.reasonCode)}</div>
+                        {#if call.decision.usage}
+                          <div>
+                            Judge usage (separate): {call.decision.usage.inputTokens} input / {call
+                              .decision.usage.outputTokens} output{call.decision.usage.costUsd ===
+                            undefined
+                              ? ''
+                              : ` · $${call.decision.usage.costUsd.toFixed(6)} reported`}
+                          </div>
+                        {/if}
+                        {#if call.decision.checks?.length}
+                          <details>
+                            <summary class="cursor-pointer">Review estimates (uncalibrated)</summary
+                            >
+                            {#each call.decision.checks as check}<div>
+                                {check.name}: {check.probability}
+                              </div>{/each}
+                          </details>
+                        {/if}
+                        {#if call.decision.auditUncertain}<div class="text-warning">
+                            The change outcome is shown above; durability or audit settlement is
+                            uncertain. Further automatic writes are suspended.
+                          </div>{/if}
+                      </div>
+                    {/if}
                     {#if call.validation}
                       <AgentValidationReport
                         report={call.validation}
@@ -517,7 +677,7 @@
                           >Reject</button
                         >
                         <button class="btn btn-sm btn-primary" onclick={() => decide(call, true)}
-                          >Approve</button
+                          >Approve once</button
                         >
                       </div>
                     {:else if call.error}
@@ -572,6 +732,113 @@
 
       <footer class="p-4 border-t border-base-300 bg-base-100 shrink-0">
         <div class="max-w-4xl mx-auto space-y-3">
+          {#if $activeAgentSession.autoReviewMigrationRequired}
+            <div class="alert alert-info text-sm">
+              Auto review needs a current acknowledgment or local audit recovery. This session is in
+              Manual. Choose Auto review to inspect current audit revisions and acknowledge its
+              scope.
+            </div>
+          {/if}
+          {#if $activeAgentSession.mode === 'auto'}
+            <div class="text-xs opacity-70">
+              Auto review uses {($settingsStore.aiProvider || 'openai') === 'openai'
+                ? 'OpenAI gpt-6-luna'
+                : 'OpenRouter / TypeSafe typesafe/jev-1.13'} for eligible changes. Saved commands change
+              the live bot. Excluded changes still require manual approval.
+            </div>
+          {/if}
+          {#if enrollmentIntent}
+            <div
+              class="border border-base-300 rounded-md p-3 space-y-3"
+              aria-label="Auto review enrollment"
+            >
+              <div class="text-sm font-semibold">
+                {enrollmentIntent.forPlan
+                  ? 'Implement this plan with Auto review'
+                  : 'Enable Auto review'}
+              </div>
+              <p class="text-sm">{AUTO_REVIEW_DISCLOSURE}</p>
+              <div class="text-xs">
+                Policy {AUTO_REVIEW_POLICY_REVISION}. Selected provider: {enrollmentIntent.provider}
+              </div>
+              <label class="flex gap-2 items-start text-sm"
+                ><input
+                  type="checkbox"
+                  class="checkbox checkbox-sm"
+                  bind:checked={enrollmentAcknowledged}
+                  disabled={enrollmentBusy}
+                />I consent to the disclosed data sharing and bounded review flow for this session</label
+              >
+              {#if enrollmentError}<div class="text-error text-sm">{enrollmentError}</div>{/if}
+              <button
+                class="btn btn-sm btn-outline"
+                disabled={enrollmentBusy}
+                onclick={inspectAudit}>Inspect current audit resource revisions</button
+              >
+              {#if auditInspection}
+                {#if auditInspection.rows.length === 0}
+                  <div class="text-xs">No unknown audit outcomes need reconciliation</div>
+                {:else}
+                  <div class="border border-base-300 rounded-md p-3 space-y-2 text-xs">
+                    <div class="font-semibold">Earlier outcomes are unknown</div>
+                    <div>
+                      These current metadata and revisions do not prove whether the earlier changes
+                      committed. No resource contents are shown. Acknowledgment permits only fresh
+                      future actions; no stored approval will run.
+                    </div>
+                    {#each auditInspection.rows as row}
+                      <div class="break-all">
+                        {row.tool} · {row.targetType || 'unbound target'}
+                        {row.targetId || ''}<br />Current resource: {row.currentResourceRevision ||
+                          'unavailable'}<br />Current target: {row.currentTargetRevision ===
+                        undefined
+                          ? 'unavailable'
+                          : row.currentTargetRevision === null
+                            ? 'absent'
+                            : row.currentTargetRevision} · Proposed revision: {row.candidateRevision ||
+                          'unavailable'} · Outcome: unknown
+                      </div>
+                    {/each}
+                    {#if auditInspection.canAcknowledge}
+                      <label class="flex gap-2 items-start"
+                        ><input
+                          type="checkbox"
+                          class="checkbox checkbox-sm"
+                          bind:checked={auditAcknowledged}
+                          disabled={enrollmentBusy}
+                        />I inspected these current revisions and acknowledge the unknown outcomes
+                        before enabling fresh Auto review</label
+                      >
+                    {:else}<div class="text-warning">
+                        {auditInspection.reasonCode}: resource binding or storage recovery is
+                        required. Keep using Manual.
+                      </div>{/if}
+                  </div>
+                {/if}
+              {/if}
+              <div class="flex gap-2 justify-end">
+                <button
+                  class="btn btn-sm btn-ghost"
+                  disabled={enrollmentBusy}
+                  onclick={() => {
+                    enrollmentIntent = null
+                    enrollmentAcknowledged = false
+                  }}>Cancel</button
+                >
+                <button
+                  class="btn btn-sm btn-primary"
+                  disabled={!enrollmentAcknowledged ||
+                    enrollmentBusy ||
+                    (!!auditInspection?.rows.length &&
+                      (!auditInspection.canAcknowledge || !auditAcknowledged))}
+                  onclick={confirmEnrollment}
+                  >{enrollmentIntent.forPlan
+                    ? 'Acknowledge and implement'
+                    : 'Acknowledge and enable'}</button
+                >
+              </div>
+            </div>
+          {/if}
           {#if awaitingPlanDecision}
             <div class="border border-base-300 rounded-md bg-base-200 p-3">
               <div class="text-sm font-semibold mb-3">Plan ready to implement</div>
@@ -579,17 +846,17 @@
                 <button
                   class="btn btn-sm btn-primary"
                   onclick={() => handlePlanDecision('auto')}
-                  disabled={resolvingPlan}>Implement in Auto</button
+                  disabled={resolvingPlan || enrollmentBusy}>Implement with Auto review</button
                 >
                 <button
                   class="btn btn-sm btn-outline"
                   onclick={() => handlePlanDecision('manual')}
-                  disabled={resolvingPlan}>Implement in Manual</button
+                  disabled={resolvingPlan || enrollmentBusy}>Implement in Manual</button
                 >
                 <button
                   class="btn btn-sm btn-ghost"
                   onclick={() => handlePlanDecision('continue')}
-                  disabled={resolvingPlan}>Continue Planning</button
+                  disabled={resolvingPlan || enrollmentBusy}>Continue Planning</button
                 >
               </div>
             </div>
@@ -609,7 +876,8 @@
                 : $activeAgentSession.mode === 'planning'
                   ? 'Describe what you want planned...'
                   : 'Ask the agent...'}
-              disabled={running || awaitingPlanDecision || resolvingPlan}></textarea>
+              disabled={running || awaitingPlanDecision || resolvingPlan || enrollmentBusy}
+            ></textarea>
             {#if running}
               <button
                 class="btn btn-square btn-error"
@@ -623,7 +891,7 @@
               <button
                 class="btn btn-square btn-primary"
                 onclick={submit}
-                disabled={!input.trim() || awaitingPlanDecision || resolvingPlan}
+                disabled={!input.trim() || awaitingPlanDecision || resolvingPlan || enrollmentBusy}
                 title="Send"
                 aria-label="Send"
               >

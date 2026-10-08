@@ -3,6 +3,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import { join } from 'node:path'
 import type { McpAccessMode, McpConfig } from '../../shared/mcpTypes'
+import { registerAgentDecisionSecret } from './agentDecisionPrivacy'
 
 const MCP_CONFIG_FILENAME = 'mcp-config.json'
 const ENCRYPTED_TOKEN_PREFIX = 'bcfd-mcp-encrypted:v1:'
@@ -90,6 +91,7 @@ export async function loadMcpConfig(): Promise<McpConfig> {
     config = { ...defaultConfig }
   }
   loaded = true
+  registerAgentDecisionSecret(config.token)
   return getMcpConfig()
 }
 
@@ -120,6 +122,7 @@ export async function ensureMcpToken(): Promise<string> {
     config.token = crypto.randomBytes(32).toString('base64url')
     await persist()
   }
+  registerAgentDecisionSecret(config.token)
   return config.token
 }
 
@@ -150,6 +153,7 @@ export async function rotateMcpToken(): Promise<string> {
   }
   config.token = crypto.randomBytes(32).toString('base64url')
   await persist()
+  registerAgentDecisionSecret(config.token)
   return config.token
 }
 
