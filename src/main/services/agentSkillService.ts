@@ -60,16 +60,25 @@ export function configureAgentSkillFolder(path: string, add: boolean) {
         folders.assertWritable()
         if (typeof path !== 'string' || !isAbsolute(path) || resolve(path) !== path)
           throw new Error('Choose an absolute skill folder')
+        const requestedPath = path
         if (add) {
           const selected = await checkedSkillDirectory(path)
           const state = await checkedSkillDirectory(app.getPath('userData'))
           if (skillPathsOverlap(selected.path, state.path))
             throw new Error('Read-only skill folders cannot overlap the app state folder')
           path = selected.path
+        } else {
+          // The dialog may have supplied a Windows case/short-name spelling. Remove
+          // the same configured directory while still allowing a missing root to be removed.
+          try {
+            path = (await checkedSkillDirectory(path)).path
+          } catch {
+            // The displayed configured path remains removable after its folder is gone.
+          }
         }
         const next = add
           ? [...new Set([...current, path])]
-          : current.filter((root) => root !== path)
+          : current.filter((root) => root !== path && root !== requestedPath)
         if (next.length > 8)
           throw new Error('At most eight read-only skill folders can be configured')
         if (next.includes(join(app.getPath('userData'), 'agent-skills')))

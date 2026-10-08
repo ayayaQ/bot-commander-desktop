@@ -134,6 +134,31 @@ describe('desktop read-only skills host workflow with installed vivi', () => {
       'skill-creator'
     ])
   })
+  it.skipIf(process.platform !== 'win32')(
+    'removes the displayed root after an ordinary Windows case-only folder rename',
+    async () => {
+      const collection = join(mocks.home, '../MixedCaseCollection')
+      const root = join(collection, 'concise-summary')
+      await fs.mkdir(root, { recursive: true })
+      await fs.writeFile(join(root, 'SKILL.md'), source())
+      const configured = await skills.configureAgentSkillFolder(collection, true)
+      const displayed = configured.externalRoots[0]
+      const snapshot = await skills.agentSkillStore.snapshot()
+      await fs.rename(collection, join(mocks.home, '../MIXEDCASECOLLECTION'))
+      const removed = await skills.configureAgentSkillFolder(displayed, false)
+      expect(removed.externalRoots).toEqual([])
+      expect(
+        await snapshot.authorizeRead(
+          {
+            name: 'concise-summary',
+            path: 'SKILL.md',
+            expectedRevision: parseSkillDocument(source()).revision
+          },
+          { signal: new AbortController().signal }
+        )
+      ).toBe(false)
+    }
+  )
   it('progressively advertises metadata and reads full source only on demand at lower priority', async () => {
     await seed()
     const document = parseSkillDocument(source())
