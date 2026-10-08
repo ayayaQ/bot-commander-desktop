@@ -6,6 +6,7 @@
   import AgentApprovalDiff from './AgentApprovalDiff.svelte'
   import AgentValidationReport from './AgentValidationReport.svelte'
   import AgentRunSummary from './AgentRunSummary.svelte'
+  import AgentSkillsPanel from './AgentSkillsPanel.svelte'
   import { renderMarkdown } from '../utils/markdown'
   import { agentToolLabel } from '../utils/agentToolLabel'
   import {
@@ -507,6 +508,7 @@
         </div>
       {/each}
     </div>
+    <AgentSkillsPanel />
   </aside>
 
   {#if $activeAgentSession}

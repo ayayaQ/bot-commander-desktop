@@ -251,6 +251,14 @@ $ npm run build:mac
 $ npm run build:linux
 ```
 
+## App-wide Agent Skills
+
+The Agent panel's Skills control lists standard SKILL.md folders, the bundled read-only
+skill creator, and format diagnostics. Skills and text resources load progressively as
+instructions. Use the app-wide folder or explicitly select existing read-only folders.
+The creator drafts SKILL.md content for manual saving. Automatic skill saving is disabled
+on every platform. Scripts do not run. See [Agent Skills](docs/AGENT_SKILLS.md).
+
 ## External agent access (optional)
 
 Open **Settings → External agent access**, enable the authenticated loopback MCP server, and copy the generated token. The server is disabled by default, binds only to `127.0.0.1`, and stores its token with the operating system's secure credential storage. Keep clients in read-only mode unless you explicitly want an agent to edit the app.

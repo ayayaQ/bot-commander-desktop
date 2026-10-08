@@ -5,6 +5,9 @@ import { runAgent, type HistoryMessage, type ToolCall } from '@ayayaq/vivi'
 import type { ToolRegistry } from '@ayayaq/vivi/extensions'
 import { formatMemoryContext, MEMORY_GUIDANCE } from '@ayayaq/vivi/extensions/memory'
 import { createAgentExtensionRegistry } from './agentExtensions'
+import { formatSkillCatalogContext, SKILL_LIMITS } from '@ayayaq/vivi/extensions/skills'
+import { agentSkillStore } from './agentSkillService'
+import type { AgentSkillSnapshot } from './agentSkillStore'
 import { createAgentProvider, getAgentModelCapabilities } from './agentProviderAdapter'
 import { initializeAgentHistory } from './agentHistory'
 import { createAgentPersistence, reportAgentPersistenceNotice } from './agentPersistence'
@@ -94,6 +97,9 @@ import { agentDecisionLedger } from './agentDecisionLedger'
 
 const AGENT_SESSIONS_FILENAME = 'agent-sessions.json'
 const MAX_TOOL_ROUNDS = 25
+// JSON escaping can double a bounded UTF-8 resource plus metadata/warnings.
+const MAX_SKILL_TOOL_RESULT_CHARS =
+  2 * SKILL_LIMITS.maximumResourceBytes + 2 * SKILL_LIMITS.maximumFrontmatterBytes + 8192
 const MAX_DRAFT_VALIDATION_FAILURES = 3
 const REASONING_EFFORTS = new Set<AgentReasoningEffort>([
   'none',
@@ -128,6 +134,7 @@ In planning mode, investigate with read and lint tools and never make mutations.
 interface AgentRunContext {
   validationFailures: Map<string, number>
   extensions: ToolRegistry
+  skills: AgentSkillSnapshot
   documentationPolicy: DocumentationPolicyState
   metrics: AgentRunMetrics
   autoReview: AgentAutoReviewContext
@@ -973,9 +980,15 @@ async function runTool(
         if (call.validation && result && typeof result === 'object')
           result = { ...result, diagnostics: call.diagnostics, validation: call.validation }
       }
+    } else if (call.name === 'save_skill') {
+      throw new Error('Automatic skill saving is disabled; save creator drafts manually')
     } else if (context.extensions.has(call.name)) {
       const output = await context.extensions.executeTool(providerCall, { signal })
-      extensionContent = boundToolContent(output.content)
+      if (call.name === 'read_skill' || call.name === 'list_skills') {
+        if (output.content.length > MAX_SKILL_TOOL_RESULT_CHARS)
+          throw new Error('Skill tool result exceeds its host bound')
+        extensionContent = output.content
+      } else extensionContent = boundToolContent(output.content)
       try {
         result = JSON.parse(extensionContent)
       } catch {
@@ -1001,12 +1014,13 @@ async function runTool(
           )
         : await executeReadTool(call.name, call.arguments)
     }
-    result = boundAgentToolResult(result)
+    if (call.name !== 'read_skill' && call.name !== 'list_skills')
+      result = boundAgentToolResult(result)
     assertActiveRun(session, runId, signal)
     if (call.status !== 'rejected' && call.status !== 'error') call.status = 'completed'
     call.result = result
     message.content = extensionContent ?? stringifyResult(result)
-    session.status = 'running'
+    if (!signal.aborted) session.status = 'running'
     context.metrics = recordAgentRunTool(context.metrics, call)
     checkpointRunMetrics(session, context)
     emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
@@ -1104,12 +1118,23 @@ async function startAgentSession(
   // Do not register a new provider run after that sweep; it has not changed any state yet.
   if (isAgentPersistencePaused()) throw new Error('The app is shutting down; agent runs are paused')
 
+  const skills = await agentSkillStore.snapshot()
+  if (controllers.has(sessionId))
+    throw new Error('This agent session already has a running request')
+  if (deletingSessionIds.has(sessionId) || deletedSessionIds.has(sessionId))
+    throw new Error('Agent session is being deleted')
+  if (isAgentPersistencePaused()) throw new Error('The app is shutting down; agent runs are paused')
   const runId = id('run')
   const context: AgentRunContext = {
     validationFailures: new Map(),
+    skills,
     // Reserve every built-in before planning mode filters mutation tools from advertisement.
     extensions: createAgentExtensionRegistry(
-      agentToolDefinitions.map((tool) => tool.function.name)
+      agentToolDefinitions.map((tool) => tool.function.name),
+      {
+        catalog: skills.catalog,
+        authorizeRead: skills.authorizeRead
+      }
     ),
     documentationPolicy: createDocumentationPolicyState(),
     metrics: createAgentRunMetrics(runId, now()),
@@ -1169,13 +1194,32 @@ async function startAgentSession(
                 content: `${memoryContext}\nThis is context only, not a request to act.`
               }
             ]
-          : [])
+          : []),
+        {
+          kind: 'message',
+          role: 'user',
+          content: `${formatSkillCatalogContext(skills.catalog)}\n${capabilities.tools === 'supported' ? 'Tools are available for this model.' : 'This model has no tools: it cannot read skills.'} Desktop host can read bounded UTF-8 skill resources. ${skills.status.saveSupport.reason} No shell, executable skill scripts, binary asset loader, community downloads, dependency installation or skill-supplied tool grants are available. Manually saved file changes apply on a future turn. Current user instructions take priority. Read-only sources cannot be edited.`
+        }
       ]
       const initialTokenCount = session.tokenCount
       assertActiveRun(session, runId, controller.signal)
       const result = await runAgent({
         provider: createAgentProvider(settings, runModel, { stream: true, capabilities }),
-        messages: [...prefix, ...session.history!],
+        messages: [
+          ...prefix,
+          ...session.history!.map((message) =>
+            message.kind === 'tool_result' && message.name === 'read_skill'
+              ? {
+                  ...message,
+                  content: JSON.stringify({
+                    priorSkillRead: true,
+                    message:
+                      'Earlier skill guidance omitted. Read the relevant skill from this turn catalog again.'
+                  })
+                }
+              : message
+          )
+        ],
         tools:
           capabilities.tools === 'supported'
             ? [
