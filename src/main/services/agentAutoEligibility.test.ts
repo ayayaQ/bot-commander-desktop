@@ -8,9 +8,13 @@ import { createPlaygroundState } from '../../shared/playground/types'
 import type { PreparedMutation } from './agentTools'
 import { resourceRevision } from './resourceChangeService'
 import { checkAutoEligibility } from './agentAutoEligibility'
+import { autoReviewSnapshot } from './agentAutoReview'
+import { routePreparedAction } from '@ayayaq/vivi/decisions'
+import { AUTO_REVIEW_POLICY_REVISION } from '../../shared/agentAutoReview'
 
 const { settings } = vi.hoisted(() => ({ settings: { useLegacyInterpreter: false } }))
 vi.mock('./settingsService', () => ({ getSettings: () => settings }))
+vi.mock('./agentDecisionLedger', () => ({ agentDecisionLedger: {} }))
 
 const hash = (value: unknown): string =>
   crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')
@@ -111,6 +115,70 @@ describe('deterministic reviewed-Auto eligibility with ordinary offline fixtures
   beforeEach(() => {
     settings.useLegacyInterpreter = false
   })
+
+  const snapshotFor = (prepared: PreparedMutation, validation?: AgentValidationReport) =>
+    autoReviewSnapshot({
+      sessionId: 'session',
+      runId: 'run',
+      callId: 'call',
+      userRequestId: 'request',
+      userRequest: 'Create the exact hello response command',
+      prepared,
+      validation,
+      enrollment: {
+        policyRevision: AUTO_REVIEW_POLICY_REVISION,
+        provider: 'openai',
+        accountRevision: 'account',
+        acknowledgedAt: '2026-10-08T01:00:00.000Z'
+      },
+      resourceRevisions: { resource: 'commands-current', hostRuntime: 1 }
+    })
+
+  it('routes validated response configuration and future behavior together for model review', () => {
+    const prepared = draft()
+    const snapshot = snapshotFor(prepared, passed(prepared))
+    expect(routePreparedAction(snapshot).route).toBe('model-review')
+    expect(snapshot.preparedAction!.complete).toBe(true)
+    expect(snapshot.preparedAction!.effects).toMatchObject([
+      { kind: 'write', scope: 'outside-workspace', review: 'model-review' },
+      {
+        kind: 'external',
+        scope: 'external',
+        review: 'model-review',
+        affectedData: {
+          effect: 'configured-future-message-response',
+          immediateDiscordSend: false
+        }
+      }
+    ])
+    for (const effect of snapshot.preparedAction!.effects) {
+      expect(effect.resourceId).toBe('desktop:command:ordinary-command')
+      expect(Object.hasOwn(snapshot.resourceRevisions, effect.resourceId)).toBe(true)
+      expect(Object.isFrozen(effect)).toBe(true)
+    }
+  })
+
+  it('keeps missing or changed validation evidence outside the shared model-review route', () => {
+    const prepared = draft()
+    expect(routePreparedAction(snapshotFor(prepared)).route).toBe('manual')
+    const report = passed(prepared)
+    report.fixtureHash = 'changed-fixtures'
+    expect(routePreparedAction(snapshotFor(prepared, report)).route).toBe('manual')
+    expect(snapshotFor(prepared, report).preparedAction!.complete).toBe(false)
+  })
+
+  it.each<Partial<BCFDCommand>>([{ isKick: true }, { startsWith: true }, { type: 1 }])(
+    'preserves existing unsupported scope %j in host-derived routing',
+    (overrides) => {
+      const prepared = draft(command(overrides))
+      const snapshot = snapshotFor(prepared, passed(prepared))
+      expect(routePreparedAction(snapshot).route).toBe('manual')
+      expect(snapshot.preparedAction!.complete).toBe(false)
+      expect(snapshot.preparedAction!.effects.every((effect) => effect.review === 'manual')).toBe(
+        true
+      )
+    }
+  )
 
   it.each(['create_memory', 'edit_memory'])(
     'allows the %s profile for later privacy review',

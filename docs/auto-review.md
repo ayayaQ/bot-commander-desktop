@@ -33,6 +33,13 @@ the existing manual or blocked paths. Read-only tools need no extra review. MCP,
 explicit memory-manager actions, extension authorization and disabled skill saving are
 unchanged by agent enrollment.
 
+The shared `@ayayaq/vivi@0.8.0` prepared-action router consumes immutable metadata
+derived by this existing host validator. Memory records are app-wide local writes;
+command saves are live-configuration writes with configured future response effects,
+not immediate Discord sends. Every effect and its literal resource revision must route
+to model review before transmission and remain exact at commit. Missing, incomplete,
+unknown, manual or blocked metadata stays on the existing human-review path.
+
 ## Review and privacy
 
 The exact current user request, exact tool arguments, normalized before/after change,

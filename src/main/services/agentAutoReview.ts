@@ -3,12 +3,14 @@ import {
   createDecisionRequest,
   evaluateDecision,
   isDecisionCurrent,
+  routePreparedAction,
   createOpenAIDecisionProvider,
   createOpenRouterDecisionProvider,
   MAX_DECISION_BYTES,
   type DecisionProvider,
   type DecisionSnapshot,
-  type DecisionResult
+  type DecisionResult,
+  type PreparedActionMetadata
 } from '@ayayaq/vivi/decisions'
 import type { JsonObject } from '@ayayaq/vivi'
 import type { AgentAutoReviewEnrollment, AgentDecisionDisplay } from '../../shared/agentAutoReview'
@@ -43,6 +45,18 @@ export function decisionBinding(value: unknown): string {
 
 export interface AgentAutoReviewContext {
   requests: number
+}
+
+function memoryArgumentsSupported(prepared: PreparedMutation): boolean {
+  const allowed =
+    prepared.name === 'create_memory' ? ['content'] : ['id', 'expectedRevision', 'content']
+  const args = prepared.arguments
+  return (
+    !Object.keys(args).some((key) => !allowed.includes(key)) &&
+    typeof args.content === 'string' &&
+    (prepared.name !== 'edit_memory' ||
+      (typeof args.id === 'string' && typeof args.expectedRevision === 'string'))
+  )
 }
 interface ReviewOptions {
   prepared: PreparedMutation
@@ -95,10 +109,13 @@ export async function reviewAgentMutation(options: ReviewOptions): Promise<Agent
       accountRevision: options.account().revision,
       policyRevision: AUTO_REVIEW_POLICY_REVISION
     })
+    const current = options.snapshot()
     if (
       !result ||
       !captured ||
-      !isDecisionCurrent(result, options.snapshot()) ||
+      !checkAutoEligibility(candidate, options.validation).eligible ||
+      routePreparedAction(current).route !== 'model-review' ||
+      !isDecisionCurrent(result, current) ||
       decisionBinding(candidate) !== decisionBinding(prepared)
     )
       throw new Error('Auto review is stale; review the exact current change again')
@@ -163,19 +180,9 @@ export async function reviewAgentMutation(options: ReviewOptions): Promise<Agent
     display.reasonCode = eligibility.reasonCode
     return finish()
   }
-  if (prepared.target.type === 'memory') {
-    const allowed =
-      prepared.name === 'create_memory' ? ['content'] : ['id', 'expectedRevision', 'content']
-    const args = prepared.arguments
-    if (
-      Object.keys(args).some((key) => !allowed.includes(key)) ||
-      typeof args.content !== 'string' ||
-      (prepared.name === 'edit_memory' &&
-        (typeof args.id !== 'string' || typeof args.expectedRevision !== 'string'))
-    ) {
-      display.reasonCode = 'memory_arguments_unsupported'
-      return finish()
-    }
+  if (prepared.target.type === 'memory' && !memoryArgumentsSupported(prepared)) {
+    display.reasonCode = 'memory_arguments_unsupported'
+    return finish()
   }
   if (!account.apiKey.trim()) {
     display.reasonCode = 'reviewer_unavailable'
@@ -194,7 +201,12 @@ export async function reviewAgentMutation(options: ReviewOptions): Promise<Agent
       return finish()
     }
     const request = createDecisionRequest(snapshot, policy)
-    captured = structuredClone(request.snapshot) as DecisionSnapshot
+    const route = routePreparedAction(request.snapshot)
+    if (route.route !== 'model-review') {
+      display.reasonCode = route.reasonCode
+      return finish()
+    }
+    captured = request.snapshot as unknown as DecisionSnapshot
     const privacy = decisionPrivacyReason(captured)
     if (privacy) {
       display.reasonCode = privacy
@@ -214,12 +226,14 @@ export async function reviewAgentMutation(options: ReviewOptions): Promise<Agent
     const beforeProvider = (): string => {
       options.assertActive()
       const current = options.account()
+      const currentSnapshot = options.snapshot()
       if (
         signal.aborted ||
         current.provider !== account.provider ||
         current.revision !== account.revision ||
         current.apiKey !== account.apiKey ||
-        decisionBinding(options.snapshot()) !== decisionBinding(captured) ||
+        routePreparedAction(currentSnapshot).route !== 'model-review' ||
+        decisionBinding(currentSnapshot) !== decisionBinding(captured) ||
         decisionPrivacyReason(captured)
       )
         throw new Error('Review inputs changed before provider admission')
@@ -308,7 +322,7 @@ export function autoReviewSnapshot(input: {
     }
     return value as JsonObject
   }
-  return {
+  const snapshot: DecisionSnapshot = {
     sessionId: input.sessionId,
     runId: input.runId,
     toolCall: {
@@ -349,4 +363,72 @@ export function autoReviewSnapshot(input: {
         : null
     }
   }
+  // Only the existing host validator can classify these prepared mutations.
+  // Tool arguments, fixture prose and model output never supply effect metadata.
+  const eligibility = checkAutoEligibility(prepared, validation)
+  const target = prepared.target
+  const resourceId = `desktop:${target.type}:${target.id ?? ''}`
+  const evidence = snapshot.inputData as JsonObject
+  const normalizedAfter = evidence.normalizedAfter as JsonObject | null
+  const normalizedBefore = evidence.normalizedBefore as JsonObject | null
+  const resolved =
+    typeof target.id === 'string' &&
+    !!target.id &&
+    typeof input.resourceRevisions.resource === 'string' &&
+    !!input.resourceRevisions.resource &&
+    normalizedAfter?.id === target.id &&
+    (prepared.name === 'create_memory' || prepared.name === 'create_command'
+      ? normalizedBefore === null
+      : normalizedBefore?.id === target.id)
+  const complete =
+    eligibility.eligible &&
+    resolved &&
+    (target.type !== 'memory' ||
+      (memoryArgumentsSupported(prepared) &&
+        typeof normalizedAfter.content === 'string' &&
+        (normalizedBefore === null || typeof normalizedBefore.content === 'string')))
+  const effects: PreparedActionMetadata['effects'][number][] = []
+  if (resolved) {
+    effects.push({
+      kind: 'write',
+      resourceId,
+      scope: 'outside-workspace',
+      affectedData: {
+        normalizedBefore,
+        normalizedAfter,
+        persistence: target.type === 'memory' ? 'app-wide-memory' : 'live-bot-configuration'
+      },
+      review: complete ? 'model-review' : 'manual'
+    })
+    if (target.type === 'command')
+      effects.push({
+        kind: 'external',
+        resourceId,
+        scope: 'external',
+        affectedData: {
+          effect: 'configured-future-message-response',
+          immediateDiscordSend: false,
+          candidateBinding: snapshot.resourceRevisions.preparedBinding,
+          validationBinding: snapshot.resourceRevisions.validationBinding
+        },
+        review: complete ? 'model-review' : 'manual'
+      })
+    snapshot.resourceRevisions[resourceId] = {
+      resource: input.resourceRevisions.resource,
+      hostRuntime: input.resourceRevisions.hostRuntime ?? null,
+      preparedBinding: snapshot.resourceRevisions.preparedBinding,
+      validationBinding: snapshot.resourceRevisions.validationBinding
+    }
+  }
+  // No aliases to prepared records survive in the host metadata. The shared
+  // request capture then deeply freezes the entire exact snapshot for review.
+  const freeze = <T>(value: T): T => {
+    if (value && typeof value === 'object') {
+      Object.values(value).forEach(freeze)
+      Object.freeze(value)
+    }
+    return value
+  }
+  snapshot.preparedAction = freeze(structuredClone({ complete, effects }))
+  return snapshot
 }
