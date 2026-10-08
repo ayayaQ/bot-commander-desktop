@@ -1,0 +1,278 @@
+[
+  {
+    "name": "ordinary workspace read",
+    "expected": {
+      "route": "auto-read",
+      "reasonCode": "ordinary_workspace_read"
+    },
+    "preparedAction": {
+      "complete": true,
+      "effects": [
+        {
+          "kind": "read",
+          "resourceId": "literal:notes/../target",
+          "scope": "workspace",
+          "affectedData": {
+            "selection": "exact bounded selection"
+          },
+          "review": "ordinary-read"
+        }
+      ]
+    }
+  },
+  {
+    "name": "model-reviewed local write",
+    "expected": {
+      "route": "model-review",
+      "reasonCode": "model_review_required"
+    },
+    "preparedAction": {
+      "complete": true,
+      "effects": [
+        {
+          "kind": "write",
+          "resourceId": "literal:notes/../target",
+          "scope": "outside-workspace",
+          "affectedData": {
+            "selection": "exact bounded selection"
+          },
+          "review": "model-review"
+        }
+      ]
+    }
+  },
+  {
+    "name": "mixed read and reviewed write",
+    "expected": {
+      "route": "model-review",
+      "reasonCode": "model_review_required"
+    },
+    "preparedAction": {
+      "complete": true,
+      "effects": [
+        {
+          "kind": "read",
+          "resourceId": "literal:notes/../target",
+          "scope": "workspace",
+          "affectedData": {
+            "selection": "exact bounded selection"
+          },
+          "review": "ordinary-read"
+        },
+        {
+          "kind": "write",
+          "resourceId": "literal:notes/../target",
+          "scope": "workspace",
+          "affectedData": {
+            "selection": "exact bounded selection"
+          },
+          "review": "model-review"
+        }
+      ]
+    }
+  },
+  {
+    "name": "manual dominates reviewed write",
+    "expected": {
+      "route": "manual",
+      "reasonCode": "host_manual"
+    },
+    "preparedAction": {
+      "complete": true,
+      "effects": [
+        {
+          "kind": "write",
+          "resourceId": "literal:notes/../target",
+          "scope": "workspace",
+          "affectedData": {
+            "selection": "exact bounded selection"
+          },
+          "review": "model-review"
+        },
+        {
+          "kind": "read",
+          "resourceId": "literal:notes/../target",
+          "scope": "workspace",
+          "affectedData": {
+            "selection": "exact bounded selection"
+          },
+          "review": "manual"
+        }
+      ]
+    }
+  },
+  {
+    "name": "blocked dominates manual",
+    "expected": {
+      "route": "blocked",
+      "reasonCode": "host_blocked"
+    },
+    "preparedAction": {
+      "complete": true,
+      "effects": [
+        {
+          "kind": "read",
+          "resourceId": "literal:notes/../target",
+          "scope": "workspace",
+          "affectedData": {
+            "selection": "exact bounded selection"
+          },
+          "review": "manual"
+        },
+        {
+          "kind": "read",
+          "resourceId": "literal:notes/../target",
+          "scope": "workspace",
+          "affectedData": {
+            "selection": "exact bounded selection"
+          },
+          "review": "blocked"
+        }
+      ]
+    }
+  },
+  {
+    "name": "missing metadata",
+    "expected": {
+      "route": "manual",
+      "reasonCode": "missing_metadata"
+    }
+  },
+  {
+    "name": "incomplete effects",
+    "expected": {
+      "route": "manual",
+      "reasonCode": "incomplete_effects"
+    },
+    "preparedAction": {
+      "complete": false,
+      "effects": [
+        {
+          "kind": "read",
+          "resourceId": "literal:notes/../target",
+          "scope": "workspace",
+          "affectedData": {
+            "selection": "exact bounded selection"
+          },
+          "review": "ordinary-read"
+        }
+      ]
+    }
+  },
+  {
+    "name": "empty effects",
+    "expected": {
+      "route": "manual",
+      "reasonCode": "incomplete_effects"
+    },
+    "preparedAction": {
+      "complete": true,
+      "effects": []
+    }
+  },
+  {
+    "name": "unknown effect",
+    "expected": {
+      "route": "manual",
+      "reasonCode": "unknown_effects"
+    },
+    "preparedAction": {
+      "complete": true,
+      "effects": [
+        {
+          "kind": "unknown",
+          "resourceId": "literal:notes/../target",
+          "scope": "workspace",
+          "affectedData": {
+            "selection": "exact bounded selection"
+          },
+          "review": "ordinary-read"
+        }
+      ]
+    }
+  },
+  {
+    "name": "unknown scope",
+    "expected": {
+      "route": "manual",
+      "reasonCode": "unknown_effects"
+    },
+    "preparedAction": {
+      "complete": true,
+      "effects": [
+        {
+          "kind": "read",
+          "resourceId": "literal:notes/../target",
+          "scope": "unknown",
+          "affectedData": {
+            "selection": "exact bounded selection"
+          },
+          "review": "ordinary-read"
+        }
+      ]
+    }
+  },
+  {
+    "name": "write labeled ordinary read",
+    "expected": {
+      "route": "manual",
+      "reasonCode": "invalid_classification"
+    },
+    "preparedAction": {
+      "complete": true,
+      "effects": [
+        {
+          "kind": "write",
+          "resourceId": "literal:notes/../target",
+          "scope": "workspace",
+          "affectedData": {
+            "selection": "exact bounded selection"
+          },
+          "review": "ordinary-read"
+        }
+      ]
+    }
+  },
+  {
+    "name": "external read labeled ordinary",
+    "expected": {
+      "route": "manual",
+      "reasonCode": "invalid_classification"
+    },
+    "preparedAction": {
+      "complete": true,
+      "effects": [
+        {
+          "kind": "read",
+          "resourceId": "literal:notes/../target",
+          "scope": "external",
+          "affectedData": {
+            "selection": "exact bounded selection"
+          },
+          "review": "ordinary-read"
+        }
+      ]
+    }
+  },
+  {
+    "name": "missing literal resource",
+    "expected": {
+      "route": "manual",
+      "reasonCode": "invalid_snapshot"
+    },
+    "preparedAction": {
+      "complete": true,
+      "effects": [
+        {
+          "kind": "read",
+          "resourceId": "literal:target",
+          "scope": "workspace",
+          "affectedData": {
+            "selection": "exact bounded selection"
+          },
+          "review": "ordinary-read"
+        }
+      ]
+    }
+  }
+]

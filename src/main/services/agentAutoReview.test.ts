@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { DecisionProvider, DecisionRequest } from '@ayayaq/vivi/decisions'
+import {
+  routePreparedAction,
+  type DecisionProvider,
+  type DecisionRequest
+} from '@ayayaq/vivi/decisions'
 import type { AgentAutoReviewEnrollment } from '../../shared/agentAutoReview'
 import { AUTO_REVIEW_POLICY_REVISION } from '../../shared/agentAutoReview'
 import { reviewAgentMutation, autoReviewSnapshot, decisionBinding } from './agentAutoReview'
@@ -105,6 +109,94 @@ afterEach(() => {
 })
 
 describe('bounded desktop Auto review with offline providers', () => {
+  it('captures immutable app-wide memory effects with exact host revisions', async () => {
+    const f = fixture()
+    const snapshot = f.options.snapshot()
+    expect(routePreparedAction(snapshot)).toEqual({
+      route: 'model-review',
+      reasonCode: 'model_review_required'
+    })
+    expect(snapshot.preparedAction).toEqual({
+      complete: true,
+      effects: [
+        {
+          kind: 'write',
+          resourceId: 'desktop:memory:memory-fixture',
+          scope: 'outside-workspace',
+          affectedData: {
+            normalizedBefore: null,
+            normalizedAfter: { id: 'memory-fixture', content: 'Prefer concise answers' },
+            persistence: 'app-wide-memory'
+          },
+          review: 'model-review'
+        }
+      ]
+    })
+    expect(snapshot.resourceRevisions['desktop:memory:memory-fixture']).toMatchObject({
+      resource: 'resource-fixture-1',
+      preparedBinding: snapshot.resourceRevisions.preparedBinding,
+      validationBinding: null
+    })
+    expect(Object.isFrozen(snapshot.preparedAction)).toBe(true)
+    expect(Object.isFrozen(snapshot.preparedAction!.effects)).toBe(true)
+    expect(Object.isFrozen(snapshot.preparedAction!.effects[0].affectedData)).toBe(true)
+    const review = await reviewAgentMutation(f.options)
+    expect(review.automatic).toBe(true)
+    const request = vi.mocked(f.provider.evaluate).mock.calls[0][0]
+    expect(Object.isFrozen(request.snapshot.preparedAction!.effects[0].affectedData)).toBe(true)
+    f.prepared.after = { ...(f.prepared.after as object), content: 'Prefer examples' }
+    expect(request.snapshot.preparedAction).toEqual(snapshot.preparedAction)
+    expect(() => review.assertCurrent(f.prepared)).toThrow('stale')
+  })
+
+  it.each(['missing', 'incomplete', 'manual', 'blocked', 'ordinary-read'] as const)(
+    'keeps a %s prepared route local without a reviewer request',
+    async (change) => {
+      const f = fixture()
+      const original = f.options.snapshot
+      f.options.snapshot = () => {
+        const snapshot = structuredClone(original())
+        if (change === 'missing') delete snapshot.preparedAction
+        else if (change === 'incomplete') snapshot.preparedAction = { complete: false, effects: [] }
+        else
+          snapshot.preparedAction = {
+            ...snapshot.preparedAction!,
+            effects: [{ ...snapshot.preparedAction!.effects[0], review: change }]
+          }
+        return snapshot
+      }
+      expect((await reviewAgentMutation(f.options)).automatic).toBe(false)
+      expect(f.provider.evaluate).not.toHaveBeenCalled()
+      expect(f.ledger.record).not.toHaveBeenCalled()
+    }
+  )
+
+  it('requires complete prepared identity and current resource evidence', async () => {
+    const f = fixture()
+    delete (f.prepared.after as { id?: string }).id
+    expect(f.options.snapshot().preparedAction!.complete).toBe(false)
+    expect((await reviewAgentMutation(f.options)).automatic).toBe(false)
+    expect(f.provider.evaluate).not.toHaveBeenCalled()
+  })
+
+  it('rechecks exact effect routing before the one-time commit journal', async () => {
+    const f = fixture()
+    const review = await reviewAgentMutation(f.options)
+    expect(review.automatic).toBe(true)
+    const original = f.options.snapshot
+    f.options.snapshot = () => {
+      const snapshot = structuredClone(original())
+      snapshot.preparedAction = {
+        ...snapshot.preparedAction!,
+        effects: [{ ...snapshot.preparedAction!.effects[0], review: 'manual' }]
+      }
+      return snapshot
+    }
+    expect(await review.beginCommit()).toBe(false)
+    expect(review.automatic).toBe(false)
+    expect(f.ledger.settle).not.toHaveBeenCalled()
+  })
+
   it.each([
     ['openai', 0.995, true, 'requirements_met'],
     ['openai', 0.9949, false, 'uncertain'],
@@ -239,6 +331,7 @@ describe('bounded desktop Auto review with offline providers', () => {
     f.prepared.after = { ...(f.prepared.after as object), unrelatedLegacy: 'Unnecessary context' }
     const snapshot = f.options.snapshot()
     expect(JSON.stringify(snapshot.inputData)).not.toContain('Unnecessary context')
+    expect(JSON.stringify(snapshot.preparedAction)).not.toContain('Unnecessary context')
     const originalBinding = snapshot.resourceRevisions.preparedBinding
     const localAfter = f.prepared.after as Record<string, unknown>
     localAfter.unrelatedLegacy = 'Changed local context'

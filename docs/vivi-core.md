@@ -2,7 +2,7 @@
 
 The generic sequential provider/tool loop lives in the separate
 [ayayaQ/vivi](https://github.com/ayayaQ/vivi) repository. Bot Commander consumes a reviewed,
-exact npm registry release `@ayayaq/vivi@0.4.0`. The published artifact was verified
+exact npm registry release `@ayayaq/vivi@0.8.0`. The published artifact was verified
 byte-for-byte against the reviewed release archive; its immutable registry URL and
 SHA-512 integrity are recorded in the lockfile. Runtime Git authentication/build is
 not required, and npm pack outputs are not committed to this repository.
@@ -19,7 +19,7 @@ cancellation-aware waits, usage totals, canonical-history validation/recovery an
 outcomes. Its root entry point has no Electron, Discord, UI, filesystem, provider SDK, storage,
 authorization or sandbox dependency. Optional provider subpaths own OpenAI Responses/OpenRouter
 Chat wire formats, native-history projection and bounded streaming HTTP; the package has no runtime
-dependencies.
+dependency outside the optional memory subpath, which uses exact `yaml@2.9.1`.
 
 Bot Commander owns the small settings/session provider bridge, prompts, memories, documentation policy,
 manual/auto/planning modes, approval previews, domain tool implementation, persistence, revision
