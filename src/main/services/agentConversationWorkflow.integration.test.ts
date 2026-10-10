@@ -774,6 +774,25 @@ describe('desktop authoritative conversation records paired workflow', () => {
           freshJournal.sessionRecords.reduce(applyAgentRecord, createAgentProjection(session.id))
         ).toEqual(freshProjection)
         expect(freshProjection.history.map((entry) => entry.message)).toEqual(freshFinal.history)
+        expect(freshProjection.history.slice(0, paused.history.length)).toEqual(paused.history)
+        const freshRetained = freshJournal.runs.at(-1)!
+        const freshRunBase = projectAgentRecords(
+          session.id,
+          freshJournal.sessionRecords.slice(0, freshRetained.baseSequence)
+        )
+        const freshReplayed = projectAgentRunRecords(
+          freshRunBase,
+          freshRun.runId,
+          freshRetained.records
+        )
+        expect(
+          freshRetained.records.reduce(
+            applyAgentRunRecord,
+            createAgentRunProjection(freshRunBase, freshRun.runId)
+          )
+        ).toEqual(freshReplayed)
+        expect(freshReplayed.state).toBe('settled')
+        expect(freshReplayed.session).toEqual(freshProjection)
         expect(freshFinal.tokenCount).toBe(32)
         expect(freshProjection.usage.totalTokens).toBe(32)
         expect(mocks.commitMutation).toHaveBeenCalledOnce()
