@@ -6,6 +6,7 @@
   import AgentApprovalDiff from './AgentApprovalDiff.svelte'
   import AgentValidationReport from './AgentValidationReport.svelte'
   import AgentRunSummary from './AgentRunSummary.svelte'
+  import AgentMcpOutcome from './AgentMcpOutcome.svelte'
   import AgentSkillsPanel from './AgentSkillsPanel.svelte'
   import { renderMarkdown } from '../utils/markdown'
   import { agentToolLabel } from '../utils/agentToolLabel'
@@ -674,7 +675,9 @@
                     {/if}
                     {#if call.status === 'waiting_approval'}
                       {#if call.mcp}
-                        <pre class="p-3 text-xs whitespace-pre-wrap break-words max-h-80 overflow-auto">{call.mcp.disclosure}</pre>
+                        <pre
+                          class="p-3 text-xs whitespace-pre-wrap break-words max-h-80 overflow-auto">{call
+                            .mcp.disclosure}</pre>
                       {:else}
                         <AgentApprovalDiff before={call.before} after={call.after} />
                       {/if}
@@ -687,10 +690,12 @@
                         >
                       </div>
                     {:else if call.error}
-                      <div class="p-3 text-sm text-error border-t border-base-300">
+                      <div
+                        class="p-3 text-sm text-error border-t border-base-300 whitespace-pre-wrap break-all max-h-64 overflow-auto"
+                      >
                         {call.error}
                       </div>
-                    {:else if call.result !== undefined}
+                    {:else if call.result !== undefined && !call.mcp}
                       <details class="border-t border-base-300">
                         <summary class="px-3 py-2 cursor-pointer text-xs opacity-70"
                           >Tool result</summary
@@ -701,13 +706,8 @@
                           )}</pre>
                       </details>
                     {/if}
-                    {#if call.mcp?.outcome === 'unknown'}
-                      <p class="p-3 text-sm text-warning">External outcome is unknown. Do not retry automatically; inspect the external resource. Cancellation cannot undo effects.</p>
-                    {:else if call.mcp?.requestSent === false}
-                      <p class="p-3 text-sm">External request was not attempted.</p>
-                    {/if}
-                    {#if call.mcp?.checkpointUnconfirmed}
-                      <p class="p-3 text-sm text-warning">Outcome checkpointing is unconfirmed. Recovery evidence is retained and further external calls may be blocked.</p>
+                    {#if call.mcp && call.status !== 'waiting_approval'}
+                      <AgentMcpOutcome mcp={call.mcp} result={call.result} />
                     {/if}
                   </div>
                 {/each}

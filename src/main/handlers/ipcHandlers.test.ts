@@ -17,6 +17,17 @@ const mocks = vi.hoisted(() => ({
   createMemory: vi.fn(),
   updateMemory: vi.fn(),
   deleteMemory: vi.fn(),
+  agentMcp: {
+    list: vi.fn(),
+    configure: vi.fn(),
+    remove: vi.fn(),
+    prepareLaunch: vi.fn(),
+    start: vi.fn(),
+    cancelLaunch: vi.fn(),
+    refresh: vi.fn(),
+    disconnect: vi.fn(),
+    onStatusChanged: vi.fn()
+  },
   commitMemory: vi.fn(),
   memorySink: null as ((result: unknown) => void) | null
 }))
@@ -69,17 +80,7 @@ vi.mock('../services/agentMemoryService', () => ({
   commitMemoryMutation: mocks.commitMemory
 }))
 vi.mock('../services/agentMcpService', () => ({
-  agentMcpService: {
-    list: vi.fn(),
-    configure: vi.fn(),
-    remove: vi.fn(),
-    prepareLaunch: vi.fn(),
-    start: vi.fn(),
-    cancelLaunch: vi.fn(),
-    refresh: vi.fn(),
-    disconnect: vi.fn(),
-    onStatusChanged: vi.fn()
-  }
+  agentMcpService: mocks.agentMcp
 }))
 vi.mock('../services/mcpServerService', () => ({
   setMcpEventSinks: vi.fn(),
@@ -338,5 +339,42 @@ describe('explicit read-only skills folder IPC', () => {
     mocks.chooseSkillFolder.mockResolvedValue({ canceled: true, filePaths: [] })
     expect(await (await handler('skills:choose-root'))({})).toBeNull()
     expect(mocks.skillFolder).not.toHaveBeenCalled()
+  })
+})
+
+describe('explicit agent MCP client IPC', () => {
+  beforeEach(() => vi.clearAllMocks())
+  const routes = [
+    ['list', 'list', []],
+    ['configure', 'configure', [{ id: 'fixture', command: '/installed/fixture' }]],
+    ['remove', 'remove', ['fixture']],
+    ['prepare-launch', 'prepareLaunch', ['fixture']],
+    ['start', 'start', ['one-use-review-token']],
+    ['cancel-launch', 'cancelLaunch', ['one-use-review-token']],
+    ['refresh', 'refresh', ['fixture', ['tools', 'resources']]],
+    ['disconnect', 'disconnect', ['fixture']]
+  ] as const
+  it.each(routes)(
+    'forwards only the explicit %s action arguments',
+    async (channel, method, args) => {
+      const { addIPCHandlers } = await import('./ipcHandlers')
+      const result = { revision: 'host-status', servers: [], environmentNames: [], paused: false }
+      mocks.agentMcp[method].mockResolvedValueOnce(result)
+      addIPCHandlers()
+      const registered = mocks.handle.mock.calls.find(([name]) => name === `agent-mcp:${channel}`)
+      expect(registered).toBeDefined()
+      expect(await registered![1]({ sender: 'trusted-wrapper-fixture' }, ...args)).toEqual(result)
+      expect(mocks.agentMcp[method]).toHaveBeenCalledExactlyOnceWith(...args)
+      expect(mocks.agentMcp.start).toHaveBeenCalledTimes(method === 'start' ? 1 : 0)
+    }
+  )
+  it('publishes only host-captured status without starting or refreshing a server', async () => {
+    const { addIPCHandlers } = await import('./ipcHandlers')
+    addIPCHandlers()
+    const status = { revision: 'captured-status', servers: [], environmentNames: [], paused: false }
+    mocks.agentMcp.onStatusChanged.mock.calls[0][0](status)
+    expect(mocks.send).toHaveBeenCalledExactlyOnceWith('agent-mcp:status', status)
+    expect(mocks.agentMcp.start).not.toHaveBeenCalled()
+    expect(mocks.agentMcp.refresh).not.toHaveBeenCalled()
   })
 })

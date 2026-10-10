@@ -559,17 +559,15 @@ describe('durable MCP outcomes', () => {
     }
   )
 
-  it('keeps corrupt/unreadable originals and refuses overwriting an empty fallback', async () => {
+  it('keeps corrupt/unreadable originals and refuses an empty fallback without repair writes', async () => {
     await fs.mkdir(join(directory, 'agent-mcp'), { mode: 0o700 })
     await fs.writeFile(path, '{invalid', { mode: 0o600 })
     const store = ledger()
-    await store.load()
-    expect(store.records()).toEqual([])
-    await expect(store.intent(scope, await operation())).rejects.toThrow('read-only')
+    await expect(store.load()).rejects.toThrow('safe file recovery')
+    expect(() => store.records()).toThrow('loading')
+    await expect(store.intent(scope, await operation())).rejects.toThrow('safe file recovery')
     expect(await fs.readFile(path, 'utf8')).toBe('{invalid')
-    expect(
-      (await fs.readdir(join(directory, 'agent-mcp'))).some((file) => file.endsWith('.corrupt'))
-    ).toBe(true)
+    expect(await fs.readdir(join(directory, 'agent-mcp'))).toEqual(['outcomes.json'])
     await fs.rm(path)
     await fs.mkdir(path)
     const unreadable = ledger()
@@ -579,20 +577,49 @@ describe('durable MCP outcomes', () => {
     expect((await fs.stat(path)).isDirectory()).toBe(true)
   })
 
-  it('does not silently resume sends after backup recovery could have lost newer evidence', async () => {
+  it('does not silently recover an older backup when latest primary evidence is damaged', async () => {
     const store = ledger(),
       op = await operation()
     await store.settle(scope, op, notSent())
     await fs.copyFile(path, `${path}.bak`)
+    const backup = await fs.readFile(`${path}.bak`, 'utf8')
     await fs.writeFile(path, '{damaged-latest-primary')
     const restored = ledger()
-    await restored.load()
-    expect(restored.records()[0].outcome).toBe('not-sent')
-    expect(() => restored.assertWritable()).toThrow('persistence recovery')
-    expect(
-      (await fs.readdir(join(directory, 'agent-mcp'))).some((file) => file.endsWith('.corrupt'))
-    ).toBe(true)
+    await expect(restored.load()).rejects.toThrow('safe file recovery')
+    expect(await fs.readFile(path, 'utf8')).toBe('{damaged-latest-primary')
+    expect(await fs.readFile(`${path}.bak`, 'utf8')).toBe(backup)
   })
+
+  it.each(['corrupt', 'missing'] as const)(
+    'refuses ambiguous older-backup recovery across two restarts (%s primary)',
+    async (damage) => {
+      const store = ledger(),
+        terminal = await operation('older-terminal-call')
+      await store.settle(scope, terminal, notSent())
+      await store.intent(scope, await operation('newer-possibly-sent-call'))
+      const backup = await fs.readFile(`${path}.bak`, 'utf8')
+      expect(
+        JSON.parse(backup).records.map((record: AgentMcpOutcomeRecord) => record.outcome)
+      ).toEqual(['not-sent'])
+      if (damage === 'corrupt') await fs.writeFile(path, '{damaged-newer-intent')
+      else await fs.unlink(path)
+      let sends = 0
+      for (let restart = 0; restart < 2; restart++) {
+        const restored = ledger()
+        await expect(restored.load()).rejects.toThrow('safe file recovery')
+        await expect(
+          restored.intent(scope, await operation(`retry-${restart}`)).then(() => {
+            sends++
+          })
+        ).rejects.toThrow('safe file recovery')
+        expect(await fs.readFile(`${path}.bak`, 'utf8')).toBe(backup)
+        if (damage === 'corrupt')
+          expect(await fs.readFile(path, 'utf8')).toBe('{damaged-newer-intent')
+        else await expect(fs.readFile(path, 'utf8')).rejects.toHaveProperty('code', 'ENOENT')
+      }
+      expect(sends).toBe(0)
+    }
+  )
 
   it('refuses capacity rather than discarding unreconciled evidence', async () => {
     const store = ledger()

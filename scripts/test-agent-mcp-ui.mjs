@@ -7,10 +7,86 @@
 import { createServer } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { spawn } from 'node:child_process'
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
+import { parse } from 'acorn'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
+
+// Parse all literal browser expressions before Chromium starts. Dynamic helpers additionally
+// validate their final generated expression before sending it to DevTools.
+const expressionSource = await readFile(fileURLToPath(import.meta.url), 'utf8')
+const expressionAst = parse(expressionSource, {
+  ecmaVersion: 'latest',
+  sourceType: 'module',
+  locations: true
+})
+let expressionChecks = 0
+const constants = new Map()
+function visit(node, callback) {
+  if (!node || typeof node !== 'object') return
+  if (typeof node.type === 'string') callback(node)
+  for (const value of Object.values(node)) {
+    if (Array.isArray(value)) value.forEach((child) => visit(child, callback))
+    else if (value && typeof value === 'object') visit(value, callback)
+  }
+}
+visit(expressionAst, (node) => {
+  if (
+    node.type === 'VariableDeclarator' &&
+    node.id.type === 'Identifier' &&
+    node.init?.type === 'Literal' &&
+    typeof node.init.value === 'string'
+  )
+    constants.set(node.id.name, node.init.value)
+})
+function browserExpression(node) {
+  if (node?.type === 'Literal' && typeof node.value === 'string') return node.value
+  if (node?.type === 'TemplateLiteral') {
+    let text = node.quasis[0].value.cooked
+    for (let index = 0; index < node.expressions.length; index++) {
+      const expression = node.expressions[index]
+      const value =
+        expression.type === 'Identifier' && constants.has(expression.name)
+          ? constants.get(expression.name)
+          : expression.type === 'CallExpression' &&
+              expression.callee.type === 'MemberExpression' &&
+              expression.callee.object.name === 'JSON' &&
+              expression.callee.property.name === 'stringify'
+            ? JSON.stringify('fixture "quoted" value')
+            : undefined
+      if (value === undefined) return undefined
+      text += value + node.quasis[index + 1].value.cooked
+    }
+    return text
+  }
+  return undefined
+}
+function validateBrowserExpression(expression) {
+  new Function(`return (async () => { ${expression} })()`)
+}
+visit(expressionAst, (node) => {
+  if (
+    node.type !== 'CallExpression' ||
+    node.callee.type !== 'Identifier' ||
+    !['evaluate', 'wait'].includes(node.callee.name)
+  )
+    return
+  const expression = browserExpression(node.arguments[0])
+  if (expression === undefined) return
+  try {
+    validateBrowserExpression(node.callee.name === 'wait' ? `return (${expression})` : expression)
+  } catch (error) {
+    throw new Error(
+      `Invalid browser expression at harness line ${node.loc.start.line}: ${error.message}`
+    )
+  }
+  expressionChecks++
+})
+if (process.argv.includes('--validate-expressions')) {
+  console.log(JSON.stringify({ expressionChecks, syntaxValidated: true, browserExecuted: false }))
+  process.exit(0)
+}
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const fixtureDir = await mkdtemp(join(root, '.agent-mcp-ui-'))
@@ -30,8 +106,17 @@ try {
     `
 import { mount, unmount } from 'svelte'
 import Card from '/@fs/${root}/src/renderer/src/components/AgentMcpSettingsCard.svelte'
+import Outcome from '/@fs/${root}/src/renderer/src/components/AgentMcpOutcome.svelte'
 import '/@fs/${root}/src/renderer/app.css'
 const clone = (value) => structuredClone(value)
+const baseMcp = { runId: 'fixture-run', operationDigest: 'fixture-operation', serverId: 'fixture', catalogKind: 'tools', remoteKey: 'fixture_tool' }
+const outcomeFixtures = {
+  confirmedError: { mcp: { ...baseMcp, outcome: 'confirmed', requestSent: true }, result: { success: false, source: 'mcp', untrusted: true, error: { code: 'fixture_server_error', message: 'Confirmed server error <img src=x onerror="window.__mcpInjected=true">' }, content: [{ type: 'text', text: 'x'.repeat(40000) + '<script>window.__mcpInjected=true</script>' }] } },
+  unknown: { mcp: { ...baseMcp, outcome: 'unknown', requestSent: true }, result: { success: false, source: 'mcp', untrusted: true, unknownOutcome: true, doNotRetry: true, error: { code: 'mcp_unknown_outcome', message: 'Synthetic unknown external outcome' } } },
+  notSent: { mcp: { ...baseMcp, outcome: 'not-sent', requestSent: false }, result: { success: false, source: 'mcp', untrusted: true, requestSent: false, unknownOutcome: false, error: { code: 'mcp_not_attempted', message: 'Synthetic request not attempted' } } },
+  checkpoint: { mcp: { ...baseMcp, outcome: 'confirmed', requestSent: true, checkpointUnconfirmed: true }, result: { success: true, source: 'mcp', untrusted: true, requestSent: true, checkpointUnconfirmed: true, content: [{ type: 'text', text: 'Confirmed response with failed local checkpoint' }] } },
+  oversized: { mcp: { ...baseMcp, outcome: 'unknown', requestSent: true, checkpointUnconfirmed: true }, result: { success: false, source: 'mcp', untrusted: true, content: [{ type: 'text', text: 'あ'.repeat(70000) }] } }
+}
 const server = { id: 'fixture', label: 'Installed fixture', executable: '/installed/server', args: ['--stdio'], cwd: '/installed', protocol: 'legacy', environment: ['HOME'] }
 const category = (state) => ({ state, count: 1, available: state === 'ready' ? 1 : 0, entries: [{ remoteKey: '<img src=x onerror="window.__mcpInjected=true">', alias: 'fixture_alias', state: state === 'ready' ? 'available' : 'quarantined', reason: state === 'ready' ? undefined : 'Invalid schema', descriptorJson: JSON.stringify({ description: '<script>window.__mcpInjected=true</script>' }) }] })
 const catalog = { generation: 1, tools: category('ready'), resources: { ...category('unsupported'), reason: 'Resources unsupported' }, resourceTemplates: { ...category('stale'), reason: 'Explicit refresh needed' } }
@@ -83,7 +168,12 @@ function render() {
     if (instance) { await unmount(instance); instance = undefined }
     document.getElementById('app').textContent = ''
     if (location.hash === '#settings') instance = mount(Card, { target: document.getElementById('app') })
-    else document.getElementById('app').textContent = 'Another settings view'
+    else if (location.hash.startsWith('#outcome-')) {
+      const props = outcomeFixtures[location.hash.slice('#outcome-'.length)]
+      if (!props) throw new Error('Unknown outcome fixture')
+      instance = mount(Outcome, { target: document.getElementById('app'), props: clone(props) })
+    } else document.getElementById('app').textContent = 'Another settings view'
+    document.getElementById('app').dataset.route = location.hash
   })
 }
 window.addEventListener('hashchange', render)
@@ -104,6 +194,10 @@ render()
   await vite.transformRequest(
     '/@fs/' + root + '/src/renderer/src/components/AgentMcpSettingsCard.svelte'
   )
+  await vite.transformRequest(
+    '/@fs/' + root + '/src/renderer/src/components/AgentMcpOutcome.svelte'
+  )
+  await vite.transformRequest('/@fs/' + root + '/src/renderer/src/utils/agentMcpOutcome.ts')
   await vite.transformRequest('/@fs/' + root + '/src/renderer/app.css')
   phase = 'Chromium startup'
   const profile = join(fixtureDir, 'chromium-profile')
@@ -198,6 +292,7 @@ render()
     mobile: false
   })
   const evaluate = async (expression) => {
+    validateBrowserExpression(expression)
     const result = await command('Runtime.evaluate', {
       expression: `(async () => { ${expression} })()`,
       awaitPromise: true,
@@ -274,7 +369,7 @@ render()
   assert.equal(await evaluate('return !!window.__mcpInjected'), false)
   assert.equal(
     await evaluate(
-      'return document.querySelector("[aria-label=\"Review exact MCP launch\"] pre").textContent.includes("<svg onload=")'
+      `return document.querySelector(${JSON.stringify('[aria-label="Review exact MCP launch"] pre')}).textContent.includes("<svg onload=")`
     ),
     true
   )
@@ -401,14 +496,118 @@ render()
     'Disconnect requires fresh startup; pause and preparation failures remain visible and do not retry'
   )
 
+  const outcomeRoute = async (name) => {
+    await evaluate(`location.hash = ${JSON.stringify('#outcome-' + name)}`)
+    await wait(
+      `!!document.querySelector('[aria-label="MCP operation outcome"]') && document.getElementById('app').dataset.route === ${JSON.stringify('#outcome-' + name)} && window.__fixture.listenerCount() === 0`
+    )
+    await evaluate(
+      'document.querySelector(\'[aria-label="MCP operation outcome"] details\').open = true'
+    )
+  }
+  await outcomeRoute('confirmedError')
+  await wait("document.body.textContent.includes('External error response confirmed')")
+  assert.equal(
+    await evaluate(
+      "return document.querySelector('[aria-label=\"MCP operation outcome\"] pre').textContent.includes('fixture_server_error')"
+    ),
+    true
+  )
+  assert.equal(
+    await evaluate(
+      "return document.querySelector('[aria-label=\"MCP operation outcome\"] pre').textContent.includes('x'.repeat(40000))"
+    ),
+    true
+  )
+  assert.equal(
+    await evaluate(
+      'return document.querySelectorAll(\'[aria-label="MCP operation outcome"] img,[aria-label="MCP operation outcome"] script\').length'
+    ),
+    0
+  )
+  assert.equal(await evaluate('return !!window.__mcpInjected'), false)
+  assert.equal(
+    await evaluate(
+      "const pre = document.querySelector('[aria-label=\"MCP operation outcome\"] pre'); const style = getComputedStyle(pre); return style.whiteSpace === 'pre-wrap' && style.overflowY === 'auto' && pre.scrollHeight > pre.clientHeight"
+    ),
+    true
+  )
+  flows.push(
+    'Confirmed MCP error retains escaped wrapped scrollable result JSON, including returned text beyond 24,000 characters'
+  )
+
+  await outcomeRoute('unknown')
+  await wait(
+    "document.body.textContent.includes('External outcome is unknown') && document.body.textContent.includes('Do not retry automatically')"
+  )
+  assert.equal(
+    await evaluate(
+      "return document.body.textContent.includes('External request was not attempted')"
+    ),
+    false
+  )
+  await evaluate(
+    'document.querySelector(\'[aria-label="MCP operation outcome"] details\').open = false'
+  )
+  assert.equal(
+    await evaluate(
+      "const warning = document.querySelector('[aria-label=\"MCP operation outcome\"] [role=status]'); return warning.getBoundingClientRect().height > 0 && warning.textContent.includes('unknown')"
+    ),
+    true
+  )
+  flows.push(
+    'Unknown-outcome warning remains visible outside collapsed result details and never claims not attempted'
+  )
+
+  await outcomeRoute('notSent')
+  await wait("document.body.textContent.includes('External request was not attempted')")
+  assert.equal(
+    await evaluate("return document.body.textContent.includes('External outcome is unknown')"),
+    false
+  )
+  flows.push('Not-sent display distinguishes zero attempted request from unknown external outcome')
+
+  await outcomeRoute('checkpoint')
+  await wait(
+    "document.body.textContent.includes('Outcome checkpointing is unconfirmed') && document.body.textContent.includes('External response confirmed')"
+  )
+  assert.equal(
+    await evaluate(
+      "return document.querySelector('[aria-label=\"MCP operation outcome\"] pre').textContent.includes('Confirmed response with failed local checkpoint')"
+    ),
+    true
+  )
+  flows.push(
+    'Checkpoint failure preserves confirmed response details and an independent visible recovery warning'
+  )
+
+  await outcomeRoute('oversized')
+  await wait("document.body.textContent.includes('Result display truncated at 64 KiB')")
+  assert.equal(
+    await evaluate(
+      'return new TextEncoder().encode(document.querySelector(\'[aria-label="MCP operation outcome"] pre\').textContent).length <= 65536'
+    ),
+    true
+  )
+  assert.equal(
+    await evaluate(
+      "return document.body.textContent.includes('External outcome is unknown') && document.body.textContent.includes('Outcome checkpointing is unconfirmed')"
+    ),
+    true
+  )
+  flows.push(
+    'Oversized multibyte result display is bounded without clipping host-owned unknown/checkpoint warnings'
+  )
+
   const report = {
     passed: true,
     engine: await send('Browser.getVersion'),
     flows,
     calls: await evaluate('return window.__fixture.calls'),
     browserErrors,
+    expressionChecks,
     limitations: [
-      'Isolated real Svelte card and app CSS with fake IPC, not the full Electron application',
+      'Isolated real Svelte controls/outcome components and app CSS with fake IPC, not the full Electron application',
       'No real MCP executable, provider, Discord, credentials, HTTP/OAuth or installation',
       'Linux Chromium only; no native platform dialogs or Windows/macOS UI coverage'
     ]

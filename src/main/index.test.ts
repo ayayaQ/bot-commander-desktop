@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   windows: [] as Array<{
     show: ReturnType<typeof vi.fn>
     callbacks: Map<string, (...args: unknown[]) => void>
+    webCallbacks: Map<string, (...args: unknown[]) => void>
   }>,
   appCallbacks: new Map<string, (...args: unknown[]) => unknown>(),
   exit: vi.fn(),
@@ -18,6 +19,14 @@ const mocks = vi.hoisted(() => ({
   consoleWarning: vi.fn(),
   addIPCHandlers: vi.fn(),
   initializeMcpServer: vi.fn(async () => undefined),
+  stopMcpServer: vi.fn(async () => undefined),
+  agentMcp: {
+    pause: vi.fn(),
+    close: vi.fn(async () => undefined),
+    resume: vi.fn(),
+    start: vi.fn(),
+    cancelPendingLaunches: vi.fn()
+  },
   stopSpamProtection: vi.fn(),
   resumeSpamProtection: vi.fn()
 }))
@@ -37,7 +46,13 @@ vi.mock('electron', () => ({
   },
   BrowserWindow: class {
     callbacks = new Map<string, (...args: unknown[]) => void>()
-    webContents = { on: vi.fn(), setWindowOpenHandler: vi.fn() }
+    webCallbacks = new Map<string, (...args: unknown[]) => void>()
+    webContents = {
+      on: vi.fn((name: string, callback: (...args: unknown[]) => void) => {
+        this.webCallbacks.set(name, callback)
+      }),
+      setWindowOpenHandler: vi.fn()
+    }
     show = vi.fn()
     hide = vi.fn()
     loadFile = vi.fn()
@@ -96,16 +111,11 @@ vi.mock('./services/botService', () => ({
   resumeSpamProtection: mocks.resumeSpamProtection
 }))
 vi.mock('./services/agentMcpService', () => ({
-  agentMcpService: {
-    pause: vi.fn(),
-    close: vi.fn(async () => undefined),
-    resume: vi.fn(),
-    cancelPendingLaunches: vi.fn()
-  }
+  agentMcpService: mocks.agentMcp
 }))
 vi.mock('./services/mcpServerService', () => ({
   initializeMcpServer: mocks.initializeMcpServer,
-  stopMcpServer: vi.fn()
+  stopMcpServer: mocks.stopMcpServer
 }))
 
 beforeEach(async () => {
@@ -113,6 +123,7 @@ beforeEach(async () => {
   vi.clearAllMocks()
   vi.useFakeTimers()
   mocks.saveStats.mockResolvedValue(undefined)
+  mocks.agentMcp.close.mockResolvedValue(undefined)
   mocks.windows.length = 0
   mocks.appCallbacks.clear()
   mocks.directory = await fs.mkdtemp(join(tmpdir(), 'bc-shell-recovery-'))
@@ -259,4 +270,49 @@ it('resumes spam protection and the runtime when a failed checkpoint cancels qui
     runtime.evaluateBotState('botState.afterCancelledQuit = true')
   ).resolves.toBeUndefined()
   expect(await runtime.readBotState()).toEqual({ afterCancelledQuit: true })
+})
+
+it('revokes startup review on main-frame reload or renderer destruction only', async () => {
+  await import('./index')
+  await vi.waitFor(() => expect(mocks.addIPCHandlers).toHaveBeenCalledOnce())
+  const window = mocks.windows[0]
+  const navigation = window.webCallbacks.get('did-start-navigation')!
+  navigation({}, 'file:///fixture', true, true)
+  navigation({}, 'file:///fixture', false, false)
+  expect(mocks.agentMcp.cancelPendingLaunches).not.toHaveBeenCalled()
+  navigation({}, 'file:///fixture', false, true)
+  expect(mocks.agentMcp.cancelPendingLaunches).toHaveBeenCalledOnce()
+  window.webCallbacks.get('destroyed')?.()
+  expect(mocks.agentMcp.cancelPendingLaunches).toHaveBeenCalledTimes(2)
+  expect(mocks.agentMcp.start).not.toHaveBeenCalled()
+  expect(mocks.agentMcp.close).not.toHaveBeenCalled()
+})
+
+it('pauses client admission before closing owned clients and exits only after both MCP sides stop', async () => {
+  await import('./index')
+  await vi.waitFor(() => expect(mocks.addIPCHandlers).toHaveBeenCalledOnce())
+  await mocks.appCallbacks.get('before-quit')?.({ preventDefault: vi.fn() })
+  expect(mocks.agentMcp.pause).toHaveBeenCalledOnce()
+  expect(mocks.agentMcp.close).toHaveBeenCalledOnce()
+  expect(mocks.stopMcpServer).toHaveBeenCalledOnce()
+  expect(mocks.agentMcp.pause.mock.invocationCallOrder[0]).toBeLessThan(
+    mocks.agentMcp.close.mock.invocationCallOrder[0]
+  )
+  expect(mocks.agentMcp.close.mock.invocationCallOrder[0]).toBeLessThan(
+    mocks.exit.mock.invocationCallOrder[0]
+  )
+  expect(mocks.agentMcp.start).not.toHaveBeenCalled()
+})
+
+it('keeps the app open and resumes admission without connecting after owned client cleanup fails', async () => {
+  await import('./index')
+  await vi.waitFor(() => expect(mocks.addIPCHandlers).toHaveBeenCalledOnce())
+  mocks.agentMcp.close.mockRejectedValueOnce(new Error('fixture-owned-cleanup-failure'))
+  await mocks.appCallbacks.get('before-quit')?.({ preventDefault: vi.fn() })
+  expect(mocks.stopMcpServer).toHaveBeenCalledOnce()
+  expect(mocks.agentMcp.close).toHaveBeenCalledOnce()
+  expect(mocks.exit).not.toHaveBeenCalled()
+  expect(mocks.agentMcp.resume).toHaveBeenCalledOnce()
+  expect(mocks.agentMcp.start).not.toHaveBeenCalled()
+  expect(mocks.consoleError).toHaveBeenCalledWith(expect.stringContaining('Could not quit safely'))
 })

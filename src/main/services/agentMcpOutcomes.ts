@@ -432,7 +432,19 @@ export function createAgentMcpOutcomeLedger(options: LedgerOptions) {
       loading = track(
         withAgentPersistenceOperation(async () => {
           try {
-            await privateDirectory()
+            // A backup may predate an unconfirmed send. Never let generic recovery
+            // replace corrupt/missing primary evidence and erase that ambiguity on restart.
+            const primary = await snapshotOnDisk()
+            if (!primary) {
+              try {
+                await fs.lstat(`${path}.bak`)
+                throw new Error(
+                  'MCP outcome primary is missing; older backup delivery evidence is ambiguous'
+                )
+              } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+              }
+            }
             const stored = await persistence.load()
             data = structuredClone(stored.data)
             dataLoaded = true

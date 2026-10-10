@@ -11,6 +11,7 @@ const files = [
   'src/main/services/agentMcpOutcomes.test.ts',
   'src/main/services/agentMcpWorkflow.integration.test.ts',
   'src/renderer/src/stores/agentMcp.test.ts',
+  'src/renderer/src/utils/agentMcpOutcome.test.ts',
   'src/main/handlers/ipcHandlers.test.ts',
   'src/main/handlers/ipcSecurity.test.ts',
   'src/main/index.test.ts',

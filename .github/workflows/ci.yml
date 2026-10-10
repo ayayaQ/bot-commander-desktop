@@ -43,6 +43,10 @@ jobs:
 
       - name: Build production application
         run: npm run build
+      - name: Verify packaged production dependencies and SDK validator resolution
+        run: |
+          node_modules/.bin/electron-builder --dir --linux --x64 --publish never --config.directories.output="$RUNNER_TEMP/agent-mcp-package" --config.electronDist="node_modules/electron/dist"
+          ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron scripts/verify-agent-mcp-package.mjs "$RUNNER_TEMP/agent-mcp-package/linux-unpacked/resources/app.asar"
       - name: Check rendered MCP controls with an installed headless browser
         run: |
           export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"

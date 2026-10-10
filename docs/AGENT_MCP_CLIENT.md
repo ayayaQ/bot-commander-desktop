@@ -38,6 +38,9 @@ warnings, invalidate the connection and require inspecting the external resource
 another attempt. A bounded host-owned send-intent/outcome record reconciles cancellation
 and interrupted history; it contains no reusable approvals and never replays a request.
 Unconfirmed checkpointing blocks further calls and preserves recovery evidence.
+An older backup cannot prove delivery of newer attempts. Corrupt primary evidence, or a
+missing primary with a backup, is retained across restarts and blocks external calls;
+the ledger is never automatically replaced with an older backup. Ordinary chat remains available.
 
 Persistence uses the existing atomic file/checkpoint lifecycle, with private owned bounded
 file preflight. It does not defend against concurrent same-user replacement of application

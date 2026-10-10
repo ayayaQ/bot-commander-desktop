@@ -371,6 +371,38 @@ describe('explicit lifecycle and control authority', () => {
     expect(subject.transports).toHaveLength(0)
     expect((await subject.service.start(fresh.token)).started).toBe(true)
   })
+  it.each(['legacy', '2026-07-28'] as const)(
+    'rechecks launch expiry at actual %s startup after a held asynchronous factory',
+    async (protocol) => {
+      const subject = await fixture(protocol, false),
+        held = gate()
+      ;(
+        subject.service as unknown as {
+          options: { transportFactory: () => Promise<OfflineTransport> }
+        }
+      ).options.transportFactory = async () => {
+        const peer = new OfflineTransport()
+        subject.transports.push(peer)
+        held.entered()
+        await held.held
+        return peer
+      }
+      const launch = await subject.service.prepareLaunch('fixture'),
+        startup = subject.service.start(launch.token)
+      await held.ready
+      subject.expire()
+      held.release()
+      expect((await startup).started).toBe(false)
+      expect(subject.peer().starts).toBe(0)
+      expect(subject.peer().closes).toBeGreaterThan(0)
+      expect((await subject.service.list()).servers[0].state).toBe('disabled')
+      await expect(subject.service.start(launch.token)).rejects.toThrow('unavailable')
+      expect(
+        (await subject.service.start((await subject.service.prepareLaunch('fixture')).token))
+          .started
+      ).toBe(true)
+    }
+  )
   it('cancels pending permits on renderer lifecycle while preserving completed connections', async () => {
     const subject = await fixture('legacy', false),
       old = await subject.service.prepareLaunch('fixture')
@@ -473,6 +505,38 @@ describe('explicit lifecycle and control authority', () => {
 })
 
 describe('one-shot actual send and durable outcomes', () => {
+  it.each(['legacy', '2026-07-28'] as const)(
+    'omits private cancellation reasons from %s notifications while preserving request identity',
+    async (protocol) => {
+      const subject = await fixture(protocol),
+        controller = new AbortController(),
+        operation = await prepared(subject)
+      subject.peer().mode = 'drop'
+      const invocation = subject.service.invoke(operation, controller.signal, () => {}, hooks())
+      await vi.waitFor(() => expect(subject.peer().count('tools/call')).toBe(1))
+      controller.abort('offline-known-credential')
+      expect(await invocation).toMatchObject({
+        outcome: 'unknown',
+        requestSent: true,
+        unknownOutcome: true,
+        doNotRetry: true
+      })
+      const request = subject
+          .peer()
+          .messages.find((message) => 'method' in message && message.method === 'tools/call')!,
+        cancelled = subject
+          .peer()
+          .messages.find(
+            (message) => 'method' in message && message.method === 'notifications/cancelled'
+          )!
+      expect(cancelled).toBeDefined()
+      expect('method' in cancelled && cancelled.params?.requestId).toBe(
+        'id' in request ? request.id : undefined
+      )
+      expect('method' in cancelled && cancelled.params).not.toHaveProperty('reason')
+      expect(JSON.stringify(subject.peer().messages)).not.toContain('offline-known-credential')
+    }
+  )
   it.each(['legacy', '2026-07-28'] as const)(
     'sends exact %s once after durable intent without SDK refresh/retry',
     async (protocol) => {

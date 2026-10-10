@@ -517,7 +517,12 @@ export class AgentMcpService {
       current.throwIfAborted()
       this.assertOpen()
       return {
-        started: await this.connect(permit.launch, permit.privacyRevision, current),
+        started: await this.connect(
+          permit.launch,
+          permit.privacyRevision,
+          permit.preparation.expiresAt,
+          current
+        ),
         status: this.statuses()
       }
     }, signal)
@@ -560,6 +565,7 @@ export class AgentMcpService {
   private async connect(
     launch: McpLaunchIdentity,
     privacyRevision: number | string,
+    expiresAt: number,
     signal: AbortSignal
   ): Promise<boolean> {
     const sdk = await import('@modelcontextprotocol/client')
@@ -603,12 +609,26 @@ export class AgentMcpService {
         this.assertOpen()
         if (privacyRevision !== this.privacyRevision())
           throw new Error('MCP privacy changed before process startup')
+        if ((this.options.now?.() ?? Date.now()) >= expiresAt)
+          throw new Error('MCP launch approval expired before process startup')
         await owned.start()
       },
       // Pinned SDK legacy handshake failure detaches this close Promise. Only its
       // adapter observes that rejection; all host paths use strict closeOwned below.
       close: () => closeOwned().catch(() => undefined),
       send: async (message, options) => {
+        if (
+          'method' in message &&
+          message.method === 'notifications/cancelled' &&
+          !('id' in message)
+        ) {
+          // SDK cancellation may stringify the caller's private signal.reason.
+          // The request ID and fixed protocol metadata suffice; never transmit that reason.
+          const params = { ...message.params }
+          delete params.reason
+          await owned.send(mcpFreeze({ ...message, params }), options)
+          return
+        }
         if (
           'method' in message &&
           (('id' in message && connection.pending) ||
