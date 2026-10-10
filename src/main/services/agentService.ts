@@ -9,9 +9,13 @@ import {
   mcpFailure,
   type McpPreparedOperation
 } from '@ayayaq/vivi/extensions/mcp'
-import type { ToolRegistry } from '@ayayaq/vivi/extensions'
+import {
+  createExtensionScope,
+  type ExtensionScope,
+  type ToolRegistry
+} from '@ayayaq/vivi/extensions'
 import { formatMemoryContext, MEMORY_GUIDANCE } from '@ayayaq/vivi/extensions/memory'
-import { createAgentExtensionRegistry } from './agentExtensions'
+import { createAgentExtensionScope } from './agentExtensions'
 import { formatSkillCatalogContext, SKILL_LIMITS } from '@ayayaq/vivi/extensions/skills'
 import { agentSkillStore } from './agentSkillService'
 import type { AgentSkillSnapshot } from './agentSkillStore'
@@ -141,6 +145,9 @@ Bot configuration already stored elsewhere must stay in its existing resource, n
 In planning mode, investigate with read and lint tools and never make mutations. Ask concise questions without special markup whenever more user input is needed. Once the plan is decision-complete, return the plan inside exactly one <proposed_plan>...</proposed_plan> block with no text outside the block. Do not use that block for questions, partial plans, or ordinary discussion.`
 
 interface AgentRunContext {
+  owner: ExtensionScope
+  extensionScope: ExtensionScope
+  durableOperations: Set<Promise<unknown>>
   validationFailures: Map<string, number>
   extensions: ToolRegistry
   mcpTools: Set<string>
@@ -175,7 +182,8 @@ let data: AgentSessionsData = {
 }
 let loaded = false
 let loading: Promise<AgentSessionsData> | undefined
-const controllers = new Map<string, AbortController>()
+const controllers = new Map<string, { runId: string; scope: ExtensionScope }>()
+const runCompletions = new Set<Promise<void>>()
 const approvals = new Map<string, PendingApproval>()
 const deletedSessionIds = new Set<string>()
 const deletingSessionIds = new Set<string>()
@@ -762,7 +770,6 @@ onSettingsChanged((next, previous) => {
   )
     return
   for (const session of data.sessions) {
-    cancelAgentRun(session.id)
     if (session.autoReviewEnrollment || session.mode === 'auto') {
       session.autoReviewEnrollment = undefined
       session.autoReviewMigrationRequired = true
@@ -867,7 +874,8 @@ function isActiveRun(session: AgentSession, runId: string, signal: AbortSignal):
   return (
     !signal.aborted &&
     session.activeRunId === runId &&
-    controllers.get(session.id)?.signal === signal &&
+    controllers.get(session.id)?.runId === runId &&
+    controllers.get(session.id)?.scope.state === 'open' &&
     !deletedSessionIds.has(session.id)
   )
 }
@@ -894,6 +902,20 @@ async function acknowledgeMcpOutcomes(session: AgentSession, runId: string): Pro
         'MCP outcome evidence is retained because its history acknowledgement could not be confirmed.'
     })
   }
+}
+
+function trackRunOperation<T>(context: AgentRunContext, operation: Promise<T>): Promise<T> {
+  context.durableOperations.add(operation)
+  void operation.then(
+    () => context.durableOperations.delete(operation),
+    () => context.durableOperations.delete(operation)
+  )
+  return operation
+}
+
+async function drainRunOperations(context: AgentRunContext): Promise<void> {
+  while (context.durableOperations.size) await Promise.allSettled([...context.durableOperations])
+  await drainMcpReviews(context)
 }
 
 async function drainMcpReviews(context: AgentRunContext): Promise<void> {
@@ -1271,7 +1293,8 @@ async function runTool(
       const knownResult = boundAgentToolResult(committedResult ?? call.result ?? { success: true })
       const ownsRun =
         session.activeRunId === runId &&
-        controllers.get(session.id)?.signal === signal &&
+        controllers.get(session.id)?.runId === runId &&
+        controllers.get(session.id)?.scope.state === 'open' &&
         !deletedSessionIds.has(session.id)
       const committedCall = ownsRun ? call : clone(call)
       committedCall.status = 'completed'
@@ -1335,6 +1358,11 @@ export function stopAgentRuns(): void {
   for (const sessionId of controllers.keys()) cancelAgentRun(sessionId)
 }
 
+/** Await run owners, including their terminal checkpoints and admitted cleanup drains. */
+export async function drainAgentRuns(): Promise<void> {
+  while (runCompletions.size) await Promise.all([...runCompletions])
+}
+
 async function startAgentSession(
   sessionId: string,
   userContent: string,
@@ -1364,20 +1392,37 @@ async function startAgentSession(
     throw new Error('Agent session is being deleted')
   if (isAgentPersistencePaused()) throw new Error('The app is shutting down; agent runs are paused')
   const runId = id('run')
+  // This owner controls the run's cancellation, subscriptions and admitted durable work.
+  // MCP connections/processes remain app-owned and are never closed by this scope.
+  const owner = createExtensionScope()
+  let extensionScope: ExtensionScope | undefined
+  try {
+    extensionScope = await createAgentExtensionScope(
+      agentToolDefinitions.map((tool) => tool.function.name),
+      { catalog: skills.catalog, authorizeRead: skills.authorizeRead }
+    )
+    // Setup can yield; a concurrent run, session deletion or shutdown must win admission.
+    if (controllers.has(sessionId))
+      throw new Error('This agent session already has a running request')
+    if (deletingSessionIds.has(sessionId) || deletedSessionIds.has(sessionId))
+      throw new Error('Agent session is being deleted')
+    if (isAgentPersistencePaused())
+      throw new Error('The app is shutting down; agent runs are paused')
+  } catch (error) {
+    await extensionScope?.dispose()
+    await owner.dispose()
+    throw error
+  }
   const context: AgentRunContext = {
+    owner,
+    extensionScope,
+    durableOperations: new Set(),
     validationFailures: new Map(),
     skills,
     mcpTools: new Set(),
     mcpCalls: new Map(),
     mcpOperations: new Set(),
-    // Reserve every built-in before planning mode filters mutation tools from advertisement.
-    extensions: createAgentExtensionRegistry(
-      agentToolDefinitions.map((tool) => tool.function.name),
-      {
-        catalog: skills.catalog,
-        authorizeRead: skills.authorizeRead
-      }
-    ),
+    extensions: extensionScope.snapshot(),
     documentationPolicy: createDocumentationPolicyState(),
     metrics: createAgentRunMetrics(runId, now()),
     autoReview: { requests: 0 },
@@ -1385,7 +1430,31 @@ async function startAgentSession(
     ...(acceptedPlan ? { acceptedPlan: clone(acceptedPlan) } : {})
   }
   const mode = session.mode
-  const controller = new AbortController()
+  const controller = { runId, scope: owner }
+  const signal = owner.signal
+  owner.defer(() => drainRunOperations(context))
+  owner.defer(() => context.extensionScope.dispose())
+  owner.defer(() => {
+    for (const [callId, approval] of approvals) {
+      if (approval.sessionId === sessionId && approval.runId === runId) {
+        approvals.delete(callId)
+        approval.resolve(false)
+      }
+    }
+  })
+  const unsubscribe = onSettingsChanged((next, previous) => {
+    if (owner.state !== 'open' || controllers.get(sessionId) !== controller) return
+    if (
+      next.aiProvider !== previous.aiProvider ||
+      next.openaiApiKey !== previous.openaiApiKey ||
+      next.openrouterApiKey !== previous.openrouterApiKey ||
+      next.agentDecisionAccountRevision !== previous.agentDecisionAccountRevision
+    )
+      cancelAgentRun(sessionId)
+  })
+  owner.defer(() => {
+    unsubscribe()
+  })
   controllers.set(sessionId, controller)
   session.activeRunId = runId
   session.status = 'running'
@@ -1404,11 +1473,17 @@ async function startAgentSession(
     session.activeRunId = undefined
     session.error = errorDetail(error)
     session.lastRunMetrics = finishAgentRunMetrics(context.metrics, 'error', now())
+    try {
+      await owner.dispose()
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], 'Agent startup and cleanup failed')
+    }
     throw error
   }
   emitSession(session, runId)
 
-  void withAgentPersistenceOperation(async () => {
+  const completion = withAgentPersistenceOperation(async () => {
+    let terminal: 'done' | 'error' = 'done'
     try {
       const memoryContext = formatAgentMemoryContext((await loadAgentMemories()).memories)
       const hasMemories = memoryContext !== 'Saved user memories: none.'
@@ -1416,8 +1491,8 @@ async function startAgentSession(
       const capabilities = getAgentModelCapabilities(settings, runModel.model)
       if (capabilities.tools === 'supported') {
         try {
-          const catalogs = await agentMcpService.captureCatalogs(controller.signal)
-          assertActiveRun(session, runId, controller.signal)
+          const catalogs = await agentMcpService.captureCatalogs(signal)
+          assertActiveRun(session, runId, signal)
           const mcp = createMcpExtension(
             agentMcpService,
             catalogs,
@@ -1428,14 +1503,32 @@ async function startAgentSession(
               operationsEnabled: mode !== 'planning'
             }
           )
-          context.mcpTools = new Set(mcp.tools.map((tool) => tool.definition.name))
-          context.extensions = createAgentExtensionRegistry(
+          const candidate = await createAgentExtensionScope(
             agentToolDefinitions.map((tool) => tool.function.name),
             { catalog: skills.catalog, authorizeRead: skills.authorizeRead },
             mcp
           )
+          try {
+            assertActiveRun(session, runId, signal)
+            // No provider has received the old snapshot. Teardown must succeed before publication.
+            await context.extensionScope.dispose()
+            assertActiveRun(session, runId, signal)
+            context.extensionScope = candidate
+            context.extensions = candidate.snapshot()
+            context.mcpTools = new Set(mcp.tools.map((tool) => tool.definition.name))
+          } catch (error) {
+            try {
+              await candidate.dispose()
+            } catch (cleanupError) {
+              throw new AggregateError(
+                [error, cleanupError],
+                'MCP extension setup and cleanup failed'
+              )
+            }
+            throw error
+          }
         } catch {
-          assertActiveRun(session, runId, controller.signal)
+          assertActiveRun(session, runId, signal)
           reportAgentPersistenceNotice({
             level: 'warning',
             message: 'External MCP metadata is unavailable; ordinary agent tools remain available.'
@@ -1472,7 +1565,7 @@ async function startAgentSession(
         }
       ]
       const initialTokenCount = session.tokenCount
-      assertActiveRun(session, runId, controller.signal)
+      assertActiveRun(session, runId, signal)
       const result = await runAgent({
         provider: createAgentProvider(settings, runModel, { stream: true, capabilities }),
         messages: [
@@ -1501,7 +1594,7 @@ async function startAgentSession(
                 ...context.extensions.tools
               ]
             : [],
-        signal: controller.signal,
+        signal,
         maxRounds: MAX_TOOL_ROUNDS,
         executeTool: async (call, { signal }) => {
           const { toolCall, content } = await runTool(session, runId, mode, call, context, signal)
@@ -1512,55 +1605,62 @@ async function startAgentSession(
               (context.mcpTools.has(toolCall.name) && toolCall.status === 'rejected')
           }
         },
-        onEvent: async (event) => {
-          assertActiveRun(session, runId, controller.signal)
-          if (event.type === 'text_delta') {
-            emit(session, { type: 'text_delta', runId, delta: event.text })
-          }
-          if (event.type === 'assistant') {
-            // Partial output is display-only and must never become persisted history.
-            emit(session, { type: 'progress_reset', runId })
-          }
-          if (event.type === 'tool_started') {
-            context.metrics = recordAgentRunTool(context.metrics, {
-              ...event.call,
-              status: 'running',
-              createdAt: now()
-            })
-          }
-          if (event.type === 'tool_completed') {
-            const recorded = context.metrics.tools?.find((tool) => tool.id === event.message.callId)
-            // Core can reject an unadvertised tool without invoking the host executor.
-            // Keep richer host completion/rejection/lint evidence when it was recorded.
-            if (recorded?.status === 'running')
-              context.metrics = recordAgentRunTool(context.metrics, {
-                id: event.message.callId,
-                name: event.message.name,
-                arguments: {},
-                status: event.message.isError ? 'error' : 'completed',
-                createdAt: now()
-              })
-          }
-          if (event.type === 'round_completed') {
-            context.metrics = recordAgentRound(
-              context.metrics,
-              context.metrics.providerRounds + 1,
-              event.usage
-            )
-            session.tokenCount = initialTokenCount + context.metrics.totalTokens
-            checkpointRunMetrics(session, context)
-            await save()
-            emitSession(session, runId)
-          }
-          if (event.type === 'assistant' || event.type === 'tool_completed') {
-            session.history!.push(clone(event.message))
-            // Checkpoint calls before execution, then each result; recovery never replays them.
-            checkpointRunMetrics(session, context)
-            await save()
-          }
-        }
+        onEvent: (event) =>
+          trackRunOperation(
+            context,
+            (async () => {
+              assertActiveRun(session, runId, signal)
+              if (event.type === 'text_delta') {
+                emit(session, { type: 'text_delta', runId, delta: event.text })
+              }
+              if (event.type === 'assistant') {
+                // Partial output is display-only and must never become persisted history.
+                emit(session, { type: 'progress_reset', runId })
+              }
+              if (event.type === 'tool_started') {
+                context.metrics = recordAgentRunTool(context.metrics, {
+                  ...event.call,
+                  status: 'running',
+                  createdAt: now()
+                })
+              }
+              if (event.type === 'tool_completed') {
+                const recorded = context.metrics.tools?.find(
+                  (tool) => tool.id === event.message.callId
+                )
+                // Core can reject an unadvertised tool without invoking the host executor.
+                // Keep richer host completion/rejection/lint evidence when it was recorded.
+                if (recorded?.status === 'running')
+                  context.metrics = recordAgentRunTool(context.metrics, {
+                    id: event.message.callId,
+                    name: event.message.name,
+                    arguments: {},
+                    status: event.message.isError ? 'error' : 'completed',
+                    createdAt: now()
+                  })
+              }
+              if (event.type === 'round_completed') {
+                context.metrics = recordAgentRound(
+                  context.metrics,
+                  context.metrics.providerRounds + 1,
+                  event.usage
+                )
+                session.tokenCount = initialTokenCount + context.metrics.totalTokens
+                checkpointRunMetrics(session, context)
+                await save()
+                assertActiveRun(session, runId, signal)
+                emitSession(session, runId)
+              }
+              if (event.type === 'assistant' || event.type === 'tool_completed') {
+                session.history!.push(clone(event.message))
+                // Checkpoint calls before execution, then each result; recovery never replays them.
+                checkpointRunMetrics(session, context)
+                await save()
+              }
+            })()
+          )
       })
-      await drainMcpReviews(context)
+      await drainRunOperations(context)
       // Cancellation/error may close unexecuted calls without emitting further events.
       if (result.error?.code !== 'invalid_input')
         session.history = result.history.slice(prefix.length)
@@ -1582,12 +1682,11 @@ async function startAgentSession(
       session.lastRunMetrics = clone(context.metrics)
       await save()
       await acknowledgeMcpOutcomes(session, runId)
-      emit(session, { type: 'done', runId, session: clone(session) })
     } catch (error) {
-      await drainMcpReviews(context)
+      await drainRunOperations(context)
       settleInterruptedToolCalls(session)
       Object.assign(session, reconcileAgentMcpOutcomes(session, currentMcpOutcomeRecords()))
-      const aborted = controller.signal.aborted
+      const aborted = signal.aborted
       session.status = aborted ? 'cancelled' : 'error'
       session.error = aborted ? undefined : errorDetail(error)
       session.activeRunId = undefined
@@ -1601,22 +1700,36 @@ async function startAgentSession(
         session.error = `Failed to save agent session: ${errorDetail(persistenceError)}`
         session.lastRunMetrics = finishAgentRunMetrics(context.metrics, 'error', now())
       }
-      emit(
-        session,
-        session.status === 'cancelled'
-          ? { type: 'done', runId, session: clone(session) }
-          : { type: 'error', runId, error: session.error, session: clone(session) }
-      )
+      terminal = session.status === 'cancelled' ? 'done' : 'error'
     } finally {
-      if (controllers.get(sessionId) === controller) controllers.delete(sessionId)
-      for (const [callId, approval] of approvals) {
-        if (approval.sessionId === sessionId && approval.runId === runId) {
-          approvals.delete(callId)
-          approval.resolve(false)
-        }
+      try {
+        await owner.dispose()
+      } catch (cleanupError) {
+        session.status = 'error'
+        session.error = `Agent cleanup failed: ${errorDetail(cleanupError)}`
+        session.lastRunMetrics = finishAgentRunMetrics(context.metrics, 'error', now())
+        terminal = 'error'
+        await save().catch((error) => {
+          reportAgentPersistenceNotice({ level: 'error', message: errorDetail(error) })
+        })
       }
+      if (controllers.get(sessionId) === controller) controllers.delete(sessionId)
     }
+    emit(
+      session,
+      terminal === 'done'
+        ? { type: 'done', runId, session: clone(session) }
+        : { type: 'error', runId, error: session.error, session: clone(session) }
+    )
   })
+  runCompletions.add(completion)
+  void completion.then(
+    () => runCompletions.delete(completion),
+    (error) => {
+      runCompletions.delete(completion)
+      reportAgentPersistenceNotice({ level: 'error', message: errorDetail(error) })
+    }
+  )
 
   return { runId }
 }
@@ -1708,7 +1821,7 @@ export async function resolveAgentApproval(
     pending.toolCallId !== toolCallId ||
     pending.approvalId !== approvalId ||
     session?.activeRunId !== pending.runId ||
-    controllers.get(sessionId)?.signal.aborted !== false
+    controllers.get(sessionId)?.scope.signal.aborted !== false
   )
     return false
   approvals.delete(approvalId)
@@ -1719,12 +1832,7 @@ export async function resolveAgentApproval(
 export function cancelAgentRun(sessionId: string): boolean {
   const controller = controllers.get(sessionId)
   if (!controller) return false
-  controller.abort()
-  for (const [callId, approval] of approvals) {
-    if (approval.sessionId === sessionId) {
-      approvals.delete(callId)
-      approval.resolve(false)
-    }
-  }
+  // dispose seals/aborts synchronously. The run completion awaits its strict cleanup promise.
+  void controller.scope.dispose().catch(() => undefined)
   return true
 }

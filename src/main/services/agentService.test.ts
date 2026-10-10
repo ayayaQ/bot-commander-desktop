@@ -368,7 +368,7 @@ describe('desktop agent service shared-provider integration', () => {
 
   it('captures the extension snapshot and reserves every built-in before provider execution', async () => {
     const extensions = await import('./agentExtensions')
-    const createRegistry = vi.spyOn(extensions, 'createAgentExtensionRegistry')
+    const createRegistry = vi.spyOn(extensions, 'createAgentExtensionScope')
     const { calculatorExtension } = await import('@ayayaq/vivi/extensions/calculator')
     const tool = calculatorExtension.tools[0]
     const description = tool.definition.description
@@ -570,7 +570,7 @@ describe('desktop agent service shared-provider integration', () => {
 
   it('creates a fresh extension snapshot for each successive run', async () => {
     const extensions = await import('./agentExtensions')
-    const createRegistry = vi.spyOn(extensions, 'createAgentExtensionRegistry')
+    const createRegistry = vi.spyOn(extensions, 'createAgentExtensionScope')
     const { calculatorExtension } = await import('@ayayaq/vivi/extensions/calculator')
     const tool = calculatorExtension.tools[0]
     const description = tool.definition.description

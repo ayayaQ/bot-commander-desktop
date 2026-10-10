@@ -1,36 +1,46 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { ExtensionScope } from '@ayayaq/vivi/extensions'
 import { calculatorExtension } from '@ayayaq/vivi/extensions/calculator'
-import { createAgentExtensionRegistry } from './agentExtensions'
+import { createAgentExtensionScope } from './agentExtensions'
 
-afterEach(() => vi.restoreAllMocks())
+const scopes: ExtensionScope[] = []
+async function registry(reservedNames: string[]) {
+  const scope = await createAgentExtensionScope(reservedNames)
+  scopes.push(scope)
+  return scope.snapshot()
+}
+afterEach(async () => {
+  await Promise.all(scopes.splice(0).map((scope) => scope.dispose()))
+  vi.restoreAllMocks()
+})
 
 describe('desktop agent extension snapshot', () => {
   it('registers the same pure calculator with frozen provider definitions', async () => {
-    const registry = createAgentExtensionRegistry(['edit_command', 'search_documentation'])
-    expect(registry.tools.map((tool) => tool.name)).toEqual(['calculate'])
-    expect(Object.isFrozen(registry)).toBe(true)
-    expect(Object.isFrozen(registry.tools)).toBe(true)
-    expect(Object.isFrozen(registry.tools[0])).toBe(true)
-    expect(Object.isFrozen(registry.tools[0].parameters)).toBe(true)
-    expect(Object.isFrozen(registry.tools[0].parameters.properties)).toBe(true)
-    expect(registry.has('edit_command')).toBe(false)
+    const subject = await registry(['edit_command', 'search_documentation'])
+    expect(subject.tools.map((tool) => tool.name)).toEqual(['calculate'])
+    expect(Object.isFrozen(subject)).toBe(true)
+    expect(Object.isFrozen(subject.tools)).toBe(true)
+    expect(Object.isFrozen(subject.tools[0])).toBe(true)
+    expect(Object.isFrozen(subject.tools[0].parameters)).toBe(true)
+    expect(Object.isFrozen(subject.tools[0].parameters.properties)).toBe(true)
+    expect(subject.has('edit_command')).toBe(false)
     expect(
-      await registry.executeTool(
+      await subject.executeTool(
         { id: 'calc_1', name: 'calculate', arguments: { expression: '2 * (3 + 4)' } },
         { signal: new AbortController().signal }
       )
     ).toEqual({ content: '{"result":14}' })
   })
 
-  it('rejects reserved names rather than replacing a host tool', () => {
-    expect(() => createAgentExtensionRegistry(['calculate'])).toThrow('Tool name collision')
+  it('rejects reserved names rather than replacing a host tool', async () => {
+    await expect(createAgentExtensionScope(['calculate'])).rejects.toThrow('Tool name collision')
   })
 
   it('rejects unknown names without executing the registered calculator', async () => {
     const execute = vi.spyOn(calculatorExtension.tools[0], 'execute')
-    const registry = createAgentExtensionRegistry([])
-    expect(registry.has('calculate_unknown')).toBe(false)
-    const result = await registry.executeTool(
+    const subject = await registry([])
+    expect(subject.has('calculate_unknown')).toBe(false)
+    const result = await subject.executeTool(
       { id: 'calc_unknown', name: 'calculate_unknown', arguments: { expression: '1' } },
       { signal: new AbortController().signal }
     )
@@ -43,7 +53,7 @@ describe('desktop agent extension snapshot', () => {
   })
 
   it('captures schemas and validator/executor references rather than live extension state', async () => {
-    const registry = createAgentExtensionRegistry([])
+    const subject = await registry([])
     const tool = calculatorExtension.tools[0]
     const description = tool.definition.description
     try {
@@ -52,9 +62,9 @@ describe('desktop agent extension snapshot', () => {
         throw new Error('Replacement validator')
       })
       const execute = vi.spyOn(tool, 'execute').mockReturnValue({ content: '{"result":99}' })
-      expect(registry.tools[0].description).toBe(description)
+      expect(subject.tools[0].description).toBe(description)
       expect(
-        await registry.executeTool(
+        await subject.executeTool(
           { id: 'calc_snapshot', name: 'calculate', arguments: { expression: '1 + 1' } },
           { signal: new AbortController().signal }
         )
@@ -68,14 +78,14 @@ describe('desktop agent extension snapshot', () => {
 
   it('rejects malformed arguments before execution and propagates cancellation', async () => {
     const execute = vi.spyOn(calculatorExtension.tools[0], 'execute')
-    const registry = createAgentExtensionRegistry([])
+    const subject = await registry([])
     const controller = new AbortController()
     const call = {
       id: 'calc_invalid',
       name: 'calculate',
       arguments: { expression: 'process.exit()' }
     }
-    const result = await registry.executeTool(call, { signal: controller.signal })
+    const result = await subject.executeTool(call, { signal: controller.signal })
     expect(result.isError).toBe(true)
     expect(JSON.parse(result.content)).toMatchObject({
       success: false,
@@ -83,7 +93,7 @@ describe('desktop agent extension snapshot', () => {
     })
     expect(execute).not.toHaveBeenCalled()
     controller.abort(new Error('Cancelled test'))
-    await expect(registry.executeTool(call, { signal: controller.signal })).rejects.toThrow(
+    await expect(subject.executeTool(call, { signal: controller.signal })).rejects.toThrow(
       'Cancelled test'
     )
   })
