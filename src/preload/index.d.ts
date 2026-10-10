@@ -8,6 +8,11 @@ export type {
 } from '../shared/aiModelTypes'
 export type { ModelCapabilities } from '@ayayaq/vivi/providers/models'
 export type { AgentSkillsStatus } from '../shared/agentSkillTypes'
+export type {
+  AgentMcpStatus,
+  AgentMcpServerConfig,
+  AgentMcpLaunchPreparation
+} from '../shared/agentMcpTypes'
 export type { InteractionPublicationState } from '../shared/interactionPublication'
 export type { AgentAutoReviewEnrollment, AgentDecisionDisplay } from '../shared/agentAutoReview'
 

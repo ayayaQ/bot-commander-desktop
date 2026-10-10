@@ -40,6 +40,7 @@ import { getInteractions, setInteractions } from '../services/interactionService
 import { decodeBCFDCommandArray } from '../../shared/commandCodec'
 import type { AgentPlanDecision, AgentStreamEvent } from '../../shared/agentTypes'
 import type { McpConfig } from '../../shared/mcpTypes'
+import { agentMcpService } from '../services/agentMcpService'
 import { interactionPublisher } from '../services/interactionPublicationService'
 import { getSettings, setSettings, normalizeSettings } from '../services/settingsService'
 import { registerAgentDecisionSecret } from '../services/agentDecisionPrivacy'
@@ -170,6 +171,18 @@ export function addWindowIPCHandlers(mainWindow: BrowserWindow) {
 }
 
 export function addIPCHandlers() {
+  ipcMain.handle('agent-mcp:list', () => agentMcpService.list())
+  ipcMain.handle('agent-mcp:configure', (_, config) => agentMcpService.configure(config))
+  ipcMain.handle('agent-mcp:remove', (_, id) => agentMcpService.remove(id))
+  ipcMain.handle('agent-mcp:prepare-launch', (_, id) => agentMcpService.prepareLaunch(id))
+  ipcMain.handle('agent-mcp:start', (_, token) => agentMcpService.start(token))
+  ipcMain.handle('agent-mcp:cancel-launch', (_, token) => agentMcpService.cancelLaunch(token))
+  ipcMain.handle('agent-mcp:refresh', (_, id, kinds) => agentMcpService.refresh(id, kinds))
+  ipcMain.handle('agent-mcp:disconnect', (_, id) => agentMcpService.disconnect(id))
+  agentMcpService.onStatusChanged((status) => {
+    for (const window of BrowserWindow.getAllWindows())
+      window.webContents.send('agent-mcp:status', status)
+  })
   interactionPublisher.setEventSink((state) => {
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send('interactions:publication', state)

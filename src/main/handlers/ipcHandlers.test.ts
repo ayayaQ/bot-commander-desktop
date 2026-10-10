@@ -68,6 +68,19 @@ vi.mock('../services/agentMemoryService', () => ({
   prepareDeleteMemory: mocks.deleteMemory,
   commitMemoryMutation: mocks.commitMemory
 }))
+vi.mock('../services/agentMcpService', () => ({
+  agentMcpService: {
+    list: vi.fn(),
+    configure: vi.fn(),
+    remove: vi.fn(),
+    prepareLaunch: vi.fn(),
+    start: vi.fn(),
+    cancelLaunch: vi.fn(),
+    refresh: vi.fn(),
+    disconnect: vi.fn(),
+    onStatusChanged: vi.fn()
+  }
+}))
 vi.mock('../services/mcpServerService', () => ({
   setMcpEventSinks: vi.fn(),
   copyMcpToken: mocks.copyMcpToken

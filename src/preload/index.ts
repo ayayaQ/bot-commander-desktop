@@ -39,6 +39,14 @@ const validInvokeChannels = [
   'mcp:copy-token',
   'mcp:rotate-token',
   'mcp:clear-activity',
+  'agent-mcp:list',
+  'agent-mcp:configure',
+  'agent-mcp:remove',
+  'agent-mcp:prepare-launch',
+  'agent-mcp:start',
+  'agent-mcp:cancel-launch',
+  'agent-mcp:refresh',
+  'agent-mcp:disconnect',
   'skills:list',
   'skills:choose-root',
   'skills:remove-root',
@@ -110,7 +118,8 @@ const validReceiveChannels = [
   'resource:changed',
   'interactions:publication',
   'mcp:status',
-  'mcp:activity'
+  'mcp:activity',
+  'agent-mcp:status'
 ]
 
 const listenerWrappers = new Map<

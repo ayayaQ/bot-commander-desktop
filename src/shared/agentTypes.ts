@@ -26,6 +26,18 @@ export interface AgentToolCall {
     'running' | 'reviewing' | 'waiting_approval' | 'approved' | 'rejected' | 'completed' | 'error'
   approvalId?: string
   decision?: AgentDecisionDisplay
+  /** Display/recovery evidence only. This does not confer permission or reusable approval. */
+  mcp?: {
+    runId: string
+    operationDigest: string
+    serverId: string
+    catalogKind: 'tools' | 'resources'
+    remoteKey: string
+    disclosure?: string
+    outcome: 'pending' | 'not-sent' | 'confirmed' | 'unknown'
+    requestSent?: boolean
+    checkpointUnconfirmed?: boolean
+  }
   result?: unknown
   error?: string
   validation?: AgentValidationReport

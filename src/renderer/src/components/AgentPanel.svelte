@@ -673,7 +673,11 @@
                       />
                     {/if}
                     {#if call.status === 'waiting_approval'}
-                      <AgentApprovalDiff before={call.before} after={call.after} />
+                      {#if call.mcp}
+                        <pre class="p-3 text-xs whitespace-pre-wrap break-words max-h-80 overflow-auto">{call.mcp.disclosure}</pre>
+                      {:else}
+                        <AgentApprovalDiff before={call.before} after={call.after} />
+                      {/if}
                       <div class="p-3 border-t border-base-300 flex justify-end gap-2">
                         <button class="btn btn-sm btn-ghost" onclick={() => decide(call, false)}
                           >Reject</button
@@ -696,6 +700,14 @@
                             call.result
                           )}</pre>
                       </details>
+                    {/if}
+                    {#if call.mcp?.outcome === 'unknown'}
+                      <p class="p-3 text-sm text-warning">External outcome is unknown. Do not retry automatically; inspect the external resource. Cancellation cannot undo effects.</p>
+                    {:else if call.mcp?.requestSent === false}
+                      <p class="p-3 text-sm">External request was not attempted.</p>
+                    {/if}
+                    {#if call.mcp?.checkpointUnconfirmed}
+                      <p class="p-3 text-sm text-warning">Outcome checkpointing is unconfirmed. Recovery evidence is retained and further external calls may be blocked.</p>
                     {/if}
                   </div>
                 {/each}

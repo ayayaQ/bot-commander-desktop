@@ -95,6 +95,14 @@ vi.mock('./services/botService', () => ({
   stopSpamProtection: mocks.stopSpamProtection,
   resumeSpamProtection: mocks.resumeSpamProtection
 }))
+vi.mock('./services/agentMcpService', () => ({
+  agentMcpService: {
+    pause: vi.fn(),
+    close: vi.fn(async () => undefined),
+    resume: vi.fn(),
+    cancelPendingLaunches: vi.fn()
+  }
+}))
 vi.mock('./services/mcpServerService', () => ({
   initializeMcpServer: mocks.initializeMcpServer,
   stopMcpServer: vi.fn()
