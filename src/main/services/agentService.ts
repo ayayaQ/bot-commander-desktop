@@ -1083,13 +1083,23 @@ async function runTool(
     toolCalls: [call]
   })
   emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
+  let finishResourceEffect: (() => void) | undefined
+  const admitResourceEffect = (): void => {
+    if (finishResourceEffect) return
+    trackRunOperation(
+      context,
+      new Promise<void>((resolve) => {
+        finishResourceEffect = resolve
+      })
+    )
+  }
   let reviewed: AgentAutoReviewResult | undefined
   let resourceCommitted = false
   let committedResult: unknown
   try {
     assertActiveRun(session, runId, signal)
     // Durably record the attempt before execution; a crashed tool has an unknown outcome.
-    await save()
+    await trackRunOperation(context, save())
     assertActiveRun(session, runId, signal)
     let result: unknown
     let extensionContent: string | undefined
@@ -1209,12 +1219,13 @@ async function runTool(
             session.status = 'running'
             context.metrics = recordAgentRunTool(context.metrics, call)
             checkpointRunMetrics(session, context)
-            await save()
+            await trackRunOperation(context, save())
             assertActiveRun(session, runId, signal)
             emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
             assertActiveRun(session, runId, signal)
             if (call.validation && call.validationBinding)
               assertAgentValidationBinding(prepared, call.validationBinding, call.validation)
+            admitResourceEffect()
             result = await commitMutation(prepared, 'agent', signal, beforeCommit)
             resourceCommitted = true
             committedResult = result
@@ -1228,6 +1239,7 @@ async function runTool(
           assertActiveRun(session, runId, signal)
           if (call.validation && call.validationBinding)
             assertAgentValidationBinding(prepared, call.validationBinding, call.validation)
+          admitResourceEffect()
           result = await commitMutation(prepared, 'agent', signal, beforeCommit)
           resourceCommitted = true
           committedResult = result
@@ -1288,7 +1300,7 @@ async function runTool(
     context.metrics = recordAgentRunTool(context.metrics, call)
     checkpointRunMetrics(session, context)
     emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
-    await save()
+    await trackRunOperation(context, save())
     return { toolCall: call, content: message.content }
   } catch (error) {
     const detail = errorDetail(error)
@@ -1339,8 +1351,10 @@ async function runTool(
     context.metrics = recordAgentRunTool(context.metrics, call)
     checkpointRunMetrics(session, context)
     emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
-    await save()
+    await trackRunOperation(context, save())
     return { toolCall: call, content: message.content }
+  } finally {
+    finishResourceEffect?.()
   }
 }
 
@@ -1362,7 +1376,12 @@ export function stopAgentRuns(): void {
 
 /** Await run owners, including their terminal checkpoints and admitted cleanup drains. */
 export async function drainAgentRuns(): Promise<void> {
-  while (runCompletions.size) await Promise.all([...runCompletions])
+  const errors: unknown[] = []
+  while (runCompletions.size) {
+    const results = await Promise.allSettled([...runCompletions])
+    for (const result of results) if (result.status === 'rejected') errors.push(result.reason)
+  }
+  if (errors.length) throw new AggregateError(errors, 'Agent runs did not drain cleanly')
 }
 
 async function startAgentSession(
@@ -1617,12 +1636,7 @@ async function startAgentSession(
         signal,
         maxRounds: MAX_TOOL_ROUNDS,
         executeTool: async (call, { signal }) => {
-          const operation = runTool(session, runId, mode, call, context, signal)
-          // Admitted local mutations may already be saving when the runner cancels.
-          // Drain those domain effects, without waiting for arbitrary pure extension executors.
-          const { toolCall, content } = await (mutationToolNames.has(call.name)
-            ? trackRunOperation(context, operation)
-            : operation)
+          const { toolCall, content } = await runTool(session, runId, mode, call, context, signal)
           return {
             content,
             isError:

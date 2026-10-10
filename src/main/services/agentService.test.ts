@@ -1824,9 +1824,9 @@ describe('desktop agent service shared-provider integration', () => {
   })
 
   it('marks an approved but unfinished commit as interrupted with an unknown outcome', async () => {
-    let finishCommit!: (value: unknown) => void
+    let failCommit!: (error: Error) => void
     mocks.commitMutation.mockImplementation(
-      () => new Promise((resolve) => (finishCommit = resolve))
+      () => new Promise((_resolve, reject) => (failCommit = reject))
     )
     mocks.responsesCreate.mockResolvedValueOnce({
       output_text: '',
@@ -1870,7 +1870,14 @@ describe('desktop agent service shared-provider integration', () => {
       tools: [{ id: 'commit_pending', status: 'approved' }]
     })
     expect(pending.lastRunMetrics).not.toHaveProperty('cachedInputTokens')
+    let terminal = false
+    void done.then(() => {
+      terminal = true
+    })
     service.cancelAgentRun(session.id)
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(terminal).toBe(false)
+    failCommit(new Error('Inert unconfirmed commit after cancellation'))
     await done
     const stored = (await service.loadAgentSessions()).sessions[0]
     expect(stored.tokenCount).toBe(120)
@@ -1896,7 +1903,6 @@ describe('desktop agent service shared-provider integration', () => {
       callId: 'commit_pending',
       isError: true
     })
-    finishCommit({ success: true, saved: true })
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(
       (await service.loadAgentSessions()).sessions[0].messages.find(
