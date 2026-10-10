@@ -18,6 +18,49 @@ export function agentDecisionPrivacyRevision(): number {
   return generation
 }
 
+/** MCP keeps the known-credential registry private and never delegates to the Auto reviewer. */
+export function assertAgentMcpPrivacy(value: unknown): void {
+  if (overflow) throw new Error('MCP privacy registry is unavailable')
+  const decode = (text: string): string[] => {
+    const forms = new Set([text])
+    let current = text
+    for (let pass = 0; pass < 32; pass++) {
+      const next = current
+        .replace(/\\u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+        .replace(/\\x([0-9a-f]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+        .replace(/(?:%[0-9a-f]{2})+/gi, (run) => {
+          const bytes = Uint8Array.from(run.match(/%[0-9a-f]{2}/gi) ?? [], (byte) =>
+            parseInt(byte.slice(1), 16)
+          )
+          return new TextDecoder('utf-8').decode(bytes)
+        })
+      forms.add(next)
+      if (next === current) break
+      current = next
+    }
+    return [...forms]
+  }
+  const secrets = [...knownSecrets].flatMap(decode).filter(Boolean)
+  const seen = new Set<object>()
+  let nodes = 0
+  const visit = (item: unknown): void => {
+    if (++nodes > 100_000) throw new Error('MCP privacy check exceeds its limit')
+    if (typeof item === 'string') {
+      if (decode(item).some((form) => secrets.some((secret) => form.includes(secret))))
+        throw new Error('MCP data contains a known credential')
+    } else if (item && typeof item === 'object') {
+      if (seen.has(item)) throw new Error('MCP privacy check requires acyclic JSON')
+      seen.add(item)
+      for (const [key, child] of Object.entries(item)) {
+        visit(key)
+        visit(child)
+      }
+      seen.delete(item)
+    }
+  }
+  visit(value)
+}
+
 function decodedForms(text: string): string[] {
   const forms = new Set([text])
   for (let pass = 0; pass < 3; pass++) {

@@ -6,6 +6,7 @@
   import AgentApprovalDiff from './AgentApprovalDiff.svelte'
   import AgentValidationReport from './AgentValidationReport.svelte'
   import AgentRunSummary from './AgentRunSummary.svelte'
+  import AgentMcpOutcome from './AgentMcpOutcome.svelte'
   import AgentSkillsPanel from './AgentSkillsPanel.svelte'
   import { renderMarkdown } from '../utils/markdown'
   import { agentToolLabel } from '../utils/agentToolLabel'
@@ -673,7 +674,13 @@
                       />
                     {/if}
                     {#if call.status === 'waiting_approval'}
-                      <AgentApprovalDiff before={call.before} after={call.after} />
+                      {#if call.mcp}
+                        <pre
+                          class="p-3 text-xs whitespace-pre-wrap break-words max-h-80 overflow-auto">{call
+                            .mcp.disclosure}</pre>
+                      {:else}
+                        <AgentApprovalDiff before={call.before} after={call.after} />
+                      {/if}
                       <div class="p-3 border-t border-base-300 flex justify-end gap-2">
                         <button class="btn btn-sm btn-ghost" onclick={() => decide(call, false)}
                           >Reject</button
@@ -683,10 +690,12 @@
                         >
                       </div>
                     {:else if call.error}
-                      <div class="p-3 text-sm text-error border-t border-base-300">
+                      <div
+                        class="p-3 text-sm text-error border-t border-base-300 whitespace-pre-wrap break-all max-h-64 overflow-auto"
+                      >
                         {call.error}
                       </div>
-                    {:else if call.result !== undefined}
+                    {:else if call.result !== undefined && !call.mcp}
                       <details class="border-t border-base-300">
                         <summary class="px-3 py-2 cursor-pointer text-xs opacity-70"
                           >Tool result</summary
@@ -696,6 +705,9 @@
                             call.result
                           )}</pre>
                       </details>
+                    {/if}
+                    {#if call.mcp && call.status !== 'waiting_approval'}
+                      <AgentMcpOutcome mcp={call.mcp} result={call.result} />
                     {/if}
                   </div>
                 {/each}

@@ -18,6 +18,7 @@
   import ModelPicker from './ModelPicker.svelte'
   import MemoryManagerModal from './MemoryManagerModal.svelte'
   import McpSettingsCard from './McpSettingsCard.svelte'
+  import AgentMcpSettingsCard from './AgentMcpSettingsCard.svelte'
   import {
     currentSelectedCapabilities,
     reasoningChoices,
@@ -522,6 +523,7 @@
   <div class="divider"></div>
   <h2 class="text-2xl font-bold mb-4">Agent integrations</h2>
   <McpSettingsCard />
+  <AgentMcpSettingsCard />
 
   <div class="divider"></div>
   <h2 class="text-2xl font-bold mb-4">AI Provider</h2>

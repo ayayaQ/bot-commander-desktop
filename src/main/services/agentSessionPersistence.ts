@@ -45,6 +45,30 @@ export function validAgentDisplayHistory(value: unknown): boolean {
         ].includes(call.status)
       )
         return false
+      if (call.mcp !== undefined) {
+        const mcp = call.mcp
+        if (
+          !record(mcp) ||
+          typeof mcp.runId !== 'string' ||
+          !mcp.runId.trim() ||
+          mcp.runId.length > 1024 ||
+          typeof mcp.operationDigest !== 'string' ||
+          !/^[a-f0-9]{64}$/.test(mcp.operationDigest) ||
+          typeof mcp.serverId !== 'string' ||
+          !/^[a-z][a-z0-9_-]{0,15}$/.test(mcp.serverId) ||
+          !['tools', 'resources'].includes(mcp.catalogKind as string) ||
+          typeof mcp.remoteKey !== 'string' ||
+          !mcp.remoteKey ||
+          mcp.remoteKey.length > 4096 ||
+          !['pending', 'not-sent', 'confirmed', 'unknown'].includes(mcp.outcome as string) ||
+          (mcp.disclosure !== undefined &&
+            (typeof mcp.disclosure !== 'string' || mcp.disclosure.length > 96 * 1024)) ||
+          (mcp.requestSent !== undefined && typeof mcp.requestSent !== 'boolean') ||
+          (mcp.checkpointUnconfirmed !== undefined &&
+            typeof mcp.checkpointUnconfirmed !== 'boolean')
+        )
+          return false
+      }
       callIds.add(call.id)
     }
   }

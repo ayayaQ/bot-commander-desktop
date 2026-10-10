@@ -1,7 +1,14 @@
 import { app } from 'electron'
 import { join } from 'node:path'
 import crypto from 'node:crypto'
-import { runAgent, type HistoryMessage, type ToolCall } from '@ayayaq/vivi'
+import { runAgent, type HistoryMessage, type ToolCall, type ToolResult } from '@ayayaq/vivi'
+import {
+  createMcpExtension,
+  MCP_GUIDANCE,
+  mcpDigest,
+  mcpFailure,
+  type McpPreparedOperation
+} from '@ayayaq/vivi/extensions/mcp'
 import type { ToolRegistry } from '@ayayaq/vivi/extensions'
 import { formatMemoryContext, MEMORY_GUIDANCE } from '@ayayaq/vivi/extensions/memory'
 import { createAgentExtensionRegistry } from './agentExtensions'
@@ -94,6 +101,8 @@ import { agentDecisionPrivacyRevision, registerAgentDecisionSecret } from './age
 import { AUTO_ELIGIBILITY_EFFECT_VERSION, checkAutoEligibility } from './agentAutoEligibility'
 import { withResourceMutationLock } from './resourceChangeService'
 import { agentDecisionLedger } from './agentDecisionLedger'
+import { agentMcpService } from './agentMcpService'
+import { createAgentMcpOutcomeLedger, reconcileAgentMcpOutcomes } from './agentMcpOutcomes'
 
 const AGENT_SESSIONS_FILENAME = 'agent-sessions.json'
 const MAX_TOOL_ROUNDS = 25
@@ -134,6 +143,9 @@ In planning mode, investigate with read and lint tools and never make mutations.
 interface AgentRunContext {
   validationFailures: Map<string, number>
   extensions: ToolRegistry
+  mcpTools: Set<string>
+  mcpCalls: Map<string, AgentToolCall>
+  mcpOperations: Set<Promise<ToolResult>>
   skills: AgentSkillSnapshot
   documentationPolicy: DocumentationPolicyState
   metrics: AgentRunMetrics
@@ -151,7 +163,7 @@ interface PendingApproval {
   sessionId: string
   runId: string
   toolCallId: string
-  prepared: PreparedMutation
+  prepared: PreparedMutation | McpPreparedOperation
   approvalId: string
   resolve: (approved: boolean) => void
 }
@@ -178,6 +190,18 @@ const persistence = createAgentPersistence<AgentSessionsData>({
   decode: decodeAgentSessions,
   empty: () => ({ sessions: [], activeSessionId: null, modelDefaultsByProvider: {} })
 })
+const mcpOutcomes = createAgentMcpOutcomeLedger({
+  path: () => join(app.getPath('userData'), 'agent-mcp', 'outcomes.json'),
+  assertAllowed: (value) => agentMcpService.assertAllowed(value)
+})
+function currentMcpOutcomeRecords() {
+  try {
+    return mcpOutcomes.records()
+  } catch {
+    // Ordinary startup/shutdown must stay available if external recovery is not loaded.
+    return []
+  }
+}
 
 function path(): string {
   return join(app.getPath('userData'), AGENT_SESSIONS_FILENAME)
@@ -305,6 +329,8 @@ function save(): Promise<void> {
 
 /** Called after agent ingress is paused and all accepted jobs have drained. */
 export async function checkpointAgentSessionsBeforeQuit(): Promise<void> {
+  await mcpOutcomes.drain()
+  if (currentMcpOutcomeRecords().length) await mcpOutcomes.checkpoint()
   if (!checkpointFailed) return
   await persistence.save(persistentSnapshot())
   checkpointFailed = false
@@ -371,6 +397,17 @@ export async function loadAgentSessions(): Promise<AgentSessionsData> {
 
 async function initializeSessions(): Promise<AgentSessionsData> {
   const stored = await persistence.load()
+  let mcpRecoveryAvailable = false
+  try {
+    await mcpOutcomes.load()
+    mcpRecoveryAvailable = true
+  } catch {
+    reportAgentPersistenceNotice({
+      level: 'error',
+      message:
+        'MCP outcome recovery is unavailable. External calls are blocked; ordinary sessions remain available.'
+    })
+  }
   data = {
     ...stored.data,
     sessions: stored.data.sessions.map((session) => ({
@@ -438,11 +475,46 @@ async function initializeSessions(): Promise<AgentSessionsData> {
       session.error = 'Run interrupted when the application closed'
     }
     settleInterruptedToolCalls(session)
+    Object.assign(session, reconcileAgentMcpOutcomes(session, currentMcpOutcomeRecords()))
+    if (
+      !mcpRecoveryAvailable &&
+      session.messages.some((message) => message.toolCalls?.some((call) => call.mcp))
+    ) {
+      const diagnostic =
+        'External MCP outcome recovery could not be verified. Saved history was preserved; resolve outcome storage before continuing this session.'
+      historyRecoveryErrors.set(session, diagnostic)
+      session.status = 'error'
+      session.error = diagnostic
+      session.activeRunId = undefined
+      session.planReady = false
+    }
   }
   // Blocked recovery still exposes the shell. A failed migration must not erase the input.
   if (stored.writable) {
     try {
-      await withAgentPersistenceOperation(() => persistence.save(persistentSnapshot()))
+      const checkpoint = persistentSnapshot()
+      await withAgentPersistenceOperation(() => persistence.save(checkpoint))
+      const scopes = new Map(
+        currentMcpOutcomeRecords().map((record) => [
+          JSON.stringify([record.sessionId, record.runId]),
+          { sessionId: record.sessionId, runId: record.runId }
+        ])
+      )
+      for (const scope of scopes.values()) {
+        const restored = checkpoint.sessions.find((session) => session.id === scope.sessionId)
+        const live = data.sessions.find((session) => session.id === scope.sessionId)
+        if (!restored || !live || historyRecoveryErrors.has(live)) continue
+        try {
+          await mcpOutcomes.acknowledge(scope, restored)
+        } catch {
+          reportAgentPersistenceNotice({
+            level: 'warning',
+            message:
+              'Recovered MCP outcomes remain recorded because their history acknowledgement could not be confirmed.'
+          })
+          break
+        }
+      }
     } catch (error) {
       checkpointFailed = true
       reportAgentPersistenceNotice({
@@ -756,7 +828,7 @@ async function awaitApproval(
   session: AgentSession,
   runId: string,
   call: AgentToolCall,
-  prepared: PreparedMutation,
+  prepared: PreparedMutation | McpPreparedOperation,
   context: AgentRunContext
 ): Promise<boolean> {
   let resolveApproval!: (approved: boolean) => void
@@ -774,8 +846,10 @@ async function awaitApproval(
   })
   session.status = 'waiting_approval'
   call.status = 'waiting_approval'
-  call.before = prepared.before
-  call.after = prepared.after
+  if ('before' in prepared) {
+    call.before = prepared.before
+    call.after = prepared.after
+  }
   context.metrics = recordAgentRunTool(context.metrics, call)
   checkpointRunMetrics(session, context)
   emit(session, {
@@ -802,6 +876,162 @@ function assertActiveRun(session: AgentSession, runId: string, signal: AbortSign
   if (!isActiveRun(session, runId, signal)) throw new Error('Agent execution cancelled')
 }
 
+async function acknowledgeMcpOutcomes(session: AgentSession, runId: string): Promise<void> {
+  if (deletedSessionIds.has(session.id)) {
+    reportAgentPersistenceNotice({
+      level: 'warning',
+      message:
+        'MCP outcome evidence is retained for a deleted session; no request will be replayed.'
+    })
+    return
+  }
+  try {
+    await mcpOutcomes.acknowledge({ sessionId: session.id, runId }, session)
+  } catch {
+    reportAgentPersistenceNotice({
+      level: 'warning',
+      message:
+        'MCP outcome evidence is retained because its history acknowledgement could not be confirmed.'
+    })
+  }
+}
+
+async function drainMcpReviews(context: AgentRunContext): Promise<void> {
+  while (context.mcpOperations.size) await Promise.allSettled([...context.mcpOperations])
+  await mcpOutcomes.drain()
+}
+
+async function trackMcpReview(
+  session: AgentSession,
+  runId: string,
+  operation: McpPreparedOperation,
+  context: AgentRunContext,
+  signal: AbortSignal
+): Promise<ToolResult> {
+  const task = executeMcpReview(session, runId, operation, context, signal)
+  context.mcpOperations.add(task)
+  try {
+    return await task
+  } finally {
+    context.mcpOperations.delete(task)
+  }
+}
+
+async function executeMcpReview(
+  session: AgentSession,
+  runId: string,
+  operation: McpPreparedOperation,
+  context: AgentRunContext,
+  signal: AbortSignal
+): Promise<ToolResult> {
+  const call = context.mcpCalls.get(operation.call.id)
+  if (
+    !call ||
+    call.name !== operation.call.name ||
+    mcpDigest(call.arguments) !== mcpDigest(operation.call.arguments)
+  )
+    throw new Error('MCP request has no matching active host tool call')
+  const scope = { sessionId: session.id, runId }
+  call.mcp = {
+    runId,
+    operationDigest: operation.binding.operationDigest as string,
+    serverId: operation.serverId,
+    catalogKind: operation.catalogKind,
+    remoteKey: operation.remoteKey,
+    disclosure: agentMcpService.operationDisclosure(operation),
+    outcome: 'pending'
+  }
+  call.targetLabel = `${operation.serverId}: ${operation.remoteKey}`
+  const privacyRevision = agentDecisionPrivacyRevision()
+  let invocationStarted = false
+  const notSent = async (denied = false): Promise<ToolResult> => {
+    const failure = mcpFailure(
+      denied ? 'mcp_rejected' : 'mcp_not_attempted',
+      denied ? 'The user rejected this external request' : 'The external request was not attempted'
+    )
+    const result = {
+      ...failure,
+      content: JSON.stringify({
+        ...JSON.parse(failure.content),
+        requestSent: false,
+        unknownOutcome: false,
+        doNotRetry: false,
+        ...(denied ? { denied: true } : {})
+      })
+    }
+    call.mcp!.outcome = 'not-sent'
+    call.mcp!.requestSent = false
+    call.result = JSON.parse(result.content)
+    try {
+      await mcpOutcomes.settle(scope, operation, {
+        result,
+        outcome: 'not-sent',
+        requestSent: false,
+        unknownOutcome: false,
+        doNotRetry: false
+      })
+    } catch {
+      call.mcp!.checkpointUnconfirmed = true
+    }
+    return result
+  }
+  try {
+    assertActiveRun(session, runId, signal)
+    if (session.mode === 'planning') return await notSent()
+    await mcpOutcomes.load()
+    mcpOutcomes.assertWritable()
+    agentMcpService.assertAllowed(operation)
+    const approved = await awaitApproval(session, runId, call, operation, context)
+    assertActiveRun(session, runId, signal)
+    if (!approved) {
+      call.status = 'rejected'
+      return await notSent(true)
+    }
+    call.status = 'approved'
+    session.status = 'running'
+    await save()
+    const assertCurrent = () => {
+      assertActiveRun(session, runId, signal)
+      if (session.mode === 'planning' || privacyRevision !== agentDecisionPrivacyRevision())
+        throw new Error('MCP approval context changed; fresh review is required')
+      agentMcpService.assertAllowed(operation)
+    }
+    assertCurrent()
+    invocationStarted = true
+    const outcome = await agentMcpService.invoke(operation, signal, assertCurrent, {
+      beforeSend: () => mcpOutcomes.intent(scope, operation),
+      settle: (outcome) => mcpOutcomes.settle(scope, operation, outcome)
+    })
+    call.mcp!.outcome = outcome.outcome
+    call.mcp!.requestSent = outcome.requestSent
+    if (outcome.checkpointUnconfirmed) call.mcp!.checkpointUnconfirmed = true
+    call.result = JSON.parse(outcome.result.content)
+    return outcome.result
+  } catch {
+    if (!invocationStarted) return await notSent()
+    // A host failure after entering invocation is not evidence of non-delivery.
+    const result = mcpFailure(
+      'mcp_unknown_outcome',
+      'External outcome could not be confirmed; inspect the external resource before another attempt',
+      true
+    )
+    call.mcp!.outcome = 'unknown'
+    delete call.mcp!.requestSent
+    call.result = JSON.parse(result.content)
+    try {
+      await mcpOutcomes.settle(scope, operation, {
+        result,
+        outcome: 'unknown',
+        unknownOutcome: true,
+        doNotRetry: true
+      })
+    } catch {
+      call.mcp!.checkpointUnconfirmed = true
+    }
+    return result
+  }
+}
+
 async function runTool(
   session: AgentSession,
   runId: string,
@@ -819,6 +1049,7 @@ async function runTool(
     status: 'running',
     createdAt: now()
   }
+  if (context.mcpTools.has(call.name)) context.mcpCalls.set(call.id, call)
   context.metrics = recordAgentRunTool(context.metrics, call)
   checkpointRunMetrics(session, context)
   const message = addMessage(session, {
@@ -984,7 +1215,11 @@ async function runTool(
       throw new Error('Automatic skill saving is disabled; save creator drafts manually')
     } else if (context.extensions.has(call.name)) {
       const output = await context.extensions.executeTool(providerCall, { signal })
-      if (call.name === 'read_skill' || call.name === 'list_skills') {
+      if (context.mcpTools.has(call.name)) {
+        if (Buffer.byteLength(output.content) > 64 * 1024)
+          throw new Error('MCP tool result exceeds its host bound')
+        extensionContent = output.content
+      } else if (call.name === 'read_skill' || call.name === 'list_skills') {
         if (output.content.length > MAX_SKILL_TOOL_RESULT_CHARS)
           throw new Error('Skill tool result exceeds its host bound')
         extensionContent = output.content
@@ -994,7 +1229,7 @@ async function runTool(
       } catch {
         result = extensionContent
       }
-      if (output.isError) {
+      if (output.isError && call.status !== 'rejected') {
         call.status = 'error'
         const error =
           result && typeof result === 'object'
@@ -1014,7 +1249,11 @@ async function runTool(
           )
         : await executeReadTool(call.name, call.arguments)
     }
-    if (call.name !== 'read_skill' && call.name !== 'list_skills')
+    if (
+      !context.mcpTools.has(call.name) &&
+      call.name !== 'read_skill' &&
+      call.name !== 'list_skills'
+    )
       result = boundAgentToolResult(result)
     assertActiveRun(session, runId, signal)
     if (call.status !== 'rejected' && call.status !== 'error') call.status = 'completed'
@@ -1128,6 +1367,9 @@ async function startAgentSession(
   const context: AgentRunContext = {
     validationFailures: new Map(),
     skills,
+    mcpTools: new Set(),
+    mcpCalls: new Map(),
+    mcpOperations: new Set(),
     // Reserve every built-in before planning mode filters mutation tools from advertisement.
     extensions: createAgentExtensionRegistry(
       agentToolDefinitions.map((tool) => tool.function.name),
@@ -1172,6 +1414,34 @@ async function startAgentSession(
       const hasMemories = memoryContext !== 'Saved user memories: none.'
       const runModel = { model: session.model, reasoningEffort: session.reasoningEffort }
       const capabilities = getAgentModelCapabilities(settings, runModel.model)
+      if (capabilities.tools === 'supported') {
+        try {
+          const catalogs = await agentMcpService.captureCatalogs(controller.signal)
+          assertActiveRun(session, runId, controller.signal)
+          const mcp = createMcpExtension(
+            agentMcpService,
+            catalogs,
+            (operation, signal) => trackMcpReview(session, runId, operation, context, signal),
+            {
+              validateSchema: agentMcpService.validateSchema,
+              assertAllowed: (value) => agentMcpService.assertAllowed(value),
+              operationsEnabled: mode !== 'planning'
+            }
+          )
+          context.mcpTools = new Set(mcp.tools.map((tool) => tool.definition.name))
+          context.extensions = createAgentExtensionRegistry(
+            agentToolDefinitions.map((tool) => tool.function.name),
+            { catalog: skills.catalog, authorizeRead: skills.authorizeRead },
+            mcp
+          )
+        } catch {
+          assertActiveRun(session, runId, controller.signal)
+          reportAgentPersistenceNotice({
+            level: 'warning',
+            message: 'External MCP metadata is unavailable; ordinary agent tools remain available.'
+          })
+        }
+      }
       const tools =
         mode === 'planning'
           ? agentToolDefinitions.filter((tool) => !mutationToolNames.has(tool.function.name))
@@ -1180,7 +1450,7 @@ async function startAgentSession(
         {
           kind: 'message',
           role: 'system',
-          content: `${SYSTEM_PROMPT}\n\nCurrent execution mode: ${mode}.${
+          content: `${SYSTEM_PROMPT}\n\n${MCP_GUIDANCE}\n\nCurrent execution mode: ${mode}. Planning permits captured local MCP metadata only; external calls and reads are disabled.${
             capabilities.tools === 'supported'
               ? ''
               : '\n\nNo tools are available for this model: tool support is unsupported or unverified. You cannot inspect or change bot resources, run calculations, or save memories. State this limitation clearly when relevant and never claim to have performed those actions.'
@@ -1235,7 +1505,12 @@ async function startAgentSession(
         maxRounds: MAX_TOOL_ROUNDS,
         executeTool: async (call, { signal }) => {
           const { toolCall, content } = await runTool(session, runId, mode, call, context, signal)
-          return { content, isError: toolCall.status === 'error' }
+          return {
+            content,
+            isError:
+              toolCall.status === 'error' ||
+              (context.mcpTools.has(toolCall.name) && toolCall.status === 'rejected')
+          }
         },
         onEvent: async (event) => {
           assertActiveRun(session, runId, controller.signal)
@@ -1285,12 +1560,14 @@ async function startAgentSession(
           }
         }
       })
+      await drainMcpReviews(context)
       // Cancellation/error may close unexecuted calls without emitting further events.
       if (result.error?.code !== 'invalid_input')
         session.history = result.history.slice(prefix.length)
       context.metrics = reconcileAgentRunUsage(context.metrics, result)
       session.tokenCount = initialTokenCount + result.usage.totalTokens
       settleInterruptedToolCalls(session)
+      Object.assign(session, reconcileAgentMcpOutcomes(session, currentMcpOutcomeRecords()))
       if (result.status === 'error')
         throw new Error(result.error?.message || 'Agent execution failed')
       if (result.status === 'cancelled') throw new Error('Agent execution cancelled')
@@ -1304,8 +1581,12 @@ async function startAgentSession(
       context.metrics = finishAgentRunMetrics(context.metrics, 'completed', now())
       session.lastRunMetrics = clone(context.metrics)
       await save()
+      await acknowledgeMcpOutcomes(session, runId)
       emit(session, { type: 'done', runId, session: clone(session) })
     } catch (error) {
+      await drainMcpReviews(context)
+      settleInterruptedToolCalls(session)
+      Object.assign(session, reconcileAgentMcpOutcomes(session, currentMcpOutcomeRecords()))
       const aborted = controller.signal.aborted
       session.status = aborted ? 'cancelled' : 'error'
       session.error = aborted ? undefined : errorDetail(error)
@@ -1314,6 +1595,7 @@ async function startAgentSession(
       session.lastRunMetrics = clone(context.metrics)
       try {
         await save()
+        await acknowledgeMcpOutcomes(session, runId)
       } catch (persistenceError) {
         session.status = 'error'
         session.error = `Failed to save agent session: ${errorDetail(persistenceError)}`

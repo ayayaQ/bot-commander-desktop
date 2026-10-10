@@ -35,6 +35,7 @@ import { addIPCHandlers, addWindowIPCHandlers } from './handlers/ipcHandlers'
 import { configureTrustedRenderer } from './handlers/ipcSecurity'
 import { loadBotStatus, loadCommands, loadSettings, loadInteractions } from './services/fileService'
 import { initializeMcpServer, stopMcpServer } from './services/mcpServerService'
+import { agentMcpService } from './services/agentMcpService'
 
 // Extend the Electron.App interface to include our custom property
 declare global {
@@ -92,6 +93,10 @@ function createWindow(recoveryError?: unknown): void {
       ? process.env['ELECTRON_RENDERER_URL']
       : pathToFileURL(join(__dirname, '../renderer/index.html')).href
   configureTrustedRenderer(mainWindow.webContents, rendererUrl)
+  mainWindow.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) agentMcpService.cancelPendingLaunches()
+  })
+  mainWindow.webContents.on('destroyed', () => agentMcpService.cancelPendingLaunches())
 
   mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
     const expected = new URL(rendererUrl)
@@ -232,6 +237,7 @@ app.whenReady().then(async () => {
         pauseResources: stopResourceMutations,
         pauseRuntime,
         pauseAgents: () => {
+          agentMcpService.pause()
           pauseAgentPersistence()
           stopAgentRuns()
         },
@@ -242,11 +248,20 @@ app.whenReady().then(async () => {
           await checkpointAgentSessionsBeforeQuit()
         },
         saveStats,
-        stopServer: stopMcpServer,
+        stopServer: async () => {
+          const results = await Promise.allSettled([stopMcpServer(), agentMcpService.close()])
+          const errors = results
+            .filter((result) => result.status === 'rejected')
+            .map((result) => result.reason)
+          if (errors.length) throw new AggregateError(errors, 'Could not close MCP connections')
+        },
         closeAndDrainWrites: closeAndDrainAtomicWrites,
         resumeResources: resumeResourceMutations,
         resumeRuntime,
-        resumeAgents: resumeAgentPersistence,
+        resumeAgents: () => {
+          resumeAgentPersistence()
+          agentMcpService.resume()
+        },
         reopenWrites: reopenAtomicWrites
       })
       app.exit(0)

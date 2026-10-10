@@ -195,7 +195,7 @@ uses Electron's bundled Node.js runtime, independently of the Node.js installed 
 ### Install
 
 The shared agent loop, canonical history helpers and OpenAI/OpenRouter provider factories use
-the exact npm release `@ayayaq/vivi@0.4.0`.
+the exact npm release `@ayayaq/vivi@0.9.0`.
 Its registry artifact was verified against the reviewed release bytes; the immutable
 registry URL and SHA-512 integrity are recorded in the lockfile. Publish and verify a
 compatible shared dependency before updating this pin. Do not commit npm pack outputs
@@ -222,7 +222,8 @@ bounded result content, persisted history, cancellation and recovery.
 
 Extensions are trusted explicit code imports, not a plugin loader or sandbox. Their
 execution context supplies only an `AbortSignal`, with no host-permissions API.
-No filesystem, network or other host-capable extensions are enabled.
+The calculator itself has no filesystem or network access. Skills and MCP use separate
+host-mediated controls described below.
 The calculator is not added to the external MCP server.
 
 Model controls use the separate `@ayayaq/vivi/providers/models` capability normalizer
@@ -258,6 +259,15 @@ skill creator, and format diagnostics. Skills and text resources load progressiv
 instructions. Use the app-wide folder or explicitly select existing read-only folders.
 The creator drafts SKILL.md content for manual saving. Automatic skill saving is disabled
 on every platform. Scripts do not run. See [Agent Skills](docs/AGENT_SKILLS.md).
+
+## Agent MCP servers (optional)
+
+In **Settings → Agent MCP servers**, configure an already-installed trusted stdio server,
+then review its exact launch details and choose **Start once**. Saving starts nothing;
+connections are never restored automatically. Server code runs with your OS permissions.
+Every external tool call and concrete resource read requires **Approve once**, including
+Auto. Planning exposes local catalog metadata only. Templates, HTTP, OAuth, installation,
+credential injection and automatic retries are unavailable. See [MCP client controls](docs/AGENT_MCP_CLIENT.md).
 
 ## External agent access (optional)
 
