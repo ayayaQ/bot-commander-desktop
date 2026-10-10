@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   handle: vi.fn(),
+  runAgent: vi.fn(),
+  cancelAgent: vi.fn(),
+  activeAgent: vi.fn(),
+  approveAgent: vi.fn(),
   listSkills: vi.fn(),
   skillFolder: vi.fn(),
   chooseSkillFolder: vi.fn(),
@@ -68,7 +72,13 @@ vi.mock('../utils/stats', () => ({}))
 vi.mock('../services/updateService', () => ({}))
 vi.mock('./apiAuthHandlers', () => ({ addApiAuthHandlers: vi.fn() }))
 vi.mock('./commandRepoHandlers', () => ({ addCommandRepoHandlers: vi.fn() }))
-vi.mock('../services/agentService', () => ({ setAgentEventSink: vi.fn() }))
+vi.mock('../services/agentService', () => ({
+  setAgentEventSink: vi.fn(),
+  runAgentSession: mocks.runAgent,
+  cancelAgentRun: mocks.cancelAgent,
+  setActiveAgentSession: mocks.activeAgent,
+  resolveAgentApproval: mocks.approveAgent
+}))
 vi.mock('../services/agentMemoryService', () => ({
   setAgentMemoryEventSink: (sink: (result: unknown) => void) => {
     mocks.memorySink = sink
@@ -376,5 +386,58 @@ describe('explicit agent MCP client IPC', () => {
     expect(mocks.send).toHaveBeenCalledExactlyOnceWith('agent-mcp:status', status)
     expect(mocks.agentMcp.start).not.toHaveBeenCalled()
     expect(mocks.agentMcp.refresh).not.toHaveBeenCalled()
+  })
+})
+
+describe('owned agent run IPC routing', () => {
+  beforeEach(() => {
+    vi.resetAllMocks()
+  })
+
+  async function handlers() {
+    const { addIPCHandlers } = await import('./ipcHandlers')
+    addIPCHandlers()
+    return new Map(mocks.handle.mock.calls.map(([channel, callback]) => [channel, callback]))
+  }
+
+  it('awaits the admitted send and forwards only the selected session and current host settings', async () => {
+    const current = { aiProvider: 'openai', openaiApiKey: 'offline-fixture-only' }
+    mocks.settings.mockReturnValue(current)
+    let resolve!: (result: { runId: string }) => void
+    mocks.runAgent.mockReturnValue(
+      new Promise((yes) => {
+        resolve = yes
+      })
+    )
+    const routes = await handlers()
+    let settled = false
+    const result = routes.get('agent:send')!({}, 'selected-session', 'Calculate')
+    void result.then(() => {
+      settled = true
+    })
+    expect(mocks.runAgent).toHaveBeenCalledWith('selected-session', 'Calculate', current)
+    expect(settled).toBe(false)
+    resolve({ runId: 'owned-run' })
+    expect(await result).toEqual({ runId: 'owned-run' })
+  })
+
+  it('keeps session switching distinct from cancellation and preserves the exact human approval identity', async () => {
+    const routes = await handlers()
+    mocks.activeAgent.mockResolvedValue(undefined)
+    mocks.cancelAgent.mockReturnValue(true)
+    mocks.approveAgent.mockResolvedValue(false)
+    expect(await routes.get('agent:set-active')!({}, 'next-session')).toBe(true)
+    expect(mocks.cancelAgent).not.toHaveBeenCalled()
+    expect(await routes.get('agent:cancel')!({}, 'prior-session')).toBe(true)
+    expect(mocks.cancelAgent).toHaveBeenCalledExactlyOnceWith('prior-session')
+    expect(
+      await routes.get('agent:approve')!({}, 'prior-session', 'call', true, 'exact-approval')
+    ).toBe(false)
+    expect(mocks.approveAgent).toHaveBeenCalledExactlyOnceWith(
+      'prior-session',
+      'call',
+      true,
+      'exact-approval'
+    )
   })
 })

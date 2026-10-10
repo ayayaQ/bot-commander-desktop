@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 
 // Explicit ordinary scope. Historical adversarial/legacy-input/skills assessments are excluded.
 const files = [
+  'src/main/services/agentExtensions.integration.test.ts',
   'src/main/services/agentMcpConfig.test.ts',
   'src/main/services/agentMcpService.test.ts',
   'src/main/services/agentMcpPrivacy.test.ts',

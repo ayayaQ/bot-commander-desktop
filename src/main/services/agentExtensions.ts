@@ -7,6 +7,9 @@ import { calculatorExtension } from '@ayayaq/vivi/extensions/calculator'
 import { createSkillsExtension, type SkillsExtensionHost } from '@ayayaq/vivi/extensions/skills'
 import { MCP_RESOURCE_TOOL_NAMES } from '@ayayaq/vivi/extensions/mcp'
 
+/** Cleanup failures cannot become a metadata-only fallback or a normal cancellation. */
+export class AgentExtensionCleanupError extends AggregateError {}
+
 /** Prepare an unpublished candidate; the run owns its disposal after successful setup. */
 export async function createAgentExtensionScope(
   reservedNames: readonly string[],
@@ -35,7 +38,10 @@ export async function createAgentExtensionScope(
     try {
       await scope.dispose()
     } catch (cleanupError) {
-      throw new AggregateError([error, cleanupError], 'Agent extension setup and cleanup failed')
+      throw new AgentExtensionCleanupError(
+        [error, cleanupError],
+        'Agent extension setup and cleanup failed'
+      )
     }
     throw error
   }

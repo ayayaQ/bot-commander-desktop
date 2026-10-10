@@ -15,7 +15,7 @@ import {
   type ToolRegistry
 } from '@ayayaq/vivi/extensions'
 import { formatMemoryContext, MEMORY_GUIDANCE } from '@ayayaq/vivi/extensions/memory'
-import { createAgentExtensionScope } from './agentExtensions'
+import { AgentExtensionCleanupError, createAgentExtensionScope } from './agentExtensions'
 import { formatSkillCatalogContext, SKILL_LIMITS } from '@ayayaq/vivi/extensions/skills'
 import { agentSkillStore } from './agentSkillService'
 import type { AgentSkillSnapshot } from './agentSkillStore'
@@ -1294,7 +1294,6 @@ async function runTool(
       const ownsRun =
         session.activeRunId === runId &&
         controllers.get(session.id)?.runId === runId &&
-        controllers.get(session.id)?.scope.state === 'open' &&
         !deletedSessionIds.has(session.id)
       const committedCall = ownsRun ? call : clone(call)
       committedCall.status = 'completed'
@@ -1409,8 +1408,15 @@ async function startAgentSession(
     if (isAgentPersistencePaused())
       throw new Error('The app is shutting down; agent runs are paused')
   } catch (error) {
-    await extensionScope?.dispose()
-    await owner.dispose()
+    const cleanup = await Promise.allSettled([
+      ...(extensionScope ? [extensionScope.dispose()] : []),
+      owner.dispose()
+    ])
+    const failures = cleanup
+      .filter((result) => result.status === 'rejected')
+      .map((result) => result.reason)
+    if (failures.length)
+      throw new AggregateError([error, ...failures], 'Agent setup and cleanup failed')
     throw error
   }
   const context: AgentRunContext = {
@@ -1468,7 +1474,6 @@ async function startAgentSession(
   try {
     await save()
   } catch (error) {
-    if (controllers.get(sessionId) === controller) controllers.delete(sessionId)
     session.status = 'error'
     session.activeRunId = undefined
     session.error = errorDetail(error)
@@ -1477,6 +1482,8 @@ async function startAgentSession(
       await owner.dispose()
     } catch (cleanupError) {
       throw new AggregateError([error, cleanupError], 'Agent startup and cleanup failed')
+    } finally {
+      if (controllers.get(sessionId) === controller) controllers.delete(sessionId)
     }
     throw error
   }
@@ -1511,7 +1518,14 @@ async function startAgentSession(
           try {
             assertActiveRun(session, runId, signal)
             // No provider has received the old snapshot. Teardown must succeed before publication.
-            await context.extensionScope.dispose()
+            try {
+              await context.extensionScope.dispose()
+            } catch (cleanupError) {
+              throw new AgentExtensionCleanupError(
+                [cleanupError],
+                'Previous extension cleanup failed'
+              )
+            }
             assertActiveRun(session, runId, signal)
             context.extensionScope = candidate
             context.extensions = candidate.snapshot()
@@ -1527,8 +1541,11 @@ async function startAgentSession(
             }
             throw error
           }
-        } catch {
+        } catch (error) {
+          if (error instanceof AgentExtensionCleanupError) throw error
           assertActiveRun(session, runId, signal)
+          // A failed candidate leaves ordinary tools available; failed prior teardown is fatal.
+          if (context.extensionScope.state !== 'open') throw error
           reportAgentPersistenceNotice({
             level: 'warning',
             message: 'External MCP metadata is unavailable; ordinary agent tools remain available.'
@@ -1597,7 +1614,12 @@ async function startAgentSession(
         signal,
         maxRounds: MAX_TOOL_ROUNDS,
         executeTool: async (call, { signal }) => {
-          const { toolCall, content } = await runTool(session, runId, mode, call, context, signal)
+          const operation = runTool(session, runId, mode, call, context, signal)
+          // Admitted local mutations may already be saving when the runner cancels.
+          // Drain those domain effects, without waiting for arbitrary pure extension executors.
+          const { toolCall, content } = await (mutationToolNames.has(call.name)
+            ? trackRunOperation(context, operation)
+            : operation)
           return {
             content,
             isError:
@@ -1686,7 +1708,7 @@ async function startAgentSession(
       await drainRunOperations(context)
       settleInterruptedToolCalls(session)
       Object.assign(session, reconcileAgentMcpOutcomes(session, currentMcpOutcomeRecords()))
-      const aborted = signal.aborted
+      const aborted = signal.aborted && !(error instanceof AgentExtensionCleanupError)
       session.status = aborted ? 'cancelled' : 'error'
       session.error = aborted ? undefined : errorDetail(error)
       session.activeRunId = undefined

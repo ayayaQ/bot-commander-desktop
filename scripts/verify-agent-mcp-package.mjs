@@ -97,6 +97,8 @@ const baseline = new Set(Object.keys(createRequire(import.meta.url).cache))
 const resolutions = {}
 for (const spec of [
   '@ayayaq/vivi',
+  '@ayayaq/vivi/extensions',
+  '@ayayaq/vivi/extensions/calculator',
   '@ayayaq/vivi/extensions/mcp',
   '@modelcontextprotocol/client',
   '@modelcontextprotocol/client/validators/ajv'
@@ -111,6 +113,37 @@ for (const name of ['@ayayaq/vivi', '@modelcontextprotocol/client']) {
   assert.equal(app.dependencies[name], versions[name])
 }
 assert.equal(typeof requireSdk('@ayayaq/vivi/extensions/mcp').createMcpExtension, 'function')
+const { createExtensionScope } = requireSdk('@ayayaq/vivi/extensions')
+assert.equal(typeof createExtensionScope, 'function')
+assert.match(main, /extensions\.createExtensionScope\(/)
+const owner = createExtensionScope({ reservedNames: ['disabled_host_tool'] })
+const cleanups = []
+owner.defer(async () => {
+  await Promise.resolve()
+  cleanups.push('drained')
+})
+owner.register(requireSdk('@ayayaq/vivi/extensions/calculator').calculatorExtension)
+const ownedSnapshot = owner.snapshot()
+assert.deepEqual(
+  await ownedSnapshot.executeTool(
+    { id: 'offline-package-calculation', name: 'calculate', arguments: { expression: '2 + 3' } },
+    { signal: new AbortController().signal }
+  ),
+  { content: '{"result":5}' }
+)
+const disposed = owner.dispose()
+assert.equal(disposed, owner.dispose())
+assert.equal(owner.signal.aborted, true)
+await disposed
+assert.deepEqual(cleanups, ['drained'])
+assert.equal(owner.state, 'closed')
+assert.equal(ownedSnapshot.has('calculate'), true)
+await assert.rejects(
+  ownedSnapshot.executeTool(
+    { id: 'closed-package-calculation', name: 'calculate', arguments: { expression: '1' } },
+    { signal: new AbortController().signal }
+  )
+)
 assert.equal(typeof requireSdk('@modelcontextprotocol/client').Client, 'function')
 const original = {
   type: 'object',
@@ -164,6 +197,7 @@ console.log(
     resolutions,
     loadedProductionModules: loaded.length,
     schemaChecks: { valid: 1, invalid: 5, capturedSchemaMutation: 'rejected' },
+    ownedExtensionScope: 'passed',
     bareSdkDynamicImport: 'passed',
     mainSha256: sha256(mainBytes),
     asarSha256: sha256(rawFs.readFileSync(root))
