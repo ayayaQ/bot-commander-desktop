@@ -361,6 +361,64 @@ describe('explicit lifecycle and control authority', () => {
       expect(subject.transports.every((peer) => peer.starts === 0)).toBe(true)
     }
   )
+  it('retains strict cleanup ownership and blocks replacement when readiness fails before any handshake', async () => {
+    const subject = await fixture('legacy', false, (peer) => {
+      peer.start = async () => {
+        peer.starts++
+        throw new Error('Inert native readiness failure')
+      }
+      peer.closeFailure = true
+    })
+    await expect(
+      subject.service.start((await subject.service.prepareLaunch('fixture')).token)
+    ).rejects.toThrow('cleanup could not be verified')
+    expect(subject.peer().messages).toEqual([])
+    expect((await subject.service.list()).servers[0]).toMatchObject({
+      state: 'error',
+      cleanupPending: true
+    })
+    await expect(subject.service.prepareLaunch('fixture')).rejects.toThrow('disconnect')
+    await expect(subject.service.disconnect('fixture')).rejects.toThrow(
+      'cleanup could not be verified'
+    )
+    expect(subject.transports).toHaveLength(1)
+    subject.peer().closeFailure = false
+    expect((await subject.service.disconnect('fixture')).servers[0].state).toBe('disabled')
+  })
+  it('keeps the ten-second overall startup bound while readiness is pending', async () => {
+    const held = gate(),
+      subject = await fixture('legacy', false, (peer) => {
+        peer.startupGate = held
+        const close = peer.close.bind(peer)
+        peer.close = () => {
+          held.release()
+          return close()
+        }
+      })
+    vi.useFakeTimers()
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => {
+      const controller = new AbortController()
+      setTimeout(
+        () => controller.abort(new DOMException('Inert startup deadline', 'TimeoutError')),
+        milliseconds
+      )
+      return controller.signal
+    })
+    try {
+      const startup = subject.service.start((await subject.service.prepareLaunch('fixture')).token)
+      await held.ready
+      expect(timeout).toHaveBeenCalledWith(10000)
+      expect(subject.peer().count('initialize')).toBe(0)
+      await vi.advanceTimersByTimeAsync(10001)
+      expect((await startup).started).toBe(false)
+      expect(subject.peer().count('initialize')).toBe(0)
+      expect(subject.peer().closes).toBeGreaterThan(0)
+      expect((await subject.service.list()).servers[0].state).toBe('disabled')
+    } finally {
+      timeout.mockRestore()
+      vi.useRealTimers()
+    }
+  })
   it('prunes a lost expired token while keeping fresh approval explicit', async () => {
     const subject = await fixture('legacy', false),
       old = await subject.service.prepareLaunch('fixture')

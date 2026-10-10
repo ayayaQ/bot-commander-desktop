@@ -27,6 +27,8 @@ export interface WindowsMcpResult {
 export interface WindowsMcpProcess {
   readonly stdout: Readable
   readonly stderr: Readable
+  /** Native Job assignment and root resume acknowledged; not a protocol handshake. */
+  readonly ready: Promise<void>
   readonly completed: Promise<WindowsMcpResult>
   write(bytes: Buffer): Promise<void>
   stop(): Promise<void>
@@ -274,6 +276,9 @@ public static class ViviMcpJob {
           environment, cwd, ref startup, out process), "CreateProcessW");
         if (ResumeThread(process.thread) == UInt32.MaxValue) throw new Win32Exception(Marshal.GetLastWin32Error(), "ResumeThread");
       }
+      // Flush the fixed readiness frame before starting output pumps. Target
+      // output/backpressure cannot delay or spoof this first helper frame.
+      lock (outputLock) { Console.Out.WriteLine("{\"type\":\"started\"}"); Console.Out.Flush(); }
       Close(ref inRead); Close(ref outWrite); Close(ref errWrite); Close(ref process.thread);
       outPump = Pump(outRead, "stdout"); outRead = IntPtr.Zero;
       errPump = Pump(errRead, "stderr"); errRead = IntPtr.Zero;
@@ -430,6 +435,14 @@ export async function launchWindowsMcp(
   env.PSModulePath = win32.join(win32.dirname(executable), 'Modules')
   const stdout = new PassThrough({ highWaterMark: 16_384 })
   const stderr = new PassThrough({ highWaterMark: 16_384 })
+  let resolveReady!: () => void, rejectReady!: (error: Error) => void
+  const ready = new Promise<void>((resolve, reject) => {
+    resolveReady = resolve
+    rejectReady = reject
+  })
+  // A caller may close before awaiting startup. Observe internally without
+  // changing the strict promise handed to the transport's startup boundary.
+  void ready.catch(() => undefined)
   let resolveCompleted!: (value: WindowsMcpResult) => void
   const completed = new Promise<WindowsMcpResult>((resolve) => {
     resolveCompleted = resolve
@@ -448,6 +461,7 @@ export async function launchWindowsMcp(
   let pending = ''
   let wrapperDiagnostics = ''
   let settled = false
+  let started = false
   let stopping = false
   let terminalReceived = false
   let closed = false
@@ -489,6 +503,7 @@ export async function launchWindowsMcp(
   const requestStop = (): void => {
     if (settled || stopping) return
     stopping = true
+    if (!started) rejectReady(new Error('Windows MCP startup cancelled before readiness'))
     stdout.resume()
     stderr.resume()
     closeControl()
@@ -498,6 +513,7 @@ export async function launchWindowsMcp(
     invalidProtocol = true
     pending = ''
     blocked = undefined
+    if (!started) rejectReady(new Error('Windows MCP startup failed before readiness'))
     requestStop()
     child.stdout?.resume()
   }
@@ -507,7 +523,14 @@ export async function launchWindowsMcp(
       if (!value || typeof value !== 'object') throw new Error('frame')
       const record = value as Record<string, unknown>
       if (terminalReceived) throw new Error('frame after terminal result')
-      if (record.type === 'stdout' || record.type === 'stderr' || record.type === 'error') {
+      if (record.type === 'started') {
+        if (started || Object.keys(record).length !== 1) throw new Error('readiness')
+        started = true
+        // EOF may race the helper's already-resumed Job acknowledgment. Keep
+        // draining its legitimate terminal result, without reopening startup.
+        if (!stopping) resolveReady()
+      } else if (record.type === 'stdout' || record.type === 'stderr' || record.type === 'error') {
+        if (!started && record.type !== 'error') throw new Error('output before readiness')
         if (
           typeof record.data !== 'string' ||
           record.data.length > protocolLineLimit ||
@@ -523,6 +546,7 @@ export async function launchWindowsMcp(
           }
         } else {
           result = { exitCode: null, error: bytes.toString('utf8') }
+          if (!started) rejectReady(new Error('Windows MCP startup failed before readiness'))
           terminalReceived = true
           closeControl()
         }
@@ -534,11 +558,13 @@ export async function launchWindowsMcp(
         if (
           typeof record.stopped !== 'boolean' ||
           (!validCode && !(record.exitCode === null && record.stopped)) ||
+          (!started && !(record.exitCode === null && record.stopped)) ||
           result !== undefined
         )
           throw new Error('exit')
         const exitCode = record.exitCode as number | null
         result = record.stopped || stopping ? { exitCode, signal: 'SIGTERM' } : { exitCode }
+        if (!started) rejectReady(new Error('Windows MCP startup cancelled before readiness'))
         terminalReceived = true
         // Final metadata acknowledges an empty Job Object. Close the control pipe so the helper’s reader can finish.
         closeControl()
@@ -550,6 +576,7 @@ export async function launchWindowsMcp(
   const finish = (): void => {
     if (!closed || settled || blocked) return
     settled = true
+    if (!started) rejectReady(new Error('Windows MCP helper closed before readiness'))
     if (stopTimer !== undefined) clearTimeout(stopTimer)
     stdout.end()
     stderr.end()
@@ -629,10 +656,12 @@ export async function launchWindowsMcp(
   return {
     stdout,
     stderr,
+    ready,
     completed,
     async write(bytes) {
       if (
         bytes.length > 65_536 ||
+        !started ||
         settled ||
         stopping ||
         terminalReceived ||

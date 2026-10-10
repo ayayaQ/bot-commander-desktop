@@ -73,6 +73,10 @@ export class McpStdioTransport implements Transport {
           this.onerror?.(new Error('MCP process cleanup could not be verified'))
         )
       })
+      // SDK2.3.1 starts initialize/discovery timers only after awaiting start.
+      // Native helper setup stays within the host's existing overall startup bound.
+      await owned.ready
+      if (this.closed) throw new Error('MCP connection closed during startup')
       return
     }
     const child = spawn(this.launch.server.executable, [...this.launch.server.args], {
@@ -149,12 +153,22 @@ export class McpStdioTransport implements Transport {
   }
   private async dispose(): Promise<void> {
     this.closed = true
+    // Startup may be awaiting native readiness. Signal EOF first so cancellation
+    // cannot wait for readiness while the helper waits for its control input.
+    const owned = this.windows,
+      stopping = owned
+        ? (async () => {
+            await owned.stop()
+          })()
+        : undefined
+    // Observe an early rejection while startup unwinds; strict await below still rejects.
+    void stopping?.catch(() => undefined)
     await this.starting?.catch(() => undefined)
     const child = this.child,
       pid = child?.pid
     try {
       if (this.windows) {
-        await this.windows.stop()
+        await (stopping ?? this.windows.stop())
         const result = await this.windows.completed
         if (result.error) throw new Error('MCP Windows process cleanup could not be verified')
       }
