@@ -18,7 +18,7 @@ The renderer adapts existing host/IPC tool facts through the optional `/presenta
 Its decoded, frozen snapshots supply inert status/effect/source/progress text and warnings outside
 collapsed, bounded argument/result details. Unknown kinds use plain-text fallback; no foreign UI,
 HTML, links, actions or approval IDs are interpreted. Oversized/deep details become an explicitly
-bounded text display; invalid snapshots leave a visible safe error. Canonical history and MCP
+bounded text display; invalid snapshots leave a visible safe error with host-owned status, provenance and safety warnings. Canonical history and MCP
 outcome storage are unchanged.
 
 Host call statuses remain authoritative. Local external effects are unreported unless the host

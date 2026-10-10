@@ -7,7 +7,7 @@
   import AgentValidationReport from './AgentValidationReport.svelte'
   import AgentRunSummary from './AgentRunSummary.svelte'
   import AgentToolPresentation from './AgentToolPresentation.svelte'
-  import { encodeAgentToolPresentation } from '../utils/agentToolPresentation'
+  import { agentToolPresentationInput } from '../utils/agentToolPresentation'
   import AgentSkillsPanel from './AgentSkillsPanel.svelte'
   import { renderMarkdown } from '../utils/markdown'
   import { agentToolLabel } from '../utils/agentToolLabel'
@@ -602,6 +602,7 @@
                 </div>
               {:else if message.role === 'tool'}
                 {#each message.toolCalls || [] as call (call.id)}
+                  {@const presentation = agentToolPresentationInput(call, $activeAgentSession.id, message.id)}
                   <div class="border border-base-300 rounded-md overflow-hidden">
                     <div class="h-10 px-3 bg-base-200 flex items-center gap-2">
                       <span class="material-symbols-outlined text-base">build</span>
@@ -694,7 +695,8 @@
                       </div>
                     {/if}
                     <AgentToolPresentation
-                      encoded={encodeAgentToolPresentation(call, $activeAgentSession.id, message.id)}
+                      encoded={presentation.encoded}
+                      fallback={presentation.fallback}
                     />
                   </div>
                 {/each}

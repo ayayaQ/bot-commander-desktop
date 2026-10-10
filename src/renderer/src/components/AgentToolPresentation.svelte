@@ -2,13 +2,19 @@
   import {
     decodeToolPresentation,
     toolPresentationView,
-    TOOL_PRESENTATION_LIMITS
+    TOOL_PRESENTATION_LIMITS,
+    type ToolPresentationView
   } from '@ayayaq/vivi/presentation'
 
   let {
     encoded,
+    fallback,
     detailBytes = TOOL_PRESENTATION_LIMITS.detailBytes
-  }: { encoded: string; detailBytes?: number } = $props()
+  }: {
+    encoded: string
+    fallback?: Pick<ToolPresentationView, 'header' | 'warnings'>
+    detailBytes?: number
+  } = $props()
   let expanded = $state(false)
   // A replacement snapshot may update status while retaining the same call/card.
   // Only plain JSON is admitted, including after an IPC/persistence transfer.
@@ -53,6 +59,18 @@
     </details>
     {#if view.notice}<p class="px-3 pb-3 opacity-70">{view.notice}</p>{/if}
   {:else}
+    {#if fallback}
+      <div class="p-3 space-y-1 break-all" aria-label="Tool status and provenance">
+        {#each fallback.header as line}<div>{line}</div>{/each}
+      </div>
+      <div
+        class="px-3 pb-3 space-y-1 text-warning break-words"
+        aria-label="Tool warnings"
+        role="status"
+      >
+        {#each fallback.warnings as warning}<p>{warning}</p>{/each}
+      </div>
+    {/if}
     <p class="p-3 text-warning" role="status">
       Tool presentation is invalid or exceeds its display bounds. Details are unavailable; use the
       host status and review above. This display grants no permission to execute or retry.

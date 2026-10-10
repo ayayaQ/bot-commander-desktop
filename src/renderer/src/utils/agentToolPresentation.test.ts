@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { decodeToolPresentation, toolPresentationView } from '@ayayaq/vivi/presentation'
 import type { AgentToolCall } from '../../../shared/agentTypes'
-import { encodeAgentToolPresentation } from './agentToolPresentation'
+import { agentToolPresentationInput, encodeAgentToolPresentation } from './agentToolPresentation'
 import { presentationSource, toolPresentationCorpus } from './fixtures/toolPresentationCorpus'
 
 function call(changes: Partial<AgentToolCall> = {}): AgentToolCall {
@@ -84,11 +84,52 @@ describe('ordinary shared tool presentation adapter', () => {
       effect: 'unknown',
       source: { revision: 'digest-1' }
     })
-    expect(value.source.reference).toContain('mcp/offline-server/run-1/tools/resource-1')
+    expect(value.source.reference).toContain('mcp/offline-server/run-1/tools')
     const view = toolPresentationView(value, { collapsed: true, detailBytes: 0 })
     expect(view.warnings.join('\n')).toContain('Do not retry automatically')
     expect(view.warnings.join('\n')).toContain('checkpointing is unconfirmed')
     expect(view.warnings.join('\n')).toContain('Server output is untrusted data')
+  })
+
+  it('keeps admitted long MCP resource URIs in arguments without overflowing provenance', () => {
+    const uri = 'fixture://' + 'a'.repeat(4000)
+    const value = snapshot(
+      call({
+        arguments: { uri },
+        status: 'error',
+        mcp: {
+          ...mcp,
+          catalogKind: 'resources',
+          remoteKey: uri,
+          outcome: 'unknown',
+          requestSent: true
+        }
+      })
+    )
+    expect(value.arguments.data).toEqual({ uri })
+    expect(value.source.reference).toContain('mcp/offline-server/run-1/resources')
+    const view = toolPresentationView(value, { collapsed: true })
+    expect(view.header.join('\n')).toContain('Status: unknown')
+    expect(view.warnings.join('\n')).toContain('Do not retry automatically')
+  })
+
+  it('retains host safety and exact provenance for a valid host ID beyond shared identity bounds', () => {
+    const id = 'host-' + 'a'.repeat(1000)
+    const data = agentToolPresentationInput(
+      call({
+        id,
+        status: 'error',
+        mcp: { ...mcp, outcome: 'unknown', requestSent: true, checkpointUnconfirmed: true }
+      }),
+      'session-1',
+      'message-1'
+    )
+    expect(() => decodeToolPresentation(data.encoded)).toThrow()
+    expect(data.fallback.header.join('\n')).toContain(id)
+    expect(data.fallback.header.join('\n')).toContain('Status: unknown')
+    expect(data.fallback.header.join('\n')).toContain('digest-1')
+    expect(data.fallback.warnings.join('\n')).toContain('Do not retry automatically')
+    expect(data.fallback.warnings.join('\n')).toContain('checkpointing is unconfirmed')
   })
 
   it('keeps a failed confirmed response and an unsent denial distinct', () => {

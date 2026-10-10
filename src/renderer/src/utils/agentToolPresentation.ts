@@ -2,7 +2,8 @@ import {
   TOOL_PRESENTATION_LIMITS,
   type ToolPresentation,
   type ToolPresentationContent,
-  type ToolPresentationStatus
+  type ToolPresentationStatus,
+  type ToolPresentationView
 } from '@ayayaq/vivi/presentation'
 import type { AgentToolCall } from '../../../shared/agentTypes'
 
@@ -79,11 +80,11 @@ const statuses: Record<AgentToolCall['status'], ToolPresentationStatus> = {
  * This serialized snapshot has no approval ID, action, callback or reusable permission.
  * In particular, generic result JSON/isError cannot establish MCP delivery or external effects.
  */
-export function encodeAgentToolPresentation(
+function prepareAgentToolPresentation(
   call: AgentToolCall,
   sessionId: string,
   messageId: string
-): string {
+): ToolPresentation {
   const warnings: string[] = []
   const budget = { nodes: TOOL_PRESENTATION_LIMITS.nodes - 64 }
   let status = statuses[call.status] ?? 'unknown'
@@ -123,7 +124,7 @@ export function encodeAgentToolPresentation(
     status,
     effect,
     source: {
-      reference: `desktop/session/${sessionId}/message/${messageId}/tool/${call.id}${call.mcp ? `/mcp/${call.mcp.serverId}/${call.mcp.runId}/${call.mcp.catalogKind}/${call.mcp.remoteKey}` : ''}`,
+      reference: `desktop/session/${sessionId}/message/${messageId}/tool/${call.id}${call.mcp ? `/mcp/${call.mcp.serverId}/${call.mcp.runId}/${call.mcp.catalogKind}` : ''}`,
       ...(call.mcp ? { revision: call.mcp.operationDigest } : {})
     },
     arguments: arguments_,
@@ -133,5 +134,60 @@ export function encodeAgentToolPresentation(
       : {}),
     warnings
   }
-  return JSON.stringify(presentation)
+  return presentation
+}
+
+function inert(text: string): string {
+  return text.replace(
+    /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/gu,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`
+  )
+}
+
+/** Host-owned safety fallback also survives the shared decoder's tighter identity limits. */
+export function agentToolPresentationInput(
+  call: AgentToolCall,
+  sessionId: string,
+  messageId: string
+): { encoded: string; fallback: Pick<ToolPresentationView, 'header' | 'warnings'> } {
+  const data = prepareAgentToolPresentation(call, sessionId, messageId)
+  const warnings: string[] = []
+  if (data.status === 'approval_required')
+    warnings.push('Approval required. This display grants no permission to execute.')
+  if (data.status === 'denied')
+    warnings.push('Tool request denied. This display grants no permission to execute.')
+  if (data.status === 'failed')
+    warnings.push('Tool failed. Failure does not establish that no effects occurred.')
+  if (data.status === 'unknown')
+    warnings.push('Tool outcome is unknown. Inspect the resource before retrying.')
+  if (data.effect === 'unknown')
+    warnings.push(
+      'External effects are unknown. Do not retry automatically; cancellation cannot undo effects.'
+    )
+  if (data.effect === 'unreported')
+    warnings.push('External effects are unreported. Do not infer that no effects occurred.')
+  warnings.push(...data.warnings)
+  return {
+    encoded: JSON.stringify(data),
+    fallback: {
+      header: [
+        inert(`Tool ${JSON.stringify(data.name)} (call ${JSON.stringify(data.callId)})`),
+        `Status: ${data.status}`,
+        `Effect: ${data.effect}`,
+        inert(
+          `Source: ${JSON.stringify(data.source.reference)}${data.source.revision ? `; revision ${JSON.stringify(data.source.revision)}` : ''}`
+        ),
+        ...(data.progress ? [inert(`Progress: ${data.progress.text}`)] : [])
+      ],
+      warnings: warnings.map(inert)
+    }
+  }
+}
+
+export function encodeAgentToolPresentation(
+  call: AgentToolCall,
+  sessionId: string,
+  messageId: string
+): string {
+  return agentToolPresentationInput(call, sessionId, messageId).encoded
 }

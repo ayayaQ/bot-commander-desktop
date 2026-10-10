@@ -94,6 +94,8 @@ let socket
 const browserErrors = []
 const flows = []
 let phase = 'fixture preparation'
+let primaryError
+let evaluate
 
 try {
   await writeFile(
@@ -122,6 +124,7 @@ window.electron = { ipcRenderer: {
   invoke(channel, ...args) { calls.push({ channel, args: clone(args) });
     if (channel === 'agent:list') return Promise.resolve(data())
     if (channel === 'fetch-ai-models') return Promise.resolve([])
+    if (channel === 'skills:list') return Promise.resolve({ skills: [], diagnostics: [], externalRoots: [], ownedRoot: '/offline/skills', saveSupport: { available: false, reason: 'Offline display-only fixture' } })
     if (channel === 'get-ai-model-capabilities') return Promise.resolve({})
     if (channel === 'agent:approve') return Promise.resolve(false)
     if (channel === 'agent:set-active') return Promise.resolve()
@@ -269,7 +272,7 @@ render()
     deviceScaleFactor: 1,
     mobile: false
   })
-  const evaluate = async (expression) => {
+  evaluate = async (expression) => {
     validateBrowserExpression(expression)
     const result = await command('Runtime.evaluate', {
       expression: `(async () => { ${expression} })()`,
@@ -510,6 +513,7 @@ render()
     code: 'Enter',
     windowsVirtualKeyCode: 13
   })
+  await wait("window.__fixture.calls.filter(call => call.channel === 'agent:approve').length === 3")
   assert.deepEqual(
     await evaluate(
       "return window.__fixture.calls.filter(call => call.channel === 'agent:approve').at(-1).args"
@@ -529,6 +533,20 @@ render()
   )
   flows.push(
     'A fresh call carries a fresh host approval identity; keyboard rejection stays deny-default and cancelled host error preserves not-attempted evidence without retry'
+  )
+  await evaluate(
+    "window.__fixture.setCall({ id: 'host-' + 'a'.repeat(1000), status: 'error', error: 'Unknown offline outcome', mcp: { ...window.__fixture.snapshot().sessions[0].messages[2].toolCalls[0].mcp, outcome: 'unknown', requestSent: true, checkpointUnconfirmed: true } }, 'interrupted')"
+  )
+  await wait("document.body.innerText.includes('Tool presentation is invalid')")
+  assert.match(await visible(), /Status: unknown/)
+  assert.match(await visible(), /Effect: unknown/)
+  assert.match(await visible(), /Do not retry automatically/)
+  assert.match(await visible(), /checkpointing is unconfirmed/)
+  assert.ok((await visible()).includes('host-' + 'a'.repeat(1000)))
+  assert.ok((await visible()).includes('offline-digest'))
+  assert.equal(await count('agent:approve'), 3)
+  flows.push(
+    'A legitimate host call ID beyond shared identity bounds leaves exact host provenance and unknown/checkpoint safety visible beside the invalid-display notice, without approval or retry'
   )
   assert.deepEqual(browserErrors, [])
   const report = {
@@ -551,6 +569,15 @@ render()
   }
   console.log(JSON.stringify(report, null, 2))
 } catch (error) {
+  primaryError = error
+  console.error(JSON.stringify({ phase, completedFlows: flows, browserErrors }))
+  if (evaluate) {
+    try {
+      console.error(await evaluate('return document.body.innerText'))
+    } catch {
+      /* The primary failure remains authoritative if the browser is unavailable. */
+    }
+  }
   throw new Error('Presentation UI phase ' + phase + ': ' + (error.stack || error))
 } finally {
   socket?.close()
@@ -568,5 +595,10 @@ render()
     })
   }
   await vite?.close()
-  await rm(fixtureDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+  try {
+    await rm(fixtureDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+  } catch (error) {
+    if (!primaryError) throw error
+    console.error('Browser profile cleanup also failed:', error)
+  }
 }
