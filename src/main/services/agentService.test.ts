@@ -129,6 +129,12 @@ function fixtureCommand(channelMessage: string) {
   }).command
 }
 
+// These mocked provider fixtures inspect the authoritative session checkpoint. Independent
+// shadow writes have real-filesystem coverage in agentConversationWorkflow.integration.test.ts.
+function sessionCheckpointWrites() {
+  return mocks.writeFile.mock.calls.filter(([path]) => path.endsWith('agent-sessions.json.tmp'))
+}
+
 function mutationValidationSuite(): AgentValidationSuite {
   const state = createPlaygroundState()
   return {
@@ -1055,7 +1061,7 @@ describe('desktop agent service shared-provider integration', () => {
       expect(recovered.status).toBe('interrupted')
       expect(recovered.activeRunId).toBeUndefined()
       expect(recovered.lastRunMetrics).toEqual(lastRunMetrics)
-      expect(JSON.parse(mocks.writeFile.mock.calls.at(-1)![1]).sessions[0].lastRunMetrics).toEqual(
+      expect(JSON.parse(sessionCheckpointWrites().at(-1)![1]).sessions[0].lastRunMetrics).toEqual(
         lastRunMetrics
       )
     }
@@ -2453,7 +2459,7 @@ describe('desktop agent service shared-provider integration', () => {
       ).toBe('Healthy answer')
       expect(mocks.responsesCreate).toHaveBeenCalledOnce()
       expect(mocks.commitMutation).not.toHaveBeenCalled()
-      for (const [, contents] of mocks.writeFile.mock.calls) {
+      for (const [, contents] of sessionCheckpointWrites()) {
         const record = JSON.parse(contents).sessions.find((session) => session.id === damaged.id)
         expect(record.history).toEqual(history)
         expect(record.messages).toEqual(damaged.messages)
@@ -2461,7 +2467,7 @@ describe('desktop agent service shared-provider integration', () => {
       }
 
       // Restarting preserves the damaged record and re-establishes its execution guard.
-      const saved = mocks.writeFile.mock.calls.at(-1)![1]
+      const saved = sessionCheckpointWrites().at(-1)![1]
       vi.resetModules()
       mocks.readFile.mockResolvedValueOnce(saved)
       vi.mocked(fetch).mockClear()
@@ -2512,7 +2518,7 @@ describe('desktop agent service shared-provider integration', () => {
       status: 'idle',
       history: [{ kind: 'message', role: 'user', content: 'Legacy request' }]
     })
-    const persisted = JSON.parse(mocks.writeFile.mock.calls.at(-1)![1])
+    const persisted = JSON.parse(sessionCheckpointWrites().at(-1)![1])
     expect(persisted.sessions[0].history).toEqual({ preserve: true })
     expect(persisted.sessions[1].history).toEqual(loaded.sessions[1].history)
   })

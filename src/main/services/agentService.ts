@@ -1,7 +1,13 @@
 import { app } from 'electron'
 import { join } from 'node:path'
 import crypto from 'node:crypto'
-import { runAgent, type HistoryMessage, type ToolCall, type ToolResult } from '@ayayaq/vivi'
+import {
+  runAgent,
+  type AgentResult,
+  type HistoryMessage,
+  type ToolCall,
+  type ToolResult
+} from '@ayayaq/vivi'
 import {
   createMcpExtension,
   MCP_GUIDANCE,
@@ -23,6 +29,7 @@ import { createAgentProvider, getAgentModelCapabilities } from './agentProviderA
 import { initializeAgentHistory } from './agentHistory'
 import { createAgentPersistence, reportAgentPersistenceNotice } from './agentPersistence'
 import { decodeAgentSessions, validAgentDisplayHistory } from './agentSessionPersistence'
+import { createAgentConversationRecords } from './agentConversationRecords'
 import {
   createAgentRunMetrics,
   finishAgentRunMetrics,
@@ -202,6 +209,16 @@ const mcpOutcomes = createAgentMcpOutcomeLedger({
   path: () => join(app.getPath('userData'), 'agent-mcp', 'outcomes.json'),
   assertAllowed: (value) => agentMcpService.assertAllowed(value)
 })
+const conversationRecords = createAgentConversationRecords({
+  path: (sessionId) =>
+    join(
+      app.getPath('userData'),
+      'agent-records',
+      `${crypto.createHash('sha256').update(sessionId).digest('hex')}.json`
+    ),
+  assertAllowed: (value) => agentMcpService.assertAllowed(value),
+  outcomes: currentMcpOutcomeRecords
+})
 function currentMcpOutcomeRecords() {
   try {
     return mcpOutcomes.records()
@@ -337,6 +354,7 @@ function save(): Promise<void> {
 
 /** Called after agent ingress is paused and all accepted jobs have drained. */
 export async function checkpointAgentSessionsBeforeQuit(): Promise<void> {
+  await conversationRecords.drain()
   await mcpOutcomes.drain()
   if (currentMcpOutcomeRecords().length) await mcpOutcomes.checkpoint()
   if (!checkpointFailed) return
@@ -502,6 +520,11 @@ async function initializeSessions(): Promise<AgentSessionsData> {
     try {
       const checkpoint = persistentSnapshot()
       await withAgentPersistenceOperation(() => persistence.save(checkpoint))
+      // Shadow migration follows the existing committed recovery. It cannot restore permits,
+      // replace canonical/display history, or authorize retirement of MCP outcome evidence.
+      for (const session of data.sessions) {
+        if (!historyRecoveryErrors.has(session)) await conversationRecords.restore(session)
+      }
       const scopes = new Map(
         currentMcpOutcomeRecords().map((record) => [
           JSON.stringify([record.sessionId, record.runId]),
@@ -577,6 +600,12 @@ export async function deleteAgentSession(sessionId: string): Promise<boolean> {
         return true
       })
       deletedSessionIds.add(sessionId)
+      await conversationRecords.forget(sessionId).catch(() => {
+        reportAgentPersistenceNotice({
+          level: 'warning',
+          message: "The deleted session's conversation shadow could not be removed."
+        })
+      })
       return deleted
     } finally {
       deletingSessionIds.delete(sessionId)
@@ -1422,6 +1451,7 @@ async function startAgentSession(
       agentToolDefinitions.map((tool) => tool.function.name),
       { catalog: skills.catalog, authorizeRead: skills.authorizeRead }
     )
+    await conversationRecords.restore(session)
     // Setup can yield; a concurrent run, session deletion or shutdown must win admission.
     if (controllers.has(sessionId))
       throw new Error('This agent session already has a running request')
@@ -1495,6 +1525,7 @@ async function startAgentSession(
   addMessage(session, { role: 'user', content: userContent.trim() })
   try {
     await save()
+    await trackRunOperation(context, conversationRecords.start(session, runId))
   } catch (error) {
     session.status = 'error'
     session.activeRunId = undefined
@@ -1513,6 +1544,8 @@ async function startAgentSession(
 
   const completion = withAgentPersistenceOperation(async () => {
     let terminal: 'done' | 'error' = 'done'
+    let acceptedResult: AgentResult | undefined
+    let inputHistoryLength = 0
     try {
       const memoryContext = formatAgentMemoryContext((await loadAgentMemories()).memories)
       const hasMemories = memoryContext !== 'Saved user memories: none.'
@@ -1604,6 +1637,7 @@ async function startAgentSession(
         }
       ]
       const initialTokenCount = session.tokenCount
+      inputHistoryLength = session.history!.length
       assertActiveRun(session, runId, signal)
       const result = await runAgent({
         provider: createAgentProvider(settings, runModel, { stream: true, capabilities }),
@@ -1644,6 +1678,16 @@ async function startAgentSession(
               (context.mcpTools.has(toolCall.name) && toolCall.status === 'rejected')
           }
         },
+        onAccepted: (update) =>
+          trackRunOperation(
+            context,
+            (async () => {
+              assertActiveRun(session, runId, signal)
+              await conversationRecords.accepted(session, runId, update)
+              // An admitted shadow write drains through cancellation; it never keeps execution alive.
+              assertActiveRun(session, runId, signal)
+            })()
+          ),
         onEvent: (event) =>
           trackRunOperation(
             context,
@@ -1699,6 +1743,7 @@ async function startAgentSession(
             })()
           )
       })
+      acceptedResult = result
       await drainRunOperations(context)
       // Cancellation/error may close unexecuted calls without emitting further events.
       if (result.error?.code !== 'invalid_input')
@@ -1720,6 +1765,10 @@ async function startAgentSession(
       context.metrics = finishAgentRunMetrics(context.metrics, 'completed', now())
       session.lastRunMetrics = clone(context.metrics)
       await save()
+      await trackRunOperation(
+        context,
+        conversationRecords.settle(session, runId, result, inputHistoryLength)
+      )
       await acknowledgeMcpOutcomes(session, runId)
     } catch (error) {
       await drainRunOperations(context)
@@ -1733,6 +1782,11 @@ async function startAgentSession(
       session.lastRunMetrics = clone(context.metrics)
       try {
         await save()
+        if (acceptedResult)
+          await trackRunOperation(
+            context,
+            conversationRecords.settle(session, runId, acceptedResult, inputHistoryLength)
+          )
         await acknowledgeMcpOutcomes(session, runId)
       } catch (persistenceError) {
         session.status = 'error'
