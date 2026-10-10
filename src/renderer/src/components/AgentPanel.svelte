@@ -6,7 +6,8 @@
   import AgentApprovalDiff from './AgentApprovalDiff.svelte'
   import AgentValidationReport from './AgentValidationReport.svelte'
   import AgentRunSummary from './AgentRunSummary.svelte'
-  import AgentMcpOutcome from './AgentMcpOutcome.svelte'
+  import AgentToolPresentation from './AgentToolPresentation.svelte'
+  import { agentToolPresentationInput } from '../utils/agentToolPresentation'
   import AgentSkillsPanel from './AgentSkillsPanel.svelte'
   import { renderMarkdown } from '../utils/markdown'
   import { agentToolLabel } from '../utils/agentToolLabel'
@@ -341,10 +342,6 @@
     return 'opacity-60'
   }
 
-  function pretty(value: unknown): string {
-    return JSON.stringify(value, null, 2)
-  }
-
   async function setMode(mode: AgentMode) {
     if (!$activeAgentSession) return
     if (mode === 'auto') {
@@ -605,6 +602,7 @@
                 </div>
               {:else if message.role === 'tool'}
                 {#each message.toolCalls || [] as call (call.id)}
+                  {@const presentation = agentToolPresentationInput(call, $activeAgentSession.id, message.id)}
                   <div class="border border-base-300 rounded-md overflow-hidden">
                     <div class="h-10 px-3 bg-base-200 flex items-center gap-2">
                       <span class="material-symbols-outlined text-base">build</span>
@@ -695,20 +693,11 @@
                       >
                         {call.error}
                       </div>
-                    {:else if call.result !== undefined && !call.mcp}
-                      <details class="border-t border-base-300">
-                        <summary class="px-3 py-2 cursor-pointer text-xs opacity-70"
-                          >Tool result</summary
-                        >
-                        <pre
-                          class="px-3 pb-3 text-xs overflow-auto max-h-64 whitespace-pre-wrap break-words">{pretty(
-                            call.result
-                          )}</pre>
-                      </details>
                     {/if}
-                    {#if call.mcp && call.status !== 'waiting_approval'}
-                      <AgentMcpOutcome mcp={call.mcp} result={call.result} />
-                    {/if}
+                    <AgentToolPresentation
+                      encoded={presentation.encoded}
+                      fallback={presentation.fallback}
+                    />
                   </div>
                 {/each}
               {/if}

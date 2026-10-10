@@ -41,6 +41,9 @@ jobs:
       - name: Run ordinary MCP client and affected integration checks
         run: npm run test:mcp
 
+      - name: Check shared tool presentation adapter
+        run: npm test -- src/renderer/src/utils/agentToolPresentation.test.ts
+
       - name: Build production application
         run: npm run build
       - name: Verify packaged production dependencies and SDK validator resolution
@@ -52,6 +55,12 @@ jobs:
           export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
           export MCP_UI_REPORT="$RUNNER_TEMP/agent-mcp-ui.json"
           node scripts/test-agent-mcp-ui.mjs
+
+      - name: Check actual shared tool presentations and host review with an installed headless browser
+        run: |
+          export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
+          export PRESENTATION_UI_REPORT="$RUNNER_TEMP/agent-presentation-ui.json"
+          node scripts/test-agent-presentation-ui.mjs
 
   agent-mcp-windows-native:
     name: Windows native MCP process lifecycle
