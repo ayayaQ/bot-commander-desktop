@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   prepareMutation: vi.fn(),
   commitMutation: vi.fn(),
   captures: 0,
+  invokes: 0,
   sends: 0,
   catalog: undefined as McpCatalogSnapshot | undefined,
   afterSend: undefined as (() => void) | undefined,
@@ -133,6 +134,7 @@ vi.mock('./agentMcpService', async () => {
         return `${operation.serverId}/${operation.remoteKey}: ${JSON.stringify(operation.call.arguments)}`
       },
       async invoke(operation, signal, assertCurrent, hooks) {
+        mocks.invokes++
         assertCurrent()
         await hooks.beforeSend()
         signal.throwIfAborted()
@@ -255,6 +257,7 @@ describe('desktop authoritative conversation records paired workflow', () => {
     mocks.home = await fs.mkdtemp(join(tmpdir(), 'desktop-conversation-workflow-'))
     Object.assign(mocks, {
       captures: 0,
+      invokes: 0,
       sends: 0,
       catalog: undefined,
       afterSend: undefined,
@@ -395,6 +398,7 @@ describe('desktop authoritative conversation records paired workflow', () => {
       prepare: mocks.prepareMutation.mock.calls.length,
       commit: mocks.commitMutation.mock.calls.length,
       captures: mocks.captures,
+      invokes: mocks.invokes,
       sends: mocks.sends
     }
     vi.resetModules()
@@ -408,6 +412,7 @@ describe('desktop authoritative conversation records paired workflow', () => {
       prepare: mocks.prepareMutation.mock.calls.length,
       commit: mocks.commitMutation.mock.calls.length,
       captures: mocks.captures,
+      invokes: mocks.invokes,
       sends: mocks.sends
     }).toEqual(counts)
     return restored
@@ -667,6 +672,213 @@ describe('desktop authoritative conversation records paired workflow', () => {
     expect(reloaded.messages).toEqual(final.messages)
     expect(reloaded.title).toBe(legacy.title)
     expect((await paired(reloaded, 97)).stored).toEqual(replay.stored)
+  })
+
+  it('pairs exact human-denied MCP evidence and reloads its denial without dispatch', async () => {
+    mocks.catalog = catalog()
+    const continued = deferred<void>()
+    const finish = deferred<void>()
+    mocks.responses
+      .mockResolvedValueOnce(
+        response(
+          '',
+          [
+            {
+              id: 'record-mcp-denied',
+              name: remoteAlias,
+              arguments: { query: 'exact offline request' }
+            }
+          ],
+          { input: 5, output: 2, total: 21 }
+        )
+      )
+      .mockImplementationOnce(async () => {
+        continued.resolve()
+        await finish.promise
+        return response('The exact external request was declined.', [], {
+          input: 2,
+          output: 1,
+          total: 13
+        })
+      })
+    const session = await agent.createAgentSession(settings)
+    const run = await start(session.id, 'Propose the exact synthetic external state request')
+    const observed = await (async () => {
+      try {
+        const approval = await run.approval
+        expect(approval.toolCall?.mcp).toMatchObject({
+          runId: run.runId,
+          serverId: 'fixture',
+          remoteKey,
+          outcome: 'pending'
+        })
+        expect(
+          await agent.resolveAgentApproval(
+            session.id,
+            'record-mcp-denied',
+            false,
+            approval.toolCall!.approvalId
+          )
+        ).toBe(true)
+        // Hold only the fake final provider reply so the committed exact ledger can be
+        // independently loaded before the existing terminal checkpoint acknowledges it.
+        await continued.promise
+        const boundary = (await import('./agentMcpService')).agentMcpService
+        const { createAgentMcpOutcomeLedger } = await import('./agentMcpOutcomes')
+        const ledger = createAgentMcpOutcomeLedger({
+          path: join(mocks.home, 'agent-mcp', 'outcomes.json'),
+          assertAllowed: (value) => boundary.assertAllowed(value)
+        })
+        await ledger.load()
+        const exact = ledger.records()
+        expect(exact).toHaveLength(1)
+        expect(exact[0]).toMatchObject({
+          sessionId: session.id,
+          runId: run.runId,
+          call: {
+            id: 'record-mcp-denied',
+            name: remoteAlias,
+            arguments: { query: 'exact offline request' }
+          },
+          serverId: 'fixture',
+          remoteKey,
+          outcome: 'not-sent',
+          requestSent: false,
+          unknownOutcome: false,
+          doNotRetry: false
+        })
+        const body = JSON.parse(exact[0].result!.content)
+        expect(body).toMatchObject({
+          denied: true,
+          requestSent: false,
+          unknownOutcome: false,
+          doNotRetry: false,
+          untrusted: true
+        })
+        expect(mocks.invokes).toBe(0)
+        expect(mocks.sends).toBe(0)
+        const pendingSession = (await agent.loadAgentSessions()).sessions.find(
+          (item) => item.id === session.id
+        )!
+        const pending = await journal(session.id)
+        const pendingRun = pending.runs[0]
+        const base = projectAgentRecords(
+          session.id,
+          pending.sessionRecords.slice(0, pendingRun.baseSequence)
+        )
+        const accepted = projectAgentRunRecords(base, run.runId, pendingRun.records)
+        expect(accepted.history.map((entry) => entry.message)).toEqual(pendingSession.history)
+        return {
+          exact: exact[0],
+          pendingSession,
+          historyIds: accepted.history.map((entry) => entry.id)
+        }
+      } finally {
+        finish.resolve()
+      }
+    })()
+    expect((await run.terminal).type).toBe('done')
+    const final = await saved(session.id)
+    const replay = await paired(final)
+    expect(final.status).toBe('completed')
+    expect(final.tokenCount).toBe(34)
+    expect(mocks.invokes).toBe(0)
+    expect(mocks.sends).toBe(0)
+    expect(mocks.operations).toEqual([])
+    expect(mocks.executeReadTool).not.toHaveBeenCalled()
+    expect(mocks.commitMutation).not.toHaveBeenCalled()
+    expect(mocks.responses).toHaveBeenCalledTimes(2)
+    expect(replay.projection.outcomes).toContainEqual(
+      expect.objectContaining({
+        callId: 'record-mcp-denied',
+        runId: run.runId,
+        name: remoteAlias,
+        argumentsDigest: agentArgumentsDigest({ query: 'exact offline request' }),
+        status: 'denied',
+        effect: 'not_attempted'
+      })
+    )
+    const denial = final.history!.find(
+      (message) => message.kind === 'tool_result' && message.callId === 'record-mcp-denied'
+    )!
+    expect(denial).toMatchObject({
+      callId: 'record-mcp-denied',
+      name: remoteAlias,
+      content: observed.exact.result!.content,
+      isError: true
+    })
+    const display = final.messages.find((message) =>
+      message.toolCalls?.some((call) => call.id === 'record-mcp-denied')
+    )!
+    expect(display.content).toBe(observed.exact.result!.content)
+    expect(display.toolCalls![0]).toMatchObject({
+      id: 'record-mcp-denied',
+      status: 'rejected',
+      mcp: { outcome: 'not-sent', requestSent: false }
+    })
+    expect(
+      final.messages.slice(0, observed.pendingSession.messages.length).map((message) => message.id)
+    ).toEqual(observed.pendingSession.messages.map((message) => message.id))
+    expect(
+      replay.projection.history.slice(0, observed.historyIds.length).map((entry) => entry.id)
+    ).toEqual(observed.historyIds)
+    const reloaded = await restart(session.id)
+    expect(reloaded.history).toEqual(final.history)
+    expect(reloaded.messages).toEqual(final.messages)
+    expect((await paired(reloaded)).stored).toEqual(replay.stored)
+    expect(mocks.invokes).toBe(0)
+    expect(mocks.sends).toBe(0)
+  })
+
+  it('keeps actual successful history and usage authoritative when the shadow file is corrupt', async () => {
+    mocks.responses.mockResolvedValueOnce(
+      response('Ordinary offline conversation completed.', [], { input: 2, output: 1, total: 37 })
+    )
+    const session = await agent.createAgentSession(settings)
+    const name = createHash('sha256').update(session.id).digest('hex')
+    const path = join(mocks.home, 'agent-records', `${name}.json`)
+    const corrupted = '{ordinary incomplete json'
+    await fs.mkdir(join(mocks.home, 'agent-records'), { recursive: true })
+    await fs.writeFile(path, corrupted)
+    const run = await start(session.id, 'Discuss the ordinary offline fixture')
+    expect((await run.terminal).type).toBe('done')
+    const final = await saved(session.id)
+    expect(final.status).toBe('completed')
+    expect(final.tokenCount).toBe(37)
+    expect(final.lastRunMetrics).toMatchObject({
+      runId: run.runId,
+      providerRounds: 1,
+      inputTokens: 2,
+      outputTokens: 1,
+      totalTokens: 37
+    })
+    expect(final.history).toEqual([
+      { kind: 'message', role: 'user', content: 'Discuss the ordinary offline fixture' },
+      {
+        kind: 'assistant',
+        content: 'Ordinary offline conversation completed.',
+        toolCalls: [],
+        providerState: { provider: `openai:${settings.selectedAiModel}`, items: [] }
+      }
+    ])
+    expect(
+      final.messages.map((message) => ({ role: message.role, content: message.content }))
+    ).toEqual([
+      { role: 'user', content: 'Discuss the ordinary offline fixture' },
+      { role: 'assistant', content: 'Ordinary offline conversation completed.' }
+    ])
+    expect(await fs.readFile(path, 'utf8')).toBe(corrupted)
+    const restored = await restart(session.id)
+    expect(restored.history).toEqual(final.history)
+    expect(restored.messages).toEqual(final.messages)
+    expect(restored.tokenCount).toBe(37)
+    expect(await fs.readFile(path, 'utf8')).toBe(corrupted)
+    expect(mocks.responses).toHaveBeenCalledTimes(1)
+    expect(mocks.executeReadTool).not.toHaveBeenCalled()
+    expect(mocks.prepareMutation).not.toHaveBeenCalled()
+    expect(mocks.commitMutation).not.toHaveBeenCalled()
+    expect(mocks.invokes).toBe(0)
+    expect(mocks.sends).toBe(0)
   })
 
   it('pairs exact unknown MCP evidence after one synthetic send and reloads without retry', async () => {

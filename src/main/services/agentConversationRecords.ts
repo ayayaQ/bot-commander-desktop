@@ -211,6 +211,8 @@ export function agentConversationOutcomes(
     )
       throw new Error('Conversation evidence differs from exact historical MCP call')
     const before = output.find((item) => item.callId === call.id)
+    const body: unknown = record.result ? JSON.parse(record.result.content) : null
+    const denied = record.outcome === 'not-sent' && object(body) && body.denied === true
     const candidate: AgentOutcomeEvidence = {
       callId: call.id,
       runId: record.runId,
@@ -222,7 +224,9 @@ export function agentConversationOutcomes(
             ? 'failed'
             : 'succeeded'
           : record.outcome === 'not-sent'
-            ? 'failed'
+            ? denied
+              ? 'denied'
+              : 'failed'
             : 'unknown',
       effect:
         record.outcome === 'not-sent'
