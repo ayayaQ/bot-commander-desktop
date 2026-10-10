@@ -965,3 +965,464 @@ describe('published registry calculator in the recoverable desktop agent', () =>
     }
   )
 })
+
+// These fixtures exercise the shared CORE-11 lifecycle corpus in the actual Electron service.
+// The only extra seam records trusted scope acquisition and provides inert owned resources.
+describe('owned desktop extension lifetimes', () => {
+  async function captureScopes(
+    acquired?: (scope: import('@ayayaq/vivi/extensions').ExtensionScope) => Promise<void> | void
+  ) {
+    const extensions = await import('./agentExtensions')
+    const create = extensions.createAgentExtensionScope
+    const scopes: Array<{
+      scope: import('@ayayaq/vivi/extensions').ExtensionScope
+      snapshot: import('@ayayaq/vivi/extensions').ToolRegistry
+    }> = []
+    const factory = vi
+      .spyOn(extensions, 'createAgentExtensionScope')
+      .mockImplementation(async (...args) => {
+        const scope = await create(...args)
+        scopes.push({ scope, snapshot: scope.snapshot() })
+        await acquired?.(scope)
+        return scope
+      })
+    return { scopes, factory, create }
+  }
+
+  it('closes every successive owner and its fixed captured snapshot before reporting completion', async () => {
+    const captured = await captureScopes()
+    transport('openai', [{ text: 'First' }, { text: 'Second' }, { text: 'Third' }])
+    const agents = await import('./agentService')
+    const session = await agents.createAgentSession(settings())
+    for (let index = 0; index < 3; index++) {
+      const observed = observe(agents)
+      await agents.runAgentSession(session.id, `Request ${index}`, settings())
+      expect((await observed.terminal).status).toBe('completed')
+      await agents.drainAgentRuns()
+      expect(captured.scopes.every(({ scope }) => scope.state === 'closed')).toBe(true)
+    }
+    expect(captured.scopes).toHaveLength(6)
+    for (const { scope, snapshot } of captured.scopes) {
+      expect(snapshot.has('calculate')).toBe(true)
+      expect(snapshot.tools.map((tool) => tool.name)).toEqual([
+        'calculate',
+        'list_skills',
+        'read_skill'
+      ])
+      expect(() => scope.snapshot()).toThrow('not open')
+      await expect(
+        snapshot.executeTool(calculate(), { signal: new AbortController().signal })
+      ).rejects.toThrow()
+      expect(scope.dispose()).toBe(scope.dispose())
+    }
+    expect(requests).toHaveLength(3)
+    expect(await storedSession(session.id)).toMatchObject({
+      status: 'completed'
+    })
+  })
+
+  it('detaches a completed run subscription and makes its retained callback inert during a newer run', async () => {
+    const settingsService = await import('./settingsService')
+    const subscribe = settingsService.onSettingsChanged
+    const listeners: Array<{
+      callback: Parameters<typeof subscribe>[0]
+      unsubscribe: ReturnType<typeof vi.fn>
+    }> = []
+    vi.spyOn(settingsService, 'onSettingsChanged').mockImplementation((callback) => {
+      const detach = subscribe(callback)
+      const unsubscribe = vi.fn(() => detach())
+      listeners.push({ callback, unsubscribe })
+      return unsubscribe
+    })
+    const { calculatorExtension } = await import('@ayayaq/vivi/extensions/calculator')
+    const entered = deferred<AbortSignal>(),
+      late = deferred<ToolResult>()
+    transport('openai', [{ text: 'First completed' }, { calls: [calculate()] }])
+    const agents = await import('./agentService')
+    const first = observe(agents),
+      session = await start(agents)
+    await first.terminal
+    const previousListener = listeners[1]
+    expect(previousListener.unsubscribe).toHaveBeenCalledOnce()
+    vi.spyOn(calculatorExtension.tools[0], 'execute').mockImplementation(
+      async (_call, { signal }) => {
+        entered.resolve(signal)
+        return late.promise
+      }
+    )
+    const second = observe(agents)
+    await agents.runAgentSession(session.id, 'Second request', settings())
+    const signal = await entered.promise
+    previousListener.callback(
+      { ...settingsService.getSettings(), openaiApiKey: 'fake-changed' },
+      settingsService.getSettings()
+    )
+    expect(signal.aborted).toBe(false)
+    expect((await agents.loadAgentSessions()).sessions[0].status).toBe('running')
+    settingsService.setSettings({ ...settingsService.getSettings(), openaiApiKey: 'fake-changed' })
+    expect((await second.terminal).status).toBe('cancelled')
+    await agents.drainAgentRuns()
+    expect(listeners[2].unsubscribe).toHaveBeenCalledOnce()
+    late.resolve({ content: '{"result":99}' })
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(requests).toHaveLength(2)
+    expect(await storedSession(session.id)).toMatchObject({ status: 'cancelled' })
+  })
+
+  it('rolls back a late candidate during shutdown and awaits its exact acquired resource before rejecting startup', async () => {
+    const acquired = deferred(),
+      releaseAcquisition = deferred(),
+      cleanupEntered = deferred(),
+      releaseCleanup = deferred()
+    const captured = await captureScopes(async (scope) => {
+      scope.defer(async () => {
+        cleanupEntered.resolve()
+        await releaseCleanup.promise
+      })
+      acquired.resolve()
+      await releaseAcquisition.promise
+    })
+    const agents = await import('./agentService')
+    const session = await agents.createAgentSession(settings())
+    const before = await storedSession(session.id)
+    const lifecycle = await import('./agentPersistenceLifecycle')
+    let settled = false
+    const startup = agents.runAgentSession(session.id, 'Must not publish', settings())
+    const rejected = expect(startup).rejects.toThrow('shutting down')
+    void startup.then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      }
+    )
+    try {
+      await acquired.promise
+      lifecycle.pauseAgentPersistence()
+      agents.stopAgentRuns()
+      releaseAcquisition.resolve()
+      await cleanupEntered.promise
+      expect(settled).toBe(false)
+      expect(captured.scopes[0].scope.state).toBe('closing')
+      expect(await storedSession(session.id)).toEqual(before)
+      releaseCleanup.resolve()
+      await rejected
+      await lifecycle.drainAgentPersistence()
+      expect(captured.scopes[0].scope.state).toBe('closed')
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(await storedSession(session.id)).toEqual(before)
+    } finally {
+      releaseAcquisition.resolve()
+      releaseCleanup.resolve()
+      await rejected
+    }
+  })
+
+  it.each(['cancel', 'shutdown'] as const)(
+    '%s waits owned cleanup while keeping app-owned MCP connections intact',
+    async (action) => {
+      const entered = deferred<AbortSignal>(),
+        late = deferred<ToolResult>(),
+        cleanupEntered = deferred(),
+        releaseCleanup = deferred()
+      const order: string[] = []
+      const captured = await captureScopes((scope) => {
+        scope.defer(() => {
+          order.push('last')
+        })
+        scope.defer(async () => {
+          order.push('first')
+          cleanupEntered.resolve()
+          await releaseCleanup.promise
+        })
+      })
+      const { AgentMcpService } = await import('./agentMcpService')
+      vi.spyOn(AgentMcpService.prototype, 'captureCatalogs').mockRejectedValue(
+        new Error('Inert unavailable metadata')
+      )
+      const close = vi.spyOn(AgentMcpService.prototype, 'close')
+      const { calculatorExtension } = await import('@ayayaq/vivi/extensions/calculator')
+      vi.spyOn(calculatorExtension.tools[0], 'execute').mockImplementation(
+        async (_call, { signal }) => {
+          entered.resolve(signal)
+          return late.promise
+        }
+      )
+      transport('openai', [{ calls: [calculate()] }])
+      const agents = await import('./agentService'),
+        observed = observe(agents),
+        session = await start(agents)
+      const signal = await entered.promise
+      let terminal = false,
+        drained = false
+      void observed.terminal.then(() => {
+        terminal = true
+      })
+      const lifecycle = await import('./agentPersistenceLifecycle')
+      if (action === 'shutdown') {
+        lifecycle.pauseAgentPersistence()
+        agents.stopAgentRuns()
+      } else expect(agents.cancelAgentRun(session.id)).toBe(true)
+      const draining = agents.drainAgentRuns().then(() => {
+        drained = true
+      })
+      try {
+        await cleanupEntered.promise
+        expect(signal.aborted).toBe(true)
+        expect(terminal).toBe(false)
+        expect(drained).toBe(false)
+        expect(order).toEqual(['first'])
+        expect(captured.scopes[0].scope.state).toBe('closing')
+        releaseCleanup.resolve()
+        expect((await observed.terminal).status).toBe('cancelled')
+        await draining
+        await lifecycle.drainAgentPersistence()
+        expect(order).toEqual(['first', 'last'])
+        expect(captured.scopes[0].scope.state).toBe('closed')
+        expect(close).not.toHaveBeenCalled()
+        const saved = await fs.readFile(join(host.directory, 'agent-sessions.json'), 'utf8')
+        late.resolve({ content: '{"result":999,"late":true}' })
+        await new Promise<void>((resolve) => setImmediate(resolve))
+        expect(await fs.readFile(join(host.directory, 'agent-sessions.json'), 'utf8')).toBe(saved)
+      } finally {
+        releaseCleanup.resolve()
+        late.resolve({ content: '{"result":0}' })
+        await draining
+      }
+    }
+  )
+
+  it('preserves the established ordinary scope when MCP candidate setup fails', async () => {
+    const captured = await captureScopes()
+    captured.factory.mockImplementation(async (...args) => {
+      if (args[2]) throw new Error('Inert candidate registration failure')
+      const scope = await captured.create(...args)
+      captured.scopes.push({ scope, snapshot: scope.snapshot() })
+      return scope
+    })
+    transport('openai', [{ calls: [calculate()] }, { text: 'Ordinary tools survived' }])
+    const agents = await import('./agentService'),
+      observed = observe(agents)
+    await start(agents)
+    const result = await observed.terminal
+    expect(result.status).toBe('completed')
+    expect(displayCalls(result)[0].result).toEqual({ result: 42 })
+    expect(captured.scopes).toHaveLength(1)
+    expect(captured.scopes[0].scope.state).toBe('closed')
+  })
+
+  it('attempts every owned cleanup and reports its failure as a persisted terminal error', async () => {
+    const cleaned = vi.fn()
+    await captureScopes((scope) => {
+      scope.defer(cleaned)
+      scope.defer(() => {
+        throw new Error('Inert owned cleanup failure')
+      })
+    })
+    const { AgentMcpService } = await import('./agentMcpService')
+    vi.spyOn(AgentMcpService.prototype, 'captureCatalogs').mockRejectedValue(
+      new Error('Inert unavailable metadata')
+    )
+    transport('openai', [{ text: 'The request completed' }])
+    const agents = await import('./agentService'),
+      observed = observe(agents),
+      session = await start(agents)
+    const result = await observed.terminal
+    expect(result.status).toBe('error')
+    expect(result.error).toContain('Agent cleanup failed')
+    expect(cleaned).toHaveBeenCalledOnce()
+    await agents.drainAgentRuns()
+    expect(await storedSession(session.id)).toEqual(result)
+    expect(result.messages.at(-1)?.content).toBe('The request completed')
+  })
+})
+
+it('switches active sessions without transferring a live run owner or its late calculator result', async () => {
+  const { calculatorExtension } = await import('@ayayaq/vivi/extensions/calculator')
+  const entered = deferred<AbortSignal>(),
+    late = deferred<ToolResult>()
+  vi.spyOn(calculatorExtension.tools[0], 'execute').mockImplementation(
+    async (_call, { signal }) => {
+      entered.resolve(signal)
+      return late.promise
+    }
+  )
+  transport('openai', [{ calls: [calculate()] }, { text: 'Neighbor completed' }])
+  const agents = await import('./agentService')
+  const first = await agents.createAgentSession(settings()),
+    second = await agents.createAgentSession(settings())
+  const firstTerminal = deferred<AgentSession>(),
+    secondTerminal = deferred<AgentSession>()
+  const events: AgentStreamEvent[] = []
+  agents.setAgentEventSink((event) => {
+    events.push(structuredClone(event))
+    if (event.type === 'done' || event.type === 'error') {
+      if (event.sessionId === first.id) firstTerminal.resolve(event.session!)
+      if (event.sessionId === second.id) secondTerminal.resolve(event.session!)
+    }
+  })
+  await agents.setActiveAgentSession(first.id)
+  await agents.runAgentSession(first.id, 'Held calculation', settings())
+  const signal = await entered.promise
+  await agents.setActiveAgentSession(second.id)
+  await agents.runAgentSession(second.id, 'Independent request', settings())
+  const completed = await secondTerminal.promise
+  expect(completed.status).toBe('completed')
+  expect(signal.aborted).toBe(false)
+  expect(agents.cancelAgentRun(first.id)).toBe(true)
+  expect((await firstTerminal.promise).status).toBe('cancelled')
+  await agents.drainAgentRuns()
+  const saved = await storedSession(second.id),
+    count = events.length
+  late.resolve({ content: '{"result":999,"late":true}' })
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  expect(await storedSession(second.id)).toEqual(saved)
+  expect(saved.messages.at(-1)?.content).toBe('Neighbor completed')
+  expect(events).toHaveLength(count)
+  expect((await agents.loadAgentSessions()).activeSessionId).toBe(second.id)
+})
+
+it('drains an already-admitted event checkpoint before cancelled owner completion', async () => {
+  const atomic = await import('./atomicPersistence'),
+    write = atomic.atomicWrite
+  const entered = deferred(),
+    release = deferred()
+  let held = false
+  vi.spyOn(atomic, 'atomicWrite').mockImplementation(async (...args) => {
+    const snapshot = args[0].endsWith('agent-sessions.json') ? JSON.parse(args[1]) : undefined
+    if (
+      !held &&
+      snapshot?.sessions.some(
+        (session: AgentSession) =>
+          session.status === 'running' &&
+          session.history?.some((message) => message.kind === 'assistant')
+      )
+    ) {
+      held = true
+      entered.resolve()
+      await release.promise
+    }
+    return write(...args)
+  })
+  transport('openai', [{ calls: [calculate()] }])
+  const agents = await import('./agentService'),
+    observed = observe(agents)
+  const session = await start(agents)
+  await entered.promise
+  let terminal = false,
+    drained = false
+  void observed.terminal.then(() => {
+    terminal = true
+  })
+  agents.cancelAgentRun(session.id)
+  const draining = agents.drainAgentRuns().then(() => {
+    drained = true
+  })
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(terminal).toBe(false)
+    expect(drained).toBe(false)
+    release.resolve()
+    const result = await observed.terminal
+    expect(result.status).toBe('cancelled')
+    await draining
+    expect(await storedSession(session.id)).toEqual(result)
+    expect(displayCalls(result)).toHaveLength(0)
+    expect(toolResults(result)).toHaveLength(1)
+    expect(JSON.parse(toolResults(result)[0].content).error.code).toBe('cancelled')
+  } finally {
+    release.resolve()
+    await draining
+  }
+})
+
+it('awaits an admitted local resource save and preserves its known committed result after cancellation', async () => {
+  const atomic = await import('./atomicPersistence'),
+    write = atomic.atomicWrite
+  const entered = deferred(),
+    release = deferred()
+  vi.spyOn(atomic, 'atomicWrite').mockImplementation(async (...args) => {
+    if (args[0].endsWith('commands.json') && JSON.parse(args[1]).channelMessage === 'After') {
+      entered.resolve()
+      await release.promise
+    }
+    return write(...args)
+  })
+  const mutation = await editCall()
+  transport('openai', [{ calls: [mutation] }])
+  const agents = await import('./agentService'),
+    observed = observe(agents),
+    session = await start(agents)
+  await vi.waitFor(() =>
+    expect(observed.events.some((event) => event.type === 'approval')).toBe(true)
+  )
+  const approvalId = observed.events.find((event) => event.type === 'approval')!.toolCall!
+    .approvalId
+  expect(await agents.resolveAgentApproval(session.id, mutation.id, true, approvalId)).toBe(true)
+  await entered.promise
+  let terminal = false
+  void observed.terminal.then(() => {
+    terminal = true
+  })
+  agents.cancelAgentRun(session.id)
+  const draining = agents.drainAgentRuns()
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(terminal).toBe(false)
+    release.resolve()
+    const result = await observed.terminal
+    expect(result.status).toBe('cancelled')
+    await draining
+    expect(await readCommand()).toMatchObject({ channelMessage: 'After' })
+    expect(displayCalls(result)[0]).toMatchObject({
+      status: 'completed',
+      result: { success: true }
+    })
+    expect(await storedSession(session.id)).toEqual(result)
+    expect(requests).toHaveLength(1)
+  } finally {
+    release.resolve()
+    await draining
+  }
+})
+
+it('reports failed cleanup of a late unpublished MCP candidate even when its run was cancelled', async () => {
+  const extensions = await import('./agentExtensions'),
+    create = extensions.createAgentExtensionScope
+  const acquired = deferred(),
+    release = deferred(),
+    cleaned = vi.fn()
+  let candidate: import('@ayayaq/vivi/extensions').ExtensionScope | undefined
+  vi.spyOn(extensions, 'createAgentExtensionScope').mockImplementation(async (...args) => {
+    const scope = await create(...args)
+    if (args[2]) {
+      candidate = scope
+      scope.defer(cleaned)
+      scope.defer(() => {
+        throw new Error('Inert unpublished resource cleanup failure')
+      })
+      acquired.resolve()
+      await release.promise
+    }
+    return scope
+  })
+  const agents = await import('./agentService'),
+    observed = observe(agents),
+    session = await start(agents)
+  await acquired.promise
+  agents.cancelAgentRun(session.id)
+  try {
+    release.resolve()
+    const result = await observed.terminal
+    expect(result.status).toBe('error')
+    expect(result.error).toContain('MCP extension setup and cleanup failed')
+    expect(cleaned).toHaveBeenCalledOnce()
+    expect(candidate?.state).toBe('closed')
+    await agents.drainAgentRuns()
+    expect(await storedSession(session.id)).toEqual(result)
+    expect(fetchMock).not.toHaveBeenCalled()
+  } finally {
+    release.resolve()
+  }
+})

@@ -13,7 +13,11 @@ import {
   resumeRuntime
 } from './utils/virtual'
 import { finishPersistenceBeforeQuit } from './utils/gracefulShutdown'
-import { stopAgentRuns, checkpointAgentSessionsBeforeQuit } from './services/agentService'
+import {
+  stopAgentRuns,
+  drainAgentRuns,
+  checkpointAgentSessionsBeforeQuit
+} from './services/agentService'
 import { setAgentPersistenceNoticeHandler } from './services/agentPersistence'
 import {
   pauseAgentPersistence,
@@ -244,6 +248,7 @@ app.whenReady().then(async () => {
         checkpointAndStopRuntime: stopRuntimeAndCheckpoint,
         drainResources: drainResourceMutations,
         drainAgents: async () => {
+          await drainAgentRuns()
           await drainAgentPersistence()
           await checkpointAgentSessionsBeforeQuit()
         },
