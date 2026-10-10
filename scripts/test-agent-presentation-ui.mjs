@@ -424,6 +424,8 @@ render()
   await evaluate('document.querySelector("summary").blur(); document.body.focus()')
   await command('Input.dispatchKeyEvent', {
     type: 'keyDown',
+    text: '\r',
+    unmodifiedText: '\r',
     key: 'Enter',
     code: 'Enter',
     windowsVirtualKeyCode: 13
@@ -501,8 +503,11 @@ render()
   await evaluate(
     "const button = [...document.querySelectorAll('button')].find(node => node.textContent.trim() === 'Reject'); button.focus()"
   )
+  assert.equal(await evaluate('return document.activeElement?.textContent.trim()'), 'Reject')
   await command('Input.dispatchKeyEvent', {
     type: 'keyDown',
+    text: '\r',
+    unmodifiedText: '\r',
     key: 'Enter',
     code: 'Enter',
     windowsVirtualKeyCode: 13
