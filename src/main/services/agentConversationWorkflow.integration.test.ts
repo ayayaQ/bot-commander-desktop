@@ -81,11 +81,13 @@ vi.mock('electron', () => ({
 
 // Resource effects are explicit offline fakes; session/journal/MCP persistence is real.
 vi.mock('./agentTools', () => ({
-  agentToolDefinitions: ['read_bot_state', 'edit_bot_state'].map((name) => ({
-    type: 'function',
-    function: { name, description: name, parameters: { type: 'object', properties: {} } }
-  })),
-  mutationToolNames: new Set(['edit_bot_state']),
+  agentToolDefinitions: ['read_bot_state', 'edit_bot_state', 'edit_developer_prompt'].map(
+    (name) => ({
+      type: 'function',
+      function: { name, description: name, parameters: { type: 'object', properties: {} } }
+    })
+  ),
+  mutationToolNames: new Set(['edit_bot_state', 'edit_developer_prompt']),
   executeReadTool: mocks.executeReadTool,
   prepareMutation: mocks.prepareMutation,
   commitMutation: mocks.commitMutation,
@@ -307,6 +309,7 @@ describe('desktop authoritative conversation records paired workflow', () => {
     await (await import('./agentPersistenceLifecycle')).drainAgentPersistence()
     agent.setAgentEventSink(null)
     vi.restoreAllMocks()
+    vi.useRealTimers()
     vi.unstubAllGlobals()
     await fs.rm(mocks.home, { recursive: true, force: true })
   })
@@ -559,6 +562,317 @@ describe('desktop authoritative conversation records paired workflow', () => {
       })
     )
   })
+
+  it.each(['unchanged', 'revision changed', 'scope changed', 'cancelled', 'cold reload'] as const)(
+    'pairs a seven-day approval pause and resumes with %s current host state',
+    async (change) => {
+      // Only Date advances. Filesystem work and cancellation keep their real scheduling.
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date('2026-10-10T00:00:00.000Z'))
+      const tools = await vi.importActual<typeof import('./agentTools')>('./agentTools')
+      const appSettings = await import('./settingsService')
+      const { saveSettings } = await import('./fileService')
+      const resources = await import('./resourceChangeService')
+      const changed = vi.fn()
+      resources.setResourceChangeEventSink(changed)
+      const initial = 'Ordinary original creator guidance'
+      const proposed = 'Ordinary proposed creator guidance'
+      appSettings.setSettings({ ...appSettings.getSettings(), developerPrompt: initial })
+      await saveSettings()
+      const beforeSettings = await fs.readFile(join(mocks.home, 'settings.json'), 'utf8')
+      const arguments_ = { expectedRevision: tools.revision(initial), content: proposed }
+      mocks.prepareMutation.mockImplementation(tools.prepareMutation)
+      mocks.commitMutation.mockImplementation(tools.commitMutation)
+      mocks.responses
+        .mockResolvedValueOnce(
+          response(
+            '',
+            [{ id: 'record-paused', name: 'edit_developer_prompt', arguments: arguments_ }],
+            {
+              input: 3,
+              output: 2,
+              total: 17
+            }
+          )
+        )
+        .mockResolvedValueOnce(
+          response('The paused proposal has been resolved.', [], { input: 2, output: 1, total: 9 })
+        )
+      const session = await agent.createAgentSession(settings)
+      const run = await start(session.id, 'Review the ordinary creator guidance change')
+      const approval = await run.approval
+      expect(approval.toolCall).toMatchObject({
+        id: 'record-paused',
+        arguments: arguments_,
+        status: 'waiting_approval',
+        before: initial,
+        after: proposed
+      })
+      // The approval event precedes its admitted canonical save. Observe the real disk
+      // checkpoint before advancing the clock, rather than mistaking a live event for one.
+      await vi.waitFor(async () => {
+        const disk = JSON.parse(await fs.readFile(join(mocks.home, 'agent-sessions.json'), 'utf8'))
+        expect(disk.sessions.find((item: AgentSession) => item.id === session.id).status).toBe(
+          'waiting_approval'
+        )
+      })
+      const pending = await journal(session.id)
+      const retained = pending.runs[0]
+      const base = projectAgentRecords(
+        session.id,
+        pending.sessionRecords.slice(0, retained.baseSequence)
+      )
+      const paused = projectAgentRunRecords(base, run.runId, retained.records)
+      expect(
+        retained.records.reduce(applyAgentRunRecord, createAgentRunProjection(base, run.runId))
+      ).toEqual(paused)
+      expect(paused).toMatchObject({
+        state: 'running',
+        runId: run.runId,
+        sequence: 2,
+        eventId: `${run.runId}:2`,
+        baseSequence: base.sequence,
+        baseEventId: base.eventId,
+        baseReceiptDigest: base.receipts.at(-1)!.digest,
+        runUsage: { inputTokens: 3, outputTokens: 2, totalTokens: 17 }
+      })
+      expect(paused.receipts.at(-1)).toMatchObject({ eventId: paused.eventId, sequence: 2 })
+      expect(paused.history.at(-1)!.message).toMatchObject({
+        kind: 'assistant',
+        toolCalls: [{ id: 'record-paused', name: 'edit_developer_prompt', arguments: arguments_ }]
+      })
+      expect(paused.history.some((entry) => entry.message.kind === 'tool_result')).toBe(false)
+      for (const [index, entry] of paused.history.entries()) {
+        expect(entry.id).toBe(`history:${index}`)
+        expect(entry.source).toEqual({
+          reference: `desktop/session/${session.id}/history/${index}`,
+          revision: createHash('sha256').update(JSON.stringify(entry.message)).digest('hex')
+        })
+      }
+      const raw = JSON.stringify(pending)
+      expect(raw).not.toContain(approval.toolCall!.approvalId!)
+      vi.setSystemTime(new Date('2026-10-17T00:00:00.000Z'))
+      const afterWait = await journal(session.id)
+      expect(afterWait).toEqual(pending)
+      const fresh = JSON.parse(JSON.stringify(afterWait)) as Journal
+      const freshBase = projectAgentRecords(
+        session.id,
+        fresh.sessionRecords.slice(0, retained.baseSequence)
+      )
+      expect(projectAgentRunRecords(freshBase, run.runId, fresh.runs[0].records)).toEqual(paused)
+      expect(mocks.responses).toHaveBeenCalledTimes(1)
+      expect(mocks.commitMutation).not.toHaveBeenCalled()
+      expect(changed).not.toHaveBeenCalled()
+      expect(appSettings.getSettings().developerPrompt).toBe(initial)
+      expect(await fs.readFile(join(mocks.home, 'settings.json'), 'utf8')).toBe(beforeSettings)
+      expect(
+        await agent.resolveAgentApproval(session.id, 'record-paused', true, 'other-approval')
+      ).toBe(false)
+
+      if (change === 'cold reload') {
+        // Keep the exact acknowledged waiting checkpoint, then stop the old owner before
+        // reconstructing an ordinary interrupted-process image in this private test home.
+        const sessionPath = join(mocks.home, 'agent-sessions.json')
+        const shadowPath = join(
+          mocks.home,
+          'agent-records',
+          `${createHash('sha256').update(session.id).digest('hex')}.json`
+        )
+        const sessionRaw = await fs.readFile(sessionPath, 'utf8')
+        const shadowRaw = await fs.readFile(shadowPath, 'utf8')
+        expect(agent.cancelAgentRun(session.id)).toBe(true)
+        await run.terminal
+        await saved(session.id)
+        await fs.writeFile(sessionPath, sessionRaw)
+        await fs.writeFile(shadowPath, shadowRaw)
+        await fs.rm(`${sessionPath}.bak`, { force: true })
+        await fs.rm(`${shadowPath}.bak`, { force: true })
+        const reloaded = await restart(session.id)
+        expect(reloaded.status).toBe('interrupted')
+        expect(reloaded.activeRunId).toBeUndefined()
+        expect(reloaded.tokenCount).toBe(0)
+        expect(mocks.commitMutation).not.toHaveBeenCalled()
+        expect(mocks.responses).toHaveBeenCalledTimes(1)
+        expect(
+          await agent.resolveAgentApproval(
+            session.id,
+            'record-paused',
+            true,
+            approval.toolCall!.approvalId
+          )
+        ).toBe(false)
+        const restored = await journal(session.id)
+        expect(restored.runs).toEqual(pending.runs)
+        expect(restored.sessionRecords.at(-1)).toMatchObject({
+          type: 'session_snapshot',
+          reason: 'reconciliation'
+        })
+        const restoredProjection = projectAgentRecords(session.id, restored.sessionRecords)
+        expect(
+          restored.sessionRecords.reduce(applyAgentRecord, createAgentProjection(session.id))
+        ).toEqual(restoredProjection)
+        expect(restoredProjection.history.slice(0, paused.history.length)).toEqual(paused.history)
+        expect(restoredProjection.history.map((entry) => entry.message)).toEqual(reloaded.history)
+        expect(restoredProjection.usage).toEqual({
+          inputTokens: 3,
+          outputTokens: 2,
+          totalTokens: 0
+        })
+        expect(restoredProjection.outcomes).toEqual([])
+        expect(restoredProjection.runs).toEqual([])
+        expect(projectAgentRunRecords(base, run.runId, restored.runs[0].records)).toEqual(paused)
+        const restoredRaw = JSON.stringify(restored)
+        await agent.loadAgentSessions()
+        expect(JSON.stringify(await journal(session.id))).toBe(restoredRaw)
+
+        // A later explicit request is a new run, with current settings and a fresh human
+        // approval. No approval or tool execution is recovered from the old data cursor.
+        await (await import('./fileService')).loadSettings()
+        const currentSettings = await import('./settingsService')
+        expect(currentSettings.getSettings().developerPrompt).toBe(initial)
+        const currentTools = await vi.importActual<typeof import('./agentTools')>('./agentTools')
+        mocks.prepareMutation.mockImplementation(currentTools.prepareMutation)
+        mocks.commitMutation.mockImplementation(currentTools.commitMutation)
+        mocks.responses
+          .mockReset()
+          .mockResolvedValueOnce(
+            response(
+              '',
+              [{ id: 'record-fresh', name: 'edit_developer_prompt', arguments: arguments_ }],
+              { input: 4, output: 1, total: 23 }
+            )
+          )
+          .mockResolvedValueOnce(
+            response('Freshly approved guidance saved.', [], { input: 2, output: 1, total: 9 })
+          )
+        const freshRun = await start(session.id, 'Review the guidance again after cold recovery')
+        const freshApproval = await freshRun.approval
+        expect(freshRun.runId).not.toBe(run.runId)
+        expect(freshApproval.toolCall!.approvalId).not.toBe(approval.toolCall!.approvalId)
+        expect(mocks.commitMutation).not.toHaveBeenCalled()
+        expect(
+          await agent.resolveAgentApproval(
+            session.id,
+            'record-paused',
+            true,
+            approval.toolCall!.approvalId
+          )
+        ).toBe(false)
+        expect(
+          await agent.resolveAgentApproval(
+            session.id,
+            'record-fresh',
+            true,
+            freshApproval.toolCall!.approvalId
+          )
+        ).toBe(true)
+        await freshRun.terminal
+        const freshFinal = await saved(session.id)
+        const freshJournal = await journal(session.id)
+        const freshProjection = projectAgentRecords(session.id, freshJournal.sessionRecords)
+        expect(
+          freshJournal.sessionRecords.reduce(applyAgentRecord, createAgentProjection(session.id))
+        ).toEqual(freshProjection)
+        expect(freshProjection.history.map((entry) => entry.message)).toEqual(freshFinal.history)
+        expect(freshProjection.history.slice(0, paused.history.length)).toEqual(paused.history)
+        const freshRetained = freshJournal.runs.at(-1)!
+        const freshRunBase = projectAgentRecords(
+          session.id,
+          freshJournal.sessionRecords.slice(0, freshRetained.baseSequence)
+        )
+        const freshReplayed = projectAgentRunRecords(
+          freshRunBase,
+          freshRun.runId,
+          freshRetained.records
+        )
+        expect(
+          freshRetained.records.reduce(
+            applyAgentRunRecord,
+            createAgentRunProjection(freshRunBase, freshRun.runId)
+          )
+        ).toEqual(freshReplayed)
+        expect(freshReplayed.state).toBe('settled')
+        expect(freshReplayed.session).toEqual(freshProjection)
+        expect(freshFinal.tokenCount).toBe(32)
+        expect(freshProjection.usage.totalTokens).toBe(32)
+        expect(mocks.commitMutation).toHaveBeenCalledOnce()
+        expect(currentSettings.getSettings().developerPrompt).toBe(proposed)
+        const freshRestored = await restart(session.id)
+        expect(freshRestored.history).toEqual(freshFinal.history)
+        expect(await journal(session.id)).toEqual(freshJournal)
+        resources.setResourceChangeEventSink(null)
+        return
+      }
+
+      if (change === 'revision changed') {
+        appSettings.setSettings({
+          ...appSettings.getSettings(),
+          developerPrompt: 'Ordinary newer creator guidance'
+        })
+        await saveSettings()
+      } else if (change === 'scope changed') {
+        await agent.updateAgentSession(session.id, { mode: 'planning' }, 'openai')
+      } else if (change === 'cancelled') {
+        expect(agent.cancelAgentRun(session.id)).toBe(true)
+      }
+      expect(
+        await agent.resolveAgentApproval(
+          session.id,
+          'record-paused',
+          true,
+          approval.toolCall!.approvalId
+        )
+      ).toBe(change === 'unchanged' || change === 'revision changed')
+      expect((await run.terminal).type).toBe('done')
+      const final = await saved(session.id)
+      const replay = await paired(final)
+      expect(replay.projection.history.slice(0, paused.history.length)).toEqual(paused.history)
+      expect(replay.projection.outcomes).toEqual([])
+      if (change === 'unchanged') {
+        expect(mocks.commitMutation).toHaveBeenCalledOnce()
+        expect(changed).toHaveBeenCalledOnce()
+        expect(appSettings.getSettings().developerPrompt).toBe(proposed)
+        expect(
+          JSON.parse(await fs.readFile(join(mocks.home, 'settings.json'), 'utf8')).developerPrompt
+        ).toBe(proposed)
+        expect(final.status).toBe('completed')
+        expect(final.tokenCount).toBe(26)
+      } else if (change === 'revision changed') {
+        // This is the real host revision lock/commit path, not a pre-scripted mock error.
+        expect(mocks.commitMutation).toHaveBeenCalledOnce()
+        expect(changed).not.toHaveBeenCalled()
+        expect(appSettings.getSettings().developerPrompt).toBe('Ordinary newer creator guidance')
+        expect(final.messages.flatMap((message) => message.toolCalls ?? [])).toContainEqual(
+          expect.objectContaining({
+            id: 'record-paused',
+            status: 'error',
+            error: expect.stringContaining('Stale resource revision')
+          })
+        )
+        expect(final.tokenCount).toBe(26)
+      } else {
+        expect(mocks.commitMutation).not.toHaveBeenCalled()
+        expect(changed).not.toHaveBeenCalled()
+        expect(appSettings.getSettings().developerPrompt).toBe(initial)
+        expect(final.status).toBe('cancelled')
+        expect(final.tokenCount).toBe(17)
+        expect(mocks.responses).toHaveBeenCalledTimes(1)
+      }
+      const reloaded = await restart(session.id)
+      expect(reloaded.history).toEqual(final.history)
+      expect(reloaded.messages).toEqual(final.messages)
+      expect((await paired(reloaded)).stored).toEqual(replay.stored)
+      expect(
+        await agent.resolveAgentApproval(
+          session.id,
+          'record-paused',
+          true,
+          approval.toolCall!.approvalId
+        )
+      ).toBe(false)
+      resources.setResourceChangeEventSink(null)
+    }
+  )
 
   it('pairs cancellation cleanup results absent from the canonical acceptance callbacks', async () => {
     mocks.responses.mockResolvedValueOnce(

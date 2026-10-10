@@ -28,6 +28,14 @@ anchor; earlier cumulative input/output/cache counts were unreported. Reported t
 remain independent. An interrupted accepted run retains its ordered partial usage and is
 reconciled once against the host's recovered history, without inventing a terminal result.
 
+Long approval pauses retain accepted pending calls, immutable history source/revision references
+and the session/run sequence, event and receipt-digest cursor. These cursors are data observations,
+not reusable execution permission. The paired host fixtures advance only the clock by seven days,
+then verify real settings revision locks on approved resume, exact current-run ownership after a
+mode change or cancellation, and one commit only while both remain current. Cold recovery closes
+unfinished calls without dispatch, preserves the incomplete run cursor and requires a new run and
+fresh human approval for a later change. Approvals are never restored from shadow records.
+
 Restore validates complete session and run chains from sequence 1. Missing/corrupt bodies,
 changed disk leases, changed historical payloads and failed checkpoints withhold the shadow
 while preserving the original session and exact MCP evidence. Existing prior-skill context
