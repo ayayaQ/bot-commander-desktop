@@ -2,7 +2,7 @@
 
 The generic sequential provider/tool loop lives in the separate
 [ayayaQ/vivi](https://github.com/ayayaQ/vivi) repository. Bot Commander consumes a reviewed,
-exact npm registry release `@ayayaq/vivi@0.8.0`. The published artifact was verified
+exact npm registry release `@ayayaq/vivi@0.10.0`. The published artifact was verified
 byte-for-byte against the reviewed release archive; its immutable registry URL and
 SHA-512 integrity are recorded in the lockfile. Runtime Git authentication/build is
 not required, and npm pack outputs are not committed to this repository.
@@ -11,6 +11,38 @@ The `0.2.0` release added the shared provider subpaths and canonical-history hel
 `0.3.0` added the explicit extension registry and shared calculator. Published `0.4.0`
 also includes the pure optional `providers/models` capability normalizer. The earlier
 `0.1.0` release contains only the original core.
+
+## Bounded conversation shadows
+
+Desktop records the optional canonical `onAccepted` seam and final host-reconciled results
+through the published `/events` and `/events/stream` contracts. Private per-session shadow
+files live under `agent-records` in user data. The existing session file remains authoritative
+for canonical history, display message IDs, titles, validation evidence and aggregate total
+tokens. Exact MCP intent/outcome storage remains the only delivery authority and is retired
+only by its existing matching session-checkpoint acknowledgement. Shadow records grant no
+approval and replay invokes no provider, tool or server.
+
+Legacy history receives stable indexed source references without invented historical runs
+or rounds. The `usageBasis` explicitly labels input/output counters as observed since the
+anchor; earlier cumulative input/output/cache counts were unreported. Reported total tokens
+remain independent. An interrupted accepted run retains its ordered partial usage and is
+reconciled once against the host's recovered history, without inventing a terminal result.
+
+Restore validates complete session and run chains from sequence 1. Missing/corrupt bodies,
+changed disk leases, changed historical payloads and failed checkpoints withhold the shadow
+while preserving the original session and exact MCP evidence. Existing prior-skill context
+omission can change a historical tool-result body; this initial shadow slice withholds that
+chain rather than silently rewriting or re-anchoring it. Promotion to authoritative storage,
+cross-turn compaction and continued restoration after erased prefixes remain later work.
+
+The whole host envelope is limited to 8 MiB, with at most 128 retained runs. Active history
+has a conservative 384 KiB budget and reserves 3 MiB for the repeated session/terminal
+wrappers. The enclosed session record still obeys the core's strict 1 MiB limit. Limits never
+truncate history; unforeseen terminal overflow preserves an incomplete shadow. Whole-envelope
+credential screening runs before admission and after writes. Newly recognized credentials
+scrub shadow bodies and backups into a hash-only quarantine marker, which prevents a fresh
+anchor; structural or budget failures preserve evidence instead. These are bounded ordinary
+offline checks, not native GUI, live provider/Discord acceptance or security certification.
 
 ## Responsibilities
 

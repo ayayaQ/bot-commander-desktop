@@ -1436,7 +1436,6 @@ async function startAgentSession(
   if (isAgentPersistencePaused()) throw new Error('The app is shutting down; agent runs are paused')
 
   const skills = await agentSkillStore.snapshot()
-  await conversationRecords.restore(session)
   if (controllers.has(sessionId))
     throw new Error('This agent session already has a running request')
   if (deletingSessionIds.has(sessionId) || deletedSessionIds.has(sessionId))
@@ -1452,6 +1451,7 @@ async function startAgentSession(
       agentToolDefinitions.map((tool) => tool.function.name),
       { catalog: skills.catalog, authorizeRead: skills.authorizeRead }
     )
+    await conversationRecords.restore(session)
     // Setup can yield; a concurrent run, session deletion or shutdown must win admission.
     if (controllers.has(sessionId))
       throw new Error('This agent session already has a running request')

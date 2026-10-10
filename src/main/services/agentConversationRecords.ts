@@ -3,6 +3,7 @@
 import fs from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import type { AgentAcceptedUpdate, AgentResult, Usage } from '@ayayaq/vivi'
+import { assertMcpJson } from '@ayayaq/vivi/extensions/mcp'
 import {
   AGENT_RECORD_LIMITS,
   agentArgumentsDigest,
@@ -32,7 +33,9 @@ import { atomicWrite } from './atomicPersistence'
 import { reportAgentPersistenceNotice } from './agentPersistence'
 
 // Includes repeated terminal wrappers and all retained runs, not just one core chain.
-export const AGENT_CONVERSATION_BYTES = 64 * 1024 * 1024
+// The existing host credential screen admits at most 8 MiB. This stricter host envelope
+// budget includes repeated terminal wrappers and never assumes the core's 64 MiB maximum.
+export const AGENT_CONVERSATION_BYTES = 8 * 1024 * 1024
 const MAX_RUNS = 128
 const TERMINAL_RESERVATION = 3 * 1024 * 1024
 // Cumulative history and answer content are repeated in the strict 1 MiB terminal.
@@ -49,7 +52,7 @@ export interface AgentConversationJournal {
 }
 interface Quarantine {
   version: 1
-  sessionId: string
+  sessionDigest: string
   state: 'quarantined'
   reason: 'privacy'
 }
@@ -67,6 +70,7 @@ interface Owner {
   active?: AgentRunProjection
   disabled: boolean
 }
+class ConversationPrivacyError extends Error {}
 const hash = (value: unknown): string =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
@@ -93,15 +97,20 @@ export function decodeAgentConversationJournal(raw: string, sessionId: string): 
   if (Buffer.byteLength(raw) > AGENT_CONVERSATION_BYTES)
     throw new Error('Conversation shadow exceeds its encoded limit')
   const value: unknown = JSON.parse(raw)
-  if (!object(value) || value.version !== 1 || value.sessionId !== sessionId)
+  if (!object(value) || value.version !== 1)
     throw new Error('Unsupported conversation shadow envelope')
   if (value.state === 'quarantined') {
-    if (!keys(value, ['version', 'sessionId', 'state', 'reason']) || value.reason !== 'privacy')
+    if (
+      !keys(value, ['version', 'sessionDigest', 'state', 'reason']) ||
+      value.sessionDigest !== hash(sessionId) ||
+      value.reason !== 'privacy'
+    )
       throw new Error('Invalid conversation quarantine')
     return value as unknown as Quarantine
   }
   if (
     value.state !== 'shadow' ||
+    value.sessionId !== sessionId ||
     !keys(value, ['version', 'sessionId', 'state', 'usageBasis', 'sessionRecords', 'runs']) ||
     !object(value.usageBasis) ||
     !keys(value.usageBasis, ['legacyTotalTokens', 'inputOutput']) ||
@@ -235,6 +244,7 @@ export function agentConversationOutcomes(
 /** Serialized host-owned shadow writes. Nothing here acknowledges an MCP sidecar. */
 export function createAgentConversationRecords(options: Options) {
   const owners = new Map<string, Owner>()
+  const deleted = new Set<string>()
   let writes: Promise<unknown> = Promise.resolve()
   const notice = () => {
     const message =
@@ -248,25 +258,56 @@ export function createAgentConversationRecords(options: Options) {
     return next
   }
   const screened = (value: unknown): void => {
-    options.assertAllowed(value)
+    // Match the existing persisted JSON envelope: undefined optionals are absent data.
+    const plain: unknown = JSON.parse(JSON.stringify(value))
+    // Separate structural/headroom failures from privacy exclusion. A size failure must
+    // preserve the prior chain, rather than erase it as if it contained a credential.
+    assertMcpJson(plain, AGENT_CONVERSATION_BYTES, { nodes: 40_000, depth: 60 })
+    try {
+      const returned = options.assertAllowed(plain) as unknown
+      if (returned !== undefined) {
+        if (returned instanceof Promise) void returned.catch(() => undefined)
+        throw new Error('Conversation privacy assertion must be synchronous')
+      }
+    } catch {
+      throw new ConversationPrivacyError('Conversation privacy excludes this envelope')
+    }
   }
   const checkpoint = async (sessionId: string, owner: Owner, next: AgentConversationJournal) => {
     const raw = JSON.stringify(next)
     decodeAgentConversationJournal(raw, sessionId)
-    screened(next)
+    try {
+      screened(next)
+    } catch (error) {
+      if (!(error instanceof ConversationPrivacyError)) throw error
+      await quarantinePrivacy(sessionId, owner)
+      throw new Error('Conversation privacy changed')
+    }
     // One serialized owner, plus a disk lease checked after every wait. Another writer or
     // a newer privacy/reconciliation body invalidates this observation, never a fresh anchor.
     if ((await read(options.path(sessionId))) !== owner.raw)
       throw new Error('Conversation shadow disk lease changed')
-    await atomicWrite(options.path(sessionId), raw, {
-      validate: (value) => {
-        decodeAgentConversationJournal(value, sessionId)
-      }
-    })
+    try {
+      await atomicWrite(options.path(sessionId), raw, {
+        validate: (value) => {
+          decodeAgentConversationJournal(value, sessionId)
+        }
+      })
+    } catch (error) {
+      // This is checkpoint acknowledgement only, never a provider/tool retry. An exact
+      // committed body is the sole permitted recovery from an ambiguous write rejection.
+      if ((await read(options.path(sessionId))) !== raw) throw error
+    }
     // Rejected/ambiguous appends never move the committed cursor without exact readback.
     if ((await read(options.path(sessionId))) !== raw)
       throw new Error('Conversation checkpoint readback differs')
-    screened(next)
+    try {
+      screened(next)
+    } catch (error) {
+      if (!(error instanceof ConversationPrivacyError)) throw error
+      await quarantinePrivacy(sessionId, owner)
+      throw new Error('Conversation privacy changed')
+    }
     owner.raw = raw
     owner.journal = next
     owner.projection = projectAgentRecords(sessionId, next.sessionRecords)
@@ -276,7 +317,12 @@ export function createAgentConversationRecords(options: Options) {
     owner.journal = undefined
     owner.projection = undefined
     owner.active = undefined
-    const tombstone: Quarantine = { version: 1, sessionId, state: 'quarantined', reason: 'privacy' }
+    const tombstone: Quarantine = {
+      version: 1,
+      sessionDigest: hash(sessionId),
+      state: 'quarantined',
+      reason: 'privacy'
+    }
     // Do not retain newly screened-out payloads in either journal or backup. A tombstone
     // prevents a later missing-prefix fallback from importing this session as a fresh anchor.
     const raw = JSON.stringify(tombstone)
@@ -288,6 +334,7 @@ export function createAgentConversationRecords(options: Options) {
   }
   const attempt = (session: AgentSession, operation: (owner: Owner) => Promise<void>) =>
     queue(async () => {
+      if (deleted.has(session.id)) return
       let owner = owners.get(session.id)
       if (!owner) {
         owner = { raw: null, disabled: false }
@@ -299,7 +346,8 @@ export function createAgentConversationRecords(options: Options) {
         try {
           screened(session)
           if (owner.journal) screened(owner.journal)
-        } catch {
+        } catch (error) {
+          if (!(error instanceof ConversationPrivacyError)) throw error
           await quarantinePrivacy(session.id, owner)
           notice()
           return
@@ -318,18 +366,19 @@ export function createAgentConversationRecords(options: Options) {
       const raw = await read(options.path(session.id))
       const backup = await read(`${options.path(session.id)}.bak`)
       owner.raw = raw
+      try {
+        if (raw !== null) screened(JSON.parse(raw))
+        if (backup !== null) screened(JSON.parse(backup))
+      } catch (error) {
+        if (!(error instanceof ConversationPrivacyError)) throw error
+        await quarantinePrivacy(session.id, owner)
+        notice()
+        return
+      }
       // A missing primary with an existing backup is evidence, not permission to re-anchor.
       if (raw === null && backup !== null) throw new Error('Conversation primary is missing')
       if (raw !== null) {
         const value = decodeAgentConversationJournal(raw, session.id)
-        try {
-          screened(value)
-          if (backup !== null) screened(JSON.parse(backup))
-        } catch {
-          await quarantinePrivacy(session.id, owner)
-          notice()
-          return
-        }
         if (value.state === 'quarantined') {
           owner.disabled = true
           return
@@ -343,19 +392,20 @@ export function createAgentConversationRecords(options: Options) {
             lastRun.runId,
             lastRun.records
           )
-        const observed = run?.state === 'running' ? run.history : projected.history
+        const interrupted = run?.state === 'running' && lastRun?.baseSequence === projected.sequence
+        const observed = interrupted ? run.history : projected.history
         if (
           !same(
             observed.map((item) => item.message),
             (session.history || []).slice(0, observed.length)
           ) ||
-          (run?.state !== 'running' && observed.length !== (session.history || []).length) ||
-          (run?.state !== 'running' && projected.usage.totalTokens !== session.tokenCount)
+          (!interrupted && observed.length !== (session.history || []).length) ||
+          (!interrupted && projected.usage.totalTokens !== session.tokenCount)
         )
           throw new Error('Conversation shadow differs from authoritative history')
         owner.journal = value
         owner.projection = projected
-        if (run?.state === 'running') {
+        if (interrupted) {
           // Recovery is data-only: preserve the incomplete run and import the exact recovered
           // canonical closure as a reconciliation snapshot, without inventing a terminal/approval.
           const record = decodeAgentRecord({
@@ -374,7 +424,7 @@ export function createAgentConversationRecords(options: Options) {
                 options.outcomes?.() || [],
                 projected.outcomes
               ),
-              usage: { ...projected.usage, totalTokens: session.tokenCount }
+              usage: addUsage(projected.usage, run.runUsage, session.tokenCount)
             }
           })
           await checkpoint(session.id, owner, {
@@ -526,15 +576,17 @@ export function createAgentConversationRecords(options: Options) {
         if (!same(projected.session, owner.projection))
           throw new Error('Conversation replay mismatch')
       }),
-    forget: (sessionId: string) =>
-      queue(async () => {
+    forget: (sessionId: string) => {
+      deleted.add(sessionId)
+      return queue(async () => {
         const owner = owners.get(sessionId)
         if (owner) owner.disabled = true
         // Delete only the bounded shadow files after the authoritative session deletion commits.
         await fs.rm(options.path(sessionId), { force: true })
         await fs.rm(`${options.path(sessionId)}.bak`, { force: true })
         owners.delete(sessionId)
-      }),
+      })
+    },
     drain: async () => {
       await writes
     }

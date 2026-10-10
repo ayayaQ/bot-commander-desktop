@@ -100,6 +100,8 @@ for (const spec of [
   '@ayayaq/vivi/extensions',
   '@ayayaq/vivi/extensions/calculator',
   '@ayayaq/vivi/extensions/mcp',
+  '@ayayaq/vivi/events',
+  '@ayayaq/vivi/events/stream',
   '@modelcontextprotocol/client',
   '@modelcontextprotocol/client/validators/ajv'
 ]) {
@@ -113,6 +115,87 @@ for (const name of ['@ayayaq/vivi', '@modelcontextprotocol/client']) {
   assert.equal(app.dependencies[name], versions[name])
 }
 assert.equal(typeof requireSdk('@ayayaq/vivi/extensions/mcp').createMcpExtension, 'function')
+// Installed production-only data replay, without launching Electron main or a provider/tool.
+const records = requireSdk('@ayayaq/vivi/events')
+const stream = requireSdk('@ayayaq/vivi/events/stream')
+assert.match(main, /require\("@ayayaq\/vivi\/events"\)/)
+assert.match(main, /require\("@ayayaq\/vivi\/events\/stream"\)/)
+assert.match(main, /onAccepted:/)
+const source = { reference: 'desktop/package/offline', revision: '1' }
+const anchor = records.decodeAgentRecord({
+  version: 1,
+  sessionId: 'package-session',
+  eventId: 'package-anchor',
+  sequence: 1,
+  previousEventId: null,
+  source,
+  type: 'session_snapshot',
+  reason: 'legacy_import',
+  snapshot: {
+    history: [],
+    outcomes: [],
+    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+  }
+})
+const base = records.projectAgentRecords('package-session', [anchor])
+const input = {
+  id: 'original-user-id',
+  source,
+  message: { kind: 'message', role: 'user', content: 'Offline package' }
+}
+const assistant = { kind: 'assistant', content: 'Settled offline', toolCalls: [] }
+const usage = { inputTokens: 3, outputTokens: 2, totalTokens: 17 }
+const envelope = (sequence, previousEventId) => ({
+  version: 1,
+  scope: 'run',
+  sessionId: 'package-session',
+  runId: 'package-run',
+  eventId: `package-run-${sequence}`,
+  sequence,
+  previousEventId,
+  source
+})
+const started = stream.createAgentRunStart(envelope(1, null), base, [input])
+const accepted = stream.createAgentAcceptedRecord({
+  envelope: envelope(2, started.eventId),
+  historyId: 'original-assistant-id',
+  source,
+  update: { type: 'assistant_accepted', message: assistant, round: 1, usage, aggregateUsage: usage }
+})
+const terminal = records.createRunSettlement({
+  envelope: {
+    version: 1,
+    sessionId: 'package-session',
+    eventId: 'package-terminal',
+    sequence: 2,
+    previousEventId: anchor.eventId,
+    source
+  },
+  runId: 'package-run',
+  inputHistoryLength: 1,
+  result: {
+    status: 'completed',
+    content: assistant.content,
+    rounds: 1,
+    usage,
+    history: [input.message, assistant]
+  },
+  history: [input, accepted.entry],
+  outcomes: [],
+  sessionUsage: usage
+})
+const settled = stream.createAgentRunTerminal(envelope(3, accepted.eventId), terminal)
+const chain = [started, accepted, settled]
+let incremental = stream.createAgentRunProjection(base, 'package-run')
+for (const record of chain) incremental = stream.applyAgentRunRecord(incremental, record)
+assert.deepEqual(stream.projectAgentRunRecords(base, 'package-run', chain), incremental)
+assert.deepEqual(
+  records.projectAgentRecords('package-session', [anchor, terminal]),
+  incremental.session
+)
+assert.equal(stream.applyAgentRunRecord(incremental, started), incremental)
+assert.equal(incremental.session.usage.totalTokens, 17)
+assert.equal(incremental.session.usage.inputTokens + incremental.session.usage.outputTokens, 5)
 const { createExtensionScope } = requireSdk('@ayayaq/vivi/extensions')
 assert.equal(typeof createExtensionScope, 'function')
 assert.match(main, /extensions\.createExtensionScope\(/)
@@ -198,6 +281,7 @@ console.log(
     loadedProductionModules: loaded.length,
     schemaChecks: { valid: 1, invalid: 5, capturedSchemaMutation: 'rejected' },
     ownedExtensionScope: 'passed',
+    conversationRecordReplay: 'passed',
     bareSdkDynamicImport: 'passed',
     mainSha256: sha256(mainBytes),
     asarSha256: sha256(rawFs.readFileSync(root))
