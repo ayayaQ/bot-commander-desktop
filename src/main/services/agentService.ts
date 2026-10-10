@@ -838,6 +838,8 @@ async function awaitApproval(
   prepared: PreparedMutation | McpPreparedOperation,
   context: AgentRunContext
 ): Promise<boolean> {
+  // Registration is itself owned: a prior await may have yielded to cancellation.
+  assertActiveRun(session, runId, context.owner.signal)
   let resolveApproval!: (approved: boolean) => void
   const approval = new Promise<boolean>((resolve) => {
     resolveApproval = resolve
@@ -1001,6 +1003,7 @@ async function executeMcpReview(
     assertActiveRun(session, runId, signal)
     if (session.mode === 'planning') return await notSent()
     await mcpOutcomes.load()
+    assertActiveRun(session, runId, signal)
     mcpOutcomes.assertWritable()
     agentMcpService.assertAllowed(operation)
     const approved = await awaitApproval(session, runId, call, operation, context)
@@ -1534,7 +1537,7 @@ async function startAgentSession(
             try {
               await candidate.dispose()
             } catch (cleanupError) {
-              throw new AggregateError(
+              throw new AgentExtensionCleanupError(
                 [error, cleanupError],
                 'MCP extension setup and cleanup failed'
               )

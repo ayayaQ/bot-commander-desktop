@@ -12,6 +12,8 @@ import {
 } from '@ayayaq/vivi/extensions/mcp'
 
 const mocks = vi.hoisted(() => ({
+  outcomes: undefined as
+    ReturnType<typeof import('./agentMcpOutcomes').createAgentMcpOutcomeLedger> | undefined,
   home: '',
   captures: 0,
   sends: 0,
@@ -124,6 +126,17 @@ vi.mock('./agentMcpService', async () => {
         await hooks.settle(outcome)
         return outcome
       }
+    }
+  }
+})
+vi.mock('./agentMcpOutcomes', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./agentMcpOutcomes')>()
+  return {
+    ...actual,
+    createAgentMcpOutcomeLedger(options: Parameters<typeof actual.createAgentMcpOutcomeLedger>[0]) {
+      const ledger = actual.createAgentMcpOutcomeLedger(options)
+      mocks.outcomes = ledger
+      return ledger
     }
   }
 })
@@ -447,5 +460,33 @@ describe('desktop MCP inside the existing Vivi agent loop', () => {
     await decide(next, true, 1)
     expect(mocks.sends).toBe(2)
     expect(JSON.parse(result(await saved(next.session.id)).content).success).toBe(true)
+  })
+
+  it('rejects late MCP approval registration after cancellation and drains the exact review', async () => {
+    const original = mocks.outcomes!.load
+    const entered = deferred<void>(),
+      release = deferred<void>()
+    let calls = 0
+    vi.spyOn(mocks.outcomes!, 'load').mockImplementation(async () => {
+      await original()
+      if (++calls === 2) {
+        entered.resolve()
+        await release.promise
+      }
+    })
+    const subject = await start()
+    await entered.promise
+    expect(agent.cancelAgentRun(subject.session.id)).toBe(true)
+    try {
+      release.resolve()
+      const event = await subject.approval
+      expect(event.type).toBe('done')
+      expect(event.session!.status).toBe('cancelled')
+      await agent.drainAgentRuns()
+      expect(mocks.sends).toBe(0)
+      expect(result(await saved(subject.session.id))).toMatchObject({ isError: true })
+    } finally {
+      release.resolve()
+    }
   })
 })
