@@ -67,7 +67,15 @@ describe('injected Windows native Job Object helper', () => {
     expect(native.indexOf('Check(CreateProcessW(')).toBeLessThan(
       native.indexOf('if (ResumeThread(')
     )
+    expect(
+      native.indexOf('Console.Out.WriteLine("{\\\"type\\\":\\\"started\\\"}")')
+    ).toBeGreaterThan(native.indexOf('if (ResumeThread('))
+    expect(native.indexOf('Console.Out.WriteLine("{\\\"type\\\":\\\"started\\\"}")')).toBeLessThan(
+      native.indexOf('outPump = Pump(')
+    )
     expect(JSON.parse(Buffer.concat(subject.writes).toString('utf8'))).toEqual(input)
+    subject.child.stdout.write(frame({ type: 'started' }))
+    await owned.ready
     subject.child.stdout.write(frame({ type: 'exit', exitCode: 0, stopped: false }))
     subject.child.emit('close', 0)
     expect(await owned.completed).toEqual({ exitCode: 0 })
@@ -79,6 +87,7 @@ describe('injected Windows native Job Object helper', () => {
     owned.stdout.on('data', (bytes) => output.push(bytes))
     const bytes = Buffer.from([0, 255, 13, 10, 128]),
       protocol =
+        frame({ type: 'started' }) +
         frame({ type: 'stdout', data: bytes.toString('base64') }) +
         frame({ type: 'exit', exitCode: 7, stopped: false })
     for (const character of protocol) subject.child.stdout.write(character)
@@ -88,6 +97,7 @@ describe('injected Windows native Job Object helper', () => {
     })
     await Promise.resolve()
     expect(settled).toBe(false)
+    await owned.ready
     subject.child.emit('close', 0)
     expect(await owned.completed).toEqual({ exitCode: 7 })
     expect(Buffer.concat(output)).toEqual(bytes)
@@ -98,10 +108,92 @@ describe('injected Windows native Job Object helper', () => {
       first = owned.stop(),
       second = owned.stop()
     expect(subject.child.stdin.writableEnded).toBe(true)
-    subject.child.stdout.write(frame({ type: 'exit', exitCode: 1, stopped: true }))
+    await expect(owned.ready).rejects.toThrow('cancelled before readiness')
+    subject.child.stdout.write(frame({ type: 'exit', exitCode: null, stopped: true }))
     subject.child.emit('close', 0)
     await Promise.all([first, second])
+    expect(await owned.completed).toEqual({ exitCode: null, signal: 'SIGTERM' })
+  })
+  it('resolves readiness from one split fixed acknowledgment before output backpressure', async () => {
+    const subject = fixture(),
+      owned = await launchWindowsMcp(input, subject.runtime)
+    let ready = false
+    void owned.ready.then(() => {
+      ready = true
+    })
+    await Promise.resolve()
+    expect(ready).toBe(false)
+    await expect(owned.write(Buffer.from('not-yet-ready'))).rejects.toThrow('unavailable')
+    for (const character of frame({ type: 'started' })) subject.child.stdout.write(character)
+    const bytes = Buffer.alloc(17000, 97)
+    subject.child.stdout.write(
+      frame({ type: 'stdout', data: bytes.toString('base64') }) +
+        frame({ type: 'exit', exitCode: 0, stopped: false })
+    )
+    await owned.ready
+    expect(ready).toBe(true)
+    // stop drains blocked output so the terminal frame can still be verified.
+    const stopped = owned.stop()
+    subject.child.emit('close', 0)
+    await stopped
+    expect((await owned.completed).error).toBeUndefined()
+  })
+  it('accepts a legitimate late started frame after stop without reopening readiness or writes', async () => {
+    const subject = fixture(),
+      owned = await launchWindowsMcp(input, subject.runtime),
+      stopped = owned.stop()
+    await expect(owned.ready).rejects.toThrow('cancelled before readiness')
+    subject.child.stdout.write(frame({ type: 'started' }))
+    await expect(owned.ready).rejects.toThrow('cancelled before readiness')
+    await expect(owned.write(Buffer.from('never send'))).rejects.toThrow('unavailable')
+    subject.child.stdout.write(frame({ type: 'exit', exitCode: 1, stopped: true }))
+    subject.child.emit('close', 0)
+    await stopped
     expect(await owned.completed).toEqual({ exitCode: 1, signal: 'SIGTERM' })
+  })
+  it('rejects missing, malformed, duplicate or out-of-order readiness without claiming cleanup', async () => {
+    for (const protocol of [
+      '',
+      frame({ type: 'started', extra: true }),
+      frame({ type: 'stdout', data: 'eA==' }),
+      frame({ type: 'exit', exitCode: 0, stopped: false })
+    ]) {
+      const subject = fixture(),
+        owned = await launchWindowsMcp(input, subject.runtime)
+      if (protocol) subject.child.stdout.write(protocol)
+      subject.child.emit('close', null)
+      await expect(owned.ready).rejects.toThrow('before readiness')
+      expect((await owned.completed).error).toBeTruthy()
+    }
+    const subject = fixture(),
+      owned = await launchWindowsMcp(input, subject.runtime)
+    subject.child.stdout.write(frame({ type: 'started' }))
+    await owned.ready
+    subject.child.stdout.write(frame({ type: 'started' }))
+    subject.child.emit('close', null)
+    expect((await owned.completed).error).toContain('Invalid Windows MCP helper protocol')
+  })
+  it('rejects error or verified prelaunch cancellation before readiness while preserving terminal semantics', async () => {
+    const failed = fixture(),
+      failure = await launchWindowsMcp(input, failed.runtime)
+    failed.child.stdout.write(
+      frame({ type: 'error', data: Buffer.from('inert setup failure').toString('base64') })
+    )
+    await expect(failure.ready).rejects.toThrow('failed before readiness')
+    failed.child.emit('close', 1)
+    expect((await failure.completed).error).toBe('inert setup failure')
+    const cancelled = fixture(),
+      cancellation = await launchWindowsMcp(input, cancelled.runtime)
+    cancelled.child.stdout.write(frame({ type: 'exit', exitCode: null, stopped: true }))
+    await expect(cancellation.ready).rejects.toThrow('cancelled before readiness')
+    let completed = false
+    void cancellation.completed.then(() => {
+      completed = true
+    })
+    await Promise.resolve()
+    expect(completed).toBe(false)
+    cancelled.child.emit('close', 0)
+    expect(await cancellation.completed).toEqual({ exitCode: null, signal: 'SIGTERM' })
   })
   it('rejects ambiguous relative/shell paths, NULs and duplicate environment names before spawning', async () => {
     const changes: Partial<WindowsMcpInput>[] = [
