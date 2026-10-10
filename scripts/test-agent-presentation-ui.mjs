@@ -554,7 +554,19 @@ render()
   throw new Error('Presentation UI phase ' + phase + ': ' + (error.stack || error))
 } finally {
   socket?.close()
-  chromium?.kill('SIGTERM')
+  if (chromium && chromium.exitCode === null && chromium.signalCode === null) {
+    await new Promise((done) => {
+      const timeout = setTimeout(() => {
+        chromium.kill('SIGKILL')
+        done()
+      }, 3000)
+      chromium.once('exit', () => {
+        clearTimeout(timeout)
+        done()
+      })
+      chromium.kill('SIGTERM')
+    })
+  }
   await vite?.close()
-  await rm(fixtureDir, { recursive: true, force: true })
+  await rm(fixtureDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
 }

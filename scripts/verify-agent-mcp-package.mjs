@@ -102,6 +102,7 @@ for (const spec of [
   '@ayayaq/vivi/extensions/mcp',
   '@ayayaq/vivi/events',
   '@ayayaq/vivi/events/stream',
+  '@ayayaq/vivi/presentation',
   '@modelcontextprotocol/client',
   '@modelcontextprotocol/client/validators/ajv'
 ]) {
@@ -115,6 +116,45 @@ for (const name of ['@ayayaq/vivi', '@modelcontextprotocol/client']) {
   assert.equal(app.dependencies[name], versions[name])
 }
 assert.equal(typeof requireSdk('@ayayaq/vivi/extensions/mcp').createMcpExtension, 'function')
+// Display-only installed production subpath; neither decoding nor viewing dispatches a tool.
+const presentation = requireSdk('@ayayaq/vivi/presentation')
+const sharedView = presentation.toolPresentationView(
+  presentation.decodeToolPresentation(
+    JSON.stringify({
+      version: 1,
+      callId: 'offline-package-call',
+      name: 'offline_resource',
+      status: 'unknown',
+      effect: 'unknown',
+      source: { reference: 'desktop/package/offline', revision: '1' },
+      arguments: { kind: 'json', text: '', data: { resource: 'fixture' } },
+      result: { kind: 'future-card', text: 'Inspect the resource before another request.' }
+    })
+  ),
+  { collapsed: true, detailBytes: 0 }
+)
+assert.ok(sharedView.header.join('\n').includes('Status: unknown'))
+assert.ok(sharedView.header.join('\n').includes('desktop/package/offline'))
+assert.ok(sharedView.warnings.join('\n').includes('Do not retry automatically'))
+assert.ok(sharedView.warnings.join('\n').includes('unsupported presentation kind'))
+assert.deepEqual(sharedView.details, [])
+const rendererArtifacts = {}
+function verifyRenderer(folder = '') {
+  const local = path.join(checkout, 'out/renderer', folder)
+  const packaged = path.join(root, 'out/renderer', folder)
+  assert.deepEqual(fs.readdirSync(packaged).sort(), fs.readdirSync(local).sort())
+  for (const entry of fs.readdirSync(local, { withFileTypes: true })) {
+    const relative = path.join(folder, entry.name)
+    if (entry.isDirectory()) verifyRenderer(relative)
+    else {
+      const bytes = fs.readFileSync(path.join(packaged, entry.name))
+      assert.ok(bytes.equals(fs.readFileSync(path.join(local, entry.name))), relative)
+      rendererArtifacts[relative] = createHash('sha256').update(bytes).digest('hex')
+    }
+  }
+}
+verifyRenderer()
+assert.ok(Object.keys(rendererArtifacts).some((file) => file.endsWith('.js')))
 // Installed production-only data replay, without launching Electron main or a provider/tool.
 const records = requireSdk('@ayayaq/vivi/events')
 const stream = requireSdk('@ayayaq/vivi/events/stream')
@@ -282,6 +322,8 @@ console.log(
     schemaChecks: { valid: 1, invalid: 5, capturedSchemaMutation: 'rejected' },
     ownedExtensionScope: 'passed',
     conversationRecordReplay: 'passed',
+    sharedToolPresentation: 'passed',
+    rendererArtifacts,
     bareSdkDynamicImport: 'passed',
     mainSha256: sha256(mainBytes),
     asarSha256: sha256(rawFs.readFileSync(root))

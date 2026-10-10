@@ -2,7 +2,7 @@
 
 The generic sequential provider/tool loop lives in the separate
 [ayayaQ/vivi](https://github.com/ayayaQ/vivi) repository. Bot Commander consumes a reviewed,
-exact npm registry release `@ayayaq/vivi@0.10.0`. The published artifact was verified
+exact npm registry release `@ayayaq/vivi@0.11.0`. The published artifact was verified
 byte-for-byte against the reviewed release archive; its immutable registry URL and
 SHA-512 integrity are recorded in the lockfile. Runtime Git authentication/build is
 not required, and npm pack outputs are not committed to this repository.
@@ -11,6 +11,23 @@ The `0.2.0` release added the shared provider subpaths and canonical-history hel
 `0.3.0` added the explicit extension registry and shared calculator. Published `0.4.0`
 also includes the pure optional `providers/models` capability normalizer. The earlier
 `0.1.0` release contains only the original core.
+
+## Display-only tool presentations
+
+The renderer adapts existing host/IPC tool facts through the optional `/presentation` subpath.
+Its decoded, frozen snapshots supply inert status/effect/source/progress text and warnings outside
+collapsed, bounded argument/result details. Unknown kinds use plain-text fallback; no foreign UI,
+HTML, links, actions or approval IDs are interpreted. Oversized/deep details become an explicitly
+bounded text display; invalid snapshots leave a visible safe error. Canonical history and MCP
+outcome storage are unchanged.
+
+Host call statuses remain authoritative. Local external effects are unreported unless the host
+rejected a request before dispatch. MCP delivery/effects use only the exact host ledger projection,
+never generic result JSON: confirmed response, not attempted or unknown remain distinct. A confirmed
+response does not establish no effects. The existing host review/approval identity, deny-default
+buttons and IPC own decisions. The common CORE-13 corpus and actual Svelte AgentPanel headless
+fixtures cover collapse, truncation, progress, denied/failed/unknown, repeat/interruption/cancellation
+and navigation. Physical GUI/macOS and live provider/bot/external-server acceptance remain separate.
 
 ## Bounded conversation shadows
 
