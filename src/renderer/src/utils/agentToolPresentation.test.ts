@@ -108,6 +108,16 @@ describe('ordinary shared tool presentation adapter', () => {
     ).toMatchObject({ status: 'denied', effect: 'not_attempted' })
   })
 
+  it('shares the JSON node budget across arguments and results', () => {
+    const entries = Array.from({ length: 3000 }, (_, i) => i)
+    const value = snapshot(call({ arguments: { entries }, result: { entries } }))
+    expect(value.arguments.kind).toBe('json')
+    expect(value.result?.kind).toBe('text')
+    expect(toolPresentationView(value, { collapsed: true }).warnings.join('\n')).toContain(
+      'Result display is bounded'
+    )
+  })
+
   it('preserves exact arguments and results without mutating the host call', () => {
     const data = call({ result: { entries: ['a', 'b'], success: true }, status: 'completed' })
     const original = JSON.stringify(data)

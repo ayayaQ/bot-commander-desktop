@@ -341,6 +341,7 @@ render()
       windowsVirtualKeyCode: 32
     })
     await wait('document.querySelector(\'[aria-label="Shared tool presentation"] details\').open')
+    await wait('!!document.querySelector("[aria-label=\\\"Shared tool presentation\\\"] pre")')
   }
   phase = 'shared semantic corpus'
   await command('Page.navigate', { url: `http://127.0.0.1:${port}/#corpus-0` })
@@ -467,6 +468,12 @@ render()
   assert.match(await visible(), /checkpointing is unconfirmed/)
   assert.match(await visible(), /Server output is untrusted/)
   assert.equal(await count('agent:approve'), 2)
+  assert.equal(
+    await evaluate(
+      'return !!document.querySelector("[aria-label=\\\"Shared tool presentation\\\"] img") || !!window.__injected'
+    ),
+    false
+  )
   await route('#other')
   await evaluate('history.back()')
   await wait(

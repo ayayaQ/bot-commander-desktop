@@ -20,32 +20,37 @@ function clip(text: string, limit: number): string {
   return result
 }
 
-function boundedJson(value: unknown): boolean {
+function boundedJson(value: unknown, budget: { nodes: number }): boolean {
   let nodes = 0
   const visit = (item: unknown, depth: number): boolean => {
-    if (++nodes > TOOL_PRESENTATION_LIMITS.nodes - 32 || depth > TOOL_PRESENTATION_LIMITS.depth - 2)
-      return false
+    if (++nodes > budget.nodes || depth > TOOL_PRESENTATION_LIMITS.depth - 2) return false
     return (
       item === null ||
       typeof item !== 'object' ||
       Object.values(item).every((child) => visit(child, depth + 1))
     )
   }
-  return visit(value, 0)
+  const admitted = visit(value, 0)
+  if (admitted) budget.nodes -= nodes
+  return admitted
 }
 
 function content(
   value: unknown,
   limit: number,
   label: string,
-  warnings: string[]
+  warnings: string[],
+  budget: { nodes: number }
 ): ToolPresentationContent {
   let encoded: string
   try {
     encoded = JSON.stringify(value) ?? 'No details available.'
     // IPC values are inert host-owned data. The decoder validates depth/nodes too.
     const section = { kind: 'json', text: '', data: JSON.parse(encoded) }
-    if (boundedJson(section.data) && encoder.encode(JSON.stringify(section)).length <= limit)
+    if (
+      boundedJson(section.data, budget) &&
+      encoder.encode(JSON.stringify(section)).length <= limit
+    )
       return section
   } catch {
     warnings.push(`${label} could not be displayed as JSON.`)
@@ -80,6 +85,7 @@ export function encodeAgentToolPresentation(
   messageId: string
 ): string {
   const warnings: string[] = []
+  const budget = { nodes: TOOL_PRESENTATION_LIMITS.nodes - 64 }
   let status = statuses[call.status] ?? 'unknown'
   let effect: ToolPresentation['effect'] = 'unreported'
   if (call.status === 'rejected') effect = 'not_attempted'
@@ -103,12 +109,13 @@ export function encodeAgentToolPresentation(
     call.arguments,
     TOOL_PRESENTATION_LIMITS.argumentBytes,
     'Arguments',
-    warnings
+    warnings,
+    budget
   )
   const result =
     call.result === undefined
       ? undefined
-      : content(call.result, TOOL_PRESENTATION_LIMITS.resultBytes, 'Result', warnings)
+      : content(call.result, TOOL_PRESENTATION_LIMITS.resultBytes, 'Result', warnings, budget)
   const presentation: ToolPresentation = {
     version: 1,
     callId: call.id,
