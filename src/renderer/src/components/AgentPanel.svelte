@@ -6,7 +6,8 @@
   import AgentApprovalDiff from './AgentApprovalDiff.svelte'
   import AgentValidationReport from './AgentValidationReport.svelte'
   import AgentRunSummary from './AgentRunSummary.svelte'
-  import AgentMcpOutcome from './AgentMcpOutcome.svelte'
+  import AgentToolPresentation from './AgentToolPresentation.svelte'
+  import { encodeAgentToolPresentation } from '../utils/agentToolPresentation'
   import AgentSkillsPanel from './AgentSkillsPanel.svelte'
   import { renderMarkdown } from '../utils/markdown'
   import { agentToolLabel } from '../utils/agentToolLabel'
@@ -339,10 +340,6 @@
     if (status === 'running') return 'text-info animate-spin'
     if (status === 'completed') return 'text-success'
     return 'opacity-60'
-  }
-
-  function pretty(value: unknown): string {
-    return JSON.stringify(value, null, 2)
   }
 
   async function setMode(mode: AgentMode) {
@@ -695,20 +692,10 @@
                       >
                         {call.error}
                       </div>
-                    {:else if call.result !== undefined && !call.mcp}
-                      <details class="border-t border-base-300">
-                        <summary class="px-3 py-2 cursor-pointer text-xs opacity-70"
-                          >Tool result</summary
-                        >
-                        <pre
-                          class="px-3 pb-3 text-xs overflow-auto max-h-64 whitespace-pre-wrap break-words">{pretty(
-                            call.result
-                          )}</pre>
-                      </details>
                     {/if}
-                    {#if call.mcp && call.status !== 'waiting_approval'}
-                      <AgentMcpOutcome mcp={call.mcp} result={call.result} />
-                    {/if}
+                    <AgentToolPresentation
+                      encoded={encodeAgentToolPresentation(call, $activeAgentSession.id, message.id)}
+                    />
                   </div>
                 {/each}
               {/if}
