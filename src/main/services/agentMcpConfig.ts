@@ -25,7 +25,13 @@ export function isMcpHttpServer(server: McpServerConfig): server is AgentMcpHttp
 }
 /** Exact endpoint only: no embedded credentials, query/fragment, redirects or insecure downgrade. */
 export function validateMcpEndpoint(endpoint: unknown, allowLoopbackHttp: unknown): string {
-  if (!mcpText(endpoint, 4096) || typeof allowLoopbackHttp !== 'boolean') fail()
+  if (
+    !mcpText(endpoint, 4096) ||
+    typeof allowLoopbackHttp !== 'boolean' ||
+    /[\s\\?#]/.test(endpoint) ||
+    !/^https?:\/\//i.test(endpoint)
+  )
+    fail()
   let url: URL
   try {
     url = new URL(endpoint)
@@ -43,7 +49,7 @@ export function validateMcpEndpoint(endpoint: unknown, allowLoopbackHttp: unknow
         allowLoopbackHttp &&
         url.protocol === 'http:' &&
         ['127.0.0.1', '[::1]'].includes(url.hostname) &&
-        /^http:\/\/(?:127\.0\.0\.1|\[::1\])(?::[0-9]+)?(?:\/|$)/.test(endpoint)
+        /^http:\/\/(?:127\.0\.0\.1|\[::1\])(?::[0-9]+)?(?:\/|$)/i.test(endpoint)
       ))
   )
     fail()

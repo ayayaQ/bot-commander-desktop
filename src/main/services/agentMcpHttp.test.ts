@@ -267,7 +267,12 @@ describe('HTTP configuration and launch approval', () => {
       'https://user:password@example.test/mcp',
       'https://example.test/mcp?token=value',
       'https://example.test/mcp#fragment',
-      'file:///mcp'
+      'file:///mcp',
+      'https://mcp.example.test/endpoint?',
+      'https://mcp.example.test/endpoint#',
+      'https:mcp.example.test/endpoint',
+      'https://mcp.example.test/a b',
+      String.raw`https:\\mcp.example.test\endpoint`
     ]) {
       expect(() => validateMcpServer({ ...BASE, endpoint })).toThrow()
     }
@@ -491,7 +496,12 @@ for (const protocol of ['legacy', '2026-07-28'] as const) {
           const payload = {
             jsonrpc: '2.0',
             id: message.id,
-            result: { resources: [], ...(protocol === 'legacy' ? {} : { resultType: 'complete' }) }
+            result: {
+              resources: [],
+              ...(protocol === 'legacy'
+                ? {}
+                : { resultType: 'complete', ttlMs: 0, cacheScope: 'private' })
+            }
           }
           return new Response(
             new ReadableStream<Uint8Array>({

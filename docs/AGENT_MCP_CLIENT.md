@@ -66,7 +66,7 @@ and resource links are never followed. OAuth/authentication flows, credential in
 known package/shell runners, installers, automatic input fulfilment, tasks and subscriptions
 are unavailable. Trusted installed server code can still execute arbitrary code internally.
 The model cannot start servers or refresh discovery.
-HTTP connections in this slice are anonymous only. Any future token/revision integration remains
+HTTP connections in this slice are anonymous only. The session token/revision seam is
 main-process-only; there is no credential-entry UI, OAuth flow or auth IPC.
 
 ## Implementation and verification
@@ -86,6 +86,6 @@ These do not establish live-provider, Discord or arbitrary real-server readiness
 Host adapters derive from Apache-2.0
 [vivi-cli c748317](https://github.com/ayayaQ/vivi-cli/tree/c748317cb87a72f4e023cc21b96e793ea89e3170).
 The HTTP wire guard derives from `mcp-http-transport.ts` in
-[vivi-cli 38978a34](https://github.com/ayayaQ/vivi-cli/tree/38978a34).
+[vivi-cli 38978a34](https://github.com/ayayaQ/vivi-cli/tree/38978a34adf1ae16ea2e61cbe15f9d8b01e1065c).
 Adapted files carry notices; the upstream license and notice are retained in `docs/licenses`.
 No SDK source, third-party binaries or dependency tarballs are vendored.
