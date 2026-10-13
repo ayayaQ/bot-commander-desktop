@@ -1,4 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AgentMcpLaunchPreparation, AgentMcpStatus } from '../../shared/agentMcpTypes'
+import type {
+  AgentMcpOAuthPublicClient,
+  AgentMcpOAuthRegistrationSettings,
+  AgentMcpOAuthReview,
+  AgentMcpOAuthStatus
+} from '../../shared/agentMcpOAuthTypes'
 
 const mocks = vi.hoisted(() => ({
   handle: vi.fn(),
@@ -31,6 +38,14 @@ const mocks = vi.hoisted(() => ({
     refresh: vi.fn(),
     disconnect: vi.fn(),
     onStatusChanged: vi.fn()
+  },
+  agentMcpOAuth: {
+    configureClient: vi.fn(),
+    prepareRegistration: vi.fn(),
+    register: vi.fn(),
+    prepareSignIn: vi.fn(),
+    signIn: vi.fn(),
+    cancel: vi.fn()
   },
   commitMemory: vi.fn(),
   memorySink: null as ((result: unknown) => void) | null
@@ -90,7 +105,8 @@ vi.mock('../services/agentMemoryService', () => ({
   commitMemoryMutation: mocks.commitMemory
 }))
 vi.mock('../services/agentMcpService', () => ({
-  agentMcpService: mocks.agentMcp
+  agentMcpService: mocks.agentMcp,
+  agentMcpOAuthService: mocks.agentMcpOAuth
 }))
 vi.mock('../services/mcpServerService', () => ({
   setMcpEventSinks: vi.fn(),
@@ -386,6 +402,133 @@ describe('explicit agent MCP client IPC', () => {
     expect(mocks.send).toHaveBeenCalledExactlyOnceWith('agent-mcp:status', status)
     expect(mocks.agentMcp.start).not.toHaveBeenCalled()
     expect(mocks.agentMcp.refresh).not.toHaveBeenCalled()
+  })
+})
+
+describe('public agent MCP OAuth IPC', () => {
+  const client: AgentMcpOAuthPublicClient = {
+    id: 'public-fixture-client',
+    issuer: 'https://issuer.example',
+    redirectPort: 53211,
+    redirectPath: '/oauth/callback',
+    scopes: ['mcp:read']
+  }
+  const settings: AgentMcpOAuthRegistrationSettings = {
+    issuer: client.issuer,
+    redirectPort: client.redirectPort,
+    redirectPath: client.redirectPath,
+    scopes: client.scopes,
+    clientName: 'Fixture desktop client'
+  }
+  const serverStatus = {
+    server: {
+      transport: 'http' as const,
+      id: 'fixture',
+      label: 'Fixture MCP',
+      endpoint: 'https://mcp.example/rpc',
+      protocol: 'legacy' as const,
+      allowLoopbackHttp: false
+    },
+    state: 'disabled' as const,
+    cleanupPending: false,
+    oauth: {
+      state: 'authorized',
+      hasClient: true,
+      revision: 'public-session-revision'
+    } satisfies AgentMcpOAuthStatus
+  }
+  const status: AgentMcpStatus = {
+    revision: 'host-status',
+    servers: [serverStatus],
+    environmentNames: [],
+    paused: false
+  }
+  const review: AgentMcpOAuthReview = {
+    token: 'one-use-oauth-review',
+    kind: 'sign-in',
+    serverId: 'fixture',
+    configRevision: 'fixture-config-revision',
+    disclosure: 'Open the fixture issuer in the browser',
+    expiresAt: 2000
+  }
+  const preparation: AgentMcpLaunchPreparation = {
+    token: 'separate-connection-review',
+    serverId: 'fixture',
+    disclosure: 'Connect to the fixture MCP server',
+    launchDigest: 'fixture-fresh-launch-digest',
+    expiresAt: 3000
+  }
+  const routes = [
+    ['configure-client', 'configureClient', ['fixture', client], status],
+    [
+      'prepare-registration',
+      'prepareRegistration',
+      ['fixture', settings],
+      { ...review, kind: 'registration' }
+    ],
+    ['register', 'register', ['one-use-registration-review'], status],
+    ['prepare-sign-in', 'prepareSignIn', ['fixture'], review],
+    ['sign-in', 'signIn', ['one-use-oauth-review'], { status, preparation }],
+    ['cancel', 'cancel', ['fixture'], status]
+  ] as const
+
+  beforeEach(() => vi.clearAllMocks())
+
+  it.each(routes)(
+    'routes the public %s arguments and returns the host result unchanged',
+    async (channel, method, args, result) => {
+      const { addIPCHandlers } = await import('./ipcHandlers')
+      mocks.agentMcpOAuth[method].mockResolvedValueOnce(result)
+      addIPCHandlers()
+      const registered = mocks.handle.mock.calls.find(
+        ([name]) => name === `agent-mcp:oauth-${channel}`
+      )
+
+      expect(registered).toBeDefined()
+      expect(await registered![1]({ sender: 'trusted-wrapper-fixture' }, ...args)).toBe(result)
+      expect(mocks.agentMcpOAuth[method]).toHaveBeenCalledExactlyOnceWith(...args)
+      expect(mocks.agentMcp.start).not.toHaveBeenCalled()
+      expect(mocks.agentMcp.refresh).not.toHaveBeenCalled()
+      expect(mocks.copyMcpToken).not.toHaveBeenCalled()
+    }
+  )
+
+  it('registers only the six explicit OAuth actions on the trusted invoke wrapper', async () => {
+    const { addIPCHandlers } = await import('./ipcHandlers')
+    addIPCHandlers()
+
+    expect(
+      mocks.handle.mock.calls
+        .map(([channel]) => channel)
+        .filter((channel) => channel.startsWith('agent-mcp:oauth'))
+    ).toEqual(routes.map(([channel]) => `agent-mcp:oauth-${channel}`))
+    expect(mocks.on.mock.calls.some(([channel]) => channel.startsWith('agent-mcp:oauth'))).toBe(
+      false
+    )
+  })
+
+  it('keeps public OAuth state on the existing host-captured status channel', async () => {
+    const { addIPCHandlers } = await import('./ipcHandlers')
+    addIPCHandlers()
+    mocks.agentMcp.onStatusChanged.mock.calls[0][0](status)
+
+    expect(mocks.send).toHaveBeenCalledExactlyOnceWith('agent-mcp:status', status)
+    expect(mocks.agentMcpOAuth.signIn).not.toHaveBeenCalled()
+    expect(mocks.agentMcp.start).not.toHaveBeenCalled()
+  })
+
+  it('propagates an expired review error without starting a connection', async () => {
+    const { addIPCHandlers } = await import('./ipcHandlers')
+    const failure = new Error('OAuth review expired')
+    mocks.agentMcpOAuth.signIn.mockRejectedValueOnce(failure)
+    addIPCHandlers()
+    const registered = mocks.handle.mock.calls.find(
+      ([channel]) => channel === 'agent-mcp:oauth-sign-in'
+    )
+
+    await expect(registered![1]({}, 'expired-review')).rejects.toBe(failure)
+    expect(mocks.agentMcpOAuth.signIn).toHaveBeenCalledExactlyOnceWith('expired-review')
+    expect(mocks.agentMcp.start).not.toHaveBeenCalled()
   })
 })
 

@@ -1,6 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { createAgentMcpControls, parseAgentMcpDraft } from '../stores/agentMcp'
+  import {
+    createAgentMcpControls,
+    parseAgentMcpDraft,
+    parseAgentMcpOAuthDraft,
+    parseAgentMcpOAuthPublicClient,
+    type AgentMcpOAuthDraft
+  } from '../stores/agentMcp'
   import type { AgentMcpCatalogKind, AgentMcpServerConfig } from '../../../shared/agentMcpTypes'
 
   const controls = createAgentMcpControls(window.electron.ipcRenderer)
@@ -19,16 +25,26 @@
   let protocol = $state<AgentMcpServerConfig['protocol']>('legacy')
   let environment = $state<string[]>([])
   let formError = $state('')
+  let oauthDrafts = $state<Record<string, AgentMcpOAuthDraft>>({})
+  let oauthDirty = $state<Record<string, boolean>>({})
+  let oauthFormError = $state('')
+  let oauthErrorServerId = $state('')
   const reviewServer = $derived(
     $controls.status?.servers.find((entry) => entry.server.id === $controls.preparation?.serverId)
       ?.server
   )
   const blocked = $derived(
-    !!$controls.busy || !!$controls.preparation || !!$controls.status?.paused
+    !!$controls.busy ||
+      !!$controls.preparation ||
+      !!$controls.oauthReview ||
+      !!$controls.status?.paused
   )
   const editBlocked = $derived(
     !!$controls.status?.paused ||
-      (!!$controls.busy && $controls.busy !== 'prepare' && $controls.busy !== 'start')
+      (!!$controls.busy &&
+        $controls.busy !== 'prepare' &&
+        $controls.busy !== 'start' &&
+        !$controls.busy.startsWith('oauth-'))
   )
 
   onMount(() => {
@@ -90,13 +106,61 @@
       formError = error instanceof Error ? error.message : 'Invalid server configuration.'
     }
   }
+  function oauthDraft(serverId: string): AgentMcpOAuthDraft {
+    return (
+      oauthDrafts[serverId] ?? {
+        clientId: '',
+        issuer: '',
+        redirectPort: '49152',
+        redirectPath: '/oauth/callback',
+        scopes: '',
+        clientName: 'Bot Commander Desktop'
+      }
+    )
+  }
+  function oauthChanged(serverId: string, key: keyof AgentMcpOAuthDraft, event: Event) {
+    oauthDrafts[serverId] = {
+      ...oauthDraft(serverId),
+      [key]: (event.target as HTMLInputElement).value
+    }
+    oauthDirty[serverId] = true
+    oauthFormError = ''
+    controls.configurationChanged()
+  }
+  async function configureOAuth(serverId: string, register: boolean) {
+    oauthFormError = ''
+    oauthErrorServerId = serverId
+    try {
+      if (register)
+        await controls.prepareRegistration(serverId, parseAgentMcpOAuthDraft(oauthDraft(serverId)))
+      else if (
+        await controls.configureOAuth(
+          serverId,
+          parseAgentMcpOAuthPublicClient(oauthDraft(serverId))
+        )
+      )
+        oauthDirty[serverId] = false
+    } catch (error) {
+      oauthFormError = error instanceof Error ? error.message : 'Invalid public OAuth settings.'
+    }
+  }
+  async function confirmOAuth() {
+    const review = $controls.oauthReview
+    if (await controls.confirmOAuth()) {
+      if (review?.kind === 'registration') oauthDirty[review.serverId] = false
+    }
+  }
 </script>
 
 <svelte:window
   onkeydown={(event) => {
     if (
       event.key === 'Escape' &&
-      ($controls.preparation || $controls.busy === 'prepare' || $controls.busy === 'start')
+      ($controls.preparation ||
+        $controls.oauthReview ||
+        $controls.oauthServerId ||
+        $controls.busy === 'prepare' ||
+        $controls.busy === 'start')
     ) {
       event.preventDefault()
       controls.cancel()
@@ -110,15 +174,16 @@
 >
   <h3 class="text-lg font-semibold">Agent MCP servers</h3>
   <p class="text-sm">
-    Connect the built-in agent to a trusted installed stdio server or anonymous Streamable HTTP
-    endpoint. Saving starts nothing. Each Start needs a fresh review. Every tool call and resource
-    read needs human approval, including Auto. Planning exposes local metadata only.
+    Connect the built-in agent to a trusted installed stdio server or Streamable HTTP endpoint.
+    Saving starts nothing. Each Start needs a fresh review. Every tool call and resource read needs
+    human approval, including Auto. Planning exposes local metadata only.
   </p>
   <p class="rounded-lg border border-base-300 p-3 text-sm">
     {#if transport === 'http'}
       Starting an HTTP connection contacts the exact endpoint before tool approval, including
       initialization and metadata discovery. The endpoint can observe your network address and MCP
-      traffic. Use HTTPS for remote servers. Credentials, OAuth and custom headers are unavailable.
+      traffic. Use HTTPS for remote servers. Optional OAuth uses a public client and separate
+      reviews. Credentials and custom headers cannot be entered here.
     {:else}
       Server code runs with your OS permissions and is not sandboxed. It can access files and the
       network before tool approval. Do not put credentials or private values in arguments. Use an
@@ -153,7 +218,8 @@
         {#if reviewServer?.transport === 'http'}
           Confirm only if you trust the exact endpoint and authentication revision in this
           disclosure. Starting sends initialization and metadata requests over the network before
-          tool approval. This connection is anonymous; no OAuth grant is requested.
+          tool approval. The disclosure identifies the exact authentication state. This Start does
+          not request an OAuth grant.
         {:else}
           Confirm only if you trust this installed executable.
         {/if}
@@ -181,6 +247,49 @@
       ><button class="btn btn-sm" onclick={() => controls.cancel()}>Cancel Start</button>
     </div>
   {/if}
+  {#if $controls.oauthReview}
+    <section
+      class="rounded-box border-2 border-warning p-3 space-y-3"
+      aria-label="Review exact OAuth action"
+    >
+      <h4 class="font-semibold">
+        {$controls.oauthReview.kind === 'registration'
+          ? 'Review public client registration'
+          : 'Review browser sign-in'}
+      </h4>
+      <p class="text-sm">
+        Review the exact destinations, public settings and consequences below. Approve this one
+        action only if you trust them. Registration and sign-in each need separate approval; neither
+        starts an MCP connection. A completed sign-in needs a fresh connection review.
+      </p>
+      <pre class="whitespace-pre-wrap break-all text-xs max-h-72 overflow-auto">{$controls
+          .oauthReview.disclosure}</pre>
+      <p class="text-xs">
+        Expires: {new Date($controls.oauthReview.expiresAt).toLocaleTimeString()}
+      </p>
+      <button class="btn btn-sm btn-warning" onclick={confirmOAuth} disabled={!!$controls.busy}
+        >{$controls.oauthReview.kind === 'registration'
+          ? 'Register once'
+          : 'Open browser once'}</button
+      >
+      <button class="btn btn-sm" onclick={() => controls.cancel()}>Cancel OAuth</button>
+    </section>
+  {:else if $controls.oauthServerId}
+    <div class="flex flex-wrap items-center gap-2 text-sm" role="status">
+      <span
+        >{$controls.busy === 'oauth-prepare-registration'
+          ? 'Preparing OAuth registration review…'
+          : $controls.busy === 'oauth-prepare-sign-in'
+            ? 'Preparing OAuth sign-in review…'
+            : $controls.busy === 'oauth-register'
+              ? 'Registering public client…'
+              : $controls.busy === 'oauth-sign-in'
+                ? 'Waiting for browser sign-in…'
+                : 'Configuring public client…'}</span
+      >
+      <button class="btn btn-sm" onclick={() => controls.cancel()}>Cancel OAuth</button>
+    </div>
+  {/if}
   <form class="space-y-3" onsubmit={save}>
     <h4 class="font-medium">{editing ? 'Edit saved server' : 'Configure a server'}</h4>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -191,7 +300,7 @@
           onchange={changed}
           disabled={editBlocked}
           ><option value="stdio">Installed stdio</option><option value="http"
-            >Streamable HTTP (anonymous)</option
+            >Streamable HTTP</option
           ></select
         ></label
       >
@@ -316,6 +425,142 @@
           >{entry.server.id}: {entry.state}</span
         >
       </div>
+      {#if entry.server.transport === 'http' && /^https:\/\//i.test(entry.server.endpoint)}
+        <section
+          class="rounded-box border border-base-300 p-3 space-y-3"
+          aria-label="OAuth public client settings"
+        >
+          <h4 class="font-medium">Optional session-only OAuth</h4>
+          <p class="text-xs opacity-70">
+            Use a preregistered public client, or explicitly review a new public client
+            registration. Settings and grants stay in main-process memory for this app session. The
+            callback is exactly http://127.0.0.1:{oauthDraft(entry.server.id)
+              .redirectPort}{oauthDraft(entry.server.id).redirectPath}. Leave scopes empty unless
+            the service requires scopes you choose. No offline scope is added.
+          </p>
+          {#if entry.oauth}<p class="text-sm" role="status">
+              OAuth: {entry.oauth.state}{entry.oauth.message ? ` · ${entry.oauth.message}` : ''}
+            </p>{/if}
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label class="form-control"
+              >Public client ID<input
+                class="input input-bordered font-mono text-xs"
+                value={oauthDraft(entry.server.id).clientId}
+                oninput={(event) => oauthChanged(entry.server.id, 'clientId', event)}
+                maxlength="1024"
+                disabled={editBlocked ||
+                  entry.state === 'connected' ||
+                  entry.state === 'connecting' ||
+                  entry.cleanupPending}
+              /></label
+            >
+            <label class="form-control"
+              >OAuth issuer<input
+                class="input input-bordered font-mono text-xs"
+                type="url"
+                value={oauthDraft(entry.server.id).issuer}
+                oninput={(event) => oauthChanged(entry.server.id, 'issuer', event)}
+                maxlength="4096"
+                placeholder="https://auth.example.com"
+                disabled={editBlocked ||
+                  entry.state === 'connected' ||
+                  entry.state === 'connecting' ||
+                  entry.cleanupPending}
+              /></label
+            >
+            <label class="form-control"
+              >Loopback port<input
+                class="input input-bordered font-mono text-xs"
+                inputmode="numeric"
+                value={oauthDraft(entry.server.id).redirectPort}
+                oninput={(event) => oauthChanged(entry.server.id, 'redirectPort', event)}
+                maxlength="5"
+                disabled={editBlocked ||
+                  entry.state === 'connected' ||
+                  entry.state === 'connecting' ||
+                  entry.cleanupPending}
+              /></label
+            >
+            <label class="form-control"
+              >Loopback path<input
+                class="input input-bordered font-mono text-xs"
+                value={oauthDraft(entry.server.id).redirectPath}
+                oninput={(event) => oauthChanged(entry.server.id, 'redirectPath', event)}
+                maxlength="512"
+                disabled={editBlocked ||
+                  entry.state === 'connected' ||
+                  entry.state === 'connecting' ||
+                  entry.cleanupPending}
+              /></label
+            >
+            <label class="form-control"
+              >Requested scopes (space-separated)<input
+                class="input input-bordered font-mono text-xs"
+                value={oauthDraft(entry.server.id).scopes}
+                oninput={(event) => oauthChanged(entry.server.id, 'scopes', event)}
+                maxlength="4127"
+                disabled={editBlocked ||
+                  entry.state === 'connected' ||
+                  entry.state === 'connecting' ||
+                  entry.cleanupPending}
+              /></label
+            >
+            <label class="form-control"
+              >Registration client name<input
+                class="input input-bordered text-xs"
+                value={oauthDraft(entry.server.id).clientName}
+                oninput={(event) => oauthChanged(entry.server.id, 'clientName', event)}
+                maxlength="128"
+                disabled={editBlocked ||
+                  entry.state === 'connected' ||
+                  entry.state === 'connecting' ||
+                  entry.cleanupPending}
+              /></label
+            >
+          </div>
+          {#if oauthFormError && oauthErrorServerId === entry.server.id}<p
+              class="text-error text-sm"
+              role="alert"
+            >
+              {oauthFormError}
+            </p>{/if}
+          <div class="flex flex-wrap gap-2">
+            <button
+              class="btn btn-xs"
+              onclick={() => configureOAuth(entry.server.id, false)}
+              disabled={blocked ||
+                entry.state === 'connected' ||
+                entry.state === 'connecting' ||
+                entry.cleanupPending ||
+                (dirty && id.trim() === entry.server.id)}>Configure public client</button
+            >
+            <button
+              class="btn btn-xs"
+              onclick={() => configureOAuth(entry.server.id, true)}
+              disabled={blocked ||
+                entry.state === 'connected' ||
+                entry.state === 'connecting' ||
+                entry.cleanupPending ||
+                (dirty && id.trim() === entry.server.id)}>Review registration</button
+            >
+            <button
+              class="btn btn-xs"
+              onclick={() => controls.prepareSignIn(entry.server.id)}
+              disabled={blocked ||
+                !entry.oauth?.hasClient ||
+                oauthDirty[entry.server.id] ||
+                entry.state === 'connected' ||
+                entry.state === 'connecting' ||
+                entry.cleanupPending ||
+                (dirty && id.trim() === entry.server.id)}>Review sign-in</button
+            >
+          </div>
+          {#if oauthDirty[entry.server.id]}<p class="text-xs opacity-70">
+              Configure these public client settings or complete registration before reviewing
+              sign-in.
+            </p>{/if}
+        </section>
+      {/if}
       {#if entry.message}<p class="text-sm break-all">{entry.message}</p>{/if}
       {#if entry.cleanupPending}<p class="text-warning text-sm">
           {entry.server.transport === 'http'
@@ -405,8 +650,8 @@
     </article>
   {/each}
   <p class="text-xs opacity-70">
-    HTTP connections are anonymous. OAuth, credential injection, installation and package/shell
-    runners are unavailable. No automatic reconnect or retry. Disconnect and cancellation cannot
-    undo effects.
+    HTTPS HTTP servers can use optional session-only OAuth after separate explicit reviews.
+    Credential input, installation and package/shell runners are unavailable. No automatic reconnect
+    or retry. Disconnect and cancellation cannot undo effects.
   </p>
 </section>

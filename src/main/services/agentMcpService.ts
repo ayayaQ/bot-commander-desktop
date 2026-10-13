@@ -61,6 +61,9 @@ import { expandAgentMcpTemplate } from './agentMcpTemplates'
 import { environmentSecrets, mcpContainsSecret } from './agentMcpPrivacy'
 import { assertAgentMcpPrivacy, agentDecisionPrivacyRevision } from './agentDecisionPrivacy'
 import { isAgentPersistencePaused } from './agentPersistenceLifecycle'
+import { registerAgentDecisionSecret } from './agentDecisionPrivacy'
+import { AgentMcpOAuthService, type AgentMcpAuthorizationLifecycle } from './agentMcpOAuthService'
+import type { AgentMcpOAuthStatus } from '../../shared/agentMcpOAuthTypes'
 
 // Resolve installed/packaged dependencies relative to this module in either Electron CJS or test ESM.
 const requireSdk = createRequire(typeof __filename !== 'undefined' ? __filename : import.meta.url)
@@ -104,6 +107,14 @@ export interface AgentMcpServiceOptions {
   /** Trusted main-process session reads only. No refresh, sign-in, storage or IPC credential path. */
   readonly httpAuthorization?: (server: AgentMcpHttpServerConfig) => AgentMcpHttpAuthorization
   readonly httpFetch?: FetchLike
+  /** Main-only lifecycle; authority must be revoked synchronously before cleanup awaits. */
+  readonly httpAuthorizationInvalidated?: (
+    id: string | undefined,
+    reason: AgentMcpAuthorizationLifecycle,
+    expectedRevision?: string
+  ) => Promise<void>
+  readonly httpOAuthStatus?: (server: AgentMcpHttpServerConfig) => AgentMcpOAuthStatus
+  readonly drainAuthorization?: () => Promise<void>
   readonly now?: () => number
 }
 interface LaunchPermit {
@@ -214,6 +225,42 @@ export class AgentMcpService {
       throw new Error('MCP content contains a known credential')
     const returned = (this.options.assertAllowed ?? assertAgentMcpPrivacy)(value)
     if (returned !== undefined) throw new Error('MCP privacy assertion must complete synchronously')
+  }
+  /** Private-process secret propagation precedes any projection, review or model context. */
+  addSecrets(values: readonly string[]): void {
+    for (const value of values)
+      if (typeof value === 'string' && value) {
+        this.httpSecrets.add(value)
+        registerAgentDecisionSecret(value)
+      }
+    this.options.store.addSecrets(values)
+  }
+  statusSnapshot(): AgentMcpStatus {
+    return this.statuses()
+  }
+  authorizationContext() {
+    return {
+      revision: this.configuration.revision,
+      servers: this.configuration.servers.filter(isMcpHttpServer),
+      paused: this.closed || this.paused || isAgentPersistencePaused()
+    }
+  }
+  notifyAuthorizationChanged(): void {
+    this.notify()
+  }
+  private authorizationLifecycle(
+    id: string | undefined,
+    reason: AgentMcpAuthorizationLifecycle,
+    expectedRevision?: string
+  ): Promise<void> {
+    const cleanup =
+      this.options.httpAuthorizationInvalidated?.(id, reason, expectedRevision) ?? Promise.resolve()
+    this.operations.add(cleanup)
+    void cleanup.then(
+      () => this.operations.delete(cleanup),
+      () => this.operations.delete(cleanup)
+    )
+    return cleanup
   }
   private secrets(): readonly string[] {
     const values = [
@@ -344,6 +391,9 @@ export class AgentMcpService {
         server,
         state: connection?.state ?? 'disabled',
         cleanupPending: connection?.cleanupPending ?? false,
+        ...(isMcpHttpServer(server) && this.options.httpOAuthStatus
+          ? { oauth: this.options.httpOAuthStatus(server) }
+          : {}),
         ...(connection?.message ? { message: connection.message } : {}),
         ...(snapshot
           ? {
@@ -365,6 +415,7 @@ export class AgentMcpService {
     })
   }
   cancelPendingLaunches(): void {
+    void this.authorizationLifecycle(undefined, 'navigation')
     this.cancelPreparedLaunches()
   }
   private pruneExpiredLaunches(): void {
@@ -373,6 +424,12 @@ export class AgentMcpService {
       if (!permit.starting && now >= permit.preparation.expiresAt) {
         permit.controller.abort()
         this.launches.delete(token)
+        if (permit.authorization?.bearerToken)
+          void this.authorizationLifecycle(
+            permit.launch.server.id,
+            'launch-cancelled',
+            permit.authorization.revision
+          )
       }
   }
   private cancelPreparedLaunches(): void {
@@ -403,6 +460,7 @@ export class AgentMcpService {
     }
   }
   private async revokeConnections(): Promise<void> {
+    const authorization = this.authorizationLifecycle(undefined, 'configuration')
     this.cancelPreparedLaunches()
     const outcomes = await Promise.allSettled(
       [...this.connections].map(async ([id, connection]) => {
@@ -410,6 +468,7 @@ export class AgentMcpService {
         await this.cleanup(id, connection)
       })
     )
+    await authorization
     this.notify()
     if (outcomes.some((result) => result.status === 'rejected'))
       throw new ConfigurationLoadError(
@@ -565,10 +624,19 @@ export class AgentMcpService {
       throw new ControlCancelledError('MCP launch preparation cancelled')
   }
   cancelLaunch(token: string): void {
+    this.cancelLaunchOwned(token, true)
+  }
+  private cancelLaunchOwned(token: string, invalidateAuthorization: boolean): void {
     const permit = this.launches.get(token)
     if (permit) {
       permit.controller.abort()
       if (!permit.starting) this.launches.delete(token)
+      if (invalidateAuthorization && permit.authorization?.bearerToken)
+        void this.authorizationLifecycle(
+          permit.launch.server.id,
+          'launch-cancelled',
+          permit.authorization.revision
+        )
     }
   }
   start(token: string, signal = noSignal()): Promise<AgentMcpStartResult> {
@@ -598,16 +666,54 @@ export class AgentMcpService {
       }
       current.throwIfAborted()
       this.assertOpen()
-      return {
-        started: await this.connect(
-          permit.launch,
-          permit.privacyRevision,
-          permit.preparation.expiresAt,
-          current,
-          permit.authorization
-        ),
-        status: this.statuses()
+      let started = await this.connect(
+        permit.launch,
+        permit.privacyRevision,
+        permit.preparation.expiresAt,
+        current,
+        permit.authorization
+      )
+      if (permit.authorization?.bearerToken)
+        await this.authorizationLifecycle(
+          permit.launch.server.id,
+          started ? 'connected' : 'connection-failed',
+          permit.authorization.revision
+        )
+      if (started) {
+        const connection = this.connections.get(permit.launch.server.id)
+        try {
+          current.throwIfAborted()
+          this.assertOpen()
+          if (
+            !connection ||
+            connection.launch !== permit.launch ||
+            connection.state !== 'connected' ||
+            connection.controller.signal.aborted ||
+            connection.cleanupPending ||
+            this.configuration.revision !== permit.launch.configRevision ||
+            permit.privacyRevision !== this.privacyRevision()
+          )
+            throw new Error('MCP connection changed before startup completed')
+          this.assertAuthorization(connection)
+        } catch {
+          // Terminal cleanup belongs only to this exact launch, never a newer replacement.
+          if (
+            connection?.launch === permit.launch &&
+            this.connections.get(permit.launch.server.id) === connection
+          ) {
+            this.invalidate(connection, 'MCP startup became unavailable before completion')
+            await this.cleanup(permit.launch.server.id, connection)
+          }
+          if (permit.authorization?.bearerToken)
+            await this.authorizationLifecycle(
+              permit.launch.server.id,
+              'connection-failed',
+              permit.authorization.revision
+            )
+          started = false
+        }
       }
+      return { started, status: this.statuses() }
     }, signal)
     void task.then(
       () => {
@@ -616,6 +722,12 @@ export class AgentMcpService {
       },
       () => {
         this.launches.delete(token)
+        if (permit.authorization?.bearerToken)
+          void this.authorizationLifecycle(
+            permit.launch.server.id,
+            'connection-failed',
+            permit.authorization.revision
+          )
         this.notify()
       }
     )
@@ -700,6 +812,11 @@ export class AgentMcpService {
             authorizationRejected: () => {
               if (this.connections.get(launch.server.id) !== connection) return
               connection.authorizationRejected = true
+              void this.authorizationLifecycle(
+                launch.server.id,
+                'needs-sign-in',
+                connection.authorization?.revision
+              )
               this.invalidate(
                 connection,
                 'MCP HTTP needs sign-in; explicit sign-in and fresh connection approval are required'
@@ -1439,16 +1556,29 @@ export class AgentMcpService {
     )
   }
   disconnect(id: string): Promise<AgentMcpStatus> {
+    const authorization = this.authorizationLifecycle(id, 'disconnect')
+    return this.disconnectOwned(id, authorization, true)
+  }
+  /** OAuth setup only: an external Disconnect has its own independent invalidation path. */
+  disconnectForAuthorization(id: string): Promise<AgentMcpStatus> {
+    return this.disconnectOwned(id, Promise.resolve(), false)
+  }
+  private disconnectOwned(
+    id: string,
+    authorization: Promise<void>,
+    invalidateAuthorization: boolean
+  ): Promise<AgentMcpStatus> {
     const task = (async () => {
       try {
         for (const [token, permit] of this.launches)
-          if (permit.launch.server.id === id) this.cancelLaunch(token)
+          if (permit.launch.server.id === id) this.cancelLaunchOwned(token, invalidateAuthorization)
         const connection = this.connections.get(id)
         if (connection) {
           this.invalidate(connection, 'MCP disconnected')
           await this.cleanup(id, connection)
           await connection.refresh?.catch(() => undefined)
         }
+        await authorization
         return this.statuses()
       } finally {
         this.notify()
@@ -1463,6 +1593,7 @@ export class AgentMcpService {
   }
   pause(): void {
     this.paused = true
+    void this.authorizationLifecycle(undefined, 'paused')
     for (const controller of this.controls) controller.abort()
     this.cancelPreparedLaunches()
     this.notify()
@@ -1470,6 +1601,7 @@ export class AgentMcpService {
   resume(): void {
     this.closed = false
     this.paused = false
+    void this.authorizationLifecycle(undefined, 'resumed')
     this.notify()
   }
   async drain(): Promise<void> {
@@ -1487,29 +1619,53 @@ export class AgentMcpService {
     if (errors.length) throw new AggregateError(errors, 'Agent MCP controls did not drain cleanly')
   }
   async close(): Promise<void> {
+    const authorization = this.authorizationLifecycle(undefined, 'closed')
     this.closed = true
     this.pause()
     const results = await Promise.allSettled(
       [...this.connections.keys()].map((id) => this.disconnect(id))
     )
+    await authorization
+    await this.options.drainAuthorization?.()
     await this.drain()
     if (results.some((result) => result.status === 'rejected'))
       throw new Error('Agent MCP process cleanup remains unverified')
   }
 }
 let singleton: AgentMcpService | undefined
+let oauthSingleton: AgentMcpOAuthService | undefined
 function currentService(): AgentMcpService {
-  singleton ??= new AgentMcpService({
-    store: new McpConfigStore(join(app.getPath('userData'), 'agent-mcp')),
-    env: process.env,
-    assertAllowed: assertAgentMcpPrivacy
-  })
+  if (!singleton) {
+    const oauth = new AgentMcpOAuthService()
+    singleton = new AgentMcpService({
+      store: new McpConfigStore(join(app.getPath('userData'), 'agent-mcp')),
+      env: process.env,
+      assertAllowed: assertAgentMcpPrivacy,
+      httpAuthorization: (server) => oauth.authorization(server),
+      httpAuthorizationInvalidated: (id, reason, revision) =>
+        oauth.invalidate(id, reason, revision),
+      httpOAuthStatus: (server) => oauth.status(server),
+      drainAuthorization: () => oauth.drain()
+    })
+    oauth.bind(singleton)
+    oauthSingleton = oauth
+  }
   return singleton
 }
 /** Importing this module never reads app state or starts a server. */
 export const agentMcpService = new Proxy({} as AgentMcpService, {
   get(_target, key) {
     const service = currentService(),
+      value = Reflect.get(service, key)
+    return typeof value === 'function' ? value.bind(service) : value
+  }
+})
+
+/** Public OAuth actions; secrets and browser URLs never cross the trusted renderer bridge. */
+export const agentMcpOAuthService = new Proxy({} as AgentMcpOAuthService, {
+  get(_target, key) {
+    currentService()
+    const service = oauthSingleton!,
       value = Reflect.get(service, key)
     return typeof value === 'function' ? value.bind(service) : value
   }

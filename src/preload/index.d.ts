@@ -13,6 +13,13 @@ export type {
   AgentMcpServerConfig,
   AgentMcpLaunchPreparation
 } from '../shared/agentMcpTypes'
+export type {
+  AgentMcpOAuthPublicClient,
+  AgentMcpOAuthRegistrationSettings,
+  AgentMcpOAuthReview,
+  AgentMcpOAuthStatus,
+  AgentMcpOAuthSignInResult
+} from '../shared/agentMcpOAuthTypes'
 export type { InteractionPublicationState } from '../shared/interactionPublication'
 export type { AgentAutoReviewEnrollment, AgentDecisionDisplay } from '../shared/agentAutoReview'
 
