@@ -10,12 +10,19 @@
   let dirty = $state(false)
   let id = $state('')
   let label = $state('')
+  let transport = $state<'stdio' | 'http'>('stdio')
+  let endpoint = $state('')
+  let allowLoopbackHttp = $state(false)
   let executable = $state('')
   let cwd = $state('')
   let args = $state('[]')
   let protocol = $state<AgentMcpServerConfig['protocol']>('legacy')
   let environment = $state<string[]>([])
   let formError = $state('')
+  const reviewServer = $derived(
+    $controls.status?.servers.find((entry) => entry.server.id === $controls.preparation?.serverId)
+      ?.server
+  )
   const blocked = $derived(
     !!$controls.busy || !!$controls.preparation || !!$controls.status?.paused
   )
@@ -38,11 +45,14 @@
     editing = true
     id = server.id
     label = server.label
-    executable = server.executable
-    cwd = server.cwd
-    args = JSON.stringify(server.args)
+    transport = server.transport === 'http' ? 'http' : 'stdio'
+    endpoint = server.transport === 'http' ? server.endpoint : ''
+    allowLoopbackHttp = server.transport === 'http' ? server.allowLoopbackHttp : false
+    executable = server.transport === 'http' ? '' : server.executable
+    cwd = server.transport === 'http' ? '' : server.cwd
+    args = server.transport === 'http' ? '[]' : JSON.stringify(server.args)
     protocol = server.protocol
-    environment = [...server.environment]
+    environment = server.transport === 'http' ? [] : [...server.environment]
     dirty = false
     formError = ''
   }
@@ -52,6 +62,9 @@
     dirty = false
     id = ''
     label = ''
+    transport = 'stdio'
+    endpoint = ''
+    allowLoopbackHttp = false
     executable = ''
     cwd = ''
     args = '[]'
@@ -64,7 +77,9 @@
     formError = ''
     try {
       const config = parseAgentMcpDraft(
-        { id, label, executable, cwd, argsJson: args, protocol, environment },
+        transport === 'http'
+          ? { transport, id, label, endpoint, protocol, allowLoopbackHttp }
+          : { id, label, executable, cwd, argsJson: args, protocol, environment },
         $controls.status?.environmentNames ?? []
       )
       if (await controls.configure(config)) {
@@ -95,14 +110,20 @@
 >
   <h3 class="text-lg font-semibold">Agent MCP servers</h3>
   <p class="text-sm">
-    Connect the built-in agent to a trusted, already-installed stdio server. Saving starts nothing.
-    Each Start needs a fresh launch review. Every tool call and resource read needs human approval,
-    including Auto. Planning exposes local metadata only.
+    Connect the built-in agent to a trusted installed stdio server or anonymous Streamable HTTP
+    endpoint. Saving starts nothing. Each Start needs a fresh review. Every tool call and resource
+    read needs human approval, including Auto. Planning exposes local metadata only.
   </p>
   <p class="rounded-lg border border-base-300 p-3 text-sm">
-    Server code runs with your OS permissions and is not sandboxed. It can access files and the
-    network before tool approval. Do not put credentials or private values in arguments. Use an
-    absolute executable path, never a shell or package installer.
+    {#if transport === 'http'}
+      Starting an HTTP connection contacts the exact endpoint before tool approval, including
+      initialization and metadata discovery. The endpoint can observe your network address and MCP
+      traffic. Use HTTPS for remote servers. Credentials, OAuth and custom headers are unavailable.
+    {:else}
+      Server code runs with your OS permissions and is not sandboxed. It can access files and the
+      network before tool approval. Do not put credentials or private values in arguments. Use an
+      absolute executable path, never a shell or package installer.
+    {/if}
   </p>
   {#if $controls.status?.paused}<p class="text-warning text-sm" role="status">
       Agent MCP controls are paused.
@@ -123,11 +144,22 @@
       class="rounded-box border-2 border-warning p-3 space-y-3"
       aria-label="Review exact MCP launch"
     >
-      <h4 class="font-semibold">Review exact launch</h4>
+      <h4 class="font-semibold">
+        {reviewServer?.transport === 'http'
+          ? 'Review exact HTTP connection'
+          : 'Review exact launch'}
+      </h4>
       <p class="text-sm">
-        Confirm only if you trust this installed executable. Its metadata may go to the selected AI
-        provider; approved returned text enters the local transcript and may go to that provider.
-        Server metadata and output are untrusted. This is startup approval only.
+        {#if reviewServer?.transport === 'http'}
+          Confirm only if you trust the exact endpoint and authentication revision in this
+          disclosure. Starting sends initialization and metadata requests over the network before
+          tool approval. This connection is anonymous; no OAuth grant is requested.
+        {:else}
+          Confirm only if you trust this installed executable.
+        {/if}
+        Its metadata may go to the selected AI provider; approved returned text enters the local transcript
+        and may go to that provider. Server metadata and output are untrusted. This is startup approval
+        only.
       </p>
       <pre class="whitespace-pre-wrap break-all text-xs max-h-72 overflow-auto">{$controls
           .preparation.disclosure}</pre>
@@ -150,8 +182,19 @@
     </div>
   {/if}
   <form class="space-y-3" onsubmit={save}>
-    <h4 class="font-medium">{editing ? 'Edit saved server' : 'Configure an installed server'}</h4>
+    <h4 class="font-medium">{editing ? 'Edit saved server' : 'Configure a server'}</h4>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <label class="form-control"
+        >Transport<select
+          class="select select-bordered"
+          bind:value={transport}
+          onchange={changed}
+          disabled={editBlocked}
+          ><option value="stdio">Installed stdio</option><option value="http"
+            >Streamable HTTP (anonymous)</option
+          ></select
+        ></label
+      >
       <label class="form-control"
         >Server ID<input
           class="input input-bordered"
@@ -170,29 +213,43 @@
           disabled={editBlocked}
         /></label
       >
-      <label class="form-control"
-        >Installed executable (absolute path)<input
-          class="input input-bordered font-mono text-xs"
-          bind:value={executable}
-          oninput={changed}
-          disabled={editBlocked}
-        /></label
-      >
-      <label class="form-control"
-        >Working directory (absolute path)<input
-          class="input input-bordered font-mono text-xs"
-          bind:value={cwd}
-          oninput={changed}
-          disabled={editBlocked}
-        /></label
-      >
-      <label class="form-control"
-        >Arguments (JSON array)<textarea
-          class="textarea textarea-bordered font-mono text-xs"
-          bind:value={args}
-          oninput={changed}
-          disabled={editBlocked}></textarea></label
-      >
+      {#if transport === 'http'}
+        <label class="form-control"
+          >Endpoint URL<input
+            class="input input-bordered font-mono text-xs"
+            type="url"
+            bind:value={endpoint}
+            oninput={changed}
+            maxlength="4096"
+            placeholder="https://example.com/mcp"
+            disabled={editBlocked}
+          /></label
+        >
+      {:else}
+        <label class="form-control"
+          >Installed executable (absolute path)<input
+            class="input input-bordered font-mono text-xs"
+            bind:value={executable}
+            oninput={changed}
+            disabled={editBlocked}
+          /></label
+        >
+        <label class="form-control"
+          >Working directory (absolute path)<input
+            class="input input-bordered font-mono text-xs"
+            bind:value={cwd}
+            oninput={changed}
+            disabled={editBlocked}
+          /></label
+        >
+        <label class="form-control"
+          >Arguments (JSON array)<textarea
+            class="textarea textarea-bordered font-mono text-xs"
+            bind:value={args}
+            oninput={changed}
+            disabled={editBlocked}></textarea></label
+        >
+      {/if}
       <label class="form-control"
         >Protocol compatibility<select
           class="select select-bordered"
@@ -205,22 +262,38 @@
         ></label
       >
     </div>
-    <fieldset class="space-y-2" disabled={editBlocked}>
-      <legend class="text-sm">Optional inherited safe environment names</legend>
+    {#if transport === 'http'}
+      <label class="label cursor-pointer justify-start gap-2 text-sm"
+        ><input
+          class="checkbox checkbox-sm"
+          type="checkbox"
+          bind:checked={allowLoopbackHttp}
+          onchange={changed}
+          disabled={editBlocked}
+        />Allow unencrypted HTTP on literal 127.0.0.1 or [::1] for local testing</label
+      >
       <p class="text-xs opacity-70">
-        No custom values or credentials can be entered or saved here.
+        No credentials, query strings or fragments in the endpoint. Redirects are refused. Saving
+        neither contacts the endpoint nor discovers metadata.
       </p>
-      {#each $controls.status?.environmentNames ?? [] as name}<label
-          class="label cursor-pointer inline-flex gap-2"
-          ><input
-            class="checkbox checkbox-sm"
-            type="checkbox"
-            value={name}
-            bind:group={environment}
-            onchange={changed}
-          />{name}</label
-        >{/each}
-    </fieldset>
+    {:else}
+      <fieldset class="space-y-2" disabled={editBlocked}>
+        <legend class="text-sm">Optional inherited safe environment names</legend>
+        <p class="text-xs opacity-70">
+          No custom values or credentials can be entered or saved here.
+        </p>
+        {#each $controls.status?.environmentNames ?? [] as name}<label
+            class="label cursor-pointer inline-flex gap-2"
+            ><input
+              class="checkbox checkbox-sm"
+              type="checkbox"
+              value={name}
+              bind:group={environment}
+              onchange={changed}
+            />{name}</label
+          >{/each}
+      </fieldset>
+    {/if}
     {#if formError}<p class="text-error text-sm" role="alert">{formError}</p>{/if}
     <div class="flex flex-wrap gap-2">
       <button class="btn btn-sm btn-primary" type="submit" disabled={blocked || !$controls.status}
@@ -245,7 +318,9 @@
       </div>
       {#if entry.message}<p class="text-sm break-all">{entry.message}</p>{/if}
       {#if entry.cleanupPending}<p class="text-warning text-sm">
-          Owned process cleanup remains unverified. Retry Disconnect before another launch.
+          {entry.server.transport === 'http'
+            ? 'HTTP connection cleanup remains unverified. Retry Disconnect before another connection.'
+            : 'Owned process cleanup remains unverified. Retry Disconnect before another launch.'}
         </p>{/if}
       <div class="flex flex-wrap gap-2">
         <button class="btn btn-xs" onclick={() => edit(entry.server)} disabled={editBlocked}
@@ -330,7 +405,8 @@
     </article>
   {/each}
   <p class="text-xs opacity-70">
-    HTTP, OAuth, credential injection, installation and package/shell runners are unavailable. No
-    automatic reconnect or retry. Disconnect and cancellation cannot undo effects.
+    HTTP connections are anonymous. OAuth, credential injection, installation and package/shell
+    runners are unavailable. No automatic reconnect or retry. Disconnect and cancellation cannot
+    undo effects.
   </p>
 </section>

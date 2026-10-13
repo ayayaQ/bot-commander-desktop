@@ -1,9 +1,11 @@
 import { writable } from 'svelte/store'
 import type {
   AgentMcpCatalogKind,
+  AgentMcpHttpServerConfig,
   AgentMcpLaunchPreparation,
   AgentMcpServerConfig,
   AgentMcpStartResult,
+  AgentMcpStdioServerConfig,
   AgentMcpStatus
 } from '../../../shared/agentMcpTypes'
 
@@ -20,16 +22,31 @@ export interface AgentMcpControlsState {
   notice: string
 }
 export interface AgentMcpConfigDraft {
+  transport?: 'stdio' | 'http'
   id: string
   label: string
-  executable: string
-  argsJson: string
-  cwd: string
+  executable?: string
+  argsJson?: string
+  cwd?: string
+  endpoint?: string
+  allowLoopbackHttp?: boolean
   protocol: AgentMcpServerConfig['protocol']
-  environment: readonly string[]
+  environment?: readonly string[]
 }
 
-/** Main remains responsible for validation, privacy screening and installed-file identity. */
+/** UX checks only. Main owns endpoint policy, privacy screening and installed-file identity. */
+export function parseAgentMcpDraft(
+  draft: AgentMcpConfigDraft & { transport: 'http' },
+  environmentNames: readonly string[]
+): AgentMcpHttpServerConfig
+export function parseAgentMcpDraft(
+  draft: AgentMcpConfigDraft & { transport?: 'stdio' },
+  environmentNames: readonly string[]
+): AgentMcpStdioServerConfig
+export function parseAgentMcpDraft(
+  draft: AgentMcpConfigDraft,
+  environmentNames: readonly string[]
+): AgentMcpServerConfig
 export function parseAgentMcpDraft(
   draft: AgentMcpConfigDraft,
   environmentNames: readonly string[]
@@ -44,19 +61,52 @@ export function parseAgentMcpDraft(
     )
   if (!label || label.length > 80 || controls.test(label))
     throw new Error('Enter a label of at most 80 characters without control characters.')
-  if (!absolute(draft.executable) || !absolute(draft.cwd))
-    throw new Error('The executable and working directory must be absolute paths.')
-  if (
-    draft.executable.length > 4096 ||
-    draft.cwd.length > 4096 ||
-    controls.test(draft.executable + draft.cwd)
-  )
-    throw new Error('Paths must be bounded and contain no control characters.')
   if (draft.protocol !== 'legacy' && draft.protocol !== '2026-07-28')
     throw new Error('Select a supported protocol.')
+  if (draft.transport === 'http') {
+    const endpoint = draft.endpoint?.trim() ?? ''
+    if (!endpoint || endpoint.length > 4096 || /[\s\\]/.test(endpoint) || controls.test(endpoint))
+      throw new Error('Enter a bounded HTTP endpoint URL without whitespace or control characters.')
+    let url: URL
+    try {
+      url = new URL(endpoint)
+    } catch {
+      throw new Error('Enter an absolute HTTPS endpoint URL.')
+    }
+    if (url.username || url.password || /[?#]/.test(endpoint))
+      throw new Error('The endpoint cannot contain credentials, a query or a fragment.')
+    if (!/^https?:\/\//i.test(endpoint)) throw new Error('Enter an absolute HTTPS endpoint URL.')
+    if (url.protocol !== 'https:') {
+      if (
+        url.protocol !== 'http:' ||
+        draft.allowLoopbackHttp !== true ||
+        !/^http:\/\/(?:127\.0\.0\.1|\[::1\])(?::[0-9]+)?(?:\/|$)/i.test(endpoint) ||
+        !['127.0.0.1', '[::1]'].includes(url.hostname)
+      )
+        throw new Error(
+          'Use HTTPS, or explicitly allow HTTP with literal 127.0.0.1 or [::1] for local testing.'
+        )
+    }
+    return {
+      transport: 'http',
+      id,
+      label,
+      endpoint,
+      protocol: draft.protocol,
+      allowLoopbackHttp: draft.allowLoopbackHttp === true
+    }
+  }
+  if (draft.transport !== undefined && draft.transport !== 'stdio')
+    throw new Error('Select a supported transport.')
+  const executable = draft.executable ?? ''
+  const cwd = draft.cwd ?? ''
+  if (!absolute(executable) || !absolute(cwd))
+    throw new Error('The executable and working directory must be absolute paths.')
+  if (executable.length > 4096 || cwd.length > 4096 || controls.test(executable + cwd))
+    throw new Error('Paths must be bounded and contain no control characters.')
   let args: unknown
   try {
-    args = JSON.parse(draft.argsJson)
+    args = JSON.parse(draft.argsJson ?? '')
   } catch {
     throw new Error('Arguments must be a JSON array of strings, such as ["--stdio"].')
   }
@@ -66,20 +116,21 @@ export function parseAgentMcpDraft(
     args.some((value) => typeof value !== 'string' || value.length > 4096 || controls.test(value))
   )
     throw new Error('Use a JSON array of up to 16 bounded string arguments.')
-  const environment = [...new Set(draft.environment)]
+  const environment = [...new Set(draft.environment ?? [])]
   if (
     environment.length > environmentNames.length ||
     environment.some((name) => !environmentNames.includes(name) || !/^[A-Z_][A-Z0-9_]*$/.test(name))
   )
     throw new Error('Choose only the safe environment names offered by this app.')
-  const config: AgentMcpServerConfig = {
+  const config: AgentMcpStdioServerConfig = {
     id,
     label,
-    executable: draft.executable,
+    executable,
     args: args as string[],
-    cwd: draft.cwd,
+    cwd,
     protocol: draft.protocol,
-    environment
+    environment,
+    ...(draft.transport === 'stdio' ? { transport: 'stdio' as const } : {})
   }
   if (new TextEncoder().encode(JSON.stringify(config)).length > 16 * 1024)
     throw new Error('The server configuration exceeds the 16 KiB limit.')

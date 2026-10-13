@@ -18,7 +18,7 @@ import {
   MCP_ENV_NAMES,
   prepareMcpLaunch,
   validateMcpServer,
-  type McpServerConfig
+  type McpStdioServerConfig
 } from './agentMcpConfig'
 import { mcpDigest, mcpDisplayJson } from '@ayayaq/vivi/extensions/mcp'
 import { atomicWrite, reopenAtomicWrites } from './atomicPersistence'
@@ -41,7 +41,7 @@ async function fixture() {
   const executable = join(directory, process.platform === 'win32' ? 'fixture.exe' : 'fixture')
   await copyFile(process.platform === 'win32' ? process.execPath : '/bin/true', executable)
   await chmod(executable, 0o700)
-  const server: McpServerConfig = {
+  const server: McpStdioServerConfig = {
     id: 'fixture',
     label: 'Inert fixture',
     executable,
@@ -60,7 +60,9 @@ describe('private bounded persistence and installed launch validation', () => {
       path = join(subject.store.directory, 'mcp-servers.json')
     expect(saved.revision).toBe(mcpDigest([subject.server]))
     expect(await subject.store.load()).toEqual(saved)
-    expect(Object.isFrozen(saved.servers[0].args)).toBe(true)
+    expect(Object.isFrozen('args' in saved.servers[0] ? saved.servers[0].args : undefined)).toBe(
+      true
+    )
     expect(Object.keys(JSON.parse(await readFile(path, 'utf8'))).sort()).toEqual([
       'schemaVersion',
       'servers'

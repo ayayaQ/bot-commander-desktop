@@ -7,6 +7,7 @@ import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import type {
   Client,
+  FetchLike,
   JSONRPCMessage,
   JsonSchemaType,
   Tool,
@@ -35,6 +36,7 @@ import {
   type McpSchemaValidator
 } from '@ayayaq/vivi/extensions/mcp'
 import type {
+  AgentMcpHttpServerConfig,
   AgentMcpCategoryStatus,
   AgentMcpLaunchPreparation,
   AgentMcpServerStatus,
@@ -45,12 +47,16 @@ import {
   MCP_ENV_NAMES,
   McpConfigStore,
   mcpFreeze,
+  mcpText,
+  isMcpHttpServer,
+  isMcpHttpLaunch,
   prepareMcpLaunch,
   validateMcpServer,
   type McpConfiguration,
   type McpLaunchIdentity,
   type McpServerConfig
 } from './agentMcpConfig'
+import { McpHttpTransport } from './agentMcpHttpTransport'
 import { expandAgentMcpTemplate } from './agentMcpTemplates'
 import { environmentSecrets, mcpContainsSecret } from './agentMcpPrivacy'
 import { assertAgentMcpPrivacy, agentDecisionPrivacyRevision } from './agentDecisionPrivacy'
@@ -82,6 +88,10 @@ export interface AgentMcpInvocationHooks {
   /** Always awaited, even for cancellation or rejected intent. */
   settle(outcome: AgentMcpInvocationOutcome): Promise<void>
 }
+export interface AgentMcpHttpAuthorization {
+  readonly revision: string
+  readonly bearerToken?: string
+}
 export interface AgentMcpServiceOptions {
   readonly store: McpConfigStore
   readonly env: Readonly<NodeJS.ProcessEnv>
@@ -91,9 +101,13 @@ export interface AgentMcpServiceOptions {
   readonly validateSchema?: McpSchemaValidator
   /** Trusted wiring only. The factory must not start a process. Never exposed through IPC. */
   readonly transportFactory?: (launch: McpLaunchIdentity) => Transport | Promise<Transport>
+  /** Trusted main-process session reads only. No refresh, sign-in, storage or IPC credential path. */
+  readonly httpAuthorization?: (server: AgentMcpHttpServerConfig) => AgentMcpHttpAuthorization
+  readonly httpFetch?: FetchLike
   readonly now?: () => number
 }
 interface LaunchPermit {
+  readonly authorization?: AgentMcpHttpAuthorization
   readonly preparation: AgentMcpLaunchPreparation
   readonly launch: McpLaunchIdentity
   readonly privacyRevision: number | string
@@ -113,6 +127,9 @@ interface PendingOperation {
   confirmedError?: boolean
 }
 interface Connection {
+  readonly http?: McpHttpTransport
+  readonly authorization?: AgentMcpHttpAuthorization
+  authorizationRejected?: boolean
   readonly client: Client
   readonly transport: Transport
   /** Strict host cleanup authority; SDK-facing close only observes detached failures. */
@@ -141,6 +158,12 @@ class ControlCancelledError extends Error {}
 export const AGENT_MCP_START_WARNING =
   'Starting this trusted server runs its installed code with your OS permissions, before any tool-call approval. It can access your files and network. This is not a sandbox. Startup performs the protocol handshake and discovers tool metadata. Ready tool metadata is advertised to the selected model; discovered resource metadata can also be listed in its context. Every tool call and resource read requires separate human approval; returned text enters the local transcript and selected provider context.'
 export function agentMcpStartDisclosure(launch: McpLaunchIdentity): string {
+  if (isMcpHttpLaunch(launch)) {
+    const disclosure = `Connecting sends a protocol handshake and metadata discovery to this exact HTTP endpoint. Ready tool metadata is advertised to the selected model; discovered resource metadata can also enter its context. Every tool call and resource read requires separate human approval. Returned text enters the local transcript and selected provider context. No redirects, background GET stream, automatic sign-in, scope expansion or request replay are allowed.\nServer: ${launch.server.id} · ${mcpDisplayJson(launch.server.label)}\nEndpoint: ${mcpDisplayJson(launch.server.endpoint)}\nProtocol: ${launch.server.protocol}\nAllow literal loopback HTTP: ${launch.server.allowLoopbackHttp}\nSession authorization revision: ${mcpDisplayJson(launch.authRevision)}\nApproval applies only to this endpoint, configuration and session authorization revision. Changes require fresh connection approval. Cancellation cannot undo external effects; uncertain requests are never retried automatically.`
+    if (Buffer.byteLength(disclosure) > 48 * 1024)
+      throw new Error('MCP connection disclosure exceeds its limit')
+    return disclosure
+  }
   const disclosure = `${AGENT_MCP_START_WARNING}\nServer: ${launch.server.id} · ${mcpDisplayJson(launch.server.label)}\nExecutable: ${mcpDisplayJson(launch.server.executable)}\nArguments: ${launch.server.args.map(mcpDisplayJson).join(' ') || '(none)'}\nWorking directory: ${mcpDisplayJson(launch.server.cwd)}\nProtocol: ${launch.server.protocol}\nEnvironment: ${
     Object.entries(launch.environment)
       .map(([name, value]) => `${name}=${mcpDisplayJson(value)}`)
@@ -164,6 +187,7 @@ export function agentMcpOperationDisclosure(operation: McpPreparedOperation): st
 }
 /** Explicit startup and one-shot reviewed invocation; no autoconnection, retries or input fulfillment. */
 export class AgentMcpService {
+  private readonly httpSecrets = new Set<string>()
   private configuration: McpConfiguration = mcpFreeze({ revision: '', servers: [] })
   private readonly connections = new Map<string, Connection>()
   private readonly launches = new Map<string, LaunchPermit>()
@@ -194,10 +218,37 @@ export class AgentMcpService {
   private secrets(): readonly string[] {
     const values = [
       ...environmentSecrets(this.options.env),
-      ...(this.options.secrets?.() ?? [])
+      ...(this.options.secrets?.() ?? []),
+      ...this.httpSecrets
     ].filter(Boolean)
     this.options.store.addSecrets(values)
     return values
+  }
+  private authorization(server: AgentMcpHttpServerConfig): AgentMcpHttpAuthorization {
+    const value = this.options.httpAuthorization?.(server) ?? { revision: 'anonymous' }
+    if (
+      !mcpText(value.revision, 256) ||
+      !/^[A-Za-z0-9._:-]+$/.test(value.revision) ||
+      (value.bearerToken !== undefined &&
+        (!mcpText(value.bearerToken, 8192) || !/^[A-Za-z0-9._~+/-]+=*$/.test(value.bearerToken)))
+    )
+      throw new Error('MCP HTTP session authorization is unavailable')
+    if (value.bearerToken) this.httpSecrets.add(value.bearerToken)
+    if (this.secrets().some((secret) => value.revision.includes(secret)))
+      throw new Error('MCP HTTP authorization revision must not contain credentials')
+    return Object.freeze({
+      revision: value.revision,
+      ...(value.bearerToken ? { bearerToken: value.bearerToken } : {})
+    })
+  }
+  private assertAuthorization(connection: Connection): void {
+    if (!isMcpHttpServer(connection.launch.server)) return
+    const current = this.authorization(connection.launch.server)
+    if (
+      current.revision !== connection.authorization?.revision ||
+      current.bearerToken !== connection.authorization?.bearerToken
+    )
+      throw new Error('MCP HTTP authorization changed; request fresh connection approval')
   }
   private privacyRevision(): number | string {
     return this.options.privacyRevision?.() ?? agentDecisionPrivacyRevision()
@@ -383,6 +434,17 @@ export class AgentMcpService {
     if (this.configuration.revision && current.revision !== this.configuration.revision)
       await this.revokeConnections()
     this.configuration = current
+    for (const [id, connection] of this.connections) {
+      try {
+        this.assertAuthorization(connection)
+      } catch {
+        this.invalidate(
+          connection,
+          'MCP HTTP authorization changed; disconnect and request fresh connection approval'
+        )
+        await this.cleanup(id, connection, false)
+      }
+    }
   }
   list(signal = noSignal()): Promise<AgentMcpStatus> {
     if (this.closed || this.paused || isAgentPersistencePaused())
@@ -466,11 +528,13 @@ export class AgentMcpService {
         throw new Error('Cancel or disconnect the current launch before preparing a replacement')
       if (this.launches.size >= 8) throw new Error('Too many pending MCP launches')
       const privacyRevision = this.privacyRevision()
+      const authorization = isMcpHttpServer(server) ? this.authorization(server) : undefined
       const launch = await prepareMcpLaunch(
         server,
         this.configuration.revision,
         this.options.env,
-        this.secrets()
+        this.secrets(),
+        authorization?.revision
       )
       current.throwIfAborted()
       this.assertOpen()
@@ -486,6 +550,7 @@ export class AgentMcpService {
         expiresAt: (this.options.now?.() ?? Date.now()) + LAUNCH_LIFETIME_MS
       })
       this.launches.set(preparation.token, {
+        ...(authorization ? { authorization } : {}),
         preparation,
         launch,
         privacyRevision,
@@ -523,6 +588,14 @@ export class AgentMcpService {
       )
         throw new Error('MCP launch approval expired or changed; prepare a fresh launch')
       await this.assertLaunchCurrent(permit.launch, current)
+      if (isMcpHttpLaunch(permit.launch)) {
+        const authorization = this.authorization(permit.launch.server)
+        if (
+          authorization.revision !== permit.authorization?.revision ||
+          authorization.bearerToken !== permit.authorization?.bearerToken
+        )
+          throw new Error('MCP HTTP authorization changed; prepare a fresh connection')
+      }
       current.throwIfAborted()
       this.assertOpen()
       return {
@@ -530,7 +603,8 @@ export class AgentMcpService {
           permit.launch,
           permit.privacyRevision,
           permit.preparation.expiresAt,
-          current
+          current,
+          permit.authorization
         ),
         status: this.statuses()
       }
@@ -562,10 +636,11 @@ export class AgentMcpService {
       server,
       persisted.revision,
       this.options.env,
-      this.secrets()
+      this.secrets(),
+      isMcpHttpServer(server) ? this.authorization(server).revision : undefined
     )
     if (latest.digest !== launch.digest)
-      throw new Error('MCP executable, directory or environment changed; request fresh approval')
+      throw new Error('MCP launch or authorization changed; request fresh approval')
     if ((await this.loadConfiguration()).revision !== launch.configRevision)
       throw new Error('MCP configuration changed before send')
     signal.throwIfAborted()
@@ -575,7 +650,8 @@ export class AgentMcpService {
     launch: McpLaunchIdentity,
     privacyRevision: number | string,
     expiresAt: number,
-    signal: AbortSignal
+    signal: AbortSignal,
+    authorization?: AgentMcpHttpAuthorization
   ): Promise<boolean> {
     const sdk = await import('@modelcontextprotocol/client')
     signal.throwIfAborted()
@@ -599,9 +675,39 @@ export class AgentMcpService {
         }
       }
     )
-    const owned = this.options.transportFactory
+    const owned: Transport = this.options.transportFactory
       ? await this.options.transportFactory(launch)
-      : new (await import('./agentMcpTransport')).McpStdioTransport(launch)
+      : isMcpHttpLaunch(launch)
+        ? new McpHttpTransport(launch, {
+            ...(this.options.httpFetch ? { fetch: this.options.httpFetch } : {}),
+            token: () => {
+              this.assertAuthorization(connection)
+              return authorization?.bearerToken
+            },
+            beforeOperation: async (message) => {
+              const pending = connection.pending
+              if (!pending) throw new Error('MCP HTTP operation has no approval')
+              await this.reload()
+              await this.assertLaunchCurrent(launch, pending.signal)
+              this.assertSendCurrent(connection, pending, message, sdk)
+            },
+            operationStarted: (message) => {
+              const pending = connection.pending
+              if (!pending) throw new Error('MCP HTTP operation has no approval')
+              this.assertSendCurrent(connection, pending, message, sdk)
+              this.consumeSend(pending, message)
+            },
+            authorizationRejected: () => {
+              if (this.connections.get(launch.server.id) !== connection) return
+              connection.authorizationRejected = true
+              this.invalidate(
+                connection,
+                'MCP HTTP needs sign-in; explicit sign-in and fresh connection approval are required'
+              )
+              this.notify()
+            }
+          })
+        : new (await import('./agentMcpTransport')).McpStdioTransport(launch)
     await this.assertLaunchCurrent(launch, signal)
     signal.throwIfAborted()
     this.assertOpen()
@@ -612,6 +718,10 @@ export class AgentMcpService {
       await owned.close()
     }
     const transport: Transport = {
+      ...(owned.hasPerRequestStream ? { hasPerRequestStream: true } : {}),
+      ...(owned.setProtocolVersion
+        ? { setProtocolVersion: (version: string) => owned.setProtocolVersion!(version) }
+        : {}),
       start: async () => {
         await this.assertLaunchCurrent(launch, signal)
         signal.throwIfAborted()
@@ -649,8 +759,25 @@ export class AgentMcpService {
           pending.phase = 'checking'
           assertMcpJson(message, 64 * 1024)
           const captured = mcpFreeze(structuredClone(message))
-          const boundary = this.guardSend(connection, pending, captured, sdk, () =>
-            owned.send(captured, options)
+          const boundary = this.guardSend(
+            connection,
+            pending,
+            captured,
+            sdk,
+            () =>
+              owned.send(
+                captured,
+                owned instanceof McpHttpTransport
+                  ? {
+                      ...options,
+                      requestSignal: AbortSignal.any([
+                        pending.signal,
+                        ...(options?.requestSignal ? [options.requestSignal] : [])
+                      ])
+                    }
+                  : options
+              ),
+            owned instanceof McpHttpTransport
           )
           pending.boundary = boundary
           await boundary
@@ -663,6 +790,8 @@ export class AgentMcpService {
       client,
       transport,
       closeOwned,
+      ...(owned instanceof McpHttpTransport ? { http: owned } : {}),
+      ...(authorization ? { authorization } : {}),
       launch,
       controller: new AbortController(),
       generation: randomUUID(),
@@ -782,15 +911,20 @@ export class AgentMcpService {
         }
       })
       await this.refreshConnection(connection, ['tools'], combined)
+      combined.throwIfAborted()
       this.notify()
       return true
     } catch {
       this.invalidate(
         connection,
-        signal.aborted ? 'MCP startup cancelled' : 'MCP startup failed or timed out'
+        connection.authorizationRejected
+          ? 'MCP HTTP needs sign-in; explicit sign-in and fresh connection approval are required'
+          : signal.aborted
+            ? 'MCP startup cancelled'
+            : 'MCP startup failed or timed out'
       )
       try {
-        await this.cleanup(launch.server.id, connection)
+        await this.cleanup(launch.server.id, connection, !connection.authorizationRejected)
       } finally {
         // Unverified cleanup rejects startup and keeps this connection's ownership.
         this.notify()
@@ -804,58 +938,67 @@ export class AgentMcpService {
     if (assertCurrent() !== undefined)
       throw new Error('MCP active-run assertion must complete synchronously')
   }
+  private assertSendCurrent(
+    connection: Connection,
+    pending: PendingOperation,
+    message: JSONRPCMessage,
+    sdk: typeof import('@modelcontextprotocol/client')
+  ): void {
+    if (connection.pending !== pending || pending.phase !== 'checking')
+      throw new Error('MCP approval changed during SDK send setup')
+    pending.signal.throwIfAborted()
+    this.assertOpen()
+    this.checkRun(pending.assertCurrent)
+    if (pending.privacyRevision !== this.privacyRevision())
+      throw new Error('MCP privacy changed before send')
+    this.assertOperationCurrent(pending.operation)
+    this.assertAllowed([
+      pending.operation.call,
+      pending.operation.descriptor,
+      mcpOperationRequest(pending.operation)
+    ])
+    const request = mcpOperationRequest(pending.operation)
+    const expected: Record<string, unknown> = { ...request.params }
+    if (pending.operation.snapshot.protocolVersion === '2026-07-28')
+      expected._meta = {
+        [sdk.PROTOCOL_VERSION_META_KEY]: pending.operation.snapshot.protocolVersion,
+        [sdk.CLIENT_INFO_META_KEY]: { name: 'bot-commander-agent-mcp', version: '1.7.0' },
+        [sdk.CLIENT_CAPABILITIES_META_KEY]: {}
+      }
+    if (
+      !('method' in message) ||
+      !('id' in message) ||
+      message.jsonrpc !== '2.0' ||
+      Object.keys(message).some((key) => !['jsonrpc', 'method', 'id', 'params'].includes(key)) ||
+      message.method !== request.method ||
+      mcpDigest(message.params) !== mcpDigest(expected)
+    )
+      throw new Error('MCP outgoing request differs from exact approval')
+  }
+  private consumeSend(pending: PendingOperation, message: JSONRPCMessage): void {
+    if (!('id' in message)) throw new Error('MCP operation requires an exact request ID')
+    // No await separates final authority checks, consumption and the possible server write.
+    pending.phase = 'consumed'
+    pending.requestSent = true
+    pending.requestId = message.id
+  }
   private async guardSend(
     connection: Connection,
     pending: PendingOperation,
     message: JSONRPCMessage,
     sdk: typeof import('@modelcontextprotocol/client'),
-    send: () => Promise<void>
+    send: () => Promise<void>,
+    deferConsumption = false
   ): Promise<void> {
-    const check = (): void => {
-      if (connection.pending !== pending || pending.phase !== 'checking')
-        throw new Error('MCP approval changed during SDK send setup')
-      pending.signal.throwIfAborted()
-      this.assertOpen()
-      this.checkRun(pending.assertCurrent)
-      if (pending.privacyRevision !== this.privacyRevision())
-        throw new Error('MCP privacy changed before send')
-      this.assertOperationCurrent(pending.operation)
-      this.assertAllowed([
-        pending.operation.call,
-        pending.operation.descriptor,
-        mcpOperationRequest(pending.operation)
-      ])
-      const request = mcpOperationRequest(pending.operation)
-      const expected: Record<string, unknown> = { ...request.params }
-      if (pending.operation.snapshot.protocolVersion === '2026-07-28')
-        expected._meta = {
-          [sdk.PROTOCOL_VERSION_META_KEY]: pending.operation.snapshot.protocolVersion,
-          [sdk.CLIENT_INFO_META_KEY]: { name: 'bot-commander-agent-mcp', version: '1.7.0' },
-          [sdk.CLIENT_CAPABILITIES_META_KEY]: {}
-        }
-      if (
-        !('method' in message) ||
-        !('id' in message) ||
-        message.jsonrpc !== '2.0' ||
-        Object.keys(message).some((key) => !['jsonrpc', 'method', 'id', 'params'].includes(key)) ||
-        message.method !== request.method ||
-        mcpDigest(message.params) !== mcpDigest(expected)
-      )
-        throw new Error('MCP outgoing request differs from exact approval')
-    }
     await this.reload()
     await this.assertLaunchCurrent(connection.launch, pending.signal)
-    check()
+    this.assertSendCurrent(connection, pending, message, sdk)
     await pending.hooks.beforeSend()
     // Persisted intent is not delivery or send authority. Repeat every mutable check after it.
     await this.reload()
     await this.assertLaunchCurrent(connection.launch, pending.signal)
-    check()
-    if (!('id' in message)) throw new Error('MCP operation requires an exact request ID')
-    // No await separates the final checks, one-shot consumption and possible server write.
-    pending.phase = 'consumed'
-    pending.requestSent = true
-    pending.requestId = message.id
+    this.assertSendCurrent(connection, pending, message, sdk)
+    if (!deferConsumption) this.consumeSend(pending, message)
     await send()
   }
   refresh(
@@ -968,6 +1111,8 @@ export class AgentMcpService {
             ? 'Metadata discovery cancelled or timed out'
             : 'Metadata discovery failed, changed or exceeded its bounds'
         })
+      } finally {
+        await connection.http?.drainCleanup()
       }
     }
     if (
@@ -1051,6 +1196,7 @@ export class AgentMcpService {
   private assertOperationCurrent(operation: McpPreparedOperation): void {
     this.assertOpen()
     const connection = this.connections.get(operation.serverId)
+    if (connection) this.assertAuthorization(connection)
     assertMcpOperationCurrent(
       operation,
       connection?.snapshot,
@@ -1133,6 +1279,7 @@ export class AgentMcpService {
               ...options,
               cacheMode: 'bypass'
             })
+      await pending.boundary
       combined.throwIfAborted()
       this.checkRun(assertCurrent)
       this.assertOperationCurrent(operation)
@@ -1221,6 +1368,8 @@ export class AgentMcpService {
           doNotRetry: false
         }
     } finally {
+      if (connection && connection.pending === pending)
+        await connection.http?.finishOperation(pending?.requestId)
       if (connection && connection.pending === pending) delete connection.pending
       this.controls.delete(controller)
     }
