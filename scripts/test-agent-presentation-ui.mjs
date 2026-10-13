@@ -562,7 +562,10 @@ render()
   )
   await evaluate('window.__fixture.setTemplateCall()')
   await wait("document.body.innerText.includes('Exact resource template:')")
-  const templateText = await visible()
+  // Human approval disclosure is separate from the collapsed display-only presentation.
+  const templateText = await evaluate(
+    'return [...document.querySelectorAll("pre")].find(node => node.textContent.startsWith("Exact resource template:"))?.innerText'
+  )
   assert.ok(templateText.includes('fixture:///items/{id}{?q}'))
   assert.ok(templateText.includes('a/b 😀'))
   assert.ok(templateText.includes('x&y'))
