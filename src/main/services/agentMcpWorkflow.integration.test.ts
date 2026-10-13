@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AgentSession, AgentStreamEvent } from '../../shared/agentTypes'
 import {
-  emptyMcpCategory,
   mcpAlias,
   mcpDigest,
   MCP_GUIDANCE,
@@ -25,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   reply: 'OFFLINE_RESPONSE',
   tool: '',
   requests: [] as Array<Record<string, unknown>>,
+  wireRequests: [] as Array<Record<string, unknown>>,
   executed: [] as Array<{ name: string; isError?: boolean }>
 }))
 vi.mock('@ayayaq/vivi', async (importOriginal) => {
@@ -55,6 +55,9 @@ vi.mock('electron', () => ({
 }))
 vi.mock('./agentMcpService', async () => {
   const core = await import('@ayayaq/vivi/extensions/mcp')
+  const { expandAgentMcpTemplate } = await import('./agentMcpTemplates')
+  const { agentMcpOperationDisclosure } =
+    await vi.importActual<typeof import('./agentMcpService')>('./agentMcpService')
   const validateSchema = () => (args: Record<string, unknown>) => {
     if (
       Object.keys(args).join(',') !== 'query' ||
@@ -66,6 +69,7 @@ vi.mock('./agentMcpService', async () => {
   return {
     agentMcpService: {
       validateSchema,
+      expandTemplate: expandAgentMcpTemplate,
       assertAllowed() {},
       async captureCatalogs(signal: AbortSignal) {
         signal.throwIfAborted()
@@ -79,12 +83,11 @@ vi.mock('./agentMcpService', async () => {
           kind,
           call,
           'fixture-launch',
-          validateSchema
+          validateSchema,
+          expandAgentMcpTemplate
         )
       },
-      operationDisclosure(operation) {
-        return `Exact offline external request: ${operation.serverId}/${operation.remoteKey}\n${JSON.stringify(operation.call.arguments)}`
-      },
+      operationDisclosure: agentMcpOperationDisclosure,
       async invoke(operation, signal, assertCurrent, hooks) {
         assertCurrent()
         await hooks.beforeSend()
@@ -93,6 +96,7 @@ vi.mock('./agentMcpService', async () => {
         if (requestSent) {
           assertCurrent()
           mocks.sends++
+          mocks.wireRequests.push(core.mcpOperationRequest(operation))
           mocks.afterSend?.()
         }
         const unknown = requestSent && mocks.phase === 'unknown'
@@ -102,9 +106,15 @@ vi.mock('./agentMcpService', async () => {
             ? core.mcpFailure('mcp_unknown_outcome', 'Offline response lost after send', true)
             : core.projectMcpResult(
                 operation.serverId,
-                'tools/call',
-                operation.remoteKey,
-                { content: [{ type: 'text', text: mocks.reply }] },
+                core.mcpOperationRequest(operation).method,
+                operation.resourceUri ?? operation.remoteKey,
+                operation.catalogKind === 'tools'
+                  ? { content: [{ type: 'text', text: mocks.reply }] }
+                  : {
+                      contents: [
+                        { uri: operation.resourceUri ?? operation.remoteKey, text: mocks.reply }
+                      ]
+                    },
                 () => undefined
               )
         const result = {
@@ -148,6 +158,9 @@ const settings = {
 const remoteName = 'fixture/name'
 const alias = mcpAlias('fixture', 'tools', remoteName)
 const callId = 'offline-mcp-call'
+const uriTemplate = 'fixture:///items/{id}{?q}'
+const variables = { id: 'a/b 😀', q: 'x&y' }
+const resourceUri = 'fixture:///items/a%2Fb%20%F0%9F%98%80?q=x%26y'
 function deferred<T>() {
   let resolve!: (value: T) => void
   return {
@@ -190,7 +203,25 @@ function catalog(): McpCatalogSnapshot {
     categories: {
       tools: { state: 'ready', entries: tools, digest: mcpDigest(tools) },
       resources: { state: 'ready', entries: resources, digest: mcpDigest(resources) },
-      resourceTemplates: emptyMcpCategory()
+      resourceTemplates: {
+        state: 'ready',
+        entries: [
+          {
+            remoteKey: uriTemplate,
+            alias: mcpAlias('fixture', 'resourceTemplates', uriTemplate),
+            descriptor: { uriTemplate, name: 'Items' },
+            state: 'available'
+          }
+        ],
+        digest: mcpDigest([
+          {
+            remoteKey: uriTemplate,
+            alias: mcpAlias('fixture', 'resourceTemplates', uriTemplate),
+            descriptor: { uriTemplate, name: 'Items' },
+            state: 'available'
+          }
+        ])
+      }
     }
   }
 }
@@ -211,6 +242,7 @@ describe('desktop MCP inside the existing Vivi agent loop', () => {
       afterSend: undefined,
       reply: 'OFFLINE_RESPONSE',
       requests: [],
+      wireRequests: [],
       executed: [],
       tool: alias
     })
@@ -232,7 +264,11 @@ describe('desktop MCP inside the existing Vivi agent loop', () => {
                     call_id: callId,
                     name: mocks.tool,
                     arguments: JSON.stringify(
-                      mocks.tool === 'list_mcp_resources' ? {} : { query: 'offline query' }
+                      mocks.tool === 'list_mcp_resources'
+                        ? {}
+                        : mocks.tool === 'read_mcp_resource_template'
+                          ? { serverId: 'fixture', uriTemplate, variables }
+                          : { query: 'offline query' }
                     )
                   }
                 ]
@@ -295,7 +331,7 @@ describe('desktop MCP inside the existing Vivi agent loop', () => {
     expect(event.type).toBe('approval')
     expect(event.toolCall?.mcp).toMatchObject({
       serverId: 'fixture',
-      remoteKey: remoteName,
+      remoteKey: mocks.tool === 'read_mcp_resource_template' ? uriTemplate : remoteName,
       outcome: 'pending'
     })
     expect(mocks.sends).toBe(priorSends)
@@ -342,6 +378,91 @@ describe('desktop MCP inside the existing Vivi agent loop', () => {
         ).toBeUndefined()
         if (!approved) expect(JSON.parse(result(session).content).denied).toBe(true)
       })
+  for (const mode of ['manual', 'auto'] as const)
+    for (const approved of [true, false])
+      it(`${mode} reviews one exact template URI before human decision (${approved})`, async () => {
+        mocks.tool = 'read_mcp_resource_template'
+        const subject = await start(mode)
+        const event = await subject.approval
+        expect(event.toolCall?.mcp).toMatchObject({
+          catalogKind: 'resourceTemplates',
+          remoteKey: uriTemplate,
+          resourceUri
+        })
+        expect(event.toolCall?.mcp?.disclosure).toContain(
+          `Exact resource template: ${JSON.stringify(uriTemplate)}`
+        )
+        expect(event.toolCall?.mcp?.disclosure).toContain(
+          `Exact variable values: ${JSON.stringify(variables)}`
+        )
+        expect(event.toolCall?.mcp?.disclosure).toContain(
+          `Expanded resource URI: ${JSON.stringify(resourceUri)}`
+        )
+        expect(event.toolCall?.mcp?.disclosure).toContain('Wire method: resources/read')
+        await decide(subject, approved)
+        expect(mocks.wireRequests).toEqual(
+          approved ? [{ method: 'resources/read', params: { uri: resourceUri } }] : []
+        )
+        const session = await saved(subject.session.id)
+        const call = session.messages
+          .flatMap((message) => message.toolCalls ?? [])
+          .find((call) => call.id === callId)!
+        expect(call.targetLabel).toBe(`fixture: ${resourceUri}`)
+        expect(call.mcp).toMatchObject({
+          remoteKey: uriTemplate,
+          resourceUri,
+          outcome: approved ? 'confirmed' : 'not-sent'
+        })
+        expect(JSON.parse(result(session).content)).toMatchObject({
+          requestSent: approved,
+          untrusted: true
+        })
+        vi.resetModules()
+        agent = await import('./agentService')
+        expect(
+          (await saved(subject.session.id)).messages
+            .flatMap((message) => message.toolCalls ?? [])
+            .find((call) => call.id === callId)?.mcp
+        ).toMatchObject({ remoteKey: uriTemplate, resourceUri })
+        expect(mocks.sends).toBe(approved ? 1 : 0)
+      })
+  it('template approval cancellation retains the exact unsent display identity after restart', async () => {
+    mocks.tool = 'read_mcp_resource_template'
+    const subject = await start()
+    await subject.approval
+    agent.cancelAgentRun(subject.session.id)
+    await subject.terminal
+    vi.resetModules()
+    agent = await import('./agentService')
+    const session = await saved(subject.session.id)
+    expect(mocks.wireRequests).toEqual([])
+    expect(
+      session.messages
+        .flatMap((message) => message.toolCalls ?? [])
+        .find((call) => call.id === callId)?.mcp
+    ).toMatchObject({ remoteKey: uriTemplate, resourceUri, outcome: 'not-sent' })
+    expect(JSON.parse(result(session).content).requestSent).toBe(false)
+  })
+  it('template response loss retains expanded URI and do-not-retry after restart', async () => {
+    mocks.tool = 'read_mcp_resource_template'
+    mocks.phase = 'unknown'
+    const subject = await start()
+    await decide(subject, true)
+    vi.resetModules()
+    agent = await import('./agentService')
+    const session = await saved(subject.session.id)
+    expect(mocks.wireRequests).toEqual([{ method: 'resources/read', params: { uri: resourceUri } }])
+    expect(
+      session.messages
+        .flatMap((message) => message.toolCalls ?? [])
+        .find((call) => call.id === callId)?.mcp
+    ).toMatchObject({ remoteKey: uriTemplate, resourceUri, outcome: 'unknown' })
+    expect(JSON.parse(result(session).content)).toMatchObject({
+      requestSent: true,
+      unknownOutcome: true,
+      doNotRetry: true
+    })
+  })
   it('Planning exposes captured metadata only and withholds every remote operation', async () => {
     mocks.tool = 'list_mcp_resources'
     const subject = await start('planning')
@@ -349,9 +470,14 @@ describe('desktop MCP inside the existing Vivi agent loop', () => {
     expect(mocks.sends).toBe(0)
     const tools = mocks.requests[0].tools as Array<{ name: string }>
     expect(tools.some((tool) => tool.name === 'list_mcp_resources')).toBe(true)
-    expect(tools.some((tool) => tool.name === alias || tool.name === 'read_mcp_resource')).toBe(
-      false
-    )
+    expect(
+      tools.some(
+        (tool) =>
+          tool.name === alias ||
+          tool.name === 'read_mcp_resource' ||
+          tool.name === 'read_mcp_resource_template'
+      )
+    ).toBe(false)
     expect(JSON.parse(result(await saved(subject.session.id)).content).localMetadataOnly).toBe(true)
   })
   it('no connected catalogs leaves ordinary chat available', async () => {

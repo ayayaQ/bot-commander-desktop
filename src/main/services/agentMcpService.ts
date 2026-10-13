@@ -23,6 +23,7 @@ import {
   mcpDisplayJson,
   mcpFailure,
   mcpOperationRevisions,
+  mcpOperationRequest,
   MCP_LIMITS,
   MCP_OPERATION_LIMITS,
   prepareMcpOperation,
@@ -50,6 +51,7 @@ import {
   type McpLaunchIdentity,
   type McpServerConfig
 } from './agentMcpConfig'
+import { expandAgentMcpTemplate } from './agentMcpTemplates'
 import { environmentSecrets, mcpContainsSecret } from './agentMcpPrivacy'
 import { assertAgentMcpPrivacy, agentDecisionPrivacyRevision } from './agentDecisionPrivacy'
 import { isAgentPersistencePaused } from './agentPersistenceLifecycle'
@@ -149,7 +151,13 @@ export function agentMcpStartDisclosure(launch: McpLaunchIdentity): string {
   return disclosure
 }
 export function agentMcpOperationDisclosure(operation: McpPreparedOperation): string {
-  const disclosure = `${operation.catalogKind === 'tools' ? 'Call MCP tool' : 'Read MCP resource'} on trusted server ${mcpDisplayJson(operation.serverId)}.\nThis sends the exact request below to that server. Effects cannot be verified from metadata; read-only annotations are not authority. Resource fetches, including file URIs, are server operations.\nBounded returned text and structured data is untrusted and enters the local transcript and selected provider context. Binary data and linked resources are never fetched. Approval permits one attempt. Cancellation cannot undo effects, and uncertain outcomes are never retried automatically.\nExact ${operation.catalogKind === 'tools' ? 'tool name' : 'resource URI'}: ${mcpDisplayJson(operation.remoteKey)}\nArguments: ${mcpDisplayJson(operation.call.arguments)}\nCatalog descriptor (untrusted): ${mcpDisplayJson(operation.descriptor)}\nBinding: ${mcpDisplayJson(operation.binding)}`
+  const request = mcpOperationRequest(operation)
+  const target = operation.catalogKind === 'tools' ? 'Call MCP tool' : 'Read MCP resource'
+  const template =
+    operation.catalogKind === 'resourceTemplates'
+      ? `\nExact resource template: ${mcpDisplayJson(operation.remoteKey)}\nExact variable values: ${mcpDisplayJson(operation.call.arguments.variables)}\nExpanded resource URI: ${mcpDisplayJson(operation.resourceUri)}`
+      : `\nExact ${operation.catalogKind === 'tools' ? 'tool name' : 'resource URI'}: ${mcpDisplayJson(operation.remoteKey)}`
+  const disclosure = `${target} on trusted server ${mcpDisplayJson(operation.serverId)}.\nThis sends the exact request below to that server. Effects cannot be verified from metadata; read-only annotations are not authority. Resource fetches, including file URIs, are server operations.\nBounded returned text and structured data is untrusted and enters the local transcript and selected provider context. Binary data and linked resources are never fetched. Approval permits one attempt. Cancellation cannot undo effects, and uncertain outcomes are never retried automatically.${template}\nWire method: ${request.method}\nExact wire parameters: ${mcpDisplayJson(request.params)}\nArguments: ${mcpDisplayJson(operation.call.arguments)}\nCatalog descriptor (untrusted): ${mcpDisplayJson(operation.descriptor)}\nBinding: ${mcpDisplayJson(operation.binding)}`
   if (Buffer.byteLength(disclosure) > 96 * 1024)
     throw new Error('MCP operation disclosure exceeds its limit')
   return disclosure
@@ -171,6 +179,7 @@ export class AgentMcpService {
   private paused = false
   private closed = false
   readonly validateSchema: McpSchemaValidator
+  readonly expandTemplate = expandAgentMcpTemplate
   readonly operationDisclosure = agentMcpOperationDisclosure
   constructor(private readonly options: AgentMcpServiceOptions) {
     this.validateSchema = options.validateSchema ?? validateAgentMcpSchema
@@ -811,11 +820,13 @@ export class AgentMcpService {
       if (pending.privacyRevision !== this.privacyRevision())
         throw new Error('MCP privacy changed before send')
       this.assertOperationCurrent(pending.operation)
-      this.assertAllowed([pending.operation.call, pending.operation.descriptor])
-      const expected: Record<string, unknown> =
-        pending.operation.catalogKind === 'tools'
-          ? { name: pending.operation.remoteKey, arguments: pending.operation.call.arguments }
-          : { uri: pending.operation.remoteKey }
+      this.assertAllowed([
+        pending.operation.call,
+        pending.operation.descriptor,
+        mcpOperationRequest(pending.operation)
+      ])
+      const request = mcpOperationRequest(pending.operation)
+      const expected: Record<string, unknown> = { ...request.params }
       if (pending.operation.snapshot.protocolVersion === '2026-07-28')
         expected._meta = {
           [sdk.PROTOCOL_VERSION_META_KEY]: pending.operation.snapshot.protocolVersion,
@@ -827,8 +838,7 @@ export class AgentMcpService {
         !('id' in message) ||
         message.jsonrpc !== '2.0' ||
         Object.keys(message).some((key) => !['jsonrpc', 'method', 'id', 'params'].includes(key)) ||
-        message.method !==
-          (pending.operation.catalogKind === 'tools' ? 'tools/call' : 'resources/read') ||
+        message.method !== request.method ||
         mcpDigest(message.params) !== mcpDigest(expected)
       )
         throw new Error('MCP outgoing request differs from exact approval')
@@ -1004,7 +1014,7 @@ export class AgentMcpService {
   prepareOperation(
     snapshot: McpCatalogSnapshot,
     entry: McpCatalogEntry,
-    kind: 'tools' | 'resources',
+    kind: McpCatalogKind,
     call: ToolCall
   ): McpPreparedOperation {
     this.assertOpen()
@@ -1015,10 +1025,11 @@ export class AgentMcpService {
       kind,
       call,
       connection?.launch.digest ?? '',
-      this.validateSchema
+      this.validateSchema,
+      this.expandTemplate
     )
     this.assertOperationCurrent(operation)
-    this.assertAllowed([operation.call, operation.descriptor])
+    this.assertAllowed([operation.call, operation.descriptor, mcpOperationRequest(operation)])
     this.prepared.set(operation, { privacyRevision: this.privacyRevision(), attempted: false })
     return operation
   }
@@ -1033,7 +1044,8 @@ export class AgentMcpService {
         !this.closed &&
         !this.paused &&
         !isAgentPersistencePaused(),
-      this.configuration.revision
+      this.configuration.revision,
+      this.expandTemplate
     )
   }
   private assertOperationCurrent(operation: McpPreparedOperation): void {
@@ -1044,7 +1056,8 @@ export class AgentMcpService {
       connection?.snapshot,
       connection?.launch.digest ?? '',
       connection?.state === 'connected' && !connection.controller.signal.aborted,
-      this.configuration.revision
+      this.configuration.revision,
+      this.expandTemplate
     )
   }
   invoke(
@@ -1085,7 +1098,7 @@ export class AgentMcpService {
         throw new Error('MCP one-shot approval is unavailable')
       authority.attempted = true
       this.assertOperationCurrent(operation)
-      this.assertAllowed([operation.call, operation.descriptor])
+      this.assertAllowed([operation.call, operation.descriptor, mcpOperationRequest(operation)])
       connection = this.connections.get(operation.serverId)!
       if (connection.pending) throw new Error('MCP server already has an operation in flight')
       const combined = AbortSignal.any([
@@ -1109,16 +1122,17 @@ export class AgentMcpService {
         timeout: MCP_OPERATION_LIMITS.operationMs,
         maxTotalTimeout: MCP_OPERATION_LIMITS.operationMs
       }
+      const request = mcpOperationRequest(operation)
       const result =
         operation.catalogKind === 'tools'
           ? await connection.client.callTool(
-              { name: operation.remoteKey, arguments: operation.call.arguments },
+              request.params as { name: string; arguments: JsonObject },
               { ...options, toolDefinition: operation.descriptor as unknown as Tool }
             )
-          : await connection.client.readResource(
-              { uri: operation.remoteKey },
-              { ...options, cacheMode: 'bypass' }
-            )
+          : await connection.client.readResource(request.params as { uri: string }, {
+              ...options,
+              cacheMode: 'bypass'
+            })
       combined.throwIfAborted()
       this.checkRun(assertCurrent)
       this.assertOperationCurrent(operation)
@@ -1128,8 +1142,8 @@ export class AgentMcpService {
       this.assertOperationCurrent(operation)
       const sharedProjection = projectMcpResult(
         operation.serverId,
-        operation.catalogKind === 'tools' ? 'tools/call' : 'resources/read',
-        operation.remoteKey,
+        request.method,
+        operation.resourceUri ?? operation.remoteKey,
         result,
         this.assertAllowed
       )
@@ -1249,11 +1263,11 @@ export class AgentMcpService {
     }
   }
   private projectProtocolError(operation: McpPreparedOperation): ToolResult {
-    const method = operation.catalogKind === 'tools' ? 'tools/call' : 'resources/read'
+    const { method } = mcpOperationRequest(operation)
     const projected = projectMcpResult(
       operation.serverId,
       method,
-      operation.remoteKey,
+      operation.resourceUri ?? operation.remoteKey,
       method === 'tools/call' ? { isError: true, content: [] } : { isError: true, contents: [] },
       this.assertAllowed
     )

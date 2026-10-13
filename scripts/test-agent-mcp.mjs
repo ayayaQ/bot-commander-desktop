@@ -8,6 +8,7 @@ const files = [
   'src/main/services/agentExtensions.integration.test.ts',
   'src/main/services/agentMcpConfig.test.ts',
   'src/main/services/agentMcpService.test.ts',
+  'src/main/services/agentMcpTemplates.test.ts',
   'src/main/services/agentMcpPrivacy.test.ts',
   'src/main/services/agentMcpTransport.test.ts',
   'src/main/services/agentMcpWindows.test.ts',

@@ -9,6 +9,7 @@ import {
   mcpFailure,
   type McpPreparedOperation
 } from '@ayayaq/vivi/extensions/mcp'
+import { expandAgentMcpTemplate } from './agentMcpTemplates'
 import { createAgentPersistence, reportAgentPersistenceNotice } from './agentPersistence'
 import { hasUncertainAtomicWrites } from './atomicPersistence'
 import { withAgentPersistenceOperation } from './agentPersistenceLifecycle'
@@ -38,8 +39,9 @@ export interface AgentMcpOutcomeRecord extends AgentMcpOutcomeScope {
   call: ToolCall
   operationDigest: string
   serverId: string
-  catalogKind: 'tools' | 'resources'
+  catalogKind: 'tools' | 'resources' | 'resourceTemplates'
   remoteKey: string
+  resourceUri?: string
   intentAt?: string
   settledAt?: string
   outcome: OutcomeState
@@ -68,6 +70,7 @@ const recordKeys = new Set([
   'serverId',
   'catalogKind',
   'remoteKey',
+  'resourceUri',
   'intentAt',
   'settledAt',
   'outcome',
@@ -133,7 +136,8 @@ function identity(
     operation.snapshot,
     operation.binding.launchDigest as string,
     true,
-    operation.snapshot.configRevision
+    operation.snapshot.configRevision,
+    expandAgentMcpTemplate
   )
   return {
     ...scope,
@@ -142,6 +146,7 @@ function identity(
     serverId: operation.serverId,
     catalogKind: operation.catalogKind,
     remoteKey: operation.remoteKey,
+    ...(operation.resourceUri !== undefined ? { resourceUri: operation.resourceUri } : {}),
     outcome: 'pending'
   }
 }
@@ -155,7 +160,8 @@ function sameIdentity(a: AgentMcpOutcomeRecord, b: AgentMcpOutcomeRecord): boole
     a.operationDigest === b.operationDigest &&
     a.serverId === b.serverId &&
     a.catalogKind === b.catalogKind &&
-    a.remoteKey === b.remoteKey
+    a.remoteKey === b.remoteKey &&
+    a.resourceUri === b.resourceUri
   )
 }
 function parseResult(result: ToolResult): Record<string, unknown> {
@@ -219,8 +225,9 @@ function assertRecord(record: AgentMcpOutcomeRecord): void {
     !/^[a-f0-9]{64}$/.test(record.operationDigest) ||
     typeof record.serverId !== 'string' ||
     !/^[a-z][a-z0-9_-]{0,15}$/.test(record.serverId) ||
-    !['tools', 'resources'].includes(record.catalogKind) ||
+    !['tools', 'resources', 'resourceTemplates'].includes(record.catalogKind) ||
     !text(record.remoteKey, record.catalogKind === 'tools' ? 256 : 4096) ||
+    (record.catalogKind !== 'resourceTemplates' && record.resourceUri !== undefined) ||
     !['pending', 'not-sent', 'confirmed', 'unknown'].includes(record.outcome) ||
     (record.intentAt !== undefined && !timestamp(record.intentAt)) ||
     (record.settledAt !== undefined && !timestamp(record.settledAt)) ||
@@ -237,6 +244,21 @@ function assertRecord(record: AgentMcpOutcomeRecord): void {
       record.call.arguments.uri !== record.remoteKey)
   )
     throw new Error('MCP resource outcome differs from its call')
+  if (record.catalogKind === 'resourceTemplates') {
+    if (
+      record.call.name !== 'read_mcp_resource_template' ||
+      Object.keys(record.call.arguments).sort().join(',') !== 'serverId,uriTemplate,variables' ||
+      record.call.arguments.serverId !== record.serverId ||
+      record.call.arguments.uriTemplate !== record.remoteKey ||
+      record.resourceUri !==
+        expandAgentMcpTemplate(
+          record.remoteKey,
+          record.call.arguments.variables as Readonly<Record<string, string>>
+        )
+    )
+      throw new Error('MCP template outcome differs from its exact call and URI')
+  }
+  const wireKey = record.resourceUri ?? record.remoteKey
   if (record.outcome === 'pending') {
     if (
       !record.intentAt ||
@@ -274,14 +296,14 @@ function assertRecord(record: AgentMcpOutcomeRecord): void {
     (record.outcome === 'confirmed' &&
       (body.serverId !== record.serverId ||
         body.method !== (record.catalogKind === 'tools' ? 'tools/call' : 'resources/read') ||
-        body.remoteKey !== record.remoteKey ||
+        body.remoteKey !== wireKey ||
         !Array.isArray(body.content) ||
         body.content.length > 128 ||
         (record.result.isError === true) === body.success)) ||
     (body.serverId !== undefined && body.serverId !== record.serverId) ||
     (body.method !== undefined &&
       body.method !== (record.catalogKind === 'tools' ? 'tools/call' : 'resources/read')) ||
-    (body.remoteKey !== undefined && body.remoteKey !== record.remoteKey) ||
+    (body.remoteKey !== undefined && body.remoteKey !== wireKey) ||
     body.requestSent !== record.requestSent ||
     body.unknownOutcome !== record.unknownOutcome ||
     body.doNotRetry !== record.doNotRetry ||
@@ -707,7 +729,8 @@ function matched(session: AgentSession, record: AgentMcpOutcomeRecord) {
     metadata.operationDigest !== record.operationDigest ||
     metadata.serverId !== record.serverId ||
     metadata.catalogKind !== record.catalogKind ||
-    metadata.remoteKey !== record.remoteKey
+    metadata.remoteKey !== record.remoteKey ||
+    metadata.resourceUri !== record.resourceUri
   )
     return undefined
   const assistantCalls = session.history.flatMap((item, index) =>

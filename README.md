@@ -195,7 +195,7 @@ uses Electron's bundled Node.js runtime, independently of the Node.js installed 
 ### Install
 
 The shared agent loop, canonical history helpers and OpenAI/OpenRouter provider factories use
-the exact npm release `@ayayaq/vivi@0.9.0`.
+the exact npm release `@ayayaq/vivi@0.13.0`.
 Its registry artifact was verified against the reviewed release bytes; the immutable
 registry URL and SHA-512 integrity are recorded in the lockfile. Publish and verify a
 compatible shared dependency before updating this pin. Do not commit npm pack outputs

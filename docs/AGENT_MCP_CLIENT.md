@@ -15,7 +15,9 @@ agents inspect or edit Bot Commander. Its settings and capabilities are unchange
 3. Inspect captured tools locally. Explicit refresh controls fetch resource and template
    metadata. Stale, quarantined, unsupported or failed categories cannot authorize a call.
 4. Send an Agent request. External operations stop for **Approve once** or **Reject**,
-   including Auto. Only an exact discovered concrete resource URI can be read.
+   including Auto. Reads use an exact discovered concrete URI or one exact URI expanded
+   from a captured available scalar template. Review the template, exact string values,
+   expanded URI and resources/read route before approving.
    Local metadata listing makes no server request. Planning permits metadata only.
 5. Disconnect stops the owned connection. Restart, reconnection and a new launch need
    fresh explicit startup review. No connection is restored automatically.
@@ -48,7 +50,11 @@ files. Unsupported directory-sync platforms provide atomic replacement without a
 power-loss rename guarantee. Filesystem/storage support still limits durability.
 
 Catalogs, schemas, arguments and final results are bounded. Unsupported schemas are
-quarantined rather than weakened. Templates are metadata-only. Binary bodies are omitted
+quarantined rather than weakened. Available scalar RFC 6570 Level 1–3 templates can
+propose exact reads; prefix/explode modifiers and composite values remain unavailable.
+Every named variable is required as a string, with no extras. Expansion is synchronous
+and performs no I/O, and the URI is never normalized or directly fetched. Reserved
+expansion with malformed percent text is withheld when the expanded URI fails validation. Binary bodies are omitted
 and resource links are never followed. HTTP, OAuth/authentication, credential injection,
 known package/shell runners, installers, automatic input fulfilment, tasks and subscriptions
 are unavailable. Trusted installed server code can still execute arbitrary code internally.
@@ -56,10 +62,13 @@ The model cannot start servers or refresh discovery.
 
 ## Implementation and verification
 
-Published `@ayayaq/vivi@0.9.0` supplies shared catalog/schema, immutable proposal and bounded
+Published `@ayayaq/vivi@0.13.0` supplies shared catalog/schema, immutable proposal and bounded
 result projection through `@ayayaq/vivi/extensions/mcp`. Electron main owns the official
 MCP client SDK 2.3.1 production dependency, process lifecycle, persistence, privacy, approvals
-and actual send. Renderer controls use the trusted, whitelisted preload IPC boundary.
+and actual send. Pinned `url-template@3.1.1` supplies the zero-dependency scalar
+expander, behind the shared core’s template/value/URI checks; no local RFC parser is duplicated.
+The template identity and expanded wire URI stay separate in approvals and outcomes.
+Renderer controls use the trusted, whitelisted preload IPC boundary.
 
 Focused checks use synthetic SDK peers, injected adapters, mocked providers and temporary
 state. Headless UI and Windows native process checks are separate verification stages.

@@ -290,7 +290,8 @@
             >
             {#if category.reason}<p class="text-xs break-all">{category.reason}</p>{/if}
             {#if kind === 'resourceTemplates'}<p class="text-xs opacity-70">
-                Templates are metadata-only. They cannot be expanded or read by the agent.
+                Available scalar templates can propose one exact resource read. Review the template,
+                values and expanded URI before approving once.
               </p>{/if}
             {#each category.entries as item}
               <div class="border-t border-base-300 py-2 text-xs">

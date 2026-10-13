@@ -140,6 +140,13 @@ window.__fixture = {
     session = { ...session, status: runStatus, messages: session.messages.map(message => message.toolCalls ? { ...message, toolCalls: [{ ...message.toolCalls[0], ...clone(patch) }] } : message) }
     for (const listener of listeners.get('agent:event') || []) listener({ sessionId: session.id, runId: session.activeRunId, type: 'session', session: clone(session) })
   },
+  setTemplateCall() {
+    const uriTemplate = 'fixture:///items/{id}{?q}'
+    const variables = { id: 'a/b 😀', q: 'x&y' }
+    const resourceUri = 'fixture:///items/a%2Fb%20%F0%9F%98%80?q=x%26y'
+    const disclosure = 'Exact resource template: ' + JSON.stringify(uriTemplate) + '\\nExact variable values: ' + JSON.stringify(variables) + '\\nExpanded resource URI: ' + JSON.stringify(resourceUri) + '\\nWire method: resources/read\\nExact wire parameters: ' + JSON.stringify({ uri: resourceUri })
+    window.__fixture.setCall({ id: 'template-call', name: 'read_mcp_resource_template', arguments: { serverId: 'offline-server', uriTemplate, variables }, status: 'waiting_approval', approvalId: 'template-approval', error: undefined, result: undefined, mcp: { ...clone(mcp), catalogKind: 'resourceTemplates', remoteKey: uriTemplate, resourceUri, disclosure } }, 'waiting_approval')
+  },
   setNewCall() { session = { ...session, status: 'waiting_approval', activeRunId: 'second-run', messages: session.messages.map(message => message.toolCalls ? { ...message, toolCalls: [{ ...clone(call), id: 'second-call', approvalId: 'second-approval', mcp: { ...clone(mcp), runId: 'second-run' } }] } : message) }; agentSessions.set(data()) }
 }
 let instance
@@ -552,6 +559,41 @@ render()
   assert.equal(await count('agent:approve'), 3)
   flows.push(
     'A legitimate host call ID beyond shared identity bounds leaves exact host provenance and unknown/checkpoint safety visible beside the invalid-display notice, without approval or retry'
+  )
+  await evaluate('window.__fixture.setTemplateCall()')
+  await wait("document.body.innerText.includes('Exact resource template:')")
+  const templateText = await visible()
+  assert.ok(templateText.includes('fixture:///items/{id}{?q}'))
+  assert.ok(templateText.includes('a/b 😀'))
+  assert.ok(templateText.includes('x&y'))
+  assert.ok(templateText.includes('fixture:///items/a%2Fb%20%F0%9F%98%80?q=x%26y'))
+  assert.match(templateText, /Wire method: resources\/read/)
+  assert.equal(await count('agent:approve'), 3)
+  await click('Approve once')
+  assert.deepEqual(
+    await evaluate(
+      "return window.__fixture.calls.filter(call => call.channel === 'agent:approve').at(-1).args"
+    ),
+    ['offline-session', 'template-call', true, 'template-approval']
+  )
+  await evaluate(
+    "window.__fixture.setCall({ status: 'rejected', mcp: { ...window.__fixture.snapshot().sessions[0].messages[2].toolCalls[0].mcp, outcome: 'not-sent', requestSent: false } }, 'completed')"
+  )
+  await wait("document.body.innerText.includes('Status: denied')")
+  await route('#other')
+  await evaluate('history.back()')
+  await wait(
+    "document.getElementById('app').dataset.route === '#panel' && document.body.innerText.includes('Status: denied')"
+  )
+  assert.equal(await count('agent:approve'), 4)
+  assert.equal(
+    await evaluate(
+      'return [...document.querySelectorAll("button")].some(button => button.textContent.trim() === "Approve once")'
+    ),
+    false
+  )
+  flows.push(
+    'Exact template, scalar values, expanded URI and resources/read route appear in existing human approval; approval uses the captured identity and denied remount never replays it'
   )
   assert.deepEqual(browserErrors, [])
   const report = {

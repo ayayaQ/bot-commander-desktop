@@ -31,8 +31,9 @@ export interface AgentToolCall {
     runId: string
     operationDigest: string
     serverId: string
-    catalogKind: 'tools' | 'resources'
+    catalogKind: 'tools' | 'resources' | 'resourceTemplates'
     remoteKey: string
+    resourceUri?: string
     disclosure?: string
     outcome: 'pending' | 'not-sent' | 'confirmed' | 'unknown'
     requestSent?: boolean

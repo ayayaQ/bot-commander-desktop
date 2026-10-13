@@ -104,18 +104,90 @@ for (const spec of [
   '@ayayaq/vivi/events/stream',
   '@ayayaq/vivi/presentation',
   '@modelcontextprotocol/client',
-  '@modelcontextprotocol/client/validators/ajv'
+  '@modelcontextprotocol/client/validators/ajv',
+  'url-template'
 ]) {
   resolutions[spec] = requireSdk.resolve(spec)
   assert.ok(resolutions[spec].startsWith(path.join(root, 'node_modules') + path.sep))
 }
 const versions = {}
-for (const name of ['@ayayaq/vivi', '@modelcontextprotocol/client']) {
+for (const name of ['@ayayaq/vivi', '@modelcontextprotocol/client', 'url-template']) {
   versions[name] = readJson(path.join(root, 'node_modules', name, 'package.json')).version
   assert.equal(versions[name], lock.packages[''].dependencies[name])
   assert.equal(app.dependencies[name], versions[name])
 }
 assert.equal(typeof requireSdk('@ayayaq/vivi/extensions/mcp').createMcpExtension, 'function')
+// Execute the emitted production expander in the archive, never Electron main or a server.
+assert.match(main, /require\("url-template"\)/)
+const templateAdapterSource = main.match(
+  /const expandAgentMcpTemplate = \(uriTemplate, variables\) => \{[\s\S]*?\n\};/
+)?.[0]
+assert.ok(templateAdapterSource, 'Built main has no trusted scalar template adapter')
+const { expandAgentMcpTemplate } = moduleAtMain(
+  'const mcp = require("@ayayaq/vivi/extensions/mcp");\n' +
+    'const urlTemplate = require("url-template");\n' +
+    templateAdapterSource +
+    '\nmodule.exports = { expandAgentMcpTemplate }'
+)
+const templateUri = 'FiXtUrE://LoCaL:0080/%2f/literal/../{id}{?q}'
+const templateValues = { id: 'a/b 😀', q: 'x&y' }
+const exactTemplateUri = 'FiXtUrE://LoCaL:0080/%2f/literal/../a%2Fb%20%F0%9F%98%80?q=x%26y'
+assert.equal(expandAgentMcpTemplate(templateUri, templateValues), exactTemplateUri)
+assert.equal(
+  expandAgentMcpTemplate('fixture:///base{;id,q}', { id: 'a/b', q: '' }),
+  'fixture:///base;id=a%2Fb;q'
+)
+assert.throws(() => expandAgentMcpTemplate('fixture:///{id*}', { id: ['a'] }))
+assert.throws(() => expandAgentMcpTemplate('fixture:///{+id}', { id: '%A' }))
+const mcp = requireSdk('@ayayaq/vivi/extensions/mcp')
+const templates = await mcp.collectMcpCategory(
+  'fixture',
+  'resourceTemplates',
+  async () => ({
+    resourceTemplates: [{ uriTemplate: templateUri, name: 'Offline package template' }]
+  }),
+  new AbortController().signal,
+  () => () => {}
+)
+const templateSnapshot = {
+  serverId: 'fixture',
+  configRevision: 'offline-config',
+  connectionGeneration: 'offline-connection',
+  protocolVersion: '2025-11-25',
+  catalogGeneration: 1,
+  categories: {
+    tools: mcp.emptyMcpCategory(),
+    resources: mcp.emptyMcpCategory(),
+    resourceTemplates: templates
+  }
+}
+const templateOperation = mcp.prepareMcpOperation(
+  templateSnapshot,
+  templates.entries[0],
+  'resourceTemplates',
+  {
+    id: 'offline-template',
+    name: 'read_mcp_resource_template',
+    arguments: { serverId: 'fixture', uriTemplate: templateUri, variables: templateValues }
+  },
+  'offline-launch',
+  () => () => {},
+  expandAgentMcpTemplate
+)
+mcp.assertMcpOperationCurrent(
+  templateOperation,
+  templateSnapshot,
+  'offline-launch',
+  true,
+  'offline-config',
+  expandAgentMcpTemplate
+)
+assert.equal(templateOperation.remoteKey, templateUri)
+assert.equal(templateOperation.resourceUri, exactTemplateUri)
+assert.deepEqual(mcp.mcpOperationRequest(templateOperation), {
+  method: 'resources/read',
+  params: { uri: exactTemplateUri }
+})
 // Display-only installed production subpath; neither decoding nor viewing dispatches a tool.
 const presentation = requireSdk('@ayayaq/vivi/presentation')
 const sharedView = presentation.toolPresentationView(
@@ -323,6 +395,7 @@ console.log(
     ownedExtensionScope: 'passed',
     conversationRecordReplay: 'passed',
     sharedToolPresentation: 'passed',
+    exactTemplateAdapter: 'passed',
     rendererArtifacts,
     bareSdkDynamicImport: 'passed',
     mainSha256: sha256(mainBytes),
