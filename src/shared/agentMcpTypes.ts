@@ -1,3 +1,5 @@
+import type { AgentMcpOAuthStatus } from './agentMcpOAuthTypes'
+
 /** Renderer-safe controls for the separate, explicitly launched agent MCP client. */
 export type AgentMcpCatalogKind = 'tools' | 'resources' | 'resourceTemplates'
 export type AgentMcpCategoryState = 'not-requested' | 'unsupported' | 'ready' | 'stale' | 'error'
@@ -39,6 +41,7 @@ export interface AgentMcpServerStatus {
   readonly state: 'disabled' | 'connecting' | 'connected' | 'error'
   readonly message?: string
   readonly cleanupPending: boolean
+  readonly oauth?: AgentMcpOAuthStatus
   readonly catalog?: {
     readonly generation: number
     readonly tools: AgentMcpCategoryStatus

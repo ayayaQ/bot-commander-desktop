@@ -8,6 +8,12 @@ import type {
   AgentMcpStdioServerConfig,
   AgentMcpStatus
 } from '../../../shared/agentMcpTypes'
+import type {
+  AgentMcpOAuthPublicClient,
+  AgentMcpOAuthRegistrationSettings,
+  AgentMcpOAuthReview,
+  AgentMcpOAuthSignInResult
+} from '../../../shared/agentMcpOAuthTypes'
 
 export interface AgentMcpBridge {
   invoke(channel: string, ...args: unknown[]): Promise<unknown>
@@ -17,7 +23,22 @@ export interface AgentMcpBridge {
 export interface AgentMcpControlsState {
   status: AgentMcpStatus | null
   preparation: AgentMcpLaunchPreparation | null
-  busy: 'load' | 'configure' | 'remove' | 'prepare' | 'start' | 'refresh' | 'disconnect' | null
+  oauthReview: AgentMcpOAuthReview | null
+  oauthServerId: string | null
+  busy:
+    | 'load'
+    | 'configure'
+    | 'remove'
+    | 'prepare'
+    | 'start'
+    | 'refresh'
+    | 'disconnect'
+    | 'oauth-configure'
+    | 'oauth-prepare-registration'
+    | 'oauth-register'
+    | 'oauth-prepare-sign-in'
+    | 'oauth-sign-in'
+    | null
   error: string
   notice: string
 }
@@ -32,6 +53,71 @@ export interface AgentMcpConfigDraft {
   allowLoopbackHttp?: boolean
   protocol: AgentMcpServerConfig['protocol']
   environment?: readonly string[]
+}
+export interface AgentMcpOAuthDraft {
+  clientId: string
+  issuer: string
+  redirectPort: string
+  redirectPath: string
+  scopes: string
+  clientName: string
+}
+
+/** Public launch-only input checks; main owns discovery, authorization and all credentials. */
+export function parseAgentMcpOAuthDraft(
+  draft: AgentMcpOAuthDraft
+): AgentMcpOAuthRegistrationSettings {
+  const issuer = draft.issuer.trim()
+  let url: URL
+  try {
+    url = new URL(issuer)
+  } catch {
+    throw new Error('Enter an absolute HTTPS OAuth issuer.')
+  }
+  if (
+    url.protocol !== 'https:' ||
+    url.username ||
+    url.password ||
+    /[?#\\\s]/.test(issuer) ||
+    issuer.length > 4096
+  )
+    throw new Error('Use an HTTPS OAuth issuer without credentials, query or fragment.')
+  const redirectPort = Number(draft.redirectPort)
+  if (
+    !/^\d{1,5}$/.test(draft.redirectPort) ||
+    !Number.isInteger(redirectPort) ||
+    redirectPort < 1 ||
+    redirectPort > 65535
+  )
+    throw new Error('Enter an exact loopback port from 1 to 65535.')
+  const redirectPath = draft.redirectPath
+  if (
+    redirectPath.length > 512 ||
+    !/^\/(?:[A-Za-z0-9._~-]+\/?)*$/.test(redirectPath) ||
+    new URL(redirectPath, 'http://127.0.0.1').pathname !== redirectPath
+  )
+    throw new Error('Enter an exact absolute loopback callback path without a query or fragment.')
+  const scopes = draft.scopes.trim() ? draft.scopes.trim().split(/\s+/) : []
+  if (
+    scopes.length > 32 ||
+    scopes.some((scope) => !/^[\x21\x23-\x5b\x5d-\x7e]{1,128}$/.test(scope)) ||
+    new Set(scopes).size !== scopes.length
+  )
+    throw new Error('Use up to 32 distinct public scope names, separated by spaces.')
+  const clientName = draft.clientName.trim()
+  if (!clientName || clientName.length > 128 || /[\u0000-\u001f\u007f-\u009f]/.test(clientName))
+    throw new Error('Enter a registration client name of at most 128 characters.')
+  return { issuer, redirectPort, redirectPath, scopes, clientName }
+}
+
+export function parseAgentMcpOAuthPublicClient(
+  draft: AgentMcpOAuthDraft
+): AgentMcpOAuthPublicClient {
+  const { clientName: _clientName, ...settings } = parseAgentMcpOAuthDraft(draft)
+  const id = draft.clientId.trim()
+  if (!id || id.length > 1024 || /[\u0000-\u0020\u007f-\u009f]/.test(id))
+    throw new Error('Enter a public client ID without whitespace or control characters.')
+  return { id, ...settings }
 }
 
 /** UX checks only. Main owns endpoint policy, privacy screening and installed-file identity. */
@@ -142,6 +228,8 @@ export function createAgentMcpControls(ipc: AgentMcpBridge, now = () => Date.now
   let current: AgentMcpControlsState = {
     status: null,
     preparation: null,
+    oauthReview: null,
+    oauthServerId: null,
     busy: null,
     error: '',
     notice: ''
@@ -153,6 +241,13 @@ export function createAgentMcpControls(ipc: AgentMcpBridge, now = () => Date.now
   let launchToken: string | undefined
   let launchServerId: string | undefined
   let launchServerJson: string | undefined
+  let launchAuthRevision: string | undefined
+  let oauthServerId: string | undefined
+  let oauthServerJson: string | undefined
+  let oauthConfigRevision: string | undefined
+  let oauthReviewRevision: string | undefined
+  let oauthGrantServerId: string | undefined
+  const pendingOAuthCancels = new Set<string>()
   let expiry: ReturnType<typeof setTimeout> | undefined
   const patch = (value: Partial<AgentMcpControlsState>) => {
     current = { ...current, ...value }
@@ -171,18 +266,51 @@ export function createAgentMcpControls(ipc: AgentMcpBridge, now = () => Date.now
         patch({ error: error instanceof Error ? error.message : 'Could not cancel the launch.' })
     }
   }
-  const cancel = (notice = 'Start cancellation requested.') => {
+  const revokeOAuth = async (id: string, reportError = active) => {
+    if (pendingOAuthCancels.has(id)) return
+    pendingOAuthCancels.add(id)
+    const expected = generation
+    const events = eventGeneration
+    try {
+      const result = (await ipc.invoke('agent-mcp:oauth-cancel', id)) as AgentMcpStatus
+      if (active && generation === expected && events === eventGeneration) patch({ status: result })
+    } catch (error) {
+      if (reportError && active && generation === expected)
+        patch({ error: error instanceof Error ? error.message : 'Could not cancel OAuth.' })
+    } finally {
+      pendingOAuthCancels.delete(id)
+    }
+  }
+  const cancel = (notice?: string) => {
     const token = launchToken
+    const oauthId = oauthServerId ?? oauthGrantServerId
     launchToken = undefined
     launchServerId = undefined
     launchServerJson = undefined
+    launchAuthRevision = undefined
+    oauthServerId = undefined
+    oauthServerJson = undefined
+    oauthConfigRevision = undefined
+    oauthReviewRevision = undefined
+    oauthGrantServerId = undefined
     clearExpiry()
-    if (current.busy === 'prepare' || current.busy === 'start') {
+    if (
+      current.busy === 'prepare' ||
+      current.busy === 'start' ||
+      current.busy?.startsWith('oauth-')
+    ) {
       generation++
       patch({ busy: null })
     }
-    patch({ preparation: null, notice })
+    patch({
+      preparation: null,
+      oauthReview: null,
+      oauthServerId: null,
+      notice:
+        notice ?? (oauthId ? 'OAuth cancellation requested.' : 'Start cancellation requested.')
+    })
     if (token) void revoke(token)
+    if (oauthId) void revokeOAuth(oauthId)
   }
   const receive = (status: AgentMcpStatus) => {
     if (!active) return
@@ -194,10 +322,24 @@ export function createAgentMcpControls(ipc: AgentMcpBridge, now = () => Date.now
         current.status?.revision !== status.revision ||
         !entry ||
         JSON.stringify(entry.server) !== launchServerJson ||
+        entry.oauth?.revision !== launchAuthRevision ||
         entry.cleanupPending ||
         (current.busy !== 'start' && (entry.state === 'connected' || entry.state === 'connecting')))
     )
       cancel('Server state changed. Review a fresh Start disclosure.')
+    const oauthEntry = status.servers.find((value) => value.server.id === oauthServerId)
+    if (
+      oauthServerId &&
+      (status.paused ||
+        status.revision !== oauthConfigRevision ||
+        !oauthEntry ||
+        JSON.stringify(oauthEntry.server) !== oauthServerJson ||
+        oauthEntry.cleanupPending ||
+        oauthEntry.state === 'connected' ||
+        oauthEntry.state === 'connecting' ||
+        (current.oauthReview && oauthEntry.oauth?.revision !== oauthReviewRevision))
+    )
+      cancel('Server state changed. Review a fresh OAuth action.')
     patch({ status })
   }
   const begin = (action: AgentMcpControlsState['busy']) => {
@@ -205,6 +347,7 @@ export function createAgentMcpControls(ipc: AgentMcpBridge, now = () => Date.now
       !active ||
       current.busy ||
       current.preparation ||
+      current.oauthReview ||
       (action !== 'load' && current.status?.paused)
     )
       return null
@@ -215,6 +358,119 @@ export function createAgentMcpControls(ipc: AgentMcpBridge, now = () => Date.now
   const acceptResponse = (status: AgentMcpStatus, events: number) => {
     // Main emits full terminal statuses. A newer event wins over a delayed invocation response.
     if (events === eventGeneration) patch({ status })
+  }
+  const oauthEntry = (id: string) => {
+    const entry = current.status?.servers.find((value) => value.server.id === id)
+    return entry &&
+      entry.server.transport === 'http' &&
+      entry.server.endpoint.startsWith('https://') &&
+      !entry.cleanupPending &&
+      entry.state !== 'connected' &&
+      entry.state !== 'connecting'
+      ? entry
+      : undefined
+  }
+  const oauthCurrent = (id: string, serverJson: string, revision: string) => {
+    const entry = oauthEntry(id)
+    return (
+      !current.status?.paused &&
+      current.status?.revision === revision &&
+      !!entry &&
+      JSON.stringify(entry.server) === serverJson
+    )
+  }
+  const ownOAuth = (id: string) => {
+    const entry = oauthEntry(id)
+    if (!entry || pendingOAuthCancels.has(id)) return false
+    oauthServerId = id
+    oauthServerJson = JSON.stringify(entry.server)
+    oauthConfigRevision = current.status!.revision
+    patch({ oauthServerId: id })
+    return true
+  }
+  const releaseOAuth = () => {
+    oauthServerId = undefined
+    oauthServerJson = undefined
+    oauthConfigRevision = undefined
+    oauthReviewRevision = undefined
+    patch({ oauthServerId: null })
+  }
+  const adoptLaunch = (preparation: AgentMcpLaunchPreparation, entryJson: string) => {
+    launchToken = preparation.token
+    launchServerId = preparation.serverId
+    launchServerJson = entryJson
+    launchAuthRevision = current.status?.servers.find((entry) => entry.server.id === launchServerId)
+      ?.oauth?.revision
+    patch({ preparation })
+    expiry = setTimeout(
+      () => {
+        if (active && launchToken === preparation.token)
+          cancel('The Start disclosure expired. Review a fresh launch.')
+      },
+      Math.max(0, preparation.expiresAt - now())
+    )
+  }
+  async function prepareOAuth(
+    id: string,
+    kind: AgentMcpOAuthReview['kind'],
+    settings?: AgentMcpOAuthRegistrationSettings
+  ) {
+    if (
+      !oauthEntry(id) ||
+      pendingOAuthCancels.has(id) ||
+      (kind === 'sign-in' && !oauthEntry(id)?.oauth?.hasClient)
+    )
+      return false
+    const ticket = begin(
+      kind === 'registration' ? 'oauth-prepare-registration' : 'oauth-prepare-sign-in'
+    )
+    if (!ticket) return false
+    ownOAuth(id)
+    const serverJson = oauthServerJson!
+    const revision = oauthConfigRevision!
+    try {
+      const review = (await ipc.invoke(
+        kind === 'registration'
+          ? 'agent-mcp:oauth-prepare-registration'
+          : 'agent-mcp:oauth-prepare-sign-in',
+        ...(kind === 'registration' ? [id, settings] : [id])
+      )) as AgentMcpOAuthReview
+      if (
+        !matches(ticket.expected) ||
+        review.serverId !== id ||
+        review.kind !== kind ||
+        review.configRevision !== revision ||
+        !oauthCurrent(id, serverJson, revision) ||
+        now() >= review.expiresAt
+      ) {
+        // Cancellation already revokes in-flight main work. Do not cancel a newer owned flow.
+        if (!oauthServerId || (matches(ticket.expected) && oauthServerId === id))
+          void revokeOAuth(id, matches(ticket.expected))
+        if (matches(ticket.expected))
+          patch({ notice: 'OAuth review changed or expired. Review again.' })
+        return false
+      }
+      oauthReviewRevision = current.status?.servers.find((entry) => entry.server.id === id)?.oauth
+        ?.revision
+      patch({ oauthReview: review })
+      expiry = setTimeout(
+        () => {
+          if (active && current.oauthReview?.token === review.token)
+            cancel('The OAuth disclosure expired. Review a fresh action.')
+        },
+        Math.max(0, review.expiresAt - now())
+      )
+      return true
+    } catch (error) {
+      if (matches(ticket.expected))
+        patch({ error: error instanceof Error ? error.message : 'Could not prepare OAuth review.' })
+      return false
+    } finally {
+      if (matches(ticket.expected)) {
+        if (!current.oauthReview) releaseOAuth()
+        patch({ busy: null })
+      }
+    }
   }
   async function update(
     action: AgentMcpControlsState['busy'],
@@ -256,8 +512,14 @@ export function createAgentMcpControls(ipc: AgentMcpBridge, now = () => Date.now
     },
     cancel: () => cancel(),
     configurationChanged() {
-      if (current.preparation || current.busy === 'prepare' || current.busy === 'start')
-        cancel('Configuration draft changed. Review a fresh Start disclosure.')
+      if (
+        current.preparation ||
+        current.oauthReview ||
+        oauthServerId ||
+        current.busy === 'prepare' ||
+        current.busy === 'start'
+      )
+        cancel('Configuration draft changed. Review a fresh disclosure.')
     },
     reload: () => update('load', 'agent-mcp:list'),
     configure: (server: AgentMcpServerConfig) =>
@@ -285,6 +547,108 @@ export function createAgentMcpControls(ipc: AgentMcpBridge, now = () => Date.now
         [id],
         'Disconnected. A new Start needs fresh approval.'
       ),
+    async configureOAuth(id: string, client: AgentMcpOAuthPublicClient) {
+      if (!oauthEntry(id) || pendingOAuthCancels.has(id)) return false
+      const ticket = begin('oauth-configure')
+      if (!ticket) return false
+      ownOAuth(id)
+      try {
+        const result = (await ipc.invoke(
+          'agent-mcp:oauth-configure-client',
+          id,
+          client
+        )) as AgentMcpStatus
+        if (!matches(ticket.expected)) return false
+        acceptResponse(result, ticket.events)
+        patch({ notice: 'Public client configured for this app session. Nothing was started.' })
+        return true
+      } catch (error) {
+        if (matches(ticket.expected))
+          patch({
+            error: error instanceof Error ? error.message : 'Could not configure public client.'
+          })
+        return false
+      } finally {
+        if (matches(ticket.expected)) {
+          releaseOAuth()
+          patch({ busy: null })
+        }
+      }
+    },
+    prepareRegistration: (id: string, settings: AgentMcpOAuthRegistrationSettings) =>
+      prepareOAuth(id, 'registration', settings),
+    prepareSignIn: (id: string) => prepareOAuth(id, 'sign-in'),
+    async confirmOAuth() {
+      const review = current.oauthReview
+      if (!active || current.busy || !review || oauthServerId !== review.serverId) return false
+      const id = review.serverId
+      const serverJson = oauthServerJson!
+      const revision = oauthConfigRevision!
+      if (now() >= review.expiresAt || !oauthCurrent(id, serverJson, revision)) {
+        cancel('The OAuth disclosure expired or server changed.')
+        return false
+      }
+      const expected = ++generation
+      const events = eventGeneration
+      clearExpiry()
+      patch({
+        oauthReview: null,
+        busy: review.kind === 'registration' ? 'oauth-register' : 'oauth-sign-in',
+        error: '',
+        notice: ''
+      })
+      try {
+        if (review.kind === 'registration') {
+          const result = (await ipc.invoke(
+            'agent-mcp:oauth-register',
+            review.token
+          )) as AgentMcpStatus
+          if (!matches(expected)) return false
+          acceptResponse(result, events)
+          patch({
+            notice: 'Public client registered for this app session. Review sign-in separately.'
+          })
+          return true
+        }
+        const result = (await ipc.invoke(
+          'agent-mcp:oauth-sign-in',
+          review.token
+        )) as AgentMcpOAuthSignInResult
+        const preparation = result.preparation
+        const responseEntry = result.status.servers.find((entry) => entry.server.id === id)
+        if (!matches(expected)) {
+          if (preparation) void revoke(preparation.token, false)
+          return false
+        }
+        acceptResponse(result.status, events)
+        const latest = current.status?.servers.find((entry) => entry.server.id === id)
+        if (
+          !preparation ||
+          preparation.serverId !== id ||
+          now() >= preparation.expiresAt ||
+          !oauthCurrent(id, serverJson, revision) ||
+          latest?.oauth?.revision !== responseEntry?.oauth?.revision
+        ) {
+          if (preparation) void revoke(preparation.token)
+          cancel('Sign-in changed or expired. Review a fresh sign-in and connection.')
+          return false
+        }
+        releaseOAuth()
+        oauthGrantServerId = id
+        adoptLaunch(preparation, serverJson)
+        patch({ notice: 'Sign-in completed. Review this fresh MCP connection before Start once.' })
+        return true
+      } catch (error) {
+        if (matches(expected))
+          patch({ error: error instanceof Error ? error.message : 'OAuth action failed.' })
+        return false
+      } finally {
+        if (matches(expected)) {
+          releaseOAuth()
+          patch({ busy: null })
+        }
+      }
+    },
     async prepare(id: string) {
       const entry = current.status?.servers.find((value) => value.server.id === id)
       if (
@@ -298,6 +662,7 @@ export function createAgentMcpControls(ipc: AgentMcpBridge, now = () => Date.now
       if (!ticket) return false
       launchServerId = id
       launchServerJson = JSON.stringify(entry.server)
+      launchAuthRevision = entry.oauth?.revision
       try {
         const preparation = (await ipc.invoke(
           'agent-mcp:prepare-launch',
@@ -310,6 +675,7 @@ export function createAgentMcpControls(ipc: AgentMcpBridge, now = () => Date.now
           !latest ||
           current.status?.paused ||
           JSON.stringify(latest.server) !== launchServerJson ||
+          latest.oauth?.revision !== launchAuthRevision ||
           latest.cleanupPending ||
           latest.state === 'connected' ||
           latest.state === 'connecting' ||
@@ -320,15 +686,7 @@ export function createAgentMcpControls(ipc: AgentMcpBridge, now = () => Date.now
             patch({ notice: 'The launch changed or expired. Press Start again.' })
           return false
         }
-        launchToken = preparation.token
-        patch({ preparation })
-        expiry = setTimeout(
-          () => {
-            if (active && launchToken === preparation.token)
-              cancel('The Start disclosure expired. Review a fresh launch.')
-          },
-          Math.max(0, preparation.expiresAt - now())
-        )
+        adoptLaunch(preparation, launchServerJson!)
         return true
       } catch (error) {
         if (matches(ticket.expected))
@@ -339,6 +697,7 @@ export function createAgentMcpControls(ipc: AgentMcpBridge, now = () => Date.now
           if (!current.preparation) {
             launchServerId = undefined
             launchServerJson = undefined
+            launchAuthRevision = undefined
           }
           patch({ busy: null })
         }
@@ -373,6 +732,8 @@ export function createAgentMcpControls(ipc: AgentMcpBridge, now = () => Date.now
           launchToken = undefined
           launchServerId = undefined
           launchServerJson = undefined
+          launchAuthRevision = undefined
+          oauthGrantServerId = undefined
           patch({ busy: null })
         }
       }
