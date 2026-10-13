@@ -4,7 +4,7 @@ import { PassThrough } from 'node:stream'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { Client, type JSONRPCMessage } from '@modelcontextprotocol/client'
 import { McpStdioTransport } from './agentMcpTransport'
-import type { McpLaunchIdentity } from './agentMcpConfig'
+import type { McpStdioLaunchIdentity } from './agentMcpConfig'
 const mocks = vi.hoisted(() => ({ spawn: vi.fn(), verify: vi.fn(async (_group: number) => {}) }))
 vi.mock('node:child_process', () => ({ spawn: mocks.spawn }))
 vi.mock('./agentMcpProcessGroup', () => ({ verifyMcpGroupDead: mocks.verify }))
@@ -23,7 +23,7 @@ function child() {
   })
   return result
 }
-const launch = Object.freeze<McpLaunchIdentity>({
+const launch = Object.freeze<McpStdioLaunchIdentity>({
   server: {
     id: 'fixture',
     label: 'Inert',

@@ -131,7 +131,13 @@ let nextToken = 0
 let revision = 1
 const emit = (patch = {}) => { status = { ...status, ...patch }; for (const listener of listeners) listener(clone(status)) }
 const answer = (channel, args) => {
-  if (channel === 'agent-mcp:prepare-launch') return { token: 'fixture-token-' + (++nextToken), serverId: args[0], disclosure: 'Exact launch\\nExecutable: /installed/server\\nArguments: ["--stdio"]\\nCWD: /installed\\nEnvironment: HOME\\n<svg onload="window.__mcpInjected=true">\\nOS permissions; not sandboxed; metadata to selected provider; approved text to transcript/provider.', launchDigest: 'fixture-digest', expiresAt: Date.now() + window.__fixture.launchDuration }
+  if (channel === 'agent-mcp:prepare-launch') {
+    const config = status.servers.find((entry) => entry.server.id === args[0]).server
+    const disclosure = config.transport === 'http'
+      ? 'Exact HTTP connection\\nEndpoint: ' + config.endpoint + '\\nProtocol: ' + config.protocol + '\\nAuthentication: anonymous\\nAuthentication revision: fixture-anonymous-v1\\nInitialization and discovery contact the endpoint before tool approval; network address and MCP traffic visible to endpoint; metadata to selected provider; approved text to transcript/provider.'
+      : 'Exact launch\\nExecutable: /installed/server\\nArguments: ["--stdio"]\\nCWD: /installed\\nEnvironment: HOME\\n<svg onload="window.__mcpInjected=true">\\nOS permissions; not sandboxed; metadata to selected provider; approved text to transcript/provider.'
+    return { token: 'fixture-token-' + (++nextToken), serverId: args[0], disclosure, launchDigest: 'fixture-digest', expiresAt: Date.now() + window.__fixture.launchDuration }
+  }
   if (channel === 'agent-mcp:configure') { const config = clone(args[0]); const entries = status.servers.filter((entry) => entry.server.id !== config.id); emit({ revision: 'fixture-' + (++revision), servers: [...entries, { server: config, state: 'disabled', cleanupPending: false }] }) }
   if (channel === 'agent-mcp:remove') emit({ revision: 'fixture-' + (++revision), servers: status.servers.filter((entry) => entry.server.id !== args[0]) })
   if (channel === 'agent-mcp:cancel-launch') { cancelled.add(args[0]); emit({ servers: status.servers.map((entry) => ({ ...entry, state: 'disabled' })) }); return undefined }
@@ -496,6 +502,136 @@ render()
     'Disconnect requires fresh startup; pause and preparation failures remain visible and do not retry'
   )
 
+  const httpStartsBefore = await count('agent-mcp:start')
+  const httpReviewsBefore = await count('agent-mcp:prepare-launch')
+  await click('Remove')
+  await wait("document.body.textContent.includes('No agent MCP servers configured')")
+  // Earlier Back/Forward remounted the card in new-server mode, so its reset action is Clear.
+  await click('Clear')
+  await fill('Transport', 'http')
+  await fill('Server ID', 'remote')
+  await fill('Label', 'Anonymous HTTP fixture')
+  await fill('Endpoint URL', 'http://example.invalid/mcp')
+  await click('Save configuration')
+  await wait("document.body.textContent.includes('Use HTTPS, or explicitly allow HTTP')")
+  assert.equal(await evaluate('return window.__fixture.status().servers.length'), 0)
+  await fill('Endpoint URL', 'https://user:secret@example.invalid/mcp')
+  await click('Save configuration')
+  await wait("document.body.textContent.includes('cannot contain credentials')")
+  await fill('Endpoint URL', 'https://example.invalid/mcp')
+  await fill('Protocol compatibility', '2026-07-28')
+  await click('Save configuration')
+  await wait("document.body.textContent.includes('remote: disabled')")
+  const httpSaved = await evaluate(
+    "return window.__fixture.calls.findLast((item) => item.channel === 'agent-mcp:configure').args[0]"
+  )
+  assert.deepEqual(httpSaved, {
+    transport: 'http',
+    id: 'remote',
+    label: 'Anonymous HTTP fixture',
+    endpoint: 'https://example.invalid/mcp',
+    protocol: '2026-07-28',
+    allowLoopbackHttp: false
+  })
+  assert.equal(
+    await evaluate(
+      "return [...document.querySelectorAll('label')].some((item) => /Installed executable|Working directory|Arguments|Optional inherited/.test(item.textContent)) || !!document.querySelector('input[type=password]')"
+    ),
+    false
+  )
+  assert.equal(await count('agent-mcp:start'), httpStartsBefore)
+  assert.equal(await count('agent-mcp:prepare-launch'), httpReviewsBefore)
+  assert.equal(
+    await evaluate(
+      'return window.__fixture.calls.some((item) => /auth|credential/.test(item.channel))'
+    ),
+    false
+  )
+  flows.push(
+    'HTTP transport hides stdio/credential fields, rejects remote HTTP and URL credentials, and saves exact anonymous configuration without startup or auth IPC'
+  )
+
+  await click('Review startup')
+  await wait(reviewOpen)
+  assert.equal(
+    await evaluate(
+      "const text = document.body.textContent.replace(/\\s+/g, ' '); return text.includes('Review exact HTTP connection') && text.includes('https://example.invalid/mcp') && text.includes('Authentication revision: fixture-anonymous-v1') && text.includes('Confirm only if you trust the exact endpoint and authentication revision in this disclosure.') && text.includes('Starting sends initialization and metadata requests over the network before tool approval.') && text.includes('This connection is anonymous; no OAuth grant is requested.') && text.includes('Its metadata may go to the selected AI provider; approved returned text enters the local transcript and may go to that provider.')"
+    ),
+    true
+  )
+  assert.equal(
+    await evaluate(
+      "return document.querySelector('[aria-label=\"Review exact MCP launch\"]').textContent.includes('installed executable')"
+    ),
+    false
+  )
+  await click('Cancel')
+  await wait(`!(${reviewOpen})`)
+  assert.equal(await count('agent-mcp:start'), httpStartsBefore)
+  await click('Review startup')
+  await wait(reviewOpen)
+  await fill('Endpoint URL', 'http://127.0.0.1:8123/mcp')
+  await wait(`!(${reviewOpen})`)
+  assert.equal(
+    await evaluate(
+      "return [...document.querySelectorAll('button')].find((item) => item.textContent.trim() === 'Review startup').disabled"
+    ),
+    true
+  )
+  await click('Save configuration')
+  await wait("document.body.textContent.includes('Use HTTPS, or explicitly allow HTTP')")
+  await evaluate(
+    "const field = [...document.querySelectorAll('label')].find((item) => item.textContent.includes('Allow unencrypted HTTP'))?.querySelector('input'); if (!field || field.disabled) throw new Error('Missing local HTTP opt-in'); field.checked = true; field.dispatchEvent(new Event('change', {bubbles:true}))"
+  )
+  await click('Save configuration')
+  await wait("document.body.textContent.includes('Configuration saved')")
+  const localHttpSaved = await evaluate(
+    "return window.__fixture.calls.findLast((item) => item.channel === 'agent-mcp:configure').args[0]"
+  )
+  assert.deepEqual(localHttpSaved, {
+    ...httpSaved,
+    endpoint: 'http://127.0.0.1:8123/mcp',
+    allowLoopbackHttp: true
+  })
+  await click('Review startup')
+  await wait(reviewOpen)
+  assert.equal(
+    await evaluate(
+      "return document.querySelector('[aria-label=\"Review exact MCP launch\"] pre').textContent.includes('Endpoint: http://127.0.0.1:8123/mcp')"
+    ),
+    true
+  )
+  await evaluate("location.hash = '#other'")
+  await wait('window.__fixture.listenerCount() === 0')
+  await evaluate('history.back()')
+  await wait(
+    "document.body.textContent.includes('remote: disabled') && window.__fixture.listenerCount() === 1"
+  )
+  assert.equal(await evaluate(`return ${reviewOpen}`), false)
+  await click('Edit')
+  assert.equal(
+    await evaluate(
+      "return [...document.querySelectorAll('label')].find((item) => item.textContent.trim().startsWith('Transport')).querySelector('select').value"
+    ),
+    'http'
+  )
+  assert.equal(
+    await evaluate(
+      "return [...document.querySelectorAll('label')].find((item) => item.textContent.trim().startsWith('Endpoint URL')).querySelector('input').value"
+    ),
+    localHttpSaved.endpoint
+  )
+  assert.equal(
+    await evaluate(
+      "return [...document.querySelectorAll('label')].find((item) => item.textContent.includes('Allow unencrypted HTTP')).querySelector('input').checked"
+    ),
+    true
+  )
+  assert.equal(await count('agent-mcp:start'), httpStartsBefore)
+  flows.push(
+    'HTTP review discloses exact endpoint/auth revision, network and provider risks; Cancel, endpoint editing and navigation revoke review; explicit local HTTP opt-in and exact configuration survive reopen without replay'
+  )
+
   const outcomeRoute = async (name) => {
     await evaluate(`location.hash = ${JSON.stringify('#outcome-' + name)}`)
     await wait(
@@ -608,7 +744,7 @@ render()
     expressionChecks,
     limitations: [
       'Isolated real Svelte controls/outcome components and app CSS with fake IPC, not the full Electron application',
-      'No real MCP executable, provider, Discord, credentials, HTTP/OAuth or installation',
+      'No real MCP executable, HTTP endpoint, provider, Discord, credentials, OAuth or installation',
       'Linux Chromium only; no native platform dialogs or Windows/macOS UI coverage'
     ]
   }

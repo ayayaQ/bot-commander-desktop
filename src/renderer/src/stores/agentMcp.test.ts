@@ -4,12 +4,13 @@ import { readFileSync } from 'node:fs'
 import { compile } from 'svelte/compiler'
 import type {
   AgentMcpLaunchPreparation,
-  AgentMcpServerConfig,
+  AgentMcpHttpServerConfig,
+  AgentMcpStdioServerConfig,
   AgentMcpStatus
 } from '../../../shared/agentMcpTypes'
 import { createAgentMcpControls, parseAgentMcpDraft, type AgentMcpConfigDraft } from './agentMcp'
 
-const config: AgentMcpServerConfig = {
+const config: AgentMcpStdioServerConfig = {
   id: 'fixture',
   label: 'Installed fixture',
   executable: '/installed/server',
@@ -33,11 +34,23 @@ const launch = (patch: Partial<AgentMcpLaunchPreparation> = {}): AgentMcpLaunchP
   expiresAt: 61000,
   ...patch
 })
-const draft = (patch: Partial<AgentMcpConfigDraft> = {}): AgentMcpConfigDraft => ({
+type StdioDraft = AgentMcpConfigDraft & { transport?: 'stdio' }
+const draft = (patch: Partial<StdioDraft> = {}): StdioDraft => ({
   ...config,
   argsJson: JSON.stringify(config.args),
   ...patch
 })
+const httpConfig: AgentMcpHttpServerConfig = {
+  transport: 'http',
+  id: 'remote',
+  label: 'Anonymous HTTP fixture',
+  endpoint: 'https://example.invalid/mcp',
+  protocol: 'legacy',
+  allowLoopbackHttp: false
+}
+const httpDraft = (
+  patch: Partial<AgentMcpConfigDraft> = {}
+): AgentMcpConfigDraft & { transport: 'http' } => ({ ...httpConfig, ...patch, transport: 'http' })
 function deferred<T>() {
   let resolve!: (value: T) => void
   let reject!: (error: Error) => void
@@ -329,7 +342,8 @@ describe('agent MCP one-shot exact launch and staleness', () => {
     pending.resolve({ started: true, status: status() })
     await first
     expect(f.invoke).toHaveBeenLastCalledWith('agent-mcp:cancel-launch', 'one-shot-fixture')
-    expect(f.state().status?.servers[0].server.cwd).toBe('/changed')
+    const changed = f.state().status?.servers[0].server
+    expect(changed?.transport !== 'http' && changed?.cwd).toBe('/changed')
     expect(f.state().notice).not.toBe('Server started.')
   })
   it('startup failure does not retry or reconstruct an approval', async () => {
@@ -422,6 +436,64 @@ describe('agent MCP unmount and remount interruption', () => {
 })
 
 describe('agent MCP bounded form and escaped render', () => {
+  it('preserves transport-less stdio configs and accepts an explicit stdio discriminator', () => {
+    expect(parseAgentMcpDraft(draft(), ['HOME'])).toEqual(config)
+    expect(parseAgentMcpDraft(draft({ transport: 'stdio' }), ['HOME'])).toEqual({
+      ...config,
+      transport: 'stdio'
+    })
+  })
+  it('parses a minimal anonymous HTTP draft without carrying hidden stdio or auth fields', () => {
+    expect(parseAgentMcpDraft(httpDraft(), [])).toEqual(httpConfig)
+    expect(
+      parseAgentMcpDraft(
+        httpDraft({ executable: '/old/server', argsJson: '[broken', environment: ['TOKEN'] }),
+        []
+      )
+    ).toEqual(httpConfig)
+    expect(parseAgentMcpDraft(httpDraft({ protocol: '2026-07-28' }), []).protocol).toBe(
+      '2026-07-28'
+    )
+  })
+  it.each(['http://127.0.0.1:8123/mcp', 'http://[::1]:8123/mcp'])(
+    'requires explicit local HTTP opt-in for %s',
+    (endpoint) => {
+      expect(() => parseAgentMcpDraft(httpDraft({ endpoint }), [])).toThrow('explicitly allow')
+      expect(
+        parseAgentMcpDraft(httpDraft({ endpoint, allowLoopbackHttp: true }), []).endpoint
+      ).toBe(endpoint)
+    }
+  )
+  it.each([
+    'http://example.invalid/mcp',
+    'http://localhost/mcp',
+    'http://127.1/mcp',
+    'http://2130706433/mcp',
+    'http://0x7f000001/mcp',
+    'http://[::ffff:127.0.0.1]/mcp',
+    'https://user:secret@example.invalid/mcp',
+    'https://example.invalid/mcp?token=secret',
+    'https://example.invalid/mcp?',
+    'https://example.invalid/mcp#fragment',
+    'https://example.invalid/mcp#',
+    'https://example.invalid/white space',
+    'https://example.invalid/\npath',
+    'file:///mcp',
+    '/relative/mcp',
+    ''
+  ])('rejects unsafe or malformed HTTP draft endpoint %s', (endpoint) => {
+    expect(() => parseAgentMcpDraft(httpDraft({ endpoint, allowLoopbackHttp: true }), [])).toThrow()
+  })
+  it('bounds endpoint length and shares ID, label and protocol checks across transports', () => {
+    expect(() =>
+      parseAgentMcpDraft(httpDraft({ endpoint: 'https://example.invalid/' + 'a'.repeat(4096) }), [])
+    ).toThrow('bounded')
+    expect(() => parseAgentMcpDraft(httpDraft({ id: 'UPPERCASE' }), [])).toThrow('lowercase')
+    expect(() => parseAgentMcpDraft(httpDraft({ label: 'bad\nlabel' }), [])).toThrow('label')
+    expect(() =>
+      parseAgentMcpDraft(httpDraft({ protocol: 'unsupported' as 'legacy' }), [])
+    ).toThrow('protocol')
+  })
   it('preserves exact argument text without interpreting it and accepts only offered names', () => {
     const result = parseAgentMcpDraft(
       draft({
@@ -471,5 +543,44 @@ describe('agent MCP bounded form and escaped render', () => {
     expect(source).toContain('Available scalar templates')
     expect(source).toContain('expanded URI before approving once')
     expect(source).toContain('including Auto')
+  })
+})
+
+describe('agent MCP anonymous HTTP controls', () => {
+  const httpStatus = (server = httpConfig) =>
+    status({ servers: [{ server, state: 'disabled', cleanupPending: false }] })
+
+  it('saves and reloads anonymous HTTP configuration without network startup or auth IPC', async () => {
+    const f = await fixture(httpStatus())
+    await f.controls.configure(httpConfig)
+    await f.controls.reload()
+    expect(f.invoke).toHaveBeenCalledWith('agent-mcp:configure', httpConfig)
+    expect(channels(f.invoke)).toEqual(['agent-mcp:list', 'agent-mcp:configure', 'agent-mcp:list'])
+  })
+  it('cancels HTTP review and requires a fresh disclosure after endpoint or opt-in changes', async () => {
+    const f = await fixture(httpStatus())
+    f.invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'agent-mcp:prepare-launch') return launch({ serverId: httpConfig.id })
+      return httpStatus()
+    })
+    await f.controls.prepare(httpConfig.id)
+    f.controls.cancel()
+    await f.controls.start()
+    expect(channels(f.invoke)).not.toContain('agent-mcp:start')
+    for (const patch of [
+      { endpoint: 'https://example.invalid/changed' },
+      { allowLoopbackHttp: true }
+    ]) {
+      f.event(httpStatus())
+      await f.controls.prepare(httpConfig.id)
+      expect(f.state().preparation?.serverId).toBe(httpConfig.id)
+      f.event(httpStatus({ ...httpConfig, ...patch }))
+      await f.controls.start()
+      expect(f.state().preparation).toBeNull()
+    }
+    expect(channels(f.invoke)).not.toContain('agent-mcp:start')
+    expect(
+      channels(f.invoke).filter((channel) => channel === 'agent-mcp:cancel-launch')
+    ).toHaveLength(3)
   })
 })

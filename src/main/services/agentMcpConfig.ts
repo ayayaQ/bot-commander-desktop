@@ -5,16 +5,56 @@ import { access, lstat, mkdir, open, realpath, unlink } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { basename, isAbsolute, join, resolve } from 'node:path'
 import { assertMcpJson, mcpDigest } from '@ayayaq/vivi/extensions/mcp'
-import type { AgentMcpServerConfig } from '../../shared/agentMcpTypes'
+import type {
+  AgentMcpServerConfig,
+  AgentMcpStdioServerConfig,
+  AgentMcpHttpServerConfig
+} from '../../shared/agentMcpTypes'
 import { atomicWrite } from './atomicPersistence'
 import { withAgentPersistenceOperation } from './agentPersistenceLifecycle'
-import { environmentSecrets } from './agentMcpPrivacy'
+import { environmentSecrets, mcpContainsSecret } from './agentMcpPrivacy'
 
 export const MCP_ENV_NAMES =
   process.platform === 'win32'
     ? (['SYSTEMROOT', 'USERPROFILE', 'TEMP', 'TMP'] as const)
     : (['HOME', 'TMPDIR'] as const)
+export type McpStdioServerConfig = AgentMcpStdioServerConfig
 export type McpServerConfig = AgentMcpServerConfig
+export function isMcpHttpServer(server: McpServerConfig): server is AgentMcpHttpServerConfig {
+  return server?.transport === 'http'
+}
+/** Exact endpoint only: no embedded credentials, query/fragment, redirects or insecure downgrade. */
+export function validateMcpEndpoint(endpoint: unknown, allowLoopbackHttp: unknown): string {
+  if (
+    !mcpText(endpoint, 4096) ||
+    typeof allowLoopbackHttp !== 'boolean' ||
+    /[\s\\?#]/.test(endpoint) ||
+    !/^https?:\/\//i.test(endpoint)
+  )
+    fail()
+  let url: URL
+  try {
+    url = new URL(endpoint)
+  } catch {
+    fail()
+  }
+  if (
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    !url.hostname ||
+    (url.protocol !== 'https:' &&
+      !(
+        allowLoopbackHttp &&
+        url.protocol === 'http:' &&
+        ['127.0.0.1', '[::1]'].includes(url.hostname) &&
+        /^http:\/\/(?:127\.0\.0\.1|\[::1\])(?::[0-9]+)?(?:\/|$)/i.test(endpoint)
+      ))
+  )
+    fail()
+  return url.href
+}
 export interface McpConfiguration {
   readonly revision: string
   readonly servers: readonly McpServerConfig[]
@@ -53,11 +93,44 @@ export function validateMcpServer(
   secrets: readonly string[] = []
 ): McpServerConfig {
   assertMcpJson(value, 16 * 1024)
+  if (mcpRecord(value) && value.transport === 'http') {
+    if (
+      Object.keys(value).length !== 6 ||
+      !Object.keys(value).every((key) =>
+        ['transport', 'id', 'label', 'endpoint', 'protocol', 'allowLoopbackHttp'].includes(key)
+      ) ||
+      typeof value.id !== 'string' ||
+      !/^[a-z][a-z0-9_-]{0,15}$/.test(value.id) ||
+      !mcpText(value.label, 80) ||
+      typeof value.protocol !== 'string' ||
+      !['legacy', '2026-07-28'].includes(value.protocol)
+    )
+      fail()
+    const server: AgentMcpHttpServerConfig = {
+      transport: 'http',
+      id: value.id,
+      label: value.label,
+      endpoint: validateMcpEndpoint(value.endpoint, value.allowLoopbackHttp),
+      protocol: value.protocol as AgentMcpHttpServerConfig['protocol'],
+      allowLoopbackHttp: value.allowLoopbackHttp as boolean
+    }
+    if (
+      mcpContainsSecret(server, secrets) ||
+      /\b(?:sk-(?:proj-|or-v1-)?[A-Za-z0-9_-]{16,}|Bearer\s+[^\s"\\]{12,})/.test(
+        JSON.stringify(server)
+      )
+    )
+      fail()
+    return mcpFreeze(server)
+  }
   if (
     !mcpRecord(value) ||
-    Object.keys(value).length !== 7 ||
+    (value.transport !== undefined && value.transport !== 'stdio') ||
+    Object.keys(value).length !== (value.transport === 'stdio' ? 8 : 7) ||
     !Object.keys(value).every((key) =>
-      ['id', 'label', 'executable', 'args', 'cwd', 'protocol', 'environment'].includes(key)
+      ['id', 'label', 'executable', 'args', 'cwd', 'protocol', 'environment', 'transport'].includes(
+        key
+      )
     ) ||
     typeof value.id !== 'string' ||
     !/^[a-z][a-z0-9_-]{0,15}$/.test(value.id) ||
@@ -89,7 +162,8 @@ export function validateMcpServer(
     /\.(?:cmd|bat|ps1)$/i.test(value.executable)
   )
     fail()
-  const server: McpServerConfig = {
+  const server: AgentMcpStdioServerConfig = {
+    ...(value.transport === 'stdio' ? { transport: 'stdio' as const } : {}),
     id: value.id,
     label: value.label,
     executable: value.executable,
@@ -373,30 +447,74 @@ export class McpConfigStore {
     }
   }
 }
-export interface McpLaunchIdentity {
-  readonly server: McpServerConfig
+export interface McpStdioLaunchIdentity {
+  readonly server: AgentMcpStdioServerConfig
   readonly configRevision: string
   readonly executableRevision: string
   readonly workingDirectoryRevision: string
   readonly environment: Readonly<Record<string, string>>
   readonly digest: string
 }
+export interface McpHttpLaunchIdentity {
+  readonly server: AgentMcpHttpServerConfig
+  readonly configRevision: string
+  readonly authRevision: string
+  readonly digest: string
+}
+export type McpLaunchIdentity = McpStdioLaunchIdentity | McpHttpLaunchIdentity
+export function isMcpHttpLaunch(launch: McpLaunchIdentity): launch is McpHttpLaunchIdentity {
+  return isMcpHttpServer(launch.server)
+}
 /** Resolve an already installed executable; no PATH lookup, shell or installation. */
+export function prepareMcpLaunch(
+  server: AgentMcpStdioServerConfig,
+  configRevision: string,
+  env: NodeJS.ProcessEnv,
+  secrets?: readonly string[],
+  authRevision?: string
+): Promise<McpStdioLaunchIdentity>
+export function prepareMcpLaunch(
+  server: AgentMcpHttpServerConfig,
+  configRevision: string,
+  env: NodeJS.ProcessEnv,
+  secrets?: readonly string[],
+  authRevision?: string
+): Promise<McpHttpLaunchIdentity>
+export function prepareMcpLaunch(
+  server: McpServerConfig,
+  configRevision: string,
+  env: NodeJS.ProcessEnv,
+  secrets?: readonly string[],
+  authRevision?: string
+): Promise<McpLaunchIdentity>
 export async function prepareMcpLaunch(
   server: McpServerConfig,
   configRevision: string,
   env: NodeJS.ProcessEnv,
-  secrets: readonly string[] = []
+  secrets: readonly string[] = [],
+  authRevision = 'anonymous'
 ): Promise<McpLaunchIdentity> {
   const knownSecrets = [...secrets, ...environmentSecrets(env)]
   const checked = validateMcpServer(server, knownSecrets)
+  if (isMcpHttpServer(checked)) {
+    if (
+      !mcpText(authRevision, 256) ||
+      knownSecrets.some((secret) => secret && authRevision.includes(secret))
+    )
+      throw new Error('MCP HTTP authorization revision is invalid')
+    const body = { server: checked, configRevision, authRevision }
+    return mcpFreeze({ ...body, digest: mcpDigest(body) })
+  }
   const executable = await realpath(checked.executable),
     cwd = await realpath(checked.cwd)
   const info = await lstat(executable),
     folder = await lstat(cwd)
   if (!info.isFile() || !folder.isDirectory() || info.size > 256 * 1024 * 1024)
     throw new Error('MCP launch requires an installed executable and an existing working directory')
-  const canonical = validateMcpServer({ ...checked, executable, cwd }, knownSecrets)
+  const canonical = validateMcpServer(
+    { ...checked, executable, cwd },
+    knownSecrets
+  ) as AgentMcpStdioServerConfig
   if ([checked.executable, executable].some((path) => /^bun(?:\.exe)?$/i.test(basename(path)))) {
     const script = await realpath(checked.args[1] ?? '')
     if (!(await lstat(script)).isFile())

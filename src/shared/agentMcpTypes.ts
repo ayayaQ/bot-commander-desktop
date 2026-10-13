@@ -1,7 +1,8 @@
 /** Renderer-safe controls for the separate, explicitly launched agent MCP client. */
 export type AgentMcpCatalogKind = 'tools' | 'resources' | 'resourceTemplates'
 export type AgentMcpCategoryState = 'not-requested' | 'unsupported' | 'ready' | 'stale' | 'error'
-export interface AgentMcpServerConfig {
+export interface AgentMcpStdioServerConfig {
+  readonly transport?: 'stdio'
   readonly id: string
   readonly label: string
   readonly executable: string
@@ -10,6 +11,15 @@ export interface AgentMcpServerConfig {
   readonly protocol: 'legacy' | '2026-07-28'
   readonly environment: readonly string[]
 }
+export interface AgentMcpHttpServerConfig {
+  readonly transport: 'http'
+  readonly id: string
+  readonly label: string
+  readonly endpoint: string
+  readonly protocol: 'legacy' | '2026-07-28'
+  readonly allowLoopbackHttp: boolean
+}
+export type AgentMcpServerConfig = AgentMcpStdioServerConfig | AgentMcpHttpServerConfig
 export interface AgentMcpCatalogEntryStatus {
   readonly remoteKey: string
   readonly alias: string

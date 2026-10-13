@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { ReadBuffer, serializeMessage } from '@modelcontextprotocol/client'
 import type { JSONRPCMessage, Transport } from '@modelcontextprotocol/client'
-import type { McpLaunchIdentity } from './agentMcpConfig'
+import type { McpStdioLaunchIdentity } from './agentMcpConfig'
 import type { WindowsMcpProcess } from './agentMcpWindows'
 import { verifyMcpGroupDead } from './agentMcpProcessGroup'
 
@@ -33,7 +33,7 @@ export class McpStdioTransport implements Transport {
   private started = false
   private starting: Promise<void> | undefined
   private readonly buffer = new ReadBuffer({ maxBufferSize: 1024 * 1024 })
-  constructor(private readonly launch: McpLaunchIdentity) {}
+  constructor(private readonly launch: McpStdioLaunchIdentity) {}
   get stderr(): null {
     return null
   }

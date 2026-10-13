@@ -1,16 +1,20 @@
 # Agent MCP client
 
-The built-in Agent connects to trusted installed **stdio** MCP servers. This is separate
+The built-in Agent connects to trusted installed **stdio** MCP servers or anonymous
+**Streamable HTTP** endpoints. This is separate
 from **External agent access**, the existing authenticated loopback server that lets other
 agents inspect or edit Bot Commander. Its settings and capabilities are unchanged.
 
 ## Setup and review
 
-1. Add a local server ID, label, absolute installed executable and working directory,
-   argument array and protocol compatibility. Optional environment selections are safe
-   inherited names only. Values and credentials cannot be configured here.
+1. Add a server ID, label, transport and protocol compatibility. For stdio, use an absolute
+   installed executable and working directory plus an argument array. Optional environment
+   selections are safe inherited names only. For HTTP, use an HTTPS endpoint with no credentials,
+   query or fragment. Unencrypted HTTP requires explicit opt-in and literal `127.0.0.1` or
+   `[::1]` for local testing. Values, credentials and custom headers cannot be configured here.
 2. Saving or editing starts nothing. Choose **Review startup**, inspect the exact resolved
-   executable, arguments, directory, protocol and inherited values, then **Start once**.
+   executable, arguments, directory, protocol and inherited values for stdio, or the exact HTTP
+   endpoint, anonymous authentication revision and network disclosure, then **Start once**.
    Cancellation, expiry or changed details requires a new review.
 3. Inspect captured tools locally. Explicit refresh controls fetch resource and template
    metadata. Stale, quarantined, unsupported or failed categories cannot authorize a call.
@@ -22,11 +26,14 @@ agents inspect or edit Bot Commander. Its settings and capabilities are unchange
 5. Disconnect stops the owned connection. Restart, reconnection and a new launch need
    fresh explicit startup review. No connection is restored automatically.
 
-Starting a server executes its installed code with your OS permissions before tool
+Starting a stdio server executes its installed code with your OS permissions before tool
 approval. It can access files and the network; this is not a sandbox. Ready metadata is
 advertised to the selected model, and approved returned text/structured data enters the
 local transcript and selected provider context. Descriptions, annotations, output and
 resource contents remain untrusted data. A read-only annotation does not prove effects.
+Starting an HTTP connection sends initialization and discovery traffic before tool approval;
+the endpoint can observe the client's network address and MCP traffic. Redirects are refused.
+HTTP uses the same approval, catalog freshness and unknown-outcome boundaries as stdio.
 
 ## Outcomes and limits
 
@@ -55,10 +62,12 @@ propose exact reads; prefix/explode modifiers and composite values remain unavai
 Every named variable is required as a string, with no extras. Expansion is synchronous
 and performs no I/O, and the URI is never normalized or directly fetched. Reserved
 expansion with malformed percent text is withheld when the expanded URI fails validation. Binary bodies are omitted
-and resource links are never followed. HTTP, OAuth/authentication, credential injection,
+and resource links are never followed. OAuth/authentication flows, credential injection,
 known package/shell runners, installers, automatic input fulfilment, tasks and subscriptions
 are unavailable. Trusted installed server code can still execute arbitrary code internally.
 The model cannot start servers or refresh discovery.
+HTTP connections in this slice are anonymous only. The session token/revision seam is
+main-process-only; there is no credential-entry UI, OAuth flow or auth IPC.
 
 ## Implementation and verification
 
@@ -76,5 +85,7 @@ These do not establish live-provider, Discord or arbitrary real-server readiness
 
 Host adapters derive from Apache-2.0
 [vivi-cli c748317](https://github.com/ayayaQ/vivi-cli/tree/c748317cb87a72f4e023cc21b96e793ea89e3170).
+The HTTP wire guard derives from `mcp-http-transport.ts` in
+[vivi-cli 38978a34](https://github.com/ayayaQ/vivi-cli/tree/38978a34adf1ae16ea2e61cbe15f9d8b01e1065c).
 Adapted files carry notices; the upstream license and notice are retained in `docs/licenses`.
 No SDK source, third-party binaries or dependency tarballs are vendored.
