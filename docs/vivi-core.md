@@ -2,7 +2,7 @@
 
 The generic sequential provider/tool loop lives in the separate
 [ayayaQ/vivi](https://github.com/ayayaQ/vivi) repository. Bot Commander consumes a reviewed,
-exact npm registry release `@ayayaq/vivi@0.11.0`. The published artifact was verified
+exact npm registry release `@ayayaq/vivi@0.13.0`. The published artifact was verified
 byte-for-byte against the reviewed release archive; its immutable registry URL and
 SHA-512 integrity are recorded in the lockfile. Runtime Git authentication/build is
 not required, and npm pack outputs are not committed to this repository.

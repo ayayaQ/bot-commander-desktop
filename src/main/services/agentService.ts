@@ -991,10 +991,11 @@ async function executeMcpReview(
     serverId: operation.serverId,
     catalogKind: operation.catalogKind,
     remoteKey: operation.remoteKey,
+    ...(operation.resourceUri !== undefined ? { resourceUri: operation.resourceUri } : {}),
     disclosure: agentMcpService.operationDisclosure(operation),
     outcome: 'pending'
   }
-  call.targetLabel = `${operation.serverId}: ${operation.remoteKey}`
+  call.targetLabel = `${operation.serverId}: ${operation.resourceUri ?? operation.remoteKey}`
   const privacyRevision = agentDecisionPrivacyRevision()
   let invocationStarted = false
   const notSent = async (denied = false): Promise<ToolResult> => {
@@ -1562,7 +1563,8 @@ async function startAgentSession(
             {
               validateSchema: agentMcpService.validateSchema,
               assertAllowed: (value) => agentMcpService.assertAllowed(value),
-              operationsEnabled: mode !== 'planning'
+              operationsEnabled: mode !== 'planning',
+              expandTemplate: agentMcpService.expandTemplate
             }
           )
           const candidate = await createAgentExtensionScope(

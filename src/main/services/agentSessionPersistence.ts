@@ -1,4 +1,5 @@
 import type { AgentSessionsData } from '../../shared/agentTypes'
+import { expandAgentMcpTemplate } from './agentMcpTemplates'
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -56,7 +57,7 @@ export function validAgentDisplayHistory(value: unknown): boolean {
           !/^[a-f0-9]{64}$/.test(mcp.operationDigest) ||
           typeof mcp.serverId !== 'string' ||
           !/^[a-z][a-z0-9_-]{0,15}$/.test(mcp.serverId) ||
-          !['tools', 'resources'].includes(mcp.catalogKind as string) ||
+          !['tools', 'resources', 'resourceTemplates'].includes(mcp.catalogKind as string) ||
           typeof mcp.remoteKey !== 'string' ||
           !mcp.remoteKey ||
           mcp.remoteKey.length > 4096 ||
@@ -68,6 +69,24 @@ export function validAgentDisplayHistory(value: unknown): boolean {
             typeof mcp.checkpointUnconfirmed !== 'boolean')
         )
           return false
+        if (mcp.catalogKind === 'resourceTemplates') {
+          try {
+            if (
+              call.name !== 'read_mcp_resource_template' ||
+              Object.keys(call.arguments).sort().join(',') !== 'serverId,uriTemplate,variables' ||
+              call.arguments.serverId !== mcp.serverId ||
+              call.arguments.uriTemplate !== mcp.remoteKey ||
+              mcp.resourceUri !==
+                expandAgentMcpTemplate(
+                  mcp.remoteKey as string,
+                  call.arguments.variables as Readonly<Record<string, string>>
+                )
+            )
+              return false
+          } catch {
+            return false
+          }
+        } else if (mcp.resourceUri !== undefined) return false
       }
       callIds.add(call.id)
     }
