@@ -506,7 +506,8 @@ render()
   const httpReviewsBefore = await count('agent-mcp:prepare-launch')
   await click('Remove')
   await wait("document.body.textContent.includes('No agent MCP servers configured')")
-  await click('New server')
+  // Earlier Back/Forward remounted the card in new-server mode, so its reset action is Clear.
+  await click('Clear')
   await fill('Transport', 'http')
   await fill('Server ID', 'remote')
   await fill('Label', 'Anonymous HTTP fixture')
@@ -554,7 +555,7 @@ render()
   await wait(reviewOpen)
   assert.equal(
     await evaluate(
-      "return document.body.textContent.includes('Review exact HTTP connection') && document.body.textContent.includes('https://example.invalid/mcp') && document.body.textContent.includes('Authentication revision: fixture-anonymous-v1') && document.body.textContent.includes('metadata requests over the network before tool approval') && document.body.textContent.includes('selected AI provider')"
+      "const text = document.body.textContent.replace(/\\s+/g, ' '); return text.includes('Review exact HTTP connection') && text.includes('https://example.invalid/mcp') && text.includes('Authentication revision: fixture-anonymous-v1') && text.includes('Confirm only if you trust the exact endpoint and authentication revision in this disclosure.') && text.includes('Starting sends initialization and metadata requests over the network before tool approval.') && text.includes('This connection is anonymous; no OAuth grant is requested.') && text.includes('Its metadata may go to the selected AI provider; approved returned text enters the local transcript and may go to that provider.')"
     ),
     true
   )
