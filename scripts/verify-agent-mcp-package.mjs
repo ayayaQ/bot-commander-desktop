@@ -339,7 +339,21 @@ await assert.rejects(
     { signal: new AbortController().signal }
   )
 )
-assert.equal(typeof requireSdk('@modelcontextprotocol/client').Client, 'function')
+const oauthSdk = requireSdk('@modelcontextprotocol/client')
+assert.equal(typeof oauthSdk.Client, 'function')
+for (const helper of [
+  'discoverOAuthServerInfo',
+  'registerClient',
+  'selectResourceURL',
+  'startAuthorization',
+  'exchangeAuthorization'
+])
+  assert.equal(typeof oauthSdk[helper], 'function')
+assert.match(main, /class McpOAuthSession/)
+assert.match(main, /class McpOAuthRegistration/)
+assert.match(main, /class AgentMcpOAuthService/)
+assert.match(main, /oauth-prepare-sign-in/)
+
 const original = {
   type: 'object',
   properties: { command: { const: 'inspect' }, count: { type: 'integer', minimum: 1, maximum: 3 } },
@@ -398,6 +412,7 @@ console.log(
     exactTemplateAdapter: 'passed',
     rendererArtifacts,
     bareSdkDynamicImport: 'passed',
+    sessionOAuthSdkHelpers: 'passed',
     mainSha256: sha256(mainBytes),
     asarSha256: sha256(rawFs.readFileSync(root))
   })

@@ -35,6 +35,7 @@ export type AgentMcpAuthorizationLifecycle =
 /** Trusted main-only interface. None of these hooks is an IPC credential path. */
 export interface AgentMcpOAuthOwner {
   list(signal?: AbortSignal): Promise<AgentMcpStatus>
+  statusSnapshot(): AgentMcpStatus
   authorizationContext(): {
     readonly revision: string
     readonly servers: readonly AgentMcpHttpServerConfig[]
@@ -135,7 +136,11 @@ export class AgentMcpOAuthService {
     return (this.options.now ?? Date.now)()
   }
   private notify(): void {
-    this.owner_?.notifyAuthorizationChanged()
+    try {
+      this.owner_?.notifyAuthorizationChanged()
+    } catch {
+      /* UI delivery cannot retain authority or interrupt owned cleanup. */
+    }
   }
   private track<T>(task: Promise<T>): Promise<T> {
     this.pending.add(task)
@@ -479,6 +484,7 @@ export class AgentMcpOAuthService {
     return this.track(
       (async () => {
         let prepared = false
+        let ownedPreparation: AgentMcpLaunchPreparation | undefined
         try {
           await this.owner().list(attempt.abort.signal)
           this.assertCurrent(attempt)
@@ -490,6 +496,7 @@ export class AgentMcpOAuthService {
             attempt.serverId,
             attempt.abort.signal
           )
+          ownedPreparation = preparation
           this.assertCurrent(attempt)
           const entry = attempt.entry!
           entry.connectionReview = preparation.token
@@ -500,22 +507,24 @@ export class AgentMcpOAuthService {
             },
             Math.max(1, preparation.expiresAt - this.now())
           )
-          this.finish(attempt)
-          const status = await this.owner().list()
-          if (
-            this.clients.get(attempt.serverId) !== entry ||
-            entry.session?.status().state !== 'connected'
-          )
+          await this.owner().list(attempt.abort.signal)
+          this.assertCurrent(attempt)
+          if (entry.session !== attempt.session || entry.session?.status().state !== 'connected')
             throw new McpOAuthError('cancelled')
+          this.finish(attempt)
+          const status = this.owner().statusSnapshot()
           prepared = true
-          this.notify()
           return { status, preparation }
         } catch (error) {
           throw error instanceof McpOAuthError
             ? error
             : new McpOAuthError(attempt.abort.signal.aborted ? 'cancelled' : 'authorization-failed')
         } finally {
-          if (!prepared && attempt.entry) await this.clearAuthority(attempt.entry, 'cancelled')
+          if (!prepared) {
+            if (ownedPreparation) this.owner_?.cancelLaunch(ownedPreparation.token)
+            if (attempt.entry && attempt.entry.session === attempt.session)
+              await this.clearAuthority(attempt.entry, 'cancelled')
+          }
           this.finish(attempt)
         }
       })()
@@ -533,7 +542,19 @@ export class AgentMcpOAuthService {
     await (state === 'needs-sign-in' ? session?.requireSignIn() : session?.disconnect())
   }
   /** Authority is removed synchronously before awaiting callbacks, fetches or transport cleanup. */
-  invalidate(serverId: string | undefined, reason: AgentMcpAuthorizationLifecycle): Promise<void> {
+  invalidate(
+    serverId: string | undefined,
+    reason: AgentMcpAuthorizationLifecycle,
+    expectedRevision?: string
+  ): Promise<void> {
+    if (expectedRevision !== undefined) {
+      const entry = serverId === undefined ? undefined : this.clients.get(serverId)
+      if (
+        !entry ||
+        (entry.session?.authorizationSnapshot().revision ?? entry.revision) !== expectedRevision
+      )
+        return Promise.resolve()
+    }
     if (reason === 'resumed') {
       this.closed = false
       return Promise.resolve()

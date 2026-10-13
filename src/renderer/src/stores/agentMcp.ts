@@ -113,7 +113,10 @@ export function parseAgentMcpOAuthDraft(
 export function parseAgentMcpOAuthPublicClient(
   draft: AgentMcpOAuthDraft
 ): AgentMcpOAuthPublicClient {
-  const { clientName: _clientName, ...settings } = parseAgentMcpOAuthDraft(draft)
+  const { clientName: _clientName, ...settings } = parseAgentMcpOAuthDraft({
+    ...draft,
+    clientName: 'Public client'
+  })
   const id = draft.clientId.trim()
   if (!id || id.length > 1024 || /[\u0000-\u0020\u007f-\u009f]/.test(id))
     throw new Error('Enter a public client ID without whitespace or control characters.')
@@ -363,7 +366,7 @@ export function createAgentMcpControls(ipc: AgentMcpBridge, now = () => Date.now
     const entry = current.status?.servers.find((value) => value.server.id === id)
     return entry &&
       entry.server.transport === 'http' &&
-      entry.server.endpoint.startsWith('https://') &&
+      /^https:\/\//i.test(entry.server.endpoint) &&
       !entry.cleanupPending &&
       entry.state !== 'connected' &&
       entry.state !== 'connecting'
@@ -443,11 +446,8 @@ export function createAgentMcpControls(ipc: AgentMcpBridge, now = () => Date.now
         !oauthCurrent(id, serverJson, revision) ||
         now() >= review.expiresAt
       ) {
-        // Cancellation already revokes in-flight main work. Do not cancel a newer owned flow.
-        if (!oauthServerId || (matches(ticket.expected) && oauthServerId === id))
-          void revokeOAuth(id, matches(ticket.expected))
-        if (matches(ticket.expected))
-          patch({ notice: 'OAuth review changed or expired. Review again.' })
+        // Cancel already revoked in-flight main work. A late response must never cancel a newer owner.
+        if (matches(ticket.expected)) cancel('OAuth review changed or expired. Review again.')
         return false
       }
       oauthReviewRevision = current.status?.servers.find((entry) => entry.server.id === id)?.oauth
@@ -560,6 +560,10 @@ export function createAgentMcpControls(ipc: AgentMcpBridge, now = () => Date.now
         )) as AgentMcpStatus
         if (!matches(ticket.expected)) return false
         acceptResponse(result, ticket.events)
+        if (!oauthCurrent(id, oauthServerJson!, oauthConfigRevision!)) {
+          cancel('Server state changed. Configure a fresh public client.')
+          return false
+        }
         patch({ notice: 'Public client configured for this app session. Nothing was started.' })
         return true
       } catch (error) {
@@ -605,6 +609,10 @@ export function createAgentMcpControls(ipc: AgentMcpBridge, now = () => Date.now
           )) as AgentMcpStatus
           if (!matches(expected)) return false
           acceptResponse(result, events)
+          if (!oauthCurrent(id, serverJson, revision)) {
+            cancel('Server state changed. Review a fresh registration.')
+            return false
+          }
           patch({
             notice: 'Public client registered for this app session. Review sign-in separately.'
           })

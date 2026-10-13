@@ -13,8 +13,8 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
 
-// Parse all literal browser expressions before Chromium starts. Dynamic helpers additionally
-// validate their final generated expression before sending it to DevTools.
+// Parse literal browser expressions and the generated fake-IPC module before Chromium starts.
+// Dynamic helpers additionally validate their final expression before sending it to DevTools.
 const expressionSource = await readFile(fileURLToPath(import.meta.url), 'utf8')
 const expressionAst = parse(expressionSource, {
   ecmaVersion: 'latest',
@@ -22,6 +22,7 @@ const expressionAst = parse(expressionSource, {
   locations: true
 })
 let expressionChecks = 0
+let fixtureScriptChecks = 0
 const constants = new Map()
 function visit(node, callback) {
   if (!node || typeof node !== 'object') return
@@ -83,8 +84,30 @@ visit(expressionAst, (node) => {
   }
   expressionChecks++
 })
+visit(expressionAst, (node) => {
+  if (
+    node.type !== 'CallExpression' ||
+    node.callee.type !== 'Identifier' ||
+    node.callee.name !== 'writeFile' ||
+    node.arguments[0]?.type !== 'CallExpression' ||
+    node.arguments[0].arguments[1]?.value !== 'main.js' ||
+    node.arguments[1]?.type !== 'TemplateLiteral'
+  )
+    return
+  const fixture = node.arguments[1]
+  const source = fixture.quasis.map((part) => part.value.cooked).join('/fixture-root')
+  parse(source, { ecmaVersion: 'latest', sourceType: 'module' })
+  fixtureScriptChecks++
+})
 if (process.argv.includes('--validate-expressions')) {
-  console.log(JSON.stringify({ expressionChecks, syntaxValidated: true, browserExecuted: false }))
+  console.log(
+    JSON.stringify({
+      expressionChecks,
+      fixtureScriptChecks,
+      syntaxValidated: true,
+      browserExecuted: false
+    })
+  )
   process.exit(0)
 }
 
@@ -129,14 +152,15 @@ const failures = new Map()
 const cancelled = new Set()
 const oauthClients = new Map()
 const oauthEpochs = new Map()
+const oauthRevisions = new Map()
 const oauthPlans = new Map()
-const oauthEffects = { registrations: 0, browserOpens: 0 }
+const oauthCompletions = { registrations: 0, signIns: 0 }
 let nextOAuthToken = 0
 let nextToken = 0
 let revision = 1
 const emit = (patch = {}) => { status = { ...status, ...patch }; for (const listener of listeners) listener(clone(status)) }
-const oauthStatus = (id, state, hasClient = oauthClients.has(id)) => ({ state, hasClient, revision: 'fixture-oauth-' + (oauthEpochs.get(id) || 0) })
-const setOAuth = (id, state) => emit({ servers: status.servers.map((entry) => entry.server.id === id ? { ...entry, oauth: oauthStatus(id, state) } : entry) })
+const oauthStatus = (id, state, hasClient = oauthClients.has(id)) => ({ state, hasClient, revision: 'fixture-oauth-' + (oauthRevisions.get(id) || 0) })
+const setOAuth = (id, state, advanceRevision = false) => { if (advanceRevision) oauthRevisions.set(id, (oauthRevisions.get(id) || 0) + 1); emit({ servers: status.servers.map((entry) => entry.server.id === id ? { ...entry, oauth: oauthStatus(id, state) } : entry) }) }
 const oauthCurrent = (flow) => oauthEpochs.get(flow.serverId) === flow.epoch
 const beginOAuth = (channel, args) => {
   if (!['agent-mcp:oauth-prepare-registration', 'agent-mcp:oauth-prepare-sign-in'].includes(channel)) return undefined
@@ -149,9 +173,10 @@ const beginOAuth = (channel, args) => {
   return flow
 }
 const launchPreparation = (id) => {
-    const config = status.servers.find((entry) => entry.server.id === id).server
-    const authentication = oauthClients.has(id) && status.servers.find((entry) => entry.server.id === id).oauth?.state === 'authorized'
-      ? 'session-only OAuth bearer\\nAuthentication revision: fixture-oauth-authorized-v1'
+    const entry = status.servers.find((entry) => entry.server.id === id)
+    const config = entry.server
+    const authentication = oauthClients.has(id) && entry.oauth?.state === 'authorized'
+      ? 'session-only OAuth bearer\\nAuthentication revision: ' + entry.oauth.revision
       : 'anonymous\\nAuthentication revision: fixture-anonymous-v1'
     const disclosure = config.transport === 'http'
       ? 'Exact HTTP connection\\nEndpoint: ' + config.endpoint + '\\nProtocol: ' + config.protocol + '\\nAuthentication: ' + authentication + '\\nInitialization and discovery contact the endpoint before tool approval; network address and MCP traffic visible to endpoint; metadata to selected provider; approved text to transcript/provider.'
@@ -163,7 +188,7 @@ const answer = (channel, args, flow) => {
   if (channel === 'agent-mcp:oauth-configure-client') {
     oauthClients.set(args[0], clone(args[1]))
     oauthEpochs.set(args[0], (oauthEpochs.get(args[0]) || 0) + 1)
-    setOAuth(args[0], 'configured')
+    setOAuth(args[0], 'configured', true)
     return clone(status)
   }
   if (channel === 'agent-mcp:oauth-prepare-registration' || channel === 'agent-mcp:oauth-prepare-sign-in') {
@@ -182,21 +207,21 @@ const answer = (channel, args, flow) => {
     plan.consumed = true
     if (channel === 'agent-mcp:oauth-register') {
       if (oauthCurrent(plan)) {
-        oauthEffects.registrations++
+        oauthCompletions.registrations++
         oauthClients.set(plan.serverId, { id: 'fixture-registered-public-client', issuer: plan.settings.issuer, redirectPort: plan.settings.redirectPort, redirectPath: plan.settings.redirectPath, scopes: clone(plan.settings.scopes) })
-        setOAuth(plan.serverId, 'configured')
+        setOAuth(plan.serverId, 'configured', true)
       }
       return clone(status)
     }
     if (oauthCurrent(plan)) {
-      oauthEffects.browserOpens++
-      setOAuth(plan.serverId, 'authorized')
+      oauthCompletions.signIns++
+      setOAuth(plan.serverId, 'authorized', true)
     }
     return { status: clone(status), preparation: launchPreparation(plan.serverId) }
   }
   if (channel === 'agent-mcp:oauth-cancel') {
     oauthEpochs.set(args[0], (oauthEpochs.get(args[0]) || 0) + 1)
-    setOAuth(args[0], 'cancelled')
+    setOAuth(args[0], 'cancelled', true)
     return clone(status)
   }
   if (channel === 'agent-mcp:configure') { const config = clone(args[0]); const entries = status.servers.filter((entry) => entry.server.id !== config.id); emit({ revision: 'fixture-' + (++revision), servers: [...entries, { server: config, state: 'disabled', cleanupPending: false, ...(config.transport === 'http' ? { oauth: oauthStatus(config.id, 'unconfigured', false) } : {}) }] }) }
@@ -208,7 +233,7 @@ const answer = (channel, args, flow) => {
   return clone(status)
 }
 window.__fixture = {
-  calls, oauthEffects, launchDuration: 120000, oauthDuration: 120000,
+  calls, oauthCompletions, launchDuration: 120000, oauthDuration: 120000,
   hold(channel) { holds.add(channel) },
   resolve(channel) { holds.delete(channel); for (const item of pending.get(channel) || []) item.resolve(answer(channel, item.args, item.flow)); pending.delete(channel) },
   failNext(channel, message) { failures.set(channel, message) },
@@ -621,7 +646,7 @@ render()
   await wait(reviewOpen)
   assert.equal(
     await evaluate(
-      "const text = document.body.textContent.replace(/\\s+/g, ' '); return text.includes('Review exact HTTP connection') && text.includes('https://example.invalid/mcp') && text.includes('Authentication revision: fixture-anonymous-v1') && text.includes('Confirm only if you trust the exact endpoint and authentication revision in this disclosure.') && text.includes('Starting sends initialization and metadata requests over the network before tool approval.') && text.includes('This connection is anonymous; no OAuth grant is requested.') && text.includes('Its metadata may go to the selected AI provider; approved returned text enters the local transcript and may go to that provider.')"
+      "const text = document.body.textContent.replace(/\\s+/g, ' '); return text.includes('Review exact HTTP connection') && text.includes('https://example.invalid/mcp') && text.includes('Authentication revision: fixture-anonymous-v1') && text.includes('Confirm only if you trust the exact endpoint and authentication revision in this disclosure.') && text.includes('Starting sends initialization and metadata requests over the network before tool approval.') && text.includes('The disclosure identifies the exact authentication state. This Start does not request an OAuth grant.') && text.includes('Its metadata may go to the selected AI provider; approved returned text enters the local transcript and may go to that provider.')"
     ),
     true
   )
@@ -730,21 +755,36 @@ render()
   assert.equal(await count('agent-mcp:start'), oauthBefore.connections)
   assert.equal(await count('agent-mcp:prepare-launch'), oauthBefore.launches)
   assert.equal(await evaluate('return !!document.querySelector("input[type=password]")'), false)
-  flows.push('Only a saved HTTPS entry offers public OAuth fields; its blank issuer/default loopback settings neither register, sign in nor connect')
+  flows.push(
+    'Only a saved HTTPS entry offers public OAuth fields; its blank issuer/default loopback settings neither register, sign in nor connect'
+  )
 
-  const oauthButtonReady = (label) => wait(
-    `[...document.querySelectorAll('button')].some((item) => item.textContent.trim() === ${JSON.stringify(label)} && !item.disabled)`
-  )
-  const repeatButton = (label) => evaluate(
-    `const button = [...document.querySelectorAll('button')].find((item) => item.textContent.trim() === ${JSON.stringify(label)}); if (!button || button.disabled) throw new Error('Missing repeat fixture button'); button.click(); button.dispatchEvent(new MouseEvent('click', {bubbles:true})); button.dispatchEvent(new MouseEvent('click', {bubbles:true}))`
-  )
+  const oauthButtonReady = (label) =>
+    wait(
+      `[...document.querySelectorAll('button')].some((item) => item.textContent.trim() === ${JSON.stringify(label)} && !item.disabled)`
+    )
+  const repeatButton = (label) =>
+    evaluate(
+      `const button = [...document.querySelectorAll('button')].find((item) => item.textContent.trim() === ${JSON.stringify(label)}); if (!button || button.disabled) throw new Error('Missing repeat fixture button'); button.click(); button.dispatchEvent(new MouseEvent('click', {bubbles:true})); button.dispatchEvent(new MouseEvent('click', {bubbles:true}))`
+    )
   const escape = async () => {
-    await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
-    await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+    await command('Input.dispatchKeyEvent', {
+      type: 'keyDown',
+      key: 'Escape',
+      code: 'Escape',
+      windowsVirtualKeyCode: 27
+    })
+    await command('Input.dispatchKeyEvent', {
+      type: 'keyUp',
+      key: 'Escape',
+      code: 'Escape',
+      windowsVirtualKeyCode: 27
+    })
   }
-  const lastCall = (channel) => evaluate(
-    `return window.__fixture.calls.findLast((item) => item.channel === ${JSON.stringify(channel)})`
-  )
+  const lastCall = (channel) =>
+    evaluate(
+      `return window.__fixture.calls.findLast((item) => item.channel === ${JSON.stringify(channel)})`
+    )
   const registrationSettings = {
     issuer: 'https://auth.example.invalid',
     redirectPort: 49153,
@@ -759,7 +799,10 @@ render()
   await fill('Registration client name', registrationSettings.clientName)
   await click('Review registration')
   await wait(oauthReviewOpen)
-  assert.deepEqual((await lastCall('agent-mcp:oauth-prepare-registration')).args, ['remote', registrationSettings])
+  assert.deepEqual((await lastCall('agent-mcp:oauth-prepare-registration')).args, [
+    'remote',
+    registrationSettings
+  ])
   assert.equal(await count('agent-mcp:oauth-register'), oauthBefore.registrations)
   assert.equal(await count('agent-mcp:oauth-sign-in'), oauthBefore.signIns)
   assert.equal(await count('agent-mcp:start'), oauthBefore.connections)
@@ -769,49 +812,69 @@ render()
     ),
     true
   )
-  assert.equal(await evaluate('return document.querySelectorAll("article svg,article img,[aria-label=\"Review exact OAuth action\"] svg,[aria-label=\"Review exact OAuth action\"] img,[aria-label=\"Review exact OAuth action\"] script").length'), 0)
+  assert.equal(
+    await evaluate('return document.querySelectorAll("svg,img,script:not([type=module])").length'),
+    0
+  )
   assert.equal(await evaluate('return !!window.__mcpInjected'), false)
   const oauthCancelsBefore = await count('agent-mcp:oauth-cancel')
   await click('Cancel OAuth')
-  await wait(`!(${oauthReviewOpen}) && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${oauthCancelsBefore}`)
+  await wait(
+    `!(${oauthReviewOpen}) && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${oauthCancelsBefore}`
+  )
   assert.deepEqual((await lastCall('agent-mcp:oauth-cancel')).args, ['remote'])
   assert.equal(await count('agent-mcp:oauth-register'), oauthBefore.registrations)
-  flows.push('Registration review sends exact public settings only; main disclosure is escaped and cancellation does not register or open a browser')
+  flows.push(
+    'Registration review sends exact public settings only; main disclosure is escaped and cancellation does not register or open a browser'
+  )
 
   await evaluate("window.__fixture.hold('agent-mcp:oauth-prepare-registration')")
   const preparingRegistrationsBefore = await count('agent-mcp:oauth-prepare-registration')
   await oauthButtonReady('Review registration')
   await repeatButton('Review registration')
   await wait("window.__fixture.pendingCount('agent-mcp:oauth-prepare-registration') === 1")
-  assert.equal(await count('agent-mcp:oauth-prepare-registration'), preparingRegistrationsBefore + 1)
+  assert.equal(
+    await count('agent-mcp:oauth-prepare-registration'),
+    preparingRegistrationsBefore + 1
+  )
   await click('Cancel OAuth')
   await evaluate("window.__fixture.resolve('agent-mcp:oauth-prepare-registration')")
   await oauthButtonReady('Review registration')
   assert.equal(await evaluate(`return ${oauthReviewOpen}`), false)
   assert.equal(await count('agent-mcp:oauth-register'), oauthBefore.registrations)
-  flows.push('Repeated registration preparation is guarded; cancelled late preparation never reopens an OAuth review')
+  flows.push(
+    'Repeated registration preparation is guarded; cancelled late preparation never reopens an OAuth review'
+  )
 
   await click('Review registration')
   await wait(oauthReviewOpen)
   const draftCancelsBefore = await count('agent-mcp:oauth-cancel')
   await fill('Registration client name', 'Changed fixture client')
-  await wait(`!(${oauthReviewOpen}) && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${draftCancelsBefore}`)
+  await wait(
+    `!(${oauthReviewOpen}) && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${draftCancelsBefore}`
+  )
   await fill('Registration client name', registrationSettings.clientName)
   await oauthButtonReady('Review registration')
   await click('Review registration')
   await wait(oauthReviewOpen)
   const escapeCancelsBefore = await count('agent-mcp:oauth-cancel')
   await escape()
-  await wait(`!(${oauthReviewOpen}) && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${escapeCancelsBefore}`)
+  await wait(
+    `!(${oauthReviewOpen}) && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${escapeCancelsBefore}`
+  )
   await evaluate('window.__fixture.oauthDuration = 80')
   const expiryCancelsBefore = await count('agent-mcp:oauth-cancel')
   await oauthButtonReady('Review registration')
   await click('Review registration')
-  await wait(`!(${oauthReviewOpen}) && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${expiryCancelsBefore}`)
+  await wait(
+    `!(${oauthReviewOpen}) && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${expiryCancelsBefore}`
+  )
   await evaluate('window.__fixture.oauthDuration = 120000')
   assert.equal(await count('agent-mcp:oauth-register'), oauthBefore.registrations)
   assert.equal(await count('agent-mcp:oauth-sign-in'), oauthBefore.signIns)
-  flows.push('OAuth public-draft edits, Escape and expiry revoke owned registration reviews without registration or browser launch')
+  flows.push(
+    'OAuth public-draft edits, Escape and expiry revoke owned registration reviews without registration or browser launch'
+  )
 
   await oauthButtonReady('Review registration')
   await click('Review registration')
@@ -825,16 +888,26 @@ render()
   assert.equal(await count('agent-mcp:start'), oauthBefore.connections)
   await evaluate("window.__fixture.resolve('agent-mcp:oauth-register')")
   await oauthButtonReady('Review sign-in')
-  assert.equal(await evaluate("return window.__fixture.status().servers[0].oauth.state"), 'configured')
-  assert.deepEqual(await evaluate('return window.__fixture.oauthEffects'), { registrations: 1, browserOpens: 0 })
+  assert.equal(
+    await evaluate('return window.__fixture.status().servers[0].oauth.state'),
+    'configured'
+  )
+  assert.deepEqual(await evaluate('return window.__fixture.oauthCompletions'), {
+    registrations: 1,
+    signIns: 0
+  })
   assert.equal(await evaluate(`return ${oauthReviewOpen} || ${reviewOpen}`), false)
-  flows.push('Register once is duplicate-guarded and configures a public client only; browser sign-in and MCP connection each still need separate approval')
+  flows.push(
+    'Register once is duplicate-guarded and configures a public client only; browser sign-in and MCP connection each still need separate approval'
+  )
 
   await click('Review sign-in')
   await wait(oauthReviewOpen)
   assert.deepEqual((await lastCall('agent-mcp:oauth-prepare-sign-in')).args, ['remote'])
   assert.equal(
-    await evaluate("const text = document.querySelector('[aria-label=\"Review exact OAuth action\"] pre').textContent; return text.includes('https://auth.example.invalid/authorize') && text.includes('fixture-registered-public-client') && text.includes('<svg onload=')"),
+    await evaluate(
+      "const text = document.querySelector('[aria-label=\"Review exact OAuth action\"] pre').textContent; return text.includes('https://auth.example.invalid/authorize') && text.includes('fixture-registered-public-client') && text.includes('<svg onload=')"
+    ),
     true
   )
   assert.equal(await count('agent-mcp:oauth-sign-in'), oauthBefore.signIns)
@@ -850,17 +923,25 @@ render()
   assert.equal(await evaluate(`return ${oauthReviewOpen}`), false)
   assert.equal(await count('agent-mcp:start'), oauthBefore.connections)
   assert.equal(await count('agent-mcp:prepare-launch'), signInLaunchesBefore)
+  const grantRevision = await evaluate('return window.__fixture.status().servers[0].oauth.revision')
   assert.equal(
-    await evaluate("const review = document.querySelector('[aria-label=\"Review exact MCP launch\"]'); return review.textContent.includes('Review exact HTTP connection') && review.querySelector('pre').textContent.includes('Authentication revision: fixture-oauth-authorized-v1')"),
+    await evaluate(
+      `const review = document.querySelector('[aria-label="Review exact MCP launch"]'); return review.textContent.includes('Review exact HTTP connection') && review.querySelector('pre').textContent.includes(${JSON.stringify('Authentication revision: ' + grantRevision)})`
+    ),
     true
   )
-  assert.deepEqual(await evaluate('return window.__fixture.oauthEffects'), { registrations: 1, browserOpens: 1 })
+  assert.deepEqual(await evaluate('return window.__fixture.oauthCompletions'), {
+    registrations: 1,
+    signIns: 1
+  })
   await click('Start once')
   await wait("document.body.textContent.includes('remote: connected')")
   assert.equal(await count('agent-mcp:start'), oauthBefore.connections + 1)
   await click('Disconnect')
   await wait("document.body.textContent.includes('remote: disabled')")
-  flows.push('Explicit browser sign-in is duplicate-guarded and returns a fresh HTTP disclosure; OAuth success never initializes MCP until separate Start once approval')
+  flows.push(
+    'Explicit browser sign-in is duplicate-guarded and returns a fresh HTTP disclosure; OAuth success never initializes MCP until separate Start once approval'
+  )
 
   const configuredBefore = await count('agent-mcp:oauth-configure-client')
   const preregisteredClient = {
@@ -878,18 +959,25 @@ render()
   await click('Configure public client')
   await oauthButtonReady('Review sign-in')
   assert.equal(await count('agent-mcp:oauth-configure-client'), configuredBefore + 1)
-  assert.deepEqual((await lastCall('agent-mcp:oauth-configure-client')).args, ['remote', preregisteredClient])
+  assert.deepEqual((await lastCall('agent-mcp:oauth-configure-client')).args, [
+    'remote',
+    preregisteredClient
+  ])
   assert.equal(await count('agent-mcp:oauth-register'), oauthBefore.registrations + 1)
   assert.equal(await count('agent-mcp:oauth-sign-in'), oauthBefore.signIns + 1)
   assert.equal(await count('agent-mcp:start'), oauthBefore.connections + 1)
   assert.equal(await evaluate(`return ${oauthReviewOpen} || ${reviewOpen}`), false)
-  flows.push('Preregistered public-client configuration has its own exact IPC and remains inert, without dynamic registration, sign-in, credentials or startup')
+  flows.push(
+    'Preregistered public-client configuration has its own exact IPC and remains inert, without dynamic registration, sign-in, credentials or startup'
+  )
 
   await click('Review sign-in')
   await wait(oauthReviewOpen)
   const signInCancelBefore = await count('agent-mcp:oauth-cancel')
   await click('Cancel OAuth')
-  await wait(`!(${oauthReviewOpen}) && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${signInCancelBefore}`)
+  await wait(
+    `!(${oauthReviewOpen}) && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${signInCancelBefore}`
+  )
   await evaluate("window.__fixture.hold('agent-mcp:oauth-prepare-sign-in')")
   const pendingSignInBefore = await count('agent-mcp:oauth-prepare-sign-in')
   await oauthButtonReady('Review sign-in')
@@ -898,13 +986,19 @@ render()
   assert.equal(await count('agent-mcp:oauth-prepare-sign-in'), pendingSignInBefore + 1)
   const pendingDraftCancelBefore = await count('agent-mcp:oauth-cancel')
   await fill('Requested scopes (space-separated)', 'mcp:read mcp:inspect')
-  await wait(`window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${pendingDraftCancelBefore}`)
+  await wait(
+    `window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${pendingDraftCancelBefore}`
+  )
   await evaluate("window.__fixture.resolve('agent-mcp:oauth-prepare-sign-in')")
-  await oauthButtonReady('Review sign-in')
+  await oauthButtonReady('Configure public client')
   assert.equal(await evaluate(`return ${oauthReviewOpen} || ${reviewOpen}`), false)
   assert.equal(await count('agent-mcp:oauth-sign-in'), oauthBefore.signIns + 1)
   await fill('Requested scopes (space-separated)', 'mcp:read')
-  flows.push('Cancelling sign-in review and editing a pending public draft revoke owned flow; repeated preparation and late responses cannot open the browser')
+  await click('Configure public client')
+  await oauthButtonReady('Review sign-in')
+  flows.push(
+    'Cancelling sign-in review and editing a pending public draft revoke owned flow; repeated preparation and late responses cannot open the browser'
+  )
 
   await click('Review sign-in')
   await wait(oauthReviewOpen)
@@ -914,22 +1008,33 @@ render()
   const lateLaunchCancelsBefore = await count('agent-mcp:cancel-launch')
   await click('Cancel OAuth')
   await evaluate("window.__fixture.resolve('agent-mcp:oauth-sign-in')")
-  await wait(`!(${oauthReviewOpen}) && !(${reviewOpen}) && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:cancel-launch').length > ${lateLaunchCancelsBefore}`)
+  await wait(
+    `!(${oauthReviewOpen}) && !(${reviewOpen}) && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:cancel-launch').length > ${lateLaunchCancelsBefore}`
+  )
   assert.equal(await count('agent-mcp:start'), oauthBefore.connections + 1)
-  assert.deepEqual(await evaluate('return window.__fixture.oauthEffects'), { registrations: 1, browserOpens: 1 })
-  flows.push('Cancel OAuth remains available during browser sign-in; its late fresh MCP launch token is revoked without a connection review or replay')
+  assert.deepEqual(await evaluate('return window.__fixture.oauthCompletions'), {
+    registrations: 1,
+    signIns: 1
+  })
+  flows.push(
+    'Cancel OAuth remains available during browser sign-in; its late fresh MCP launch token is revoked without a connection review or replay'
+  )
 
   await oauthButtonReady('Review sign-in')
   await click('Review sign-in')
   await wait(oauthReviewOpen)
   const signInEscapeBefore = await count('agent-mcp:oauth-cancel')
   await escape()
-  await wait(`!(${oauthReviewOpen}) && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${signInEscapeBefore}`)
+  await wait(
+    `!(${oauthReviewOpen}) && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${signInEscapeBefore}`
+  )
   await oauthButtonReady('Review sign-in')
   await evaluate('window.__fixture.oauthDuration = 80')
   const signInExpiryBefore = await count('agent-mcp:oauth-cancel')
   await click('Review sign-in')
-  await wait(`!(${oauthReviewOpen}) && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${signInExpiryBefore}`)
+  await wait(
+    `!(${oauthReviewOpen}) && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${signInExpiryBefore}`
+  )
   await evaluate('window.__fixture.oauthDuration = 120000')
   flows.push('Escape and expiry also revoke sign-in reviews; neither approval is silently retained')
 
@@ -943,9 +1048,13 @@ render()
   const navigationLaunchCancelsBefore = await count('agent-mcp:cancel-launch')
   const navigationOAuthCancelsBefore = await count('agent-mcp:oauth-cancel')
   await evaluate("location.hash = '#other'")
-  await wait(`window.__fixture.listenerCount() === 0 && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${navigationOAuthCancelsBefore}`)
+  await wait(
+    `window.__fixture.listenerCount() === 0 && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${navigationOAuthCancelsBefore}`
+  )
   await evaluate("window.__fixture.resolve('agent-mcp:oauth-sign-in'); history.back()")
-  await wait(`window.__fixture.listenerCount() === 1 && !(${oauthReviewOpen}) && !(${reviewOpen}) && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:cancel-launch').length > ${navigationLaunchCancelsBefore}`)
+  await wait(
+    `window.__fixture.listenerCount() === 1 && !(${oauthReviewOpen}) && !(${reviewOpen}) && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:cancel-launch').length > ${navigationLaunchCancelsBefore}`
+  )
   await evaluate('history.forward()')
   await wait('window.__fixture.listenerCount() === 0')
   await evaluate('history.back()')
@@ -953,7 +1062,9 @@ render()
   assert.equal(await count('agent-mcp:oauth-sign-in'), navigationOAuthCalls)
   assert.equal(await count('agent-mcp:start'), oauthBefore.connections + 1)
   assert.equal(await evaluate(`return ${oauthReviewOpen} || ${reviewOpen}`), false)
-  flows.push('Unmount cancels browser sign-in and revokes its late connection token; Back/Forward remounts one listener without OAuth or MCP replay')
+  flows.push(
+    'Unmount cancels browser sign-in and revokes its late connection token; Back/Forward remounts one listener without OAuth or MCP replay'
+  )
 
   await fill('OAuth issuer', registrationSettings.issuer)
   await fill('Registration client name', registrationSettings.clientName)
@@ -964,13 +1075,20 @@ render()
   await wait("window.__fixture.pendingCount('agent-mcp:oauth-register') === 1")
   const registrationDraftCancelBefore = await count('agent-mcp:oauth-cancel')
   await fill('Registration client name', 'Cancelled in-flight fixture client')
-  await wait(`window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${registrationDraftCancelBefore}`)
+  await wait(
+    `window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${registrationDraftCancelBefore}`
+  )
   await evaluate("window.__fixture.resolve('agent-mcp:oauth-register')")
   await oauthButtonReady('Review registration')
   assert.equal(await evaluate(`return ${oauthReviewOpen} || ${reviewOpen}`), false)
-  assert.deepEqual(await evaluate('return window.__fixture.oauthEffects'), { registrations: 1, browserOpens: 1 })
+  assert.deepEqual(await evaluate('return window.__fixture.oauthCompletions'), {
+    registrations: 1,
+    signIns: 1
+  })
   assert.equal(await count('agent-mcp:start'), oauthBefore.connections + 1)
-  flows.push('Editing public settings cancels in-flight registration; late registration completion cannot resurrect review, launch sign-in or connect MCP')
+  flows.push(
+    'Editing public settings cancels in-flight registration; late registration completion cannot resurrect review, launch sign-in or connect MCP'
+  )
 
   const outcomeRoute = async (name) => {
     await evaluate(`location.hash = ${JSON.stringify('#outcome-' + name)}`)
@@ -1082,6 +1200,7 @@ render()
     calls: await evaluate('return window.__fixture.calls'),
     browserErrors,
     expressionChecks,
+    fixtureScriptChecks,
     limitations: [
       'Isolated real Svelte controls/outcome components and app CSS with fake IPC, not the full Electron application',
       'No real MCP executable, HTTP endpoint, provider, Discord, credentials, OAuth or installation',

@@ -425,7 +425,7 @@
           >{entry.server.id}: {entry.state}</span
         >
       </div>
-      {#if entry.server.transport === 'http' && entry.server.endpoint.startsWith('https://')}
+      {#if entry.server.transport === 'http' && /^https:\/\//i.test(entry.server.endpoint)}
         <section
           class="rounded-box border border-base-300 p-3 space-y-3"
           aria-label="OAuth public client settings"

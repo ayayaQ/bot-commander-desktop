@@ -110,7 +110,8 @@ export interface AgentMcpServiceOptions {
   /** Main-only lifecycle; authority must be revoked synchronously before cleanup awaits. */
   readonly httpAuthorizationInvalidated?: (
     id: string | undefined,
-    reason: AgentMcpAuthorizationLifecycle
+    reason: AgentMcpAuthorizationLifecycle,
+    expectedRevision?: string
   ) => Promise<void>
   readonly httpOAuthStatus?: (server: AgentMcpHttpServerConfig) => AgentMcpOAuthStatus
   readonly drainAuthorization?: () => Promise<void>
@@ -234,6 +235,9 @@ export class AgentMcpService {
       }
     this.options.store.addSecrets(values)
   }
+  statusSnapshot(): AgentMcpStatus {
+    return this.statuses()
+  }
   authorizationContext() {
     return {
       revision: this.configuration.revision,
@@ -246,9 +250,11 @@ export class AgentMcpService {
   }
   private authorizationLifecycle(
     id: string | undefined,
-    reason: AgentMcpAuthorizationLifecycle
+    reason: AgentMcpAuthorizationLifecycle,
+    expectedRevision?: string
   ): Promise<void> {
-    const cleanup = this.options.httpAuthorizationInvalidated?.(id, reason) ?? Promise.resolve()
+    const cleanup =
+      this.options.httpAuthorizationInvalidated?.(id, reason, expectedRevision) ?? Promise.resolve()
     this.operations.add(cleanup)
     void cleanup.then(
       () => this.operations.delete(cleanup),
@@ -419,7 +425,11 @@ export class AgentMcpService {
         permit.controller.abort()
         this.launches.delete(token)
         if (permit.authorization?.bearerToken)
-          void this.authorizationLifecycle(permit.launch.server.id, 'launch-cancelled')
+          void this.authorizationLifecycle(
+            permit.launch.server.id,
+            'launch-cancelled',
+            permit.authorization.revision
+          )
       }
   }
   private cancelPreparedLaunches(): void {
@@ -622,7 +632,11 @@ export class AgentMcpService {
       permit.controller.abort()
       if (!permit.starting) this.launches.delete(token)
       if (invalidateAuthorization && permit.authorization?.bearerToken)
-        void this.authorizationLifecycle(permit.launch.server.id, 'launch-cancelled')
+        void this.authorizationLifecycle(
+          permit.launch.server.id,
+          'launch-cancelled',
+          permit.authorization.revision
+        )
     }
   }
   start(token: string, signal = noSignal()): Promise<AgentMcpStartResult> {
@@ -652,7 +666,7 @@ export class AgentMcpService {
       }
       current.throwIfAborted()
       this.assertOpen()
-      const started = await this.connect(
+      let started = await this.connect(
         permit.launch,
         permit.privacyRevision,
         permit.preparation.expiresAt,
@@ -662,8 +676,43 @@ export class AgentMcpService {
       if (permit.authorization?.bearerToken)
         await this.authorizationLifecycle(
           permit.launch.server.id,
-          started ? 'connected' : 'connection-failed'
+          started ? 'connected' : 'connection-failed',
+          permit.authorization.revision
         )
+      if (started) {
+        const connection = this.connections.get(permit.launch.server.id)
+        try {
+          current.throwIfAborted()
+          this.assertOpen()
+          if (
+            !connection ||
+            connection.launch !== permit.launch ||
+            connection.state !== 'connected' ||
+            connection.controller.signal.aborted ||
+            connection.cleanupPending ||
+            this.configuration.revision !== permit.launch.configRevision ||
+            permit.privacyRevision !== this.privacyRevision()
+          )
+            throw new Error('MCP connection changed before startup completed')
+          this.assertAuthorization(connection)
+        } catch {
+          // Terminal cleanup belongs only to this exact launch, never a newer replacement.
+          if (
+            connection?.launch === permit.launch &&
+            this.connections.get(permit.launch.server.id) === connection
+          ) {
+            this.invalidate(connection, 'MCP startup became unavailable before completion')
+            await this.cleanup(permit.launch.server.id, connection)
+          }
+          if (permit.authorization?.bearerToken)
+            await this.authorizationLifecycle(
+              permit.launch.server.id,
+              'connection-failed',
+              permit.authorization.revision
+            )
+          started = false
+        }
+      }
       return { started, status: this.statuses() }
     }, signal)
     void task.then(
@@ -674,7 +723,11 @@ export class AgentMcpService {
       () => {
         this.launches.delete(token)
         if (permit.authorization?.bearerToken)
-          void this.authorizationLifecycle(permit.launch.server.id, 'connection-failed')
+          void this.authorizationLifecycle(
+            permit.launch.server.id,
+            'connection-failed',
+            permit.authorization.revision
+          )
         this.notify()
       }
     )
@@ -759,7 +812,11 @@ export class AgentMcpService {
             authorizationRejected: () => {
               if (this.connections.get(launch.server.id) !== connection) return
               connection.authorizationRejected = true
-              void this.authorizationLifecycle(launch.server.id, 'needs-sign-in')
+              void this.authorizationLifecycle(
+                launch.server.id,
+                'needs-sign-in',
+                connection.authorization?.revision
+              )
               this.invalidate(
                 connection,
                 'MCP HTTP needs sign-in; explicit sign-in and fresh connection approval are required'
@@ -1585,7 +1642,8 @@ function currentService(): AgentMcpService {
       env: process.env,
       assertAllowed: assertAgentMcpPrivacy,
       httpAuthorization: (server) => oauth.authorization(server),
-      httpAuthorizationInvalidated: (id, reason) => oauth.invalidate(id, reason),
+      httpAuthorizationInvalidated: (id, reason, revision) =>
+        oauth.invalidate(id, reason, revision),
       httpOAuthStatus: (server) => oauth.status(server),
       drainAuthorization: () => oauth.drain()
     })
