@@ -182,12 +182,7 @@ export function parseAiModelCatalog(
       id: capabilities.id,
       name: textField(model.name) || capabilities.id,
       description: textField(model.description, 5000),
-      contextLength:
-        typeof model.context_length === 'number' &&
-        Number.isFinite(model.context_length) &&
-        model.context_length > 0
-          ? model.context_length
-          : undefined,
+      contextLength: capabilities.contextWindow,
       supportedParameters: parameters,
       outputModalities: stringList(architecture.output_modalities),
       supportsStructuredOutputs: parameters

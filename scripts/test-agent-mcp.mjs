@@ -3,6 +3,9 @@ import { fileURLToPath } from 'node:url'
 
 // Explicit ordinary scope. Historical adversarial/legacy-input/skills assessments are excluded.
 const files = [
+  'src/shared/agentContext.test.ts',
+  'src/main/services/agentContextStore.test.ts',
+  'src/main/services/agentContextProjection.test.ts',
   'src/main/services/agentConversationRecords.test.ts',
   'src/main/services/agentConversationWorkflow.integration.test.ts',
   'src/main/services/agentExtensions.integration.test.ts',

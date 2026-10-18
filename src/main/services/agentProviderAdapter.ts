@@ -1,5 +1,6 @@
 import type {
   HistoryMessage,
+  ContextLimits,
   ModelProvider,
   ProviderGenerateOptions,
   ProviderResult,
@@ -35,11 +36,45 @@ export function getAgentModelCapabilities(
   )
 }
 
+export function getAgentContextLimits(settings: AiRuntimeSettings, id: string): ContextLimits {
+  const provider = getAiProvider(settings)
+  const snapshot = modelCapabilityCatalog.selectedSnapshot(
+    provider,
+    getProviderApiKey(settings),
+    agentProtocol(provider),
+    id
+  )
+  const capabilities = snapshot.capabilities
+  const source = capabilities.contextLimitsSource
+  return {
+    contextWindow: capabilities.contextWindow,
+    maxInputTokens: capabilities.maxInputTokens,
+    maxOutputTokens: capabilities.maxOutputTokens,
+    ...(source
+      ? {
+          source: {
+            ...source,
+            ...(snapshot.fetchedAt !== undefined
+              ? {
+                  fetchedAt: new Date(snapshot.fetchedAt).toISOString(),
+                  freshness: 'cached' as const
+                }
+              : {})
+          }
+        }
+      : {})
+  }
+}
+
 /** The host owns account metadata/policy; vivi owns protocol and native history. */
 export function createAgentProvider(
   settings: AiRuntimeSettings,
   session: SessionModel,
-  options: { stream?: boolean; capabilities?: ModelCapabilities } = {}
+  options: {
+    stream?: boolean
+    capabilities?: ModelCapabilities
+    onSummaryDispatch?: () => void
+  } = {}
 ): ModelProvider {
   const provider = getAiProvider(settings)
   const apiKey = getProviderApiKey(settings)
@@ -71,20 +106,42 @@ export function createAgentProvider(
     stream: capabilities.stream === 'unsupported' ? false : (options.stream ?? false),
     timeoutMs: AGENT_REQUEST_TIMEOUT_MS
   }
-  const transport =
+  const createTransport = (fetch?: typeof globalThis.fetch) =>
     provider === 'openrouter'
       ? createOpenRouterProvider({
           ...common,
+          ...(fetch ? { fetch } : {}),
           apiKey,
           attribution: {
             referer: 'https://github.com/ayayaQ/bot-commander-desktop',
             title: 'Bot Commander for Discord'
           }
         })
-      : createOpenAIProvider({ ...common, apiKey })
+      : createOpenAIProvider({ ...common, apiKey, ...(fetch ? { fetch } : {}) })
+  const transport = createTransport()
+  const fetchImpl = globalThis.fetch
   return {
-    generate: (input, signal, generateOptions) =>
-      transport.generate(
+    ...(transport.estimateContext
+      ? {
+          estimateContext: (input, estimateOptions) =>
+            transport.estimateContext!(
+              { ...input, tools: capabilities.tools === 'supported' ? input.tools : [] },
+              estimateOptions
+            )
+        }
+      : {}),
+    generate: (input, signal, generateOptions) => {
+      const selected =
+        generateOptions?.purpose === 'context-summary' && options.onSummaryDispatch
+          ? createTransport((request, init) => {
+              // Body validation and cancellation preflight have finished. This callback is sync,
+              // immediately before the actual fetch invocation; estimates never reach it.
+              signal.throwIfAborted()
+              options.onSummaryDispatch!()
+              return fetchImpl(request, init)
+            })
+          : transport
+      return selected.generate(
         {
           ...input,
           tools: capabilities.tools === 'supported' ? input.tools : []
@@ -92,6 +149,7 @@ export function createAgentProvider(
         signal,
         generateOptions
       )
+    }
   }
 }
 

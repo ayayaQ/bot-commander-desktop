@@ -55,10 +55,9 @@ fresh human approval for a later change. Approvals are never restored from shado
 
 Restore validates complete session and run chains from sequence 1. Missing/corrupt bodies,
 changed disk leases, changed historical payloads and failed checkpoints withhold the shadow
-while preserving the original session and exact MCP evidence. Existing prior-skill context
-omission can change a historical tool-result body; this initial shadow slice withholds that
-chain rather than silently rewriting or re-anchoring it. Promotion to authoritative storage,
-cross-turn compaction and continued restoration after erased prefixes remain later work.
+while preserving the original session and exact MCP evidence. Earlier skill guidance is omitted
+only in the provider-facing context view; canonical tool results and shadow source bindings
+remain exact. Promotion to authoritative storage and erased-prefix restoration remain later work.
 
 The whole host envelope is limited to 8 MiB, with at most 128 retained runs. Active history
 has a conservative 384 KiB budget and reserves 3 MiB for the repeated session/terminal
@@ -166,3 +165,29 @@ PR #12's proposed offline draft validation remains host code. Integrating that P
 retain lint/validation binding, bounded repair counts, unsupported-candidate approval and
 cancellation checks inside the host executor; it does not require changing vivi's domain-neutral
 API.
+
+## Context management
+
+Context accounting and compaction use the pinned `@ayayaq/vivi` 0.14.0 registry release.
+
+The agent header shows the most recent request's input estimate (`~`) separately from
+cumulative execution usage. It includes current host guidance, memories, skills, tool schemas,
+and provider-native history. Unknown windows stay unknown. Exact documented model limits
+and unexpired provider catalog limits are rechecked for each run; model names are not matched
+by prefix or guessed.
+
+`Compact` summarizes older complete exchanges with the selected provider and can incur
+provider charges. Known summary usage is recorded separately, including summaries that later
+fail to shrink or save. Unreported usage stays explicitly incomplete. Automatic compaction
+runs at the shared core's safe request boundary when a known budget approaches capacity.
+If fresh guidance, schemas, or the retained recent exchanges still cannot fit, the request stops
+with a context error rather than silently discarding them.
+
+Versioned, source-bound summaries live in `agent-context/`, separately from the original
+conversation, display messages, and approval/outcome records. A changed raw source or
+provider-view projection invalidates the summary. Earlier skill-read guidance is expired only
+in that view, as before; canonical tool results remain exact. A summary never supplies approval,
+confirms a tool outcome, or causes an old tool to execute. Cancellation and restart retain the
+original history; compaction writes must finish before their new view is used. Cancellation
+before the primary rename blocks a new checkpoint; a rename already issued may commit and
+is retained with an explicit completion-before-cancellation status.

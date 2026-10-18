@@ -263,4 +263,56 @@ describe('atomic persistence', () => {
     expect(await atomicWrite(path, '{}')).toEqual({ durability: 'uncertain' })
     expect(await fs.readFile(path, 'utf8')).toBe('{}')
   })
+
+  it('checks an optional commit gate once immediately before primary rename and preserves its original error', async () => {
+    await fs.writeFile(path, '{"value":"old"}')
+    const original = new DOMException('Cancelled before commit', 'AbortError')
+    const rename = fs.rename.bind(fs)
+    const primaryRenames = vi.fn()
+    vi.spyOn(fs, 'rename').mockImplementation(async (source, destination) => {
+      if (destination === path) primaryRenames()
+      return rename(source, destination)
+    })
+    const gate = vi.fn(() => {
+      throw original
+    })
+    await expect(
+      atomicWrite(path, '{"value":"new"}', { validate: JSON.parse, beforeCommit: gate })
+    ).rejects.toBe(original)
+    expect(gate).toHaveBeenCalledTimes(1)
+    expect(primaryRenames).not.toHaveBeenCalled()
+    expect(await fs.readFile(path, 'utf8')).toBe('{"value":"old"}')
+    expect(await fs.readFile(`${path}.bak`, 'utf8')).toBe('{"value":"old"}')
+    expect((await fs.readdir(directory)).filter((name) => name.endsWith('.tmp'))).toEqual([])
+    await atomicWrite(path, '{"value":"retry"}', { validate: JSON.parse })
+    expect(await fs.readFile(path, 'utf8')).toBe('{"value":"retry"}')
+  })
+
+  it('runs the optional synchronous gate after temp sync and directly before primary rename', async () => {
+    const operations: string[] = []
+    const open = fs.open.bind(fs)
+    const rename = fs.rename.bind(fs)
+    vi.spyOn(fs, 'open').mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+      const handle = await open(...args)
+      if (String(args[0]).startsWith(`${path}.`)) {
+        const sync = handle.sync.bind(handle)
+        vi.spyOn(handle, 'sync').mockImplementation(async () => {
+          await sync()
+          operations.push('temp synced')
+        })
+      }
+      return handle
+    })
+    vi.spyOn(fs, 'rename').mockImplementation(async (source, destination) => {
+      if (destination === path) operations.push('primary rename')
+      return rename(source, destination)
+    })
+    await atomicWrite(path, '{"value":"new"}', {
+      beforeCommit: () => {
+        operations.push('commit gate')
+      }
+    })
+    expect(operations).toEqual(['temp synced', 'commit gate', 'primary rename'])
+    expect(await fs.readFile(path, 'utf8')).toBe('{"value":"new"}')
+  })
 })

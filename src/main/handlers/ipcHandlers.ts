@@ -62,6 +62,7 @@ import { addApiAuthHandlers } from './apiAuthHandlers'
 import { addCommandRepoHandlers } from './commandRepoHandlers'
 import {
   cancelAgentRun,
+  compactAgentSession,
   createAgentSession,
   deleteAgentSession,
   loadAgentSessions,
@@ -654,6 +655,9 @@ export function addIPCHandlers() {
     'agent:approve',
     async (_, sessionId: string, toolCallId: string, approved: boolean, approvalId?: string) =>
       resolveAgentApproval(sessionId, toolCallId, approved, approvalId)
+  )
+  ipcMain.handle('agent:compact', (_, sessionId: string) =>
+    compactAgentSession(sessionId, getSettings())
   )
   ipcMain.handle('agent:cancel', (_, sessionId: string) => cancelAgentRun(sessionId))
 

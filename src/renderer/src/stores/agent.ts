@@ -252,6 +252,12 @@ export async function inspectAgentAutoReviewAudit(
   return window.electron.ipcRenderer.invoke('agent:inspect-auto-review-audit', sessionId)
 }
 
+export async function compactAgentSession() {
+  const session = get(activeAgentSession)
+  if (!session) return
+  await window.electron.ipcRenderer.invoke('agent:compact', session.id)
+}
+
 export async function cancelAgentRun() {
   const session = get(activeAgentSession)
   if (!session) return

@@ -1,5 +1,6 @@
+import type { AgentContextStatus } from './agentContext'
 import type { AgentValidationReport } from './agentValidationTypes'
-import type { HistoryMessage } from '@ayayaq/vivi'
+import type { HistoryMessage, Usage } from '@ayayaq/vivi'
 import type {
   MemoriesData,
   Memory,
@@ -110,6 +111,11 @@ export interface AgentSession {
   planReady: boolean
   tokenCount: number
   lastRunMetrics?: AgentRunMetrics
+  /** Last measured request input, separate from lifetime billed token usage. */
+  context?: AgentContextStatus
+  /** Summary requests are billed separately from canonical execution rounds. */
+  compactionUsage?: Usage
+  compactionUsageIncomplete?: boolean
   autoReviewEnrollment?: AgentAutoReviewEnrollment
   autoReviewMigrationRequired?: boolean
   error?: string

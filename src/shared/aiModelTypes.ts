@@ -44,4 +44,6 @@ export interface SelectedModelCapabilitySnapshot {
   capabilities: ModelCapabilities
   /** Account-backed catalog fact expiry; absent for static documentation/unknown facts. */
   expiresAt?: number
+  /** Catalog fetch time; never a model-name-derived fact. */
+  fetchedAt?: number
 }
