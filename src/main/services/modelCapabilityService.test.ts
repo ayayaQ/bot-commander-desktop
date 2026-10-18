@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { normalizeModelCapabilities, type CapabilityInput } from '@ayayaq/vivi/providers/models'
+import { agentContextLabel, type AgentContextStatus } from '../../shared/agentContext'
 import { ModelCapabilityCatalog, modelCapabilities } from './modelCapabilityService'
 import { openAiResponsesExclusionSources } from './openAiResponsesExclusionSources'
 import { nonConversationOpenAI, openaiCapabilities } from './openAiResponsesRegistry'
@@ -235,5 +236,35 @@ describe('host-owned account-scoped capability cache', () => {
       ).tools
     ).toBe('unknown')
     setSettings(original)
+  })
+  it('shows current unknown capacity after catalog expiry or restart instead of a persisted window', () => {
+    let now = 100
+    const cache = new ModelCapabilityCatalog(() => now)
+    const generation = cache.begin('openrouter', 'offline-key')
+    cache.complete('openrouter', 'offline-key', generation, [{ ...router, context_length: 16000 }])
+    const persisted: AgentContextStatus = JSON.parse(
+      JSON.stringify({
+        provider: 'openrouter',
+        model: router.id,
+        state: 'ready',
+        usage: {
+          inputTokens: 1234,
+          estimated: true,
+          contextWindow: 16000,
+          outputReserveTokens: 1600
+        }
+      })
+    )
+    const label = (catalog: ModelCapabilityCatalog) =>
+      agentContextLabel(
+        persisted,
+        'openrouter',
+        router.id,
+        catalog.get('openrouter', 'offline-key', 'chat-completions', router.id).contextWindow
+      )
+    expect(label(cache)).toBe('Context ~1,234 / 16,000')
+    now += 15 * 60_000
+    expect(label(cache)).toBe('Context ~1,234 / unknown')
+    expect(label(new ModelCapabilityCatalog(() => now))).toBe('Context ~1,234 / unknown')
   })
 })

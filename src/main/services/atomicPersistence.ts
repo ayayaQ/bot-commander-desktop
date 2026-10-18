@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto'
 
 interface AtomicWriteOptions {
   validate?: (data: string) => void
+  /** Synchronous admission gate after temp sync, immediately before issuing primary rename. */
+  beforeCommit?: () => void
   // Credential stores use this to ensure legacy plaintext never enters a backup.
   backupTransform?: (data: string) => string
 }
@@ -106,7 +108,11 @@ async function syncDirectory(directory: string): Promise<boolean> {
   }
 }
 
-async function replaceFile(path: string, data: string): Promise<AtomicWriteResult> {
+async function replaceFile(
+  path: string,
+  data: string,
+  beforeCommit?: () => void
+): Promise<AtomicWriteResult> {
   const temporary = `${path}.${randomUUID()}.tmp`
   let file: Awaited<ReturnType<typeof fs.open>> | undefined
   try {
@@ -115,6 +121,13 @@ async function replaceFile(path: string, data: string): Promise<AtomicWriteResul
     await file.sync()
     await file.close()
     file = undefined
+    if (beforeCommit) {
+      const result: unknown = beforeCommit()
+      if (result !== undefined) {
+        if (result instanceof Promise) void result.catch(() => undefined)
+        throw new Error('Atomic write commit gate must be synchronous and return no value')
+      }
+    }
     await fs.rename(temporary, path)
     const directory = dirname(path)
     let supported: boolean
@@ -191,7 +204,7 @@ export async function atomicWrite(
         await replaceFile(`${path}.bak`, backup)
       }
       try {
-        const result = await replaceFile(path, data)
+        const result = await replaceFile(path, data, options.beforeCommit)
         if (result.durability === 'confirmed') uncertainWrites.delete(path)
         // An unsupported sync cannot clear an earlier actual durability failure.
         if (uncertainWrites.has(path)) return { durability: 'uncertain' as const }

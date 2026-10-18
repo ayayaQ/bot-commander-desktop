@@ -10,6 +10,7 @@ import type {
 const mocks = vi.hoisted(() => ({
   handle: vi.fn(),
   runAgent: vi.fn(),
+  compactAgent: vi.fn(),
   cancelAgent: vi.fn(),
   activeAgent: vi.fn(),
   approveAgent: vi.fn(),
@@ -90,6 +91,7 @@ vi.mock('./commandRepoHandlers', () => ({ addCommandRepoHandlers: vi.fn() }))
 vi.mock('../services/agentService', () => ({
   setAgentEventSink: vi.fn(),
   runAgentSession: mocks.runAgent,
+  compactAgentSession: mocks.compactAgent,
   cancelAgentRun: mocks.cancelAgent,
   setActiveAgentSession: mocks.activeAgent,
   resolveAgentApproval: mocks.approveAgent
@@ -562,6 +564,18 @@ describe('owned agent run IPC routing', () => {
     expect(settled).toBe(false)
     resolve({ runId: 'owned-run' })
     expect(await result).toEqual({ runId: 'owned-run' })
+  })
+
+  it('routes compaction to the selected session with current host settings', async () => {
+    const current = { aiProvider: 'openai', openaiApiKey: 'offline-fixture-only' }
+    mocks.settings.mockReturnValue(current)
+    mocks.compactAgent.mockResolvedValue({ runId: 'compact-owned-run' })
+    const routes = await handlers()
+    expect(await routes.get('agent:compact')!({}, 'selected-session')).toEqual({
+      runId: 'compact-owned-run'
+    })
+    expect(mocks.compactAgent).toHaveBeenCalledExactlyOnceWith('selected-session', current)
+    expect(mocks.runAgent).not.toHaveBeenCalled()
   })
 
   it('keeps session switching distinct from cancellation and preserves the exact human approval identity', async () => {

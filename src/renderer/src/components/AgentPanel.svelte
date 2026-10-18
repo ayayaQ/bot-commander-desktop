@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ModelCapabilities } from '@ayayaq/vivi/providers/models'
+  import { agentContextLabel, agentContextTooltip } from '../../../shared/agentContext'
   import type { AppSettings } from '../types/types'
   import { onMount, tick } from 'svelte'
   import ModelPicker from './ModelPicker.svelte'
@@ -37,6 +38,7 @@
     activeAgentProgress,
     agentSessions,
     cancelAgentRun,
+    compactAgentSession,
     createAgentSession,
     deleteAgentSession,
     initializeAgentSessions,
@@ -54,6 +56,24 @@
     autoReviewReasonLabel
   } from '../../../shared/agentAutoReview'
   import type { AgentDecisionAuditInspection } from '../../../shared/agentAutoReview'
+
+  let compactError = $state('')
+  let compactBusy = $state(false)
+  let compactErrorSessionId = $state('')
+  async function compactCurrentContext() {
+    const sessionId = $activeAgentSession?.id
+    if (!sessionId || compactBusy) return
+    compactBusy = true
+    compactError = ''
+    compactErrorSessionId = sessionId
+    try {
+      await compactAgentSession()
+    } catch {
+      compactError = 'Context compaction could not start'
+    } finally {
+      compactBusy = false
+    }
+  }
 
   let input = $state('')
   let inputElement: HTMLTextAreaElement = $state()
@@ -171,8 +191,16 @@
   )
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
+  const currentContext = $derived(
+    $activeAgentSession?.context?.provider === ($settingsStore.aiProvider || 'openai') &&
+      $activeAgentSession.context.model === $activeAgentSession.model
+      ? $activeAgentSession.context
+      : undefined
+  )
   const running = $derived(
-    $activeAgentSession?.status === 'running' || $activeAgentSession?.status === 'waiting_approval'
+    $activeAgentSession?.status === 'running' ||
+      $activeAgentSession?.status === 'waiting_approval' ||
+      currentContext?.state === 'compacting'
   )
   const awaitingPlanDecision = $derived(
     $activeAgentSession?.planReady === true &&
@@ -511,7 +539,9 @@
 
   {#if $activeAgentSession}
     <section class="grow min-w-0 flex flex-col min-h-0">
-      <header class="h-14 px-4 border-b border-base-300 flex items-center gap-3 shrink-0">
+      <header
+        class="min-h-14 px-4 py-2 border-b border-base-300 flex flex-wrap items-center gap-3 shrink-0"
+      >
         <div class="join shrink-0" aria-label="Agent execution mode">
           {#each [['manual', 'Manual'], ['auto', 'Auto review'], ['planning', 'Planning']] as option}
             <button
@@ -550,11 +580,42 @@
             <option value={choice.value}>{choice.label}</option>
           {/each}
         </select>
-        <div class="ml-auto text-xs opacity-60 tabular-nums">
-          {$activeAgentSession.tokenCount.toLocaleString()} tokens
+        <div class="ml-auto shrink-0 flex items-center gap-2 text-xs tabular-nums">
+          <span
+            class="opacity-60"
+            title={agentContextTooltip(currentContext, {
+              execution: $activeAgentSession.tokenCount,
+              summary: $activeAgentSession.compactionUsage?.totalTokens,
+              summaryIncomplete: $activeAgentSession.compactionUsageIncomplete
+            })}
+          >
+            {agentContextLabel(
+              $activeAgentSession.context,
+              $settingsStore.aiProvider || 'openai',
+              $activeAgentSession.model,
+              capabilities?.contextWindow
+            )}
+          </span>
+          <button
+            class="btn btn-ghost btn-xs"
+            onclick={compactCurrentContext}
+            disabled={running ||
+              compactBusy ||
+              resolvingPlan ||
+              enrollmentBusy ||
+              !$activeAgentSession.history?.length}
+            title="Summarize older context while retaining the original conversation. Uses the selected model and may incur provider charges."
+            >Compact</button
+          >
         </div>
       </header>
 
+      {#if compactError && compactErrorSessionId === $activeAgentSession.id}
+        <p class="px-4 py-1 text-xs text-error" role="alert">{compactError}</p>
+      {/if}
+      {#if $activeAgentSession.context?.message && $activeAgentSession.context.provider === ($settingsStore.aiProvider || 'openai') && $activeAgentSession.context.model === $activeAgentSession.model}
+        <p class="px-4 py-1 text-xs" role="status">{$activeAgentSession.context.message}</p>
+      {/if}
       <div class="px-4 py-2 text-xs border-b border-base-300" aria-live="polite">
         {reasoningCapabilityLabel(capabilities)} · Tools {capabilities?.tools || 'unknown'}
         {#if !models.some((model) => model.id === $activeAgentSession.model)}
@@ -602,7 +663,11 @@
                 </div>
               {:else if message.role === 'tool'}
                 {#each message.toolCalls || [] as call (call.id)}
-                  {@const presentation = agentToolPresentationInput(call, $activeAgentSession.id, message.id)}
+                  {@const presentation = agentToolPresentationInput(
+                    call,
+                    $activeAgentSession.id,
+                    message.id
+                  )}
                   <div class="border border-base-300 rounded-md overflow-hidden">
                     <div class="h-10 px-3 bg-base-200 flex items-center gap-2">
                       <span class="material-symbols-outlined text-base">build</span>
@@ -718,9 +783,11 @@
                   aria-hidden="true">{spinnerFrames[spinnerFrameIndex]}</span
                 >
                 <span>Agent is working</span>
-                <span class="tabular-nums" aria-label={`Elapsed time ${elapsedTime}`}
-                  >{elapsedTime}</span
-                >
+                {#if $activeAgentSession.context?.state !== 'compacting'}
+                  <span class="tabular-nums" aria-label={`Elapsed time ${elapsedTime}`}
+                    >{elapsedTime}</span
+                  >
+                {/if}
               </div>
             {/if}
             {#if $activeAgentSession.error}

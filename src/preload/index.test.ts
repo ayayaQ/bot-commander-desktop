@@ -33,6 +33,7 @@ async function bridge(): Promise<FixtureBridge> {
 
 describe('public agent MCP OAuth preload whitelist', () => {
   const channels = [
+    'agent:compact',
     'agent-mcp:oauth-configure-client',
     'agent-mcp:oauth-prepare-registration',
     'agent-mcp:oauth-register',

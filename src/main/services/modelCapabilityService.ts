@@ -135,7 +135,14 @@ export function immutableModelCapabilities(result: ModelCapabilities): ModelCapa
     efforts: Object.freeze([...result.reasoning.efforts])
   })
   const sources = Object.freeze(result.sources.map((source) => Object.freeze({ ...source })))
-  return Object.freeze({ ...result, reasoning, sources })
+  return Object.freeze({
+    ...result,
+    reasoning,
+    sources,
+    ...(result.contextLimitsSource
+      ? { contextLimitsSource: Object.freeze({ ...result.contextLimitsSource }) }
+      : {})
+  })
 }
 
 interface CatalogSnapshot {
@@ -227,6 +234,7 @@ export class ModelCapabilityCatalog {
       if (capabilities?.protocol === protocol)
         return {
           capabilities,
+          fetchedAt: snapshot.at,
           expiresAt: snapshot.at + this.maxAgeMs
         }
     }

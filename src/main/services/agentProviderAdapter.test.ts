@@ -352,3 +352,70 @@ describe('desktop shared-provider settings bridge', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })
+
+describe('desktop context limit provenance', () => {
+  it('uses exact live catalog fields and drops them when the account snapshot is invalidated', async () => {
+    const { getAgentContextLimits } = await import('./agentProviderAdapter')
+    const generation = modelCapabilityCatalog.begin('openrouter', routerSettings.openrouterApiKey)
+    modelCapabilityCatalog.complete('openrouter', routerSettings.openrouterApiKey, generation, [
+      {
+        id: 'vendor/exact-window',
+        context_length: 64000,
+        top_provider: { max_completion_tokens: 7000 },
+        max_prompt_tokens: 60000,
+        supported_parameters: ['tools'],
+        architecture: { output_modalities: ['text'] }
+      }
+    ])
+    expect(getAgentContextLimits(routerSettings, 'vendor/exact-window')).toMatchObject({
+      contextWindow: 64000,
+      maxInputTokens: 60000,
+      maxOutputTokens: 7000,
+      source: { kind: 'provider-catalog', freshness: 'cached', fetchedAt: expect.any(String) }
+    })
+    expect(getAgentContextLimits(routerSettings, 'vendor/exact-window-version')).toMatchObject({
+      contextWindow: undefined,
+      maxOutputTokens: undefined
+    })
+    modelCapabilityCatalog.invalidate('openrouter')
+    expect(getAgentContextLimits(routerSettings, 'vendor/exact-window')).toMatchObject({
+      contextWindow: undefined,
+      maxOutputTokens: undefined
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('forwards measurement through the same tool capability projection as dispatch', () => {
+    const provider = createAgentProvider(settings, {
+      model: 'unverified/exact-model',
+      reasoningEffort: 'none'
+    })
+    expect(provider.estimateContext).toBeTypeOf('function')
+    expect(provider.estimateContext!({ messages, tools })).toEqual(
+      provider.estimateContext!({ messages, tools: [] })
+    )
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('observes summary dispatch only at actual fetch, never during estimation or preflight failure', async () => {
+    const onSummaryDispatch = vi.fn()
+    const provider = createAgentProvider(settings, session, { onSummaryDispatch })
+    provider.estimateContext!({ messages, tools: [] })
+    expect(onSummaryDispatch).not.toHaveBeenCalled()
+    const cancelled = new AbortController()
+    cancelled.abort()
+    await expect(
+      provider.generate({ messages, tools: [] }, cancelled.signal, { purpose: 'context-summary' })
+    ).rejects.toThrow()
+    expect(onSummaryDispatch).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+    fetchMock.mockRejectedValueOnce(new Error('Offline request response lost'))
+    await expect(
+      provider.generate({ messages, tools: [] }, new AbortController().signal, {
+        purpose: 'context-summary'
+      })
+    ).rejects.toThrow()
+    expect(onSummaryDispatch).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})

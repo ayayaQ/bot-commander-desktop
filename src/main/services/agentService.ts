@@ -3,6 +3,12 @@ import { join } from 'node:path'
 import crypto from 'node:crypto'
 import {
   runAgent,
+  compactContext,
+  measureContext,
+  ContextError,
+  type ContextOptions,
+  type ContextUsage,
+  type Usage,
   type AgentResult,
   type HistoryMessage,
   type ToolCall,
@@ -25,8 +31,14 @@ import { AgentExtensionCleanupError, createAgentExtensionScope } from './agentEx
 import { formatSkillCatalogContext, SKILL_LIMITS } from '@ayayaq/vivi/extensions/skills'
 import { agentSkillStore } from './agentSkillService'
 import type { AgentSkillSnapshot } from './agentSkillStore'
-import { createAgentProvider, getAgentModelCapabilities } from './agentProviderAdapter'
+import {
+  createAgentProvider,
+  getAgentModelCapabilities,
+  getAgentContextLimits
+} from './agentProviderAdapter'
 import { initializeAgentHistory } from './agentHistory'
+import { createAgentContextStore } from './agentContextStore'
+import { createAgentContextProjection } from './agentContextProjection'
 import { createAgentPersistence, reportAgentPersistenceNotice } from './agentPersistence'
 import { decodeAgentSessions, validAgentDisplayHistory } from './agentSessionPersistence'
 import { createAgentConversationRecords } from './agentConversationRecords'
@@ -155,6 +167,9 @@ interface AgentRunContext {
   owner: ExtensionScope
   extensionScope: ExtensionScope
   durableOperations: Set<Promise<unknown>>
+  contextCheckpointCommitted: boolean
+  pendingSummaryUsage: number
+  missingSummaryUsage: boolean
   validationFailures: Map<string, number>
   extensions: ToolRegistry
   mcpTools: Set<string>
@@ -219,6 +234,17 @@ const conversationRecords = createAgentConversationRecords({
   assertAllowed: (value) => agentMcpService.assertAllowed(value),
   outcomes: currentMcpOutcomeRecords
 })
+const contextStore = createAgentContextStore({
+  path: (sessionId) =>
+    join(
+      app.getPath('userData'),
+      'agent-context',
+      `${crypto.createHash('sha256').update(sessionId).digest('hex')}.json`
+    ),
+  assertAllowed: (value) => agentMcpService.assertAllowed(value),
+  notice: (message) => reportAgentPersistenceNotice({ level: 'warning', message })
+})
+
 function currentMcpOutcomeRecords() {
   try {
     return mcpOutcomes.records()
@@ -387,13 +413,14 @@ function editSessions<T>(
         'mode',
         'model',
         'reasoningEffort',
+        'context',
         'planReady',
         'updatedAt',
         'autoReviewEnrollment',
         'autoReviewMigrationRequired'
       ] as const) {
         const changed =
-          key === 'autoReviewEnrollment'
+          key === 'autoReviewEnrollment' || key === 'context'
             ? JSON.stringify(session[key]) !== JSON.stringify(original[key])
             : session[key] !== original[key]
         if (changed) Object.assign(existing, { [key]: session[key] })
@@ -499,6 +526,11 @@ async function initializeSessions(): Promise<AgentSessionsData> {
       session.status = 'interrupted'
       session.activeRunId = undefined
       session.error = 'Run interrupted when the application closed'
+    }
+    if (session.context?.state === 'compacting') {
+      session.context.state = 'ready'
+      session.context.message = 'Compaction interrupted; the original conversation is retained'
+      session.activeRunId = undefined
     }
     settleInterruptedToolCalls(session)
     Object.assign(session, reconcileAgentMcpOutcomes(session, currentMcpOutcomeRecords()))
@@ -606,6 +638,12 @@ export async function deleteAgentSession(sessionId: string): Promise<boolean> {
           message: "The deleted session's conversation shadow could not be removed."
         })
       })
+      await contextStore.forget(sessionId).catch(() => {
+        reportAgentPersistenceNotice({
+          level: 'warning',
+          message: "The deleted session's compact context could not be removed."
+        })
+      })
       return deleted
     } finally {
       deletingSessionIds.delete(sessionId)
@@ -620,7 +658,12 @@ export async function updateAgentSession(
 ): Promise<AgentSession> {
   await loadAgentSessions()
   const current = getSessionOrThrow(sessionId)
-  if (updates.mode && updates.mode !== current.mode) cancelAgentRun(sessionId)
+  if (
+    (updates.mode && updates.mode !== current.mode) ||
+    (updates.model && updates.model !== current.model) ||
+    (updates.reasoningEffort && updates.reasoningEffort !== current.reasoningEffort)
+  )
+    cancelAgentRun(sessionId)
   await editSessions((next) => {
     const session = next.sessions.find((item) => item.id === sessionId)
     if (!session) throw new Error('Agent session not found')
@@ -632,6 +675,11 @@ export async function updateAgentSession(
       session.autoReviewMigrationRequired = false
     }
     if (updates.mode && updates.mode !== 'planning') session.planReady = false
+    if (
+      (updates.model && updates.model !== session.model) ||
+      (updates.reasoningEffort && updates.reasoningEffort !== session.reasoningEffort)
+    )
+      session.context = undefined
     if (updates.model) session.model = updates.model
     if (updates.reasoningEffort) session.reasoningEffort = updates.reasoningEffort
     if (updates.model !== undefined || updates.reasoningEffort !== undefined) {
@@ -1388,6 +1436,122 @@ async function runTool(
   }
 }
 
+function contextFailureMessage(code?: string): string {
+  switch (code) {
+    case 'cannot_fit':
+      return 'Context cannot fit this model. Reduce current instructions or tools, or choose a larger-context model.'
+    case 'not_smaller':
+      return 'The summary did not reduce context. Try a larger-context model.'
+    case 'checkpoint_failed':
+      return 'Compact context could not be saved. Check storage, then retry.'
+    case 'summary_failed':
+      return 'The context summary failed. Try Compact again.'
+    default:
+      return 'Context could not be compacted'
+  }
+}
+
+function recordAgentCompactionUsage(
+  session: AgentSession,
+  context: AgentRunContext,
+  usage?: Usage
+): void {
+  context.pendingSummaryUsage = Math.max(0, context.pendingSummaryUsage - 1)
+  if (!usage) context.missingSummaryUsage = true
+  session.compactionUsageIncomplete =
+    context.missingSummaryUsage || context.pendingSummaryUsage > 0 || undefined
+  if (!usage) return
+  const prior = session.compactionUsage
+  const next: Usage = {
+    inputTokens: (prior?.inputTokens ?? 0) + usage.inputTokens,
+    outputTokens: (prior?.outputTokens ?? 0) + usage.outputTokens,
+    totalTokens: (prior?.totalTokens ?? 0) + usage.totalTokens
+  }
+  for (const key of ['cachedInputTokens', 'cacheWriteInputTokens'] as const)
+    if (usage[key] !== undefined && (!prior || prior[key] !== undefined))
+      next[key] = (prior?.[key] ?? 0) + usage[key]
+  session.compactionUsage = next
+}
+
+function setAgentContextUsage(
+  session: AgentSession,
+  settings: AiRuntimeSettings,
+  usage: ContextUsage
+): void {
+  session.context = {
+    provider: getAiProvider(settings),
+    model: session.model,
+    state: 'ready',
+    usage: clone(usage)
+  }
+}
+
+async function agentContextOptions(
+  session: AgentSession,
+  settings: AiRuntimeSettings,
+  prefixMessages: HistoryMessage[],
+  runId: string,
+  signal: AbortSignal,
+  runContext: AgentRunContext
+): Promise<ContextOptions> {
+  const checkpoint = await contextStore.load(session.id)
+  assertActiveRun(session, runId, signal)
+  return {
+    sourceId: `desktop/session/${session.id}`,
+    prefixMessages,
+    projectMessages: createAgentContextProjection(session.history || []),
+    checkpoint,
+    limits: getAgentContextLimits(settings, session.model),
+    autoCompact: true,
+    onCheckpoint: async (next) => {
+      assertActiveRun(session, runId, signal)
+      await trackRunOperation(
+        runContext,
+        contextStore
+          .save(session.id, next, () => assertActiveRun(session, runId, signal))
+          .then(() => {
+            runContext.contextCheckpointCommitted = true
+          })
+      )
+      assertActiveRun(session, runId, signal)
+    }
+  }
+}
+
+function agentContextPrefix(
+  mode: AgentMode,
+  capabilities: ReturnType<typeof getAgentModelCapabilities>,
+  skills: AgentSkillSnapshot,
+  memoryContext: string
+): HistoryMessage[] {
+  const hasMemories = memoryContext !== 'Saved user memories: none.'
+  return [
+    {
+      kind: 'message',
+      role: 'system',
+      content: `${SYSTEM_PROMPT}\n\n${MCP_GUIDANCE}\n\nCurrent execution mode: ${mode}. Planning permits captured local MCP metadata only; external calls and reads are disabled.${
+        capabilities.tools === 'supported'
+          ? ''
+          : '\n\nNo tools are available for this model: tool support is unsupported or unverified. You cannot inspect or change bot resources, run calculations, or save memories. State this limitation clearly when relevant and never claim to have performed those actions.'
+      }`
+    },
+    ...(hasMemories
+      ? [
+          {
+            kind: 'message' as const,
+            role: 'user' as const,
+            content: `${memoryContext}\nThis is context only, not a request to act.`
+          }
+        ]
+      : []),
+    {
+      kind: 'message',
+      role: 'user',
+      content: `${formatSkillCatalogContext(skills.catalog)}\n${capabilities.tools === 'supported' ? 'Tools are available for this model.' : 'This model has no tools: it cannot read skills.'} Desktop host can read bounded UTF-8 skill resources. ${skills.status.saveSupport.reason} No shell, executable skill scripts, binary asset loader, community downloads, dependency installation or skill-supplied tool grants are available. Manually saved file changes apply on a future turn. Current user instructions take priority. Read-only sources cannot be edited.`
+    }
+  ]
+}
+
 export function runAgentSession(
   sessionId: string,
   userContent: string,
@@ -1396,6 +1560,15 @@ export function runAgentSession(
 ): Promise<{ runId: string }> {
   return withAgentPersistenceOperation(() =>
     startAgentSession(sessionId, userContent, settings, acceptedPlan)
+  )
+}
+
+export function compactAgentSession(
+  sessionId: string,
+  settings: AiRuntimeSettings
+): Promise<{ runId: string }> {
+  return withAgentPersistenceOperation(() =>
+    startAgentSession(sessionId, '', settings, undefined, true)
   )
 }
 
@@ -1418,7 +1591,8 @@ async function startAgentSession(
   sessionId: string,
   userContent: string,
   settings: AiRuntimeSettings,
-  acceptedPlan?: { text: string; binding: string }
+  acceptedPlan?: { text: string; binding: string },
+  compactOnly = false
 ): Promise<{ runId: string }> {
   await loadAgentSessions()
   persistence.assertWritable()
@@ -1428,7 +1602,7 @@ async function startAgentSession(
   if (historyError) throw new Error(historyError)
   if (controllers.has(sessionId))
     throw new Error('This agent session already has a running request')
-  if (!userContent.trim()) throw new Error('Message cannot be empty')
+  if (!compactOnly && !userContent.trim()) throw new Error('Message cannot be empty')
   // App policy remains here; a standalone vivi OpenRouter provider needs only its own key.
   const configError = validateAiConfiguration(settings)
   if (configError) throw new Error(configError)
@@ -1476,6 +1650,9 @@ async function startAgentSession(
     owner,
     extensionScope,
     durableOperations: new Set(),
+    contextCheckpointCommitted: false,
+    pendingSummaryUsage: 0,
+    missingSummaryUsage: session.compactionUsageIncomplete === true,
     validationFailures: new Map(),
     skills,
     mcpTools: new Set(),
@@ -1489,6 +1666,7 @@ async function startAgentSession(
     ...(acceptedPlan ? { acceptedPlan: clone(acceptedPlan) } : {})
   }
   const mode = session.mode
+  const priorStatus = session.status
   const controller = { runId, scope: owner }
   const signal = owner.signal
   owner.defer(() => drainRunOperations(context))
@@ -1516,22 +1694,40 @@ async function startAgentSession(
   })
   controllers.set(sessionId, controller)
   session.activeRunId = runId
-  session.status = 'running'
-  session.planReady = false
-  session.error = undefined
-  checkpointRunMetrics(session, context)
-  if (session.messages.length === 0) session.title = userContent.trim().slice(0, 48)
-  session.history ??= []
-  session.history.push({ kind: 'message', role: 'user', content: userContent.trim() })
-  addMessage(session, { role: 'user', content: userContent.trim() })
+  if (!compactOnly) session.status = 'running'
+  if (compactOnly)
+    session.context = {
+      ...(session.context?.provider === getAiProvider(settings) &&
+      session.context.model === session.model
+        ? session.context
+        : {}),
+      provider: getAiProvider(settings),
+      model: session.model,
+      state: 'compacting',
+      message: 'Compacting context…'
+    }
+  if (!compactOnly) {
+    session.planReady = false
+    session.error = undefined
+    checkpointRunMetrics(session, context)
+    if (session.messages.length === 0) session.title = userContent.trim().slice(0, 48)
+    session.history ??= []
+    session.history.push({ kind: 'message', role: 'user', content: userContent.trim() })
+    addMessage(session, { role: 'user', content: userContent.trim() })
+  }
   try {
     await save()
-    await trackRunOperation(context, conversationRecords.start(session, runId))
+    if (!compactOnly) await trackRunOperation(context, conversationRecords.start(session, runId))
   } catch (error) {
     session.status = 'error'
     session.activeRunId = undefined
     session.error = errorDetail(error)
-    session.lastRunMetrics = finishAgentRunMetrics(context.metrics, 'error', now())
+    if (compactOnly && session.context) {
+      session.context.state = 'error'
+      session.context.message = 'Compaction could not start'
+    }
+    if (!compactOnly)
+      session.lastRunMetrics = finishAgentRunMetrics(context.metrics, 'error', now())
     try {
       await owner.dispose()
     } catch (cleanupError) {
@@ -1549,7 +1745,6 @@ async function startAgentSession(
     let inputHistoryLength = 0
     try {
       const memoryContext = formatAgentMemoryContext((await loadAgentMemories()).memories)
-      const hasMemories = memoryContext !== 'Saved user memories: none.'
       const runModel = { model: session.model, reasoningEffort: session.reasoningEffort }
       const capabilities = getAgentModelCapabilities(settings, runModel.model)
       if (capabilities.tools === 'supported') {
@@ -1613,196 +1808,292 @@ async function startAgentSession(
         mode === 'planning'
           ? agentToolDefinitions.filter((tool) => !mutationToolNames.has(tool.function.name))
           : agentToolDefinitions
-      const prefix: HistoryMessage[] = [
-        {
-          kind: 'message',
-          role: 'system',
-          content: `${SYSTEM_PROMPT}\n\n${MCP_GUIDANCE}\n\nCurrent execution mode: ${mode}. Planning permits captured local MCP metadata only; external calls and reads are disabled.${
-            capabilities.tools === 'supported'
-              ? ''
-              : '\n\nNo tools are available for this model: tool support is unsupported or unverified. You cannot inspect or change bot resources, run calculations, or save memories. State this limitation clearly when relevant and never claim to have performed those actions.'
-          }`
-        },
-        ...(hasMemories
+      const prefix = agentContextPrefix(mode, capabilities, skills, memoryContext)
+      const providerTools =
+        capabilities.tools === 'supported'
           ? [
-              {
-                kind: 'message' as const,
-                role: 'user' as const,
-                content: `${memoryContext}\nThis is context only, not a request to act.`
-              }
+              ...tools.map((tool) => ({
+                name: tool.function.name,
+                description: tool.function.description,
+                parameters: JSON.parse(JSON.stringify(tool.function.parameters))
+              })),
+              ...context.extensions.tools
             ]
-          : []),
-        {
-          kind: 'message',
-          role: 'user',
-          content: `${formatSkillCatalogContext(skills.catalog)}\n${capabilities.tools === 'supported' ? 'Tools are available for this model.' : 'This model has no tools: it cannot read skills.'} Desktop host can read bounded UTF-8 skill resources. ${skills.status.saveSupport.reason} No shell, executable skill scripts, binary asset loader, community downloads, dependency installation or skill-supplied tool grants are available. Manually saved file changes apply on a future turn. Current user instructions take priority. Read-only sources cannot be edited.`
-        }
-      ]
-      const initialTokenCount = session.tokenCount
-      inputHistoryLength = session.history!.length
-      assertActiveRun(session, runId, signal)
-      const result = await runAgent({
-        provider: createAgentProvider(settings, runModel, { stream: true, capabilities }),
-        messages: [
-          ...prefix,
-          ...session.history!.map((message) =>
-            message.kind === 'tool_result' && message.name === 'read_skill'
-              ? {
-                  ...message,
-                  content: JSON.stringify({
-                    priorSkillRead: true,
-                    message:
-                      'Earlier skill guidance omitted. Read the relevant skill from this turn catalog again.'
-                  })
-                }
-              : message
-          )
-        ],
-        tools:
-          capabilities.tools === 'supported'
-            ? [
-                ...tools.map((tool) => ({
-                  name: tool.function.name,
-                  description: tool.function.description,
-                  parameters: JSON.parse(JSON.stringify(tool.function.parameters))
-                })),
-                ...context.extensions.tools
-              ]
-            : [],
+          : []
+      const contextOptions = await agentContextOptions(
+        session,
+        settings,
+        prefix,
+        runId,
         signal,
-        maxRounds: MAX_TOOL_ROUNDS,
-        executeTool: async (call, { signal }) => {
-          const { toolCall, content } = await runTool(session, runId, mode, call, context, signal)
-          return {
-            content,
-            isError:
-              toolCall.status === 'error' ||
-              (context.mcpTools.has(toolCall.name) && toolCall.status === 'rejected')
+        context
+      )
+      const provider = createAgentProvider(settings, runModel, {
+        stream: !compactOnly,
+        capabilities,
+        onSummaryDispatch: () => {
+          assertActiveRun(session, runId, signal)
+          context.pendingSummaryUsage++
+          session.compactionUsageIncomplete = true
+          void trackRunOperation(context, save())
+        }
+      })
+      setAgentContextUsage(
+        session,
+        settings,
+        measureContext({
+          provider,
+          messages: session.history || [],
+          tools: providerTools,
+          context: contextOptions
+        }).usage
+      )
+      emitSession(session, runId)
+      if (compactOnly) {
+        session.context = {
+          provider: getAiProvider(settings),
+          model: session.model,
+          ...session.context,
+          state: 'compacting',
+          message: 'Compacting context…'
+        }
+        emitSession(session, runId)
+        const compacted = await compactContext({
+          provider,
+          messages: session.history || [],
+          tools: providerTools,
+          context: contextOptions,
+          signal,
+          onEvent: async (event) => {
+            assertActiveRun(session, runId, signal)
+            if (event.type === 'compaction_usage') {
+              recordAgentCompactionUsage(session, context, event.usage)
+              await trackRunOperation(context, save())
+            }
           }
-        },
-        onAccepted: (update) =>
-          trackRunOperation(
-            context,
-            (async () => {
-              assertActiveRun(session, runId, signal)
-              await conversationRecords.accepted(session, runId, update)
-              // An admitted shadow write drains through cancellation; it never keeps execution alive.
-              assertActiveRun(session, runId, signal)
-            })()
-          ),
-        onEvent: (event) =>
-          trackRunOperation(
-            context,
-            (async () => {
-              assertActiveRun(session, runId, signal)
-              if (event.type === 'text_delta') {
-                emit(session, { type: 'text_delta', runId, delta: event.text })
-              }
-              if (event.type === 'assistant') {
-                // Partial output is display-only and must never become persisted history.
-                emit(session, { type: 'progress_reset', runId })
-              }
-              if (event.type === 'tool_started') {
-                context.metrics = recordAgentRunTool(context.metrics, {
-                  ...event.call,
-                  status: 'running',
-                  createdAt: now()
-                })
-              }
-              if (event.type === 'tool_completed') {
-                const recorded = context.metrics.tools?.find(
-                  (tool) => tool.id === event.message.callId
-                )
-                // Core can reject an unadvertised tool without invoking the host executor.
-                // Keep richer host completion/rejection/lint evidence when it was recorded.
-                if (recorded?.status === 'running')
+        })
+        assertActiveRun(session, runId, signal)
+        setAgentContextUsage(session, settings, compacted.usage)
+        session.context!.message = !compacted.checkpoint
+          ? 'Nothing to compact'
+          : JSON.stringify(compacted.checkpoint) === JSON.stringify(contextOptions.checkpoint)
+            ? 'Context already compact'
+            : 'Context compacted'
+        session.status = priorStatus
+        session.activeRunId = undefined
+        await save()
+      } else {
+        const initialTokenCount = session.tokenCount
+        inputHistoryLength = session.history!.length
+        assertActiveRun(session, runId, signal)
+        const result = await runAgent({
+          provider,
+          messages: session.history!,
+          context: contextOptions,
+          tools: providerTools,
+          signal,
+          maxRounds: MAX_TOOL_ROUNDS,
+          executeTool: async (call, { signal }) => {
+            const { toolCall, content } = await runTool(session, runId, mode, call, context, signal)
+            return {
+              content,
+              isError:
+                toolCall.status === 'error' ||
+                (context.mcpTools.has(toolCall.name) && toolCall.status === 'rejected')
+            }
+          },
+          onAccepted: (update) =>
+            trackRunOperation(
+              context,
+              (async () => {
+                assertActiveRun(session, runId, signal)
+                await conversationRecords.accepted(session, runId, update)
+                // An admitted shadow write drains through cancellation; it never keeps execution alive.
+                assertActiveRun(session, runId, signal)
+              })()
+            ),
+          onEvent: (event) =>
+            trackRunOperation(
+              context,
+              (async () => {
+                assertActiveRun(session, runId, signal)
+                if (event.type === 'compaction_usage') {
+                  recordAgentCompactionUsage(session, context, event.usage)
+                  await save()
+                }
+                if (event.type === 'context_usage') {
+                  setAgentContextUsage(session, settings, event.usage)
+                  emitSession(session, runId)
+                }
+                if (event.type === 'compaction_started') {
+                  session.context = {
+                    provider: getAiProvider(settings),
+                    model: session.model,
+                    ...session.context,
+                    state: 'compacting',
+                    message: 'Compacting context…'
+                  }
+                  emitSession(session, runId)
+                }
+                if (event.type === 'compaction_completed') {
+                  if (session.context) {
+                    session.context.state = 'ready'
+                    session.context.message = 'Context compacted'
+                  }
+                  emitSession(session, runId)
+                }
+                if (event.type === 'compaction_failed') {
+                  session.context = {
+                    provider: getAiProvider(settings),
+                    model: session.model,
+                    ...session.context,
+                    state: 'error',
+                    message: contextFailureMessage(event.code)
+                  }
+                  emitSession(session, runId)
+                }
+                if (event.type === 'text_delta') {
+                  emit(session, { type: 'text_delta', runId, delta: event.text })
+                }
+                if (event.type === 'assistant') {
+                  // Partial output is display-only and must never become persisted history.
+                  emit(session, { type: 'progress_reset', runId })
+                }
+                if (event.type === 'tool_started') {
                   context.metrics = recordAgentRunTool(context.metrics, {
-                    id: event.message.callId,
-                    name: event.message.name,
-                    arguments: {},
-                    status: event.message.isError ? 'error' : 'completed',
+                    ...event.call,
+                    status: 'running',
                     createdAt: now()
                   })
-              }
-              if (event.type === 'round_completed') {
-                context.metrics = recordAgentRound(
-                  context.metrics,
-                  context.metrics.providerRounds + 1,
-                  event.usage
-                )
-                session.tokenCount = initialTokenCount + context.metrics.totalTokens
-                checkpointRunMetrics(session, context)
-                await save()
-                assertActiveRun(session, runId, signal)
-                emitSession(session, runId)
-              }
-              if (event.type === 'assistant' || event.type === 'tool_completed') {
-                session.history!.push(clone(event.message))
-                // Checkpoint calls before execution, then each result; recovery never replays them.
-                checkpointRunMetrics(session, context)
-                await save()
-              }
-            })()
-          )
-      })
-      acceptedResult = result
-      await drainRunOperations(context)
-      // Cancellation/error may close unexecuted calls without emitting further events.
-      if (result.error?.code !== 'invalid_input')
-        session.history = result.history.slice(prefix.length)
-      context.metrics = reconcileAgentRunUsage(context.metrics, result)
-      session.tokenCount = initialTokenCount + result.usage.totalTokens
-      settleInterruptedToolCalls(session)
-      Object.assign(session, reconcileAgentMcpOutcomes(session, currentMcpOutcomeRecords()))
-      if (result.status === 'error')
-        throw new Error(result.error?.message || 'Agent execution failed')
-      if (result.status === 'cancelled') throw new Error('Agent execution cancelled')
-      const content = result.content.trim() || 'The agent completed without a text response.'
-      const response =
-        mode === 'planning' ? parseProposedPlan(content) : { content, planReady: false }
-      addMessage(session, { role: 'assistant', content: response.content })
-      session.status = 'completed'
-      session.planReady = response.planReady
-      session.activeRunId = undefined
-      context.metrics = finishAgentRunMetrics(context.metrics, 'completed', now())
-      session.lastRunMetrics = clone(context.metrics)
-      await save()
-      await trackRunOperation(
-        context,
-        conversationRecords.settle(session, runId, result, inputHistoryLength)
-      )
-      await acknowledgeMcpOutcomes(session, runId)
+                }
+                if (event.type === 'tool_completed') {
+                  const recorded = context.metrics.tools?.find(
+                    (tool) => tool.id === event.message.callId
+                  )
+                  // Core can reject an unadvertised tool without invoking the host executor.
+                  // Keep richer host completion/rejection/lint evidence when it was recorded.
+                  if (recorded?.status === 'running')
+                    context.metrics = recordAgentRunTool(context.metrics, {
+                      id: event.message.callId,
+                      name: event.message.name,
+                      arguments: {},
+                      status: event.message.isError ? 'error' : 'completed',
+                      createdAt: now()
+                    })
+                }
+                if (event.type === 'round_completed') {
+                  context.metrics = recordAgentRound(
+                    context.metrics,
+                    context.metrics.providerRounds + 1,
+                    event.usage
+                  )
+                  session.tokenCount = initialTokenCount + context.metrics.totalTokens
+                  checkpointRunMetrics(session, context)
+                  await save()
+                  assertActiveRun(session, runId, signal)
+                  emitSession(session, runId)
+                }
+                if (event.type === 'assistant' || event.type === 'tool_completed') {
+                  session.history!.push(clone(event.message))
+                  // Checkpoint calls before execution, then each result; recovery never replays them.
+                  checkpointRunMetrics(session, context)
+                  await save()
+                }
+              })()
+            )
+        })
+        acceptedResult = result
+        await drainRunOperations(context)
+        // Cancellation/error may close unexecuted calls without emitting further events.
+        if (result.error?.code !== 'invalid_input') session.history = result.history
+        context.metrics = reconcileAgentRunUsage(context.metrics, result)
+        session.tokenCount = initialTokenCount + result.usage.totalTokens
+        settleInterruptedToolCalls(session)
+        Object.assign(session, reconcileAgentMcpOutcomes(session, currentMcpOutcomeRecords()))
+        if (result.status === 'error')
+          throw new Error(result.error?.message || 'Agent execution failed')
+        if (result.status === 'cancelled') throw new Error('Agent execution cancelled')
+        const content = result.content.trim() || 'The agent completed without a text response.'
+        const response =
+          mode === 'planning' ? parseProposedPlan(content) : { content, planReady: false }
+        addMessage(session, { role: 'assistant', content: response.content })
+        session.status = 'completed'
+        session.planReady = response.planReady
+        session.activeRunId = undefined
+        context.metrics = finishAgentRunMetrics(context.metrics, 'completed', now())
+        session.lastRunMetrics = clone(context.metrics)
+        await save()
+        await trackRunOperation(
+          context,
+          conversationRecords.settle(session, runId, result, inputHistoryLength)
+        )
+        await acknowledgeMcpOutcomes(session, runId)
+      }
     } catch (error) {
       await drainRunOperations(context)
-      settleInterruptedToolCalls(session)
-      Object.assign(session, reconcileAgentMcpOutcomes(session, currentMcpOutcomeRecords()))
-      const aborted = signal.aborted && !(error instanceof AgentExtensionCleanupError)
-      session.status = aborted ? 'cancelled' : 'error'
-      session.error = aborted ? undefined : errorDetail(error)
-      session.activeRunId = undefined
-      context.metrics = finishAgentRunMetrics(context.metrics, session.status, now())
-      session.lastRunMetrics = clone(context.metrics)
-      try {
-        await save()
-        if (acceptedResult)
-          await trackRunOperation(
-            context,
-            conversationRecords.settle(session, runId, acceptedResult, inputHistoryLength)
-          )
-        await acknowledgeMcpOutcomes(session, runId)
-      } catch (persistenceError) {
-        session.status = 'error'
-        session.error = `Failed to save agent session: ${errorDetail(persistenceError)}`
-        session.lastRunMetrics = finishAgentRunMetrics(context.metrics, 'error', now())
+      if (signal.aborted && context.contextCheckpointCommitted && session.context)
+        session.context.usage = undefined
+      if (compactOnly) {
+        session.status = priorStatus
+        session.activeRunId = undefined
+        if (session.context)
+          session.context = {
+            ...session.context,
+            state: signal.aborted ? 'ready' : 'error',
+            message: signal.aborted
+              ? context.contextCheckpointCommitted
+                ? 'Context compacted before cancellation'
+                : 'Compaction cancelled'
+              : contextFailureMessage(error instanceof ContextError ? error.code : undefined)
+          }
+        try {
+          await save()
+        } catch (persistenceError) {
+          session.status = 'error'
+          session.error = `Failed to save agent session: ${errorDetail(persistenceError)}`
+          terminal = 'error'
+        }
+      } else {
+        settleInterruptedToolCalls(session)
+        Object.assign(session, reconcileAgentMcpOutcomes(session, currentMcpOutcomeRecords()))
+        const aborted = signal.aborted && !(error instanceof AgentExtensionCleanupError)
+        if (session.context?.state === 'compacting') {
+          session.context.state = aborted ? 'ready' : 'error'
+          session.context.message = aborted
+            ? context.contextCheckpointCommitted
+              ? 'Context compacted before cancellation'
+              : 'Compaction cancelled'
+            : contextFailureMessage(error instanceof ContextError ? error.code : undefined)
+        }
+        session.status = aborted ? 'cancelled' : 'error'
+        session.error = aborted ? undefined : errorDetail(error)
+        session.activeRunId = undefined
+        context.metrics = finishAgentRunMetrics(context.metrics, session.status, now())
+        session.lastRunMetrics = clone(context.metrics)
+        try {
+          await save()
+          if (acceptedResult)
+            await trackRunOperation(
+              context,
+              conversationRecords.settle(session, runId, acceptedResult, inputHistoryLength)
+            )
+          await acknowledgeMcpOutcomes(session, runId)
+        } catch (persistenceError) {
+          session.status = 'error'
+          session.error = `Failed to save agent session: ${errorDetail(persistenceError)}`
+          if (!compactOnly)
+            session.lastRunMetrics = finishAgentRunMetrics(context.metrics, 'error', now())
+        }
+        terminal = session.status === 'cancelled' ? 'done' : 'error'
       }
-      terminal = session.status === 'cancelled' ? 'done' : 'error'
     } finally {
       try {
         await owner.dispose()
       } catch (cleanupError) {
         session.status = 'error'
         session.error = `Agent cleanup failed: ${errorDetail(cleanupError)}`
-        session.lastRunMetrics = finishAgentRunMetrics(context.metrics, 'error', now())
+        if (!compactOnly)
+          session.lastRunMetrics = finishAgentRunMetrics(context.metrics, 'error', now())
         terminal = 'error'
         await save().catch((error) => {
           reportAgentPersistenceNotice({ level: 'error', message: errorDetail(error) })

@@ -94,6 +94,7 @@ const validInvokeChannels = [
   'agent:resolve-plan',
   'agent:approve',
   'agent:cancel',
+  'agent:compact',
   // API auth
   'api-auth-register',
   'api-auth-login',
