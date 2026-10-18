@@ -1,18 +1,20 @@
-import type { AgentProvider } from './agentTypes'
+import type { ReviewerProvider } from './providerSelection'
+import type { AgentWebEnrollment } from './agentWeb'
 
 export const AUTO_REVIEW_POLICY_REVISION = 'desktop-reviewed-auto-v2'
 
 export interface AgentAutoReviewEnrollment {
   policyRevision: string
-  provider: AgentProvider
+  provider: ReviewerProvider
   accountRevision: string
   acknowledgedAt: string
+  web?: AgentWebEnrollment
 }
 
 export interface AgentDecisionAuditInspection {
   id: string
   policyRevision: string
-  provider: AgentProvider
+  provider: ReviewerProvider
   accountRevision: string
   inspectedAt: string
   canAcknowledge: boolean
@@ -20,7 +22,7 @@ export interface AgentDecisionAuditInspection {
   rows: Array<{
     id: string
     tool: string
-    targetType?: 'command' | 'memory'
+    targetType?: 'command' | 'memory' | 'web'
     targetId?: string
     outcome: 'unknown'
     candidateRevision?: string
@@ -33,7 +35,7 @@ export interface AgentDecisionAuditInspection {
 export interface AgentDecisionDisplay {
   id: string
   policyRevision: string
-  provider?: AgentProvider
+  provider?: ReviewerProvider
   model?: string
   reasonCode: string
   recommendation: 'allow' | 'ask' | 'deny'

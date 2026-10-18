@@ -307,3 +307,56 @@ describe('aiProviderService', () => {
     expect(JSON.stringify(agent)).not.toContain('host-only-fixture-key')
   })
 })
+
+describe('DeepSeek Discord chat adapter', () => {
+  it('supports standalone agent configuration but preflights Discord moderation before a paid $chat call', async () => {
+    const { validateAiConfiguration, createAiChatCompletion } = await import('./aiProviderService')
+    const settings = {
+      aiProvider: 'deepseek' as const,
+      deepseekApiKey: 'chat-fixture',
+      openaiApiKey: ''
+    }
+    expect(validateAiConfiguration(settings)).toBeNull()
+    await expect(
+      createAiChatCompletion(settings, [{ role: 'user', content: 'Hello' }])
+    ).rejects.toThrow('Discord $chat response moderation')
+    expect(fetch).not.toHaveBeenCalled()
+  })
+  it('uses the core tool-free native adapter and preserves provider-default omission', async () => {
+    const { createAiChatCompletion } = await import('./aiProviderService')
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: {
+                role: 'assistant',
+                content: 'Hello',
+                reasoning_content: 'private native reasoning'
+              }
+            }
+          ],
+          usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 }
+        })
+      )
+    )
+    expect(
+      await createAiChatCompletion(
+        {
+          aiProvider: 'deepseek',
+          deepseekApiKey: 'chat-fixture',
+          openaiApiKey: 'moderation-fixture'
+        },
+        [{ role: 'user', content: 'Hello' }]
+      )
+    ).toEqual({ content: 'Hello', tokenCount: 10 })
+    const [url, init] = vi.mocked(fetch).mock.calls.at(-1)!
+    expect(String(url)).toBe('https://api.deepseek.com/chat/completions')
+    const body = JSON.parse(String(init!.body))
+    expect(body.model).toBe('deepseek-flash')
+    expect(body).not.toHaveProperty('thinking')
+    expect(body).not.toHaveProperty('reasoning_effort')
+    expect(body).not.toHaveProperty('tools')
+  })
+})

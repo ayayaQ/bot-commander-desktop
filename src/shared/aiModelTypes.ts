@@ -1,6 +1,6 @@
 import type { ApiProtocol, ModelCapabilities } from '@ayayaq/vivi/providers/models'
 
-export type AiProvider = 'openai' | 'openrouter'
+export type AiProvider = 'openai' | 'openrouter' | 'deepseek'
 /** Legacy none is omission. Disabled is an explicit, separately verified override. */
 export type DesktopReasoningEffort =
   'none' | 'disabled' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'

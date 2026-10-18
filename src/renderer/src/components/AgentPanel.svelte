@@ -56,6 +56,8 @@
     autoReviewReasonLabel
   } from '../../../shared/agentAutoReview'
   import type { AgentDecisionAuditInspection } from '../../../shared/agentAutoReview'
+  import { AGENT_WEB_DISCLOSURE, AGENT_WEB_POLICY_REVISION } from '../../../shared/agentWeb'
+  import { selectedReviewer } from '../../../shared/providerSelection'
 
   let compactError = $state('')
   let compactBusy = $state(false)
@@ -99,16 +101,29 @@
     planId?: string
     provider: 'openai' | 'openrouter'
     accountRevision?: string
+    webAccountRevision?: string
   } | null>(null)
   let enrollmentAcknowledged = $state(false)
+  let webEnrollmentAcknowledged = $state(false)
   let enrollmentBusy = $state(false)
   let enrollmentError = $state('')
   let auditInspection = $state<AgentDecisionAuditInspection | undefined>()
   let auditAcknowledged = $state(false)
   $effect(() => {
-    if (enrollmentIntent && (enrollmentIntent.sessionId !== $activeAgentSession?.id || running)) {
+    if (
+      enrollmentIntent &&
+      (enrollmentIntent.sessionId !== $activeAgentSession?.id ||
+        running ||
+        enrollmentIntent.provider !== selectedReviewer($settingsStore) ||
+        enrollmentIntent.accountRevision !== $settingsStore.agentDecisionAccountRevision ||
+        enrollmentIntent.webAccountRevision !==
+          ($settingsStore.webProvider === 'deepseek'
+            ? $settingsStore.agentWebAccountRevision
+            : undefined))
+    ) {
       enrollmentIntent = null
       enrollmentAcknowledged = false
+      webEnrollmentAcknowledged = false
     }
   })
 
@@ -227,7 +242,11 @@
     const unsubscribeSettings = settingsStore.subscribe((settings) => {
       const nextProvider = settings.aiProvider || 'openai'
       const nextKey =
-        nextProvider === 'openrouter' ? settings.openrouterApiKey : settings.openaiApiKey
+        nextProvider === 'deepseek'
+          ? `${Boolean(settings.deepseekKeyConfigured)}:${settings.deepseekChatAccountRevision || ''}`
+          : nextProvider === 'openrouter'
+            ? settings.openrouterApiKey
+            : settings.openaiApiKey
       if (provider === nextProvider && key === nextKey) return
       provider = nextProvider
       key = nextKey
@@ -382,6 +401,11 @@
 
   function beginEnrollment(forPlan: boolean) {
     if (!$activeAgentSession || running) return
+    const provider = selectedReviewer($settingsStore)
+    if (!provider) {
+      enrollmentError = 'Choose OpenAI or OpenRouter as the Auto reviewer in Settings first.'
+      return
+    }
     const plan = [...$activeAgentSession.messages]
       .reverse()
       .find((message) => message.role === 'assistant')
@@ -389,10 +413,15 @@
       sessionId: $activeAgentSession.id,
       forPlan,
       ...(forPlan && plan ? { planId: plan.id } : {}),
-      provider: $settingsStore.aiProvider || 'openai',
-      accountRevision: $settingsStore.agentDecisionAccountRevision
+      provider,
+      accountRevision: $settingsStore.agentDecisionAccountRevision,
+      webAccountRevision:
+        $settingsStore.webProvider === 'deepseek'
+          ? $settingsStore.agentWebAccountRevision
+          : undefined
     }
     enrollmentAcknowledged = false
+    webEnrollmentAcknowledged = false
     enrollmentError = ''
     auditInspection = undefined
     auditAcknowledged = false
@@ -438,6 +467,14 @@
         {
           provider: intent.provider,
           accountRevision: intent.accountRevision,
+          ...(webEnrollmentAcknowledged
+            ? {
+                web: {
+                  policyRevision: AGENT_WEB_POLICY_REVISION,
+                  accountRevision: intent.webAccountRevision
+                }
+              }
+            : {}),
           ...(auditInspection?.rows.length && auditAcknowledged
             ? { recoveryInspectionId: auditInspection.id }
             : {})
@@ -811,11 +848,16 @@
           {/if}
           {#if $activeAgentSession.mode === 'auto'}
             <div class="text-xs opacity-70">
-              Auto review uses {($settingsStore.aiProvider || 'openai') === 'openai'
+              Auto review uses {selectedReviewer($settingsStore) === 'openai'
                 ? 'OpenAI gpt-6-luna'
-                : 'OpenRouter / TypeSafe typesafe/jev-1.13'} for eligible changes. Saved commands change
-              the live bot. Excluded changes still require manual approval.
+                : selectedReviewer($settingsStore) === 'openrouter'
+                  ? 'OpenRouter / TypeSafe typesafe/jev-1.13'
+                  : 'an unavailable reviewer'} for eligible changes. Saved commands change the live bot.
+              Excluded changes still require manual approval.
             </div>
+          {/if}
+          {#if enrollmentError && !enrollmentIntent}
+            <div class="text-error text-sm" role="alert">{enrollmentError}</div>
           {/if}
           {#if enrollmentIntent}
             <div
@@ -839,6 +881,19 @@
                   disabled={enrollmentBusy}
                 />I consent to the disclosed data sharing and bounded review flow for this session</label
               >
+              {#if $settingsStore.webProvider === 'deepseek'}
+                <div class="border-t border-base-300 pt-3 space-y-2">
+                  <p class="text-xs">{AGENT_WEB_DISCLOSURE}</p>
+                  <label class="flex gap-2 items-start text-sm"
+                    ><input
+                      type="checkbox"
+                      class="checkbox checkbox-sm"
+                      bind:checked={webEnrollmentAcknowledged}
+                      disabled={enrollmentBusy || !enrollmentIntent.webAccountRevision}
+                    />Also allow the disclosed paid DeepSeek web requests for this session</label
+                  >
+                </div>
+              {/if}
               {#if enrollmentError}<div class="text-error text-sm">{enrollmentError}</div>{/if}
               <button
                 class="btn btn-sm btn-outline"
@@ -893,6 +948,7 @@
                   onclick={() => {
                     enrollmentIntent = null
                     enrollmentAcknowledged = false
+                    webEnrollmentAcknowledged = false
                   }}>Cancel</button
                 >
                 <button

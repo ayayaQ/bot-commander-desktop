@@ -6,6 +6,7 @@ import type {
   ProviderResult,
   ToolDefinition
 } from '@ayayaq/vivi'
+import { createDeepSeekProvider } from '@ayayaq/vivi/providers/deepseek'
 import { createOpenAIProvider } from '@ayayaq/vivi/providers/openai'
 import { createOpenRouterProvider } from '@ayayaq/vivi/providers/openrouter'
 import type { ModelCapabilities } from '@ayayaq/vivi/providers/models'
@@ -80,7 +81,7 @@ export function createAgentProvider(
   const apiKey = getProviderApiKey(settings)
   if (!apiKey.trim()) {
     throw new Error(
-      `${provider === 'openai' ? 'OpenAI' : 'OpenRouter'} API key not configured. Please add it in Settings.`
+      `${provider === 'deepseek' ? 'DeepSeek' : provider === 'openai' ? 'OpenAI' : 'OpenRouter'} API key not configured. Please add it in Settings.`
     )
   }
   const capabilities = immutableModelCapabilities(
@@ -107,17 +108,19 @@ export function createAgentProvider(
     timeoutMs: AGENT_REQUEST_TIMEOUT_MS
   }
   const createTransport = (fetch?: typeof globalThis.fetch) =>
-    provider === 'openrouter'
-      ? createOpenRouterProvider({
-          ...common,
-          ...(fetch ? { fetch } : {}),
-          apiKey,
-          attribution: {
-            referer: 'https://github.com/ayayaQ/bot-commander-desktop',
-            title: 'Bot Commander for Discord'
-          }
-        })
-      : createOpenAIProvider({ ...common, apiKey, ...(fetch ? { fetch } : {}) })
+    provider === 'deepseek'
+      ? createDeepSeekProvider({ ...common, apiKey, ...(fetch ? { fetch } : {}) })
+      : provider === 'openrouter'
+        ? createOpenRouterProvider({
+            ...common,
+            ...(fetch ? { fetch } : {}),
+            apiKey,
+            attribution: {
+              referer: 'https://github.com/ayayaQ/bot-commander-desktop',
+              title: 'Bot Commander for Discord'
+            }
+          })
+        : createOpenAIProvider({ ...common, apiKey, ...(fetch ? { fetch } : {}) })
   const transport = createTransport()
   const fetchImpl = globalThis.fetch
   return {

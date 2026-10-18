@@ -1,4 +1,6 @@
 import OpenAI from 'openai'
+import { createDeepSeekProvider } from '@ayayaq/vivi/providers/deepseek'
+import { reasoningSelection, providerReasoningEfforts } from '../../shared/modelReasoningControls'
 import type { AppSettings } from '../types/types'
 import type { ApiProtocol } from '@ayayaq/vivi/providers/models'
 import type {
@@ -11,7 +13,7 @@ import { nonConversationOpenAI } from './openAiResponsesRegistry'
 import { reasoningConfigurationError } from '../../shared/modelReasoningControls'
 export type { AiModelInfo } from '../../shared/aiModelTypes'
 
-export type AiProvider = 'openai' | 'openrouter'
+export type AiProvider = 'openai' | 'openrouter' | 'deepseek'
 export type ReasoningEffort = ChatReasoningEffort
 export type AiRuntimeSettings = Partial<AppSettings> & {
   openaiApiKey: string
@@ -273,10 +275,16 @@ function formatOpenRouterChoiceError(choice: any): string | null {
 }
 
 export function getAiProvider(settings: AiRuntimeSettings): AiProvider {
-  return settings.aiProvider === 'openrouter' ? 'openrouter' : 'openai'
+  return settings.aiProvider === 'deepseek'
+    ? 'deepseek'
+    : settings.aiProvider === 'openrouter'
+      ? 'openrouter'
+      : 'openai'
 }
 
 export function getSelectedAiModel(settings: AiRuntimeSettings): string {
+  if (getAiProvider(settings) === 'deepseek')
+    return settings.selectedDeepSeekModel || 'deepseek-flash'
   if (getAiProvider(settings) === 'openrouter') {
     return settings.selectedOpenRouterModel || settings.selectedAiModel || 'openai/gpt-5.4-nano'
   }
@@ -285,6 +293,7 @@ export function getSelectedAiModel(settings: AiRuntimeSettings): string {
 }
 
 export function getProviderApiKey(settings: AiRuntimeSettings): string {
+  if (getAiProvider(settings) === 'deepseek') return settings.deepseekApiKey || ''
   return getAiProvider(settings) === 'openrouter'
     ? settings.openrouterApiKey || ''
     : settings.openaiApiKey || ''
@@ -292,6 +301,11 @@ export function getProviderApiKey(settings: AiRuntimeSettings): string {
 
 export function validateAiConfiguration(settings: AiRuntimeSettings): string | null {
   const provider = getAiProvider(settings)
+  if (provider === 'deepseek') {
+    if (!settings.deepseekApiKey?.trim())
+      return 'DeepSeek API key not configured. Please add it in Settings.'
+    return null
+  }
   if (provider === 'openrouter') {
     if (!settings.openrouterApiKey)
       return 'OpenRouter API key not configured. Please add it in Settings.'
@@ -334,6 +348,14 @@ export async function fetchAiModels(
       if (!response.ok) throw new Error(`Model catalog unavailable (HTTP ${response.status})`)
       const json: unknown = await response.json()
       data = isRecord(json) ? json.data : undefined
+    } else if (provider === 'deepseek') {
+      if (!apiKey?.trim()) throw new Error('Model catalog requires a DeepSeek API key')
+      const response = await fetch('https://api.deepseek.com/models', {
+        headers: { Authorization: `Bearer ${apiKey}` }
+      })
+      if (!response.ok) throw new Error(`Model catalog unavailable (HTTP ${response.status})`)
+      const json: unknown = await response.json()
+      data = isRecord(json) ? json.data : undefined
     } else {
       if (!apiKey) throw new Error('OpenAI API key is required to fetch OpenAI models')
       const openai = new OpenAI({ apiKey })
@@ -347,7 +369,7 @@ export async function fetchAiModels(
     if (!modelCapabilityCatalog.complete(provider, apiKey, generation, data as unknown[])) {
       throw new Error('Model catalog request was superseded; refresh for the current provider')
     }
-    if (provider === 'openrouter')
+    if (provider !== 'openai')
       for (const model of models) {
         model.capabilityExpiresAt = modelCapabilityCatalog.selectedSnapshot(
           provider,
@@ -396,6 +418,10 @@ export async function createAiChatCompletion(
 ): Promise<{ content: string; tokenCount: number }> {
   const configError = validateAiConfiguration(settings)
   if (configError) throw new Error(configError)
+  if (getAiProvider(settings) === 'deepseek' && !settings.openaiApiKey.trim())
+    throw new Error(
+      'OpenAI API key is required for Discord $chat response moderation. Add it in Settings before sending a DeepSeek chat request.'
+    )
   if (options.reasoningEffort && options.reasoningEffort !== 'none') {
     if (!['minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(options.reasoningEffort)) {
       throw new Error(
@@ -411,6 +437,43 @@ export async function createAiChatCompletion(
     )
     const reasoningError = reasoningConfigurationError(capabilities, options.reasoningEffort)
     if (reasoningError) throw new Error(reasoningError)
+  }
+
+  if (getAiProvider(settings) === 'deepseek') {
+    if (options.responseFormat || options.requireStructuredOutputs)
+      throw new Error(
+        'Structured output is not supported by the DeepSeek chat adapter; select OpenAI or OpenRouter for this feature.'
+      )
+    const capabilities = modelCapabilityCatalog.get(
+      'deepseek',
+      getProviderApiKey(settings),
+      'chat-completions',
+      model
+    )
+    const provider = createDeepSeekProvider({
+      apiKey: getProviderApiKey(settings),
+      model,
+      stream: false,
+      timeoutMs: 600_000,
+      reasoning: reasoningSelection(options.reasoningEffort || 'none'),
+      supportedReasoningEfforts: providerReasoningEfforts(capabilities)
+    })
+    const result = await provider.generate(
+      {
+        messages: messages.map((message) =>
+          message.role === 'assistant'
+            ? { kind: 'assistant' as const, content: message.content, toolCalls: [] }
+            : {
+                kind: 'message' as const,
+                role: message.role as 'system' | 'user',
+                content: message.content
+              }
+        ),
+        tools: []
+      },
+      new AbortController().signal
+    )
+    return { content: result.content, tokenCount: result.usage?.totalTokens || 0 }
   }
 
   if (getAiProvider(settings) === 'openrouter') {

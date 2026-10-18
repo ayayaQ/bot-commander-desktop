@@ -8,12 +8,13 @@ import type {
   MemoryListResult,
   MemoryWithRevision
 } from '@ayayaq/vivi/extensions/memory'
+import type { AgentWebCallEvidence } from './agentWeb'
 import type { DesktopReasoningEffort } from './aiModelTypes'
 import type { AgentAutoReviewEnrollment, AgentDecisionDisplay } from './agentAutoReview'
 
 export type AgentMode = 'manual' | 'auto' | 'planning'
 export type AgentPlanDecision = 'auto' | 'manual' | 'continue'
-export type AgentProvider = 'openai' | 'openrouter'
+export type AgentProvider = 'openai' | 'openrouter' | 'deepseek'
 export type AgentReasoningEffort = DesktopReasoningEffort
 export type AgentRunStatus =
   'idle' | 'running' | 'waiting_approval' | 'completed' | 'error' | 'cancelled' | 'interrupted'
@@ -40,6 +41,7 @@ export interface AgentToolCall {
     requestSent?: boolean
     checkpointUnconfirmed?: boolean
   }
+  web?: AgentWebCallEvidence
   result?: unknown
   error?: string
   validation?: AgentValidationReport

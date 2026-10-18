@@ -65,9 +65,14 @@ export function currentMutationRuntimeReviewRevision(prepared: PreparedMutation)
 
 /** Recovery inspection returns identity/revisions only, never resource content. */
 export async function readDecisionAuditResourceMetadata(
-  targetType: 'command' | 'memory',
+  targetType: 'command' | 'memory' | 'web',
   targetId: string
 ): Promise<{ resourceRevision: string; targetRevision: string | null }> {
+  if (targetType === 'web')
+    return {
+      resourceRevision: resourceRevision({ account: getSettings().agentWebAccountRevision }),
+      targetRevision: null
+    }
   if (targetType === 'command') {
     const commands = getCommands()
     const target = commands.bcfdCommands.find((item) => item.id === targetId)

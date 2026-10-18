@@ -137,12 +137,24 @@ export type AppSettings = {
   showToken: boolean
   hideOutput: boolean
   language: string
-  aiProvider?: 'openai' | 'openrouter'
+  aiProvider?: 'openai' | 'openrouter' | 'deepseek'
   /** Host-owned opaque credential generation; never derived from a credential. */
   agentDecisionAccountRevision?: string
   openaiApiKey: string
   spamProtectionEnabled?: boolean
   openrouterApiKey?: string
+  deepseekApiKey?: string
+  deepseekKeyConfigured?: boolean
+  deepseekWebKeyConfigured?: boolean
+  deepseekChatAccountRevision?: string
+  selectedDeepSeekModel?: string
+  /** Unset retains legacy reviewer selection for supported chat providers only. */
+  agentReviewerProvider?: 'openai' | 'openrouter'
+  webProvider?: 'disabled' | 'deepseek'
+  deepseekWebKeySource?: 'separate' | 'chat'
+  deepseekWebApiKey?: string
+  /** Host-owned web account/config generation, never a credential fingerprint. */
+  agentWebAccountRevision?: string
   selectedAiModel?: string
   selectedOpenAiModel?: string
   selectedOpenRouterModel?: string

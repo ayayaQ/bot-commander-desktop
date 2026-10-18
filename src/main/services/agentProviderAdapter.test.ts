@@ -419,3 +419,190 @@ describe('desktop context limit provenance', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('desktop native DeepSeek chat and effective history', () => {
+  const deepseekSettings: AiRuntimeSettings = {
+    aiProvider: 'deepseek',
+    openaiApiKey: '',
+    deepseekApiKey: 'native-chat-fixture'
+  }
+  const deepseekModel = 'deepseek-flash'
+  function deepseekCatalog() {
+    const generation = modelCapabilityCatalog.begin('deepseek', deepseekSettings.deepseekApiKey)
+    modelCapabilityCatalog.complete('deepseek', deepseekSettings.deepseekApiKey, generation, [
+      {
+        id: deepseekModel,
+        context_window: 128000,
+        max_output_tokens: 32000,
+        input_modalities: ['text'],
+        output_modalities: ['text'],
+        effort: { supported_levels: ['high', 'max'] }
+      }
+    ])
+  }
+  it('uses core native reasoning history, the selected key and dynamic exact metadata', async () => {
+    deepseekCatalog()
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: {
+                role: 'assistant',
+                content: 'Done',
+                reasoning_content: 'exact provider reasoning'
+              }
+            }
+          ],
+          usage: {
+            prompt_tokens: 15,
+            completion_tokens: 8,
+            total_tokens: 23,
+            prompt_cache_hit_tokens: 5,
+            prompt_cache_miss_tokens: 10
+          }
+        })
+      )
+    )
+    const result = await executeAgentProviderTurn(
+      deepseekSettings,
+      { model: deepseekModel, reasoningEffort: 'max' },
+      messages,
+      tools,
+      new AbortController().signal
+    )
+    expect(request().url).toBe('https://api.deepseek.com/chat/completions')
+    expect(new Headers(request().init!.headers).get('authorization')).toBe(
+      'Bearer native-chat-fixture'
+    )
+    expect(request().body).toMatchObject({ model: deepseekModel, reasoning_effort: 'max' })
+    expect(result.providerState).toMatchObject({
+      provider: `deepseek:${deepseekModel}`,
+      items: [{ reasoning_content: 'exact provider reasoning' }]
+    })
+    expect(result.usage).toMatchObject({
+      inputTokens: 15,
+      outputTokens: 8,
+      totalTokens: 23,
+      cachedInputTokens: 5
+    })
+    const { getAgentContextLimits } = await import('./agentProviderAdapter')
+    expect(getAgentContextLimits(deepseekSettings, deepseekModel)).toMatchObject({
+      contextWindow: 128000,
+      maxOutputTokens: 32000,
+      source: { kind: 'provider-catalog', freshness: 'cached' }
+    })
+    expect(
+      getAgentContextLimits(deepseekSettings, deepseekModel + '-unverified').contextWindow
+    ).toBeUndefined()
+  })
+  it.each(['none', 'disabled', 'high'] as const)(
+    'rejects imported tool history before HTTP with %s without deleting records',
+    async (reasoningEffort) => {
+      deepseekCatalog()
+      const history: HistoryMessage[] = [
+        ...messages,
+        {
+          kind: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'imported', name: 'read_bot_state', arguments: {} }]
+        },
+        { kind: 'tool_result', callId: 'imported', name: 'read_bot_state', content: '{}' }
+      ]
+      const original = structuredClone(history)
+      const provider = createAgentProvider(deepseekSettings, {
+        model: deepseekModel,
+        reasoningEffort
+      })
+      expect(() => provider.estimateContext!({ messages: history, tools })).toThrow(
+        /new session|portable summary/
+      )
+      await expect(
+        provider.generate({ messages: history, tools }, new AbortController().signal)
+      ).rejects.toThrow(/new session|portable summary/)
+      expect(history).toEqual(original)
+      expect(fetchMock).not.toHaveBeenCalled()
+    }
+  )
+  it('fails closed when thinking is enabled after a no-reasoning native turn, while explicit disabled remains usable', async () => {
+    deepseekCatalog()
+    const history: HistoryMessage[] = [
+      ...messages,
+      {
+        kind: 'assistant',
+        content: 'Prior nonthinking response',
+        toolCalls: [],
+        providerState: {
+          provider: `deepseek:${deepseekModel}`,
+          items: [{ role: 'assistant', content: 'Prior nonthinking response' }]
+        }
+      }
+    ]
+    const original = structuredClone(history)
+    for (const reasoningEffort of ['none', 'high', 'max'] as const) {
+      const provider = createAgentProvider(deepseekSettings, {
+        model: deepseekModel,
+        reasoningEffort
+      })
+      expect(() => provider.estimateContext!({ messages: history, tools })).toThrow(
+        /new session|portable summary/
+      )
+      await expect(
+        provider.generate({ messages: history, tools }, new AbortController().signal)
+      ).rejects.toThrow(/new session|portable summary/)
+    }
+    expect(history).toEqual(original)
+    expect(fetchMock).not.toHaveBeenCalled()
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'Done' } }]
+        })
+      )
+    )
+    await createAgentProvider(deepseekSettings, {
+      model: deepseekModel,
+      reasoningEffort: 'disabled'
+    }).generate({ messages: history, tools }, new AbortController().signal)
+    expect(request().body.thinking).toEqual({ type: 'disabled' })
+  })
+  it('does not migrate exact-model native tool history across a model switch', async () => {
+    deepseekCatalog()
+    const history: HistoryMessage[] = [
+      ...messages,
+      {
+        kind: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'native-call', name: 'read_bot_state', arguments: {} }],
+        providerState: {
+          provider: 'deepseek:other-model',
+          items: [
+            {
+              role: 'assistant',
+              content: null,
+              reasoning_content: 'prior',
+              tool_calls: [
+                {
+                  id: 'native-call',
+                  type: 'function',
+                  function: { name: 'read_bot_state', arguments: '{}' }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      { kind: 'tool_result', callId: 'native-call', name: 'read_bot_state', content: '{}' }
+    ]
+    const original = structuredClone(history)
+    await expect(
+      createAgentProvider(deepseekSettings, {
+        model: deepseekModel,
+        reasoningEffort: 'none'
+      }).generate({ messages: history, tools }, new AbortController().signal)
+    ).rejects.toThrow(/new session|portable summary/)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(history).toEqual(original)
+  })
+})

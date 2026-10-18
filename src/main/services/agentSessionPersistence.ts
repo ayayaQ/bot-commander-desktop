@@ -46,6 +46,42 @@ export function validAgentDisplayHistory(value: unknown): boolean {
         ].includes(call.status)
       )
         return false
+      if (call.web !== undefined) {
+        const web = call.web
+        if (
+          !record(web) ||
+          Object.keys(web).some(
+            (key) =>
+              ![
+                'runId',
+                'operationDigest',
+                'provider',
+                'requestState',
+                'outcome',
+                'intentAt',
+                'settledAt',
+                'checkpointUnconfirmed'
+              ].includes(key)
+          ) ||
+          typeof web.runId !== 'string' ||
+          !web.runId ||
+          web.runId.length > 256 ||
+          typeof web.operationDigest !== 'string' ||
+          !/^[a-f0-9]{64}$/.test(web.operationDigest) ||
+          web.provider !== 'deepseek' ||
+          !['not_started', 'unknown', 'response_received'].includes(web.requestState as string) ||
+          !['pending', 'not-sent', 'confirmed', 'unknown'].includes(web.outcome as string) ||
+          (web.checkpointUnconfirmed !== undefined &&
+            typeof web.checkpointUnconfirmed !== 'boolean') ||
+          ['intentAt', 'settledAt'].some(
+            (key) =>
+              web[key] !== undefined &&
+              (typeof web[key] !== 'string' ||
+                !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(web[key] as string))
+          )
+        )
+          return false
+      }
       if (call.mcp !== undefined) {
         const mcp = call.mcp
         if (

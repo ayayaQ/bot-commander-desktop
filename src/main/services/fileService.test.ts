@@ -171,6 +171,8 @@ describe('fileService', () => {
       theme: 'light',
       openaiApiKey: 'openai-secret',
       openrouterApiKey: 'openrouter-secret',
+      deepseekApiKey: 'deepseek-chat-secret',
+      deepseekWebApiKey: 'deepseek-web-secret',
       spamProtectionEnabled: true
     })
     const { saveSettings } = await import('./fileService')
@@ -180,9 +182,13 @@ describe('fileService', () => {
     const stored = await fs.readFile(join(userDataPath, 'settings.json'), 'utf-8')
     expect(stored).not.toContain('openai-secret')
     expect(stored).not.toContain('openrouter-secret')
+    expect(stored).not.toContain('deepseek-chat-secret')
+    expect(stored).not.toContain('deepseek-web-secret')
     expect(JSON.parse(stored)).toMatchObject({
       openaiApiKey: expect.stringMatching(/^bcfd-encrypted:v1:/),
       openrouterApiKey: expect.stringMatching(/^bcfd-encrypted:v1:/),
+      deepseekApiKey: expect.stringMatching(/^bcfd-encrypted:v1:/),
+      deepseekWebApiKey: expect.stringMatching(/^bcfd-encrypted:v1:/),
       spamProtectionEnabled: true
     })
   })

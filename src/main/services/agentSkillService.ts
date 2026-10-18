@@ -41,7 +41,12 @@ export const agentSkillStore = createAgentSkillStore({
   assertContent(content) {
     const settings = getSettings()
     if (
-      [settings.openaiApiKey, settings.openrouterApiKey].some((key) => key && content.includes(key))
+      [
+        settings.openaiApiKey,
+        settings.openrouterApiKey,
+        settings.deepseekApiKey,
+        settings.deepseekWebApiKey
+      ].some((key) => key && content.includes(key))
     )
       throw new Error(
         'Skill text contains a currently configured provider credential; remove it before discovery'

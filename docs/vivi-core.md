@@ -2,8 +2,8 @@
 
 The generic sequential provider/tool loop lives in the separate
 [ayayaQ/vivi](https://github.com/ayayaQ/vivi) repository. Bot Commander consumes a reviewed,
-exact npm registry release `@ayayaq/vivi@0.13.0`. The published artifact was verified
-byte-for-byte against the reviewed release archive; its immutable registry URL and
+exact npm registry release of `@ayayaq/vivi` recorded in `package.json` and the lockfile.
+The published artifact was verified byte-for-byte against the reviewed release archive; its immutable registry URL and
 SHA-512 integrity are recorded in the lockfile. Runtime Git authentication/build is
 not required, and npm pack outputs are not committed to this repository.
 
@@ -168,7 +168,8 @@ API.
 
 ## Context management
 
-Context accounting and compaction use the pinned `@ayayaq/vivi` 0.14.0 registry release.
+Context accounting and compaction use the exact `@ayayaq/vivi` registry release pinned in
+`package.json` and the lockfile.
 
 The agent header shows the most recent request's input estimate (`~`) separately from
 cumulative execution usage. It includes current host guidance, memories, skills, tool schemas,

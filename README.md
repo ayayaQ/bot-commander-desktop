@@ -194,8 +194,8 @@ uses Electron's bundled Node.js runtime, independently of the Node.js installed 
 
 ### Install
 
-The shared agent loop, canonical history helpers and OpenAI/OpenRouter provider factories use
-the exact npm release `@ayayaq/vivi@0.13.0`.
+The shared agent loop, canonical history helpers and provider factories use the exact published
+`@ayayaq/vivi` release recorded in `package.json` and the lockfile.
 Its registry artifact was verified against the reviewed release bytes; the immutable
 registry URL and SHA-512 integrity are recorded in the lockfile. Publish and verify a
 compatible shared dependency before updating this pin. Do not commit npm pack outputs
@@ -232,6 +232,19 @@ Chat Completions have separate capability snapshots; missing metadata stays unkn
 Legacy saved reasoning `none` still means provider default. Agent reasoning disable is
 a separate choice, and unsupported or unverified saved overrides remain visible with an
 actionable configuration error. See [shared-runtime integration](docs/vivi-core.md).
+
+DeepSeek chat uses the shared native adapter and the exact model catalog's context/output and
+reasoning metadata. Switching providers, models or thinking modes can make old tool history
+incompatible; start a new session when prompted. Existing history is preserved.
+
+Chat and Web providers are independent. Web is disabled until you choose DeepSeek in Settings
+and save a separate key or deliberately reuse the chat key. Saved DeepSeek keys stay in the main
+process and use encrypted storage. Queries and public HTTPS URLs go to DeepSeek and may incur
+charges; the displayed documented estimate is not a verified charge or billing cap. Web tools make
+one request with no retry or fallback and return bounded, untrusted evidence with source URLs.
+Plan mode stays local-only. Auto review supports only an explicitly selected OpenAI/OpenRouter
+reviewer (legacy supported choices are retained); paid web needs its separate unchecked consent
+within the existing Auto review disclosure. Changing that account invalidates its web consent.
 
 ### Development
 

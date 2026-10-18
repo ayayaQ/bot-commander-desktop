@@ -17,6 +17,12 @@ import type { AgentAutoReviewEnrollment, AgentDecisionDisplay } from '../../shar
 import { AUTO_REVIEW_POLICY_REVISION } from '../../shared/agentAutoReview'
 import type { AgentValidationReport } from '../../shared/agentValidationTypes'
 import type { PreparedMutation } from './agentTools'
+import { AGENT_WEB_POLICY_REVISION } from '../../shared/agentWeb'
+import {
+  checkWebAutoEligibility,
+  webReviewSnapshot,
+  type PreparedWebOperation
+} from './agentWebPolicy'
 import { checkAutoEligibility } from './agentAutoEligibility'
 import { resourceRevision } from './resourceChangeService'
 import {
@@ -80,7 +86,7 @@ export interface AgentAutoReviewResult {
   assertCurrent: (prepared: PreparedMutation) => void
   beginCommit: () => Promise<boolean>
   settle: (
-    state: 'committed' | 'denied' | 'cancelled' | 'failed',
+    state: 'committed' | 'denied' | 'cancelled' | 'failed' | 'unknown',
     revision?: string,
     source?: AgentDecisionDisplay['source']
   ) => Promise<boolean>
@@ -113,7 +119,11 @@ export async function reviewAgentMutation(options: ReviewOptions): Promise<Agent
     if (
       !result ||
       !captured ||
-      !checkAutoEligibility(candidate, options.validation).eligible ||
+      !(
+        candidate.target.type === 'web'
+          ? checkWebAutoEligibility(candidate)
+          : checkAutoEligibility(candidate, options.validation)
+      ).eligible ||
       routePreparedAction(current).route !== 'model-review' ||
       !isDecisionCurrent(result, current) ||
       decisionBinding(candidate) !== decisionBinding(prepared)
@@ -175,7 +185,18 @@ export async function reviewAgentMutation(options: ReviewOptions): Promise<Agent
     enrollment.accountRevision !== account.revision
   )
     return finish()
-  const eligibility = checkAutoEligibility(prepared, options.validation)
+  const web = prepared.target.type === 'web'
+  if (
+    web &&
+    (enrollment.web?.policyRevision !== AGENT_WEB_POLICY_REVISION ||
+      enrollment.web.accountRevision !== (prepared as PreparedWebOperation).accountRevision)
+  ) {
+    display.reasonCode = 'web_enrollment_required'
+    return finish()
+  }
+  const eligibility = web
+    ? checkWebAutoEligibility(prepared)
+    : checkAutoEligibility(prepared, options.validation)
   if (!eligibility.eligible) {
     display.reasonCode = eligibility.reasonCode
     return finish()
@@ -195,7 +216,7 @@ export async function reviewAgentMutation(options: ReviewOptions): Promise<Agent
   options.assertActive()
   try {
     const snapshot = options.snapshot()
-    const policy = desktopDecisionPolicy(account.provider, prepared.target.type === 'memory')
+    const policy = desktopDecisionPolicy(account.provider, prepared.target.type === 'memory', web)
     if (Buffer.byteLength(JSON.stringify({ snapshot, policy })) > MAX_DECISION_BYTES) {
       display.reasonCode = 'review_input_oversized'
       return finish()
@@ -281,7 +302,7 @@ export async function reviewAgentMutation(options: ReviewOptions): Promise<Agent
       callBinding: decisionBinding(captured.toolCall.id),
       tool: prepared.name as AgentDecisionLedgerRow['tool'],
       snapshotBinding: decisionBinding(captured),
-      targetType: prepared.target.type as 'command' | 'memory',
+      targetType: prepared.target.type as 'command' | 'memory' | 'web',
       targetId: prepared.target.id,
       candidateRevision: prepared.after === null ? undefined : resourceRevision(prepared.after),
       state: 'reviewed',
@@ -313,6 +334,8 @@ export function autoReviewSnapshot(input: {
   validation?: AgentValidationReport
   acceptedPlan?: { text: string; binding: string }
 }): DecisionSnapshot {
+  if (input.prepared.target.type === 'web')
+    return webReviewSnapshot({ ...input, prepared: input.prepared as PreparedWebOperation })
   const { prepared, validation } = input
   const reviewData = (value: unknown): JsonObject | null => {
     if (value === null) return null
@@ -335,7 +358,7 @@ export function autoReviewSnapshot(input: {
       text: input.userRequest,
       approvedScope: {
         profile: 'ordinary_memory_and_validated_response_commands',
-        enrollment: { ...input.enrollment },
+        enrollment: structuredClone(input.enrollment) as unknown as JsonObject,
         ...(input.acceptedPlan ? { acceptedPlan: input.acceptedPlan } : {})
       }
     },

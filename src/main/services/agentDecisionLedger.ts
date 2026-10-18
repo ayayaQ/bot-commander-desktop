@@ -19,7 +19,8 @@ export interface AgentDecisionLedgerRow {
   sessionId: string
   runId: string
   callBinding: string
-  tool: 'create_command' | 'edit_command' | 'create_memory' | 'edit_memory'
+  tool:
+    'create_command' | 'edit_command' | 'create_memory' | 'edit_memory' | 'web_search' | 'fetch_url'
   snapshotBinding: string
   policyRevision: string
   provider?: 'openai' | 'openrouter'
@@ -33,7 +34,7 @@ export interface AgentDecisionLedgerRow {
   createdAt: string
   settledAt?: string
   resultingRevision?: string
-  targetType?: 'command' | 'memory'
+  targetType?: 'command' | 'memory' | 'web'
   targetId?: string
   candidateRevision?: string
   reconciliation?: {
@@ -54,7 +55,7 @@ export interface AgentDecisionAuditBinding {
   policyRevision: string
 }
 export type DecisionAuditResourceReader = (
-  targetType: 'command' | 'memory',
+  targetType: 'command' | 'memory' | 'web',
   targetId: string
 ) => Promise<{
   resourceRevision: string
@@ -96,7 +97,14 @@ const rowKeys = new Set([
   'candidateRevision',
   'reconciliation'
 ])
-const tools = new Set(['create_command', 'edit_command', 'create_memory', 'edit_memory'])
+const tools = new Set([
+  'create_command',
+  'edit_command',
+  'create_memory',
+  'edit_memory',
+  'web_search',
+  'fetch_url'
+])
 function text(value: unknown, max = 120): value is string {
   return (
     typeof value === 'string' &&
@@ -149,7 +157,7 @@ export function decodeAgentDecisionLedger(raw: string): LedgerData {
       (row.resultingRevision !== undefined && !/^[a-f0-9]{16}$/.test(row.resultingRevision)) ||
       (row.provider !== undefined && !['openai', 'openrouter'].includes(row.provider)) ||
       (row.model !== undefined && !['gpt-6-luna', 'typesafe/jev-1.13'].includes(row.model)) ||
-      (row.targetType !== undefined && !['command', 'memory'].includes(row.targetType)) ||
+      (row.targetType !== undefined && !['command', 'memory', 'web'].includes(row.targetType)) ||
       (row.targetId !== undefined && !text(row.targetId)) ||
       (row.candidateRevision !== undefined && !/^[a-f0-9]{16}$/.test(row.candidateRevision))
     )
@@ -196,7 +204,9 @@ export function decodeAgentDecisionLedger(raw: string): LedgerData {
               'request_authorizes_change',
               'effects_within_scope',
               'evidence_not_redirected',
-              'durable_memory_intent'
+              'durable_memory_intent',
+              'request_authorizes_web',
+              'paid_scope_authorized'
             ].includes(check.name) ||
             !Number.isFinite(check.probability) ||
             check.probability < 0 ||
