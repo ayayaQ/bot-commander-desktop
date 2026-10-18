@@ -6,7 +6,7 @@
     models?: ModelOption[]
     placeholder?: string
     disabled?: boolean
-    provider?: 'openai' | 'openrouter'
+    provider?: 'openai' | 'openrouter' | 'deepseek'
     buttonClass?: string
     title?: string
     error?: string
@@ -167,7 +167,11 @@
         <div class="min-w-0">
           <h3 class="font-bold text-lg">{title}</h3>
           <p class="text-xs opacity-70 truncate">
-            {provider === 'openrouter' ? 'OpenRouter' : 'OpenAI'} · Current: {value || 'None'}
+            {provider === 'deepseek'
+              ? 'DeepSeek'
+              : provider === 'openrouter'
+                ? 'OpenRouter'
+                : 'OpenAI'} · Current: {value || 'None'}
           </p>
         </div>
         <div class="flex items-center gap-2">

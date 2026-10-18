@@ -256,7 +256,9 @@ onSettingsChanged((next, previous) => {
   if (next.aiProvider !== previous.aiProvider) {
     modelCapabilityCatalog.invalidate('openai')
     modelCapabilityCatalog.invalidate('openrouter')
+    modelCapabilityCatalog.invalidate('deepseek')
   }
+  if (next.deepseekApiKey !== previous.deepseekApiKey) modelCapabilityCatalog.invalidate('deepseek')
   if (next.openaiApiKey !== previous.openaiApiKey) modelCapabilityCatalog.invalidate('openai')
   if (next.openrouterApiKey !== previous.openrouterApiKey)
     modelCapabilityCatalog.invalidate('openrouter')

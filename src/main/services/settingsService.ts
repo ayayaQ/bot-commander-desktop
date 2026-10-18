@@ -1,8 +1,17 @@
 import { AppSettings } from '../types/types'
+import { selectedReviewer } from '../../shared/providerSelection'
 import { randomUUID } from 'node:crypto'
 import { registerAgentDecisionSecret } from './agentDecisionPrivacy'
 
-let observedCredentials: { provider: string; openai: string; openrouter: string; revision: string }
+let observedCredentials: { provider: string; key: string; revision: string }
+let observedWeb: {
+  provider: string
+  source: string
+  key: string
+  storedKey: string
+  revision: string
+}
+let observedChat: { key: string; revision: string }
 let settingsGeneration = 0
 
 export function getAgentDecisionSettingsGeneration(): number {
@@ -18,6 +27,12 @@ let settings: AppSettings = {
   agentDecisionAccountRevision: randomUUID(),
   openaiApiKey: '',
   openrouterApiKey: '',
+  deepseekApiKey: '',
+  deepseekChatAccountRevision: randomUUID(),
+  webProvider: 'disabled',
+  agentWebAccountRevision: randomUUID(),
+  deepseekWebKeySource: 'separate',
+  deepseekWebApiKey: '',
   spamProtectionEnabled: false,
   selectedAiModel: 'gpt-5.4-nano',
   selectedOpenAiModel: 'gpt-5.4-nano',
@@ -69,13 +84,22 @@ export function normalizeSettings(newSettings: AppSettings): AppSettings {
     newSettings.openaiApiKey = ''
   }
 
-  if (!newSettings.aiProvider) {
+  if (!['openai', 'openrouter', 'deepseek'].includes(newSettings.aiProvider || '')) {
     newSettings.aiProvider = 'openai'
   }
 
   if (!newSettings.openrouterApiKey) {
     newSettings.openrouterApiKey = ''
   }
+
+  newSettings.deepseekApiKey ||= ''
+  newSettings.deepseekWebApiKey ||= ''
+  newSettings.webProvider = newSettings.webProvider === 'deepseek' ? 'deepseek' : 'disabled'
+  newSettings.deepseekWebKeySource =
+    newSettings.deepseekWebKeySource === 'chat' ? 'chat' : 'separate'
+  if (!['openai', 'openrouter'].includes(newSettings.agentReviewerProvider || ''))
+    delete newSettings.agentReviewerProvider
+  newSettings.selectedDeepSeekModel ||= 'deepseek-flash'
 
   if (!newSettings.openaiModel) {
     newSettings.openaiModel = 'gpt-5.4-nano'
@@ -100,9 +124,11 @@ export function normalizeSettings(newSettings: AppSettings): AppSettings {
   }
 
   newSettings.selectedAiModel =
-    newSettings.aiProvider === 'openrouter'
-      ? newSettings.selectedOpenRouterModel
-      : newSettings.selectedOpenAiModel
+    newSettings.aiProvider === 'deepseek'
+      ? newSettings.selectedDeepSeekModel
+      : newSettings.aiProvider === 'openrouter'
+        ? newSettings.selectedOpenRouterModel
+        : newSettings.selectedOpenAiModel
 
   if (!newSettings.aiReasoningEffort) {
     newSettings.aiReasoningEffort = 'none'
@@ -127,20 +153,24 @@ export function normalizeSettings(newSettings: AppSettings): AppSettings {
   newSettings.spamProtectionEnabled = newSettings.spamProtectionEnabled === true
   registerAgentDecisionSecret(newSettings.openaiApiKey)
   registerAgentDecisionSecret(newSettings.openrouterApiKey)
-  const provider = newSettings.aiProvider
-  const openai = newSettings.openaiApiKey
-  const openrouter = newSettings.openrouterApiKey || ''
+  registerAgentDecisionSecret(newSettings.deepseekApiKey)
+  registerAgentDecisionSecret(newSettings.deepseekWebApiKey)
+  const provider = selectedReviewer(newSettings) || 'unconfigured'
+  const key =
+    provider === 'openai'
+      ? newSettings.openaiApiKey
+      : provider === 'openrouter'
+        ? newSettings.openrouterApiKey || ''
+        : ''
   if (
     !observedCredentials ||
     observedCredentials.provider !== provider ||
-    observedCredentials.openai !== openai ||
-    observedCredentials.openrouter !== openrouter
+    observedCredentials.key !== key
   ) {
     const stored = newSettings.agentDecisionAccountRevision
     observedCredentials = {
       provider,
-      openai,
-      openrouter,
+      key,
       // The initial persisted opaque nonce is retained; renderer-provided replacements
       // never control a credential change after initialization.
       revision:
@@ -150,6 +180,42 @@ export function normalizeSettings(newSettings: AppSettings): AppSettings {
     }
   }
   newSettings.agentDecisionAccountRevision = observedCredentials.revision
+  if (!observedChat || observedChat.key !== newSettings.deepseekApiKey) {
+    const stored = newSettings.deepseekChatAccountRevision
+    observedChat = {
+      key: newSettings.deepseekApiKey,
+      revision:
+        !observedChat && typeof stored === 'string' && /^[a-f0-9-]{36}$/.test(stored)
+          ? stored
+          : randomUUID()
+    }
+  }
+  newSettings.deepseekChatAccountRevision = observedChat.revision
+  delete newSettings.deepseekKeyConfigured
+  delete newSettings.deepseekWebKeyConfigured
+  const webProvider = newSettings.webProvider
+  const source = newSettings.deepseekWebKeySource
+  const webKey = source === 'chat' ? newSettings.deepseekApiKey : newSettings.deepseekWebApiKey
+  if (
+    !observedWeb ||
+    observedWeb.provider !== webProvider ||
+    observedWeb.source !== source ||
+    observedWeb.key !== webKey ||
+    observedWeb.storedKey !== newSettings.deepseekWebApiKey
+  ) {
+    const stored = newSettings.agentWebAccountRevision
+    observedWeb = {
+      provider: webProvider,
+      source,
+      key: webKey,
+      storedKey: newSettings.deepseekWebApiKey,
+      revision:
+        !observedWeb && typeof stored === 'string' && /^[a-f0-9-]{36}$/.test(stored)
+          ? stored
+          : randomUUID()
+    }
+  }
+  newSettings.agentWebAccountRevision = observedWeb.revision
   return newSettings
 }
 
@@ -158,4 +224,19 @@ export function setSettings(newSettings: AppSettings) {
   settings = normalizeSettings(newSettings)
   settingsGeneration++
   for (const listener of listeners) listener(settings, previous)
+}
+
+/** New DeepSeek secrets are write-only across the renderer boundary. Legacy providers are unchanged. */
+export function publicSettings(value?: AppSettings): AppSettings {
+  // Establish the live baseline before exposing write nonces on a fresh installation.
+  // Persisted settings are normalized during startup before this renderer boundary.
+  if (!observedChat || !observedWeb || !observedCredentials)
+    settings = normalizeSettings({ ...settings })
+  value ??= settings
+  const { deepseekApiKey, deepseekWebApiKey, ...safe } = value
+  return {
+    ...safe,
+    deepseekKeyConfigured: !!deepseekApiKey?.trim(),
+    deepseekWebKeyConfigured: !!deepseekWebApiKey?.trim()
+  }
 }

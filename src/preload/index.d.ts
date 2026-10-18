@@ -21,6 +21,12 @@ export type {
   AgentMcpOAuthSignInResult
 } from '../shared/agentMcpOAuthTypes'
 export type { InteractionPublicationState } from '../shared/interactionPublication'
+export interface SaveDeepSeekKeyRequest {
+  purpose: 'chat' | 'web'
+  value: string
+  expectedRevision: string
+}
+
 export type { AgentAutoReviewEnrollment, AgentDecisionDisplay } from '../shared/agentAutoReview'
 
 declare global {

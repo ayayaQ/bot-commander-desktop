@@ -21,6 +21,10 @@ const mocks = vi.hoisted(() => ({
   copyMcpToken: vi.fn(),
   writeText: vi.fn(),
   settings: vi.fn(),
+  saveSettings: vi.fn(),
+  normalizeSettings: vi.fn(),
+  setSettings: vi.fn(),
+  publicSettings: vi.fn(),
   provider: vi.fn(),
   capabilities: vi.fn(),
   fetchModels: vi.fn(),
@@ -69,7 +73,7 @@ vi.mock('./ipcSecurity', () => ({
 vi.mock('discord.js', () => ({}))
 vi.mock('../utils/virtual', () => ({}))
 vi.mock('../services/botService', () => ({}))
-vi.mock('../services/fileService', () => ({}))
+vi.mock('../services/fileService', () => ({ saveSettings: mocks.saveSettings }))
 vi.mock('../services/interactionService', () => ({ getInteractions: vi.fn() }))
 vi.mock('../services/slashCommandRegistry', () => ({ createInteractionPublishBackend: vi.fn() }))
 vi.mock('../services/interactionPublisher', () => ({
@@ -77,7 +81,12 @@ vi.mock('../services/interactionPublisher', () => ({
     setEventSink() {}
   }
 }))
-vi.mock('../services/settingsService', () => ({ getSettings: mocks.settings }))
+vi.mock('../services/settingsService', () => ({
+  getSettings: mocks.settings,
+  normalizeSettings: mocks.normalizeSettings,
+  setSettings: mocks.setSettings,
+  publicSettings: mocks.publicSettings
+}))
 vi.mock('../services/aiProviderService', () => ({
   getAiProvider: mocks.provider,
   getSelectedModelCapabilities: mocks.capabilities,
@@ -596,5 +605,104 @@ describe('owned agent run IPC routing', () => {
       true,
       'exact-approval'
     )
+  })
+})
+
+describe('write-only DeepSeek credential IPC', () => {
+  async function handlers() {
+    const { addIPCHandlers } = await import('./ipcHandlers')
+    addIPCHandlers()
+    return new Map(mocks.handle.mock.calls.map(([channel, handler]) => [channel, handler]))
+  }
+  let current: Record<string, unknown>
+  beforeEach(() => {
+    vi.clearAllMocks()
+    current = {
+      aiProvider: 'deepseek',
+      openaiApiKey: '',
+      deepseekApiKey: 'saved-chat-fixture',
+      deepseekWebApiKey: 'saved-web-fixture',
+      deepseekChatAccountRevision: 'chat-revision',
+      agentWebAccountRevision: 'web-revision'
+    }
+    mocks.settings.mockImplementation(() => current)
+    mocks.normalizeSettings.mockImplementation((value) => ({
+      ...value,
+      deepseekChatAccountRevision:
+        value.deepseekApiKey === current.deepseekApiKey ? 'chat-revision' : 'new-chat-revision'
+    }))
+    mocks.setSettings.mockImplementation((value) => {
+      current = value
+    })
+    mocks.publicSettings.mockImplementation(() => {
+      const { deepseekApiKey, deepseekWebApiKey, ...rest } = current
+      return {
+        ...rest,
+        deepseekKeyConfigured: !!deepseekApiKey,
+        deepseekWebKeyConfigured: !!deepseekWebApiKey
+      }
+    })
+    mocks.saveSettings.mockResolvedValue(undefined)
+  })
+  it('returns flags/nonces only and ordinary settings saves preserve host credentials', async () => {
+    const routes = await handlers()
+    expect(routes.get('get-settings')!({})).not.toHaveProperty('deepseekApiKey')
+    const saved = await routes.get('save-settings')!(
+      {},
+      { ...current, theme: 'dark', deepseekApiKey: 'forged-chat', deepseekWebApiKey: 'forged-web' }
+    )
+    expect(current.deepseekApiKey).toBe('saved-chat-fixture')
+    expect(current.deepseekWebApiKey).toBe('saved-web-fixture')
+    expect(saved).not.toHaveProperty('deepseekApiKey')
+    expect(saved).not.toHaveProperty('deepseekWebApiKey')
+  })
+  it.each([
+    { purpose: 'chat', value: 'replacement', expectedRevision: 'stale' },
+    { purpose: 'web', value: 'replacement', expectedRevision: 'stale' },
+    { purpose: 'other', value: 'replacement', expectedRevision: 'chat-revision' },
+    {
+      purpose: 'chat',
+      value: 'replacement',
+      expectedRevision: 'chat-revision',
+      endpoint: 'https://evil.invalid'
+    },
+    { purpose: 'chat', value: 'bad\nkey', expectedRevision: 'chat-revision' }
+  ])('rejects stale or forged credential payload %# without persistence', async (request) => {
+    const routes = await handlers()
+    await expect(routes.get('save-deepseek-key')!({}, request)).rejects.toThrow()
+    expect(mocks.saveSettings).not.toHaveBeenCalled()
+    expect(mocks.setSettings).not.toHaveBeenCalled()
+  })
+  it('saves and clears only the exact chosen secret without returning it', async () => {
+    const routes = await handlers()
+    const result = await routes.get('save-deepseek-key')!(
+      {},
+      { purpose: 'chat', value: 'new-chat-fixture', expectedRevision: 'chat-revision' }
+    )
+    expect(current.deepseekApiKey).toBe('new-chat-fixture')
+    expect(current.deepseekWebApiKey).toBe('saved-web-fixture')
+    expect(result).toMatchObject({
+      deepseekKeyConfigured: true,
+      deepseekChatAccountRevision: 'new-chat-revision'
+    })
+    expect(JSON.stringify(result)).not.toContain('new-chat-fixture')
+    await routes.get('save-deepseek-key')!(
+      {},
+      { purpose: 'web', value: '', expectedRevision: 'web-revision' }
+    )
+    expect(current.deepseekWebApiKey).toBe('')
+    expect(current.deepseekApiKey).toBe('new-chat-fixture')
+  })
+  it('leaves the saved key active on persistence failure and sanitizes the error', async () => {
+    const routes = await handlers()
+    mocks.saveSettings.mockRejectedValueOnce(new Error('raw replacement-secret provider detail'))
+    await expect(
+      routes.get('save-deepseek-key')!(
+        {},
+        { purpose: 'chat', value: 'replacement-secret', expectedRevision: 'chat-revision' }
+      )
+    ).rejects.toThrow('existing key remains active')
+    expect(current.deepseekApiKey).toBe('saved-chat-fixture')
+    expect(mocks.setSettings).not.toHaveBeenCalled()
   })
 })

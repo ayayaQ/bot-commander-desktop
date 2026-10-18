@@ -5,6 +5,7 @@ import {
   AUTO_REVIEW_DISCLOSURE,
   AUTO_REVIEW_POLICY_REVISION
 } from '../../../shared/agentAutoReview'
+import { AGENT_WEB_POLICY_REVISION, type AgentWebEnrollment } from '../../../shared/agentWeb'
 
 const session = (): AgentSession => ({
   id: 'agent-fixture',
@@ -26,16 +27,27 @@ describe('Auto review renderer IPC and interrupted responses', () => {
   let agent: typeof import('./agent')
   let settings: typeof import('./settings')
   let accountRevision: string
+  let chatProvider: 'openai' | 'deepseek'
+  let reviewerProvider: 'openai' | 'openrouter' | undefined
+  let webProvider: 'disabled' | 'deepseek'
+  let webAccountRevision: string
 
   beforeEach(async () => {
     vi.resetModules()
     accountRevision = 'account-fixture-1'
-    invoke = vi.fn(async (channel: string, ..._args: unknown[]) => {
+    chatProvider = 'openai'
+    reviewerProvider = undefined
+    webProvider = 'disabled'
+    webAccountRevision = 'web-account-fixture-1'
+    invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
       if (channel === 'get-settings')
         return {
           theme: 'light',
           language: 'en',
-          aiProvider: 'openai',
+          aiProvider: chatProvider,
+          agentReviewerProvider: reviewerProvider,
+          webProvider,
+          agentWebAccountRevision: webAccountRevision,
           openaiApiKey: '',
           agentDecisionAccountRevision: accountRevision
         }
@@ -45,8 +57,11 @@ describe('Auto review renderer IPC and interrupted responses', () => {
           mode: 'auto',
           autoReviewEnrollment: {
             policyRevision: AUTO_REVIEW_POLICY_REVISION,
-            provider: 'openai',
+            provider: reviewerProvider || 'openai',
             accountRevision,
+            ...((args[1] as { web?: AgentWebEnrollment })?.web
+              ? { web: (args[1] as { web: AgentWebEnrollment }).web }
+              : {}),
             acknowledgedAt: '2026-10-08T01:00:00.000Z'
           }
         }
@@ -131,6 +146,89 @@ describe('Auto review renderer IPC and interrupted responses', () => {
     await expect(
       agent.enrollAgentAutoReview('agent-fixture', { provider: 'openai', accountRevision })
     ).rejects.toThrow('changed')
+    expect(get(agent.activeAgentSession)?.mode).toBe('manual')
+  })
+
+  it('uses an explicitly supported reviewer for DeepSeek chat', async () => {
+    chatProvider = 'deepseek'
+    reviewerProvider = 'openai'
+    await settings.loadSettings()
+    await agent.enrollAgentAutoReview('agent-fixture', { provider: 'openai', accountRevision })
+    expect(get(agent.activeAgentSession)?.autoReviewEnrollment?.provider).toBe('openai')
+  })
+
+  it('does not fall through to OpenRouter when DeepSeek has no reviewer', async () => {
+    chatProvider = 'deepseek'
+    await settings.loadSettings()
+    await expect(
+      agent.enrollAgentAutoReview('agent-fixture', { provider: 'openrouter', accountRevision })
+    ).rejects.toThrow('changed')
+    expect(invoke.mock.calls.some(([channel]) => channel === 'agent:enroll-auto-review')).toBe(
+      false
+    )
+  })
+
+  it('does not infer paid web consent from enabled web settings', async () => {
+    webProvider = 'deepseek'
+    await settings.loadSettings()
+    await agent.enrollAgentAutoReview('agent-fixture', { provider: 'openai', accountRevision })
+    const sent = invoke.mock.calls.find(([channel]) => channel === 'agent:enroll-auto-review')![2]
+    expect(sent).not.toHaveProperty('web')
+    expect(get(agent.activeAgentSession)?.autoReviewEnrollment?.web).toBeUndefined()
+  })
+
+  it('sends paid web authority only for its exact independently acknowledged account', async () => {
+    webProvider = 'deepseek'
+    await settings.loadSettings()
+    const web = { policyRevision: AGENT_WEB_POLICY_REVISION, accountRevision: webAccountRevision }
+    await agent.enrollAgentAutoReview('agent-fixture', { provider: 'openai', accountRevision, web })
+    expect(invoke).toHaveBeenCalledWith('agent:enroll-auto-review', 'agent-fixture', {
+      policyRevision: AUTO_REVIEW_POLICY_REVISION,
+      provider: 'openai',
+      accountRevision,
+      web,
+      activate: true
+    })
+    expect(get(agent.activeAgentSession)?.autoReviewEnrollment?.web).toEqual(web)
+  })
+
+  it('rejects stale, disabled or unsupported paid web acknowledgments before IPC', async () => {
+    const web = { policyRevision: AGENT_WEB_POLICY_REVISION, accountRevision: webAccountRevision }
+    await expect(
+      agent.enrollAgentAutoReview('agent-fixture', { provider: 'openai', accountRevision, web })
+    ).rejects.toThrow('web account changed')
+    webProvider = 'deepseek'
+    await settings.loadSettings()
+    for (const invalid of [
+      { ...web, accountRevision: 'stale-web-account' },
+      { ...web, policyRevision: 'old-web-policy' }
+    ]) {
+      await expect(
+        agent.enrollAgentAutoReview('agent-fixture', {
+          provider: 'openai',
+          accountRevision,
+          web: invalid
+        })
+      ).rejects.toThrow('web account changed')
+    }
+    expect(invoke.mock.calls.some(([channel]) => channel === 'agent:enroll-auto-review')).toBe(
+      false
+    )
+  })
+
+  it('does not adopt a late Auto response after the web account changed', async () => {
+    webProvider = 'deepseek'
+    await settings.loadSettings()
+    const web = { policyRevision: AGENT_WEB_POLICY_REVISION, accountRevision: webAccountRevision }
+    const original = invoke.getMockImplementation()!
+    invoke.mockImplementation(async (channel, ...args) => {
+      const result = await original(channel, ...args)
+      if (channel === 'agent:enroll-auto-review') webAccountRevision = 'web-account-fixture-2'
+      return result
+    })
+    await expect(
+      agent.enrollAgentAutoReview('agent-fixture', { provider: 'openai', accountRevision, web })
+    ).rejects.toThrow('web account changed')
     expect(get(agent.activeAgentSession)?.mode).toBe('manual')
   })
 

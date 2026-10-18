@@ -113,3 +113,102 @@ describe('settingsService', () => {
     expect(listener).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('independent DeepSeek configuration and credential revisions', () => {
+  it('keeps web disabled and saved secrets private without inferring key reuse', async () => {
+    vi.resetModules()
+    const service = await import('./settingsService')
+    service.setSettings(legacySettings({ aiProvider: 'deepseek', deepseekApiKey: 'chat-only' }))
+    expect(service.getSettings()).toMatchObject({
+      webProvider: 'disabled',
+      deepseekWebKeySource: 'separate',
+      deepseekWebApiKey: '',
+      selectedAiModel: 'deepseek-flash'
+    })
+    expect(service.publicSettings()).not.toHaveProperty('deepseekApiKey')
+    expect(service.publicSettings()).toMatchObject({
+      deepseekKeyConfigured: true,
+      deepseekWebKeyConfigured: false,
+      deepseekChatAccountRevision: expect.any(String)
+    })
+  })
+  it('rotates only relevant account revisions and preserves explicit reviewer across chat switches', async () => {
+    vi.resetModules()
+    const service = await import('./settingsService')
+    service.setSettings(
+      legacySettings({
+        aiProvider: 'deepseek',
+        agentReviewerProvider: 'openai',
+        openaiApiKey: 'reviewer',
+        deepseekApiKey: 'chat',
+        webProvider: 'deepseek',
+        deepseekWebApiKey: 'web',
+        deepseekWebKeySource: 'separate'
+      })
+    )
+    const first = service.getSettings()
+    service.setSettings({ ...first, deepseekApiKey: 'new-chat' })
+    const second = service.getSettings()
+    expect(second.deepseekChatAccountRevision).not.toBe(first.deepseekChatAccountRevision)
+    expect(second.agentDecisionAccountRevision).toBe(first.agentDecisionAccountRevision)
+    expect(second.agentWebAccountRevision).toBe(first.agentWebAccountRevision)
+    service.setSettings({ ...second, deepseekWebKeySource: 'chat' })
+    const reuse = service.getSettings()
+    expect(reuse.agentWebAccountRevision).not.toBe(second.agentWebAccountRevision)
+    service.setSettings({ ...reuse, deepseekApiKey: '' })
+    expect(service.getSettings().agentWebAccountRevision).not.toBe(reuse.agentWebAccountRevision)
+    expect(service.publicSettings().deepseekKeyConfigured).toBe(false)
+    service.setSettings({
+      ...service.getSettings(),
+      agentReviewerProvider: 'openrouter',
+      openrouterApiKey: 'reviewer2'
+    })
+    expect(service.getSettings().agentDecisionAccountRevision).not.toBe(
+      first.agentDecisionAccountRevision
+    )
+    const reviewer = service.getSettings().agentDecisionAccountRevision
+    service.setSettings({ ...service.getSettings(), aiProvider: 'openai' })
+    expect(service.getSettings().agentDecisionAccountRevision).toBe(reviewer)
+  })
+})
+
+it('rotates the web write nonce for separate-key replacement/removal even while chat-key reuse is selected', async () => {
+  vi.resetModules()
+  const service = await import('./settingsService')
+  service.setSettings(
+    legacySettings({
+      aiProvider: 'deepseek',
+      deepseekApiKey: 'chat',
+      webProvider: 'deepseek',
+      deepseekWebKeySource: 'chat',
+      deepseekWebApiKey: 'stored-old'
+    })
+  )
+  const old = service.getSettings().agentWebAccountRevision
+  service.setSettings({ ...service.getSettings(), deepseekWebApiKey: 'stored-new' })
+  const replaced = service.getSettings().agentWebAccountRevision
+  expect(replaced).not.toBe(old)
+  service.setSettings({ ...service.getSettings(), deepseekWebApiKey: '' })
+  expect(service.getSettings().agentWebAccountRevision).not.toBe(replaced)
+  expect(service.publicSettings().deepseekWebKeyConfigured).toBe(false)
+})
+
+it('initializes fresh public nonces before the first key write and preserves explicit startup hydration', async () => {
+  vi.resetModules()
+  let service = await import('./settingsService')
+  const fresh = service.publicSettings()
+  expect(fresh.agentWebAccountRevision).toMatch(/^[a-f0-9-]{36}$/)
+  expect(fresh.deepseekChatAccountRevision).toMatch(/^[a-f0-9-]{36}$/)
+  service.setSettings({ ...service.getSettings(), deepseekApiKey: 'first-chat-fixture' })
+  expect(service.getSettings().deepseekChatAccountRevision).not.toBe(
+    fresh.deepseekChatAccountRevision
+  )
+  const persisted = service.getSettings()
+  vi.resetModules()
+  service = await import('./settingsService')
+  service.setSettings(service.normalizeSettings({ ...persisted }))
+  expect(service.getSettings().deepseekChatAccountRevision).toBe(
+    persisted.deepseekChatAccountRevision
+  )
+  expect(service.getSettings().agentWebAccountRevision).toBe(persisted.agentWebAccountRevision)
+})

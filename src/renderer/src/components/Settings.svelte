@@ -5,6 +5,7 @@
     getSelectedModelForProvider,
     loadSettings,
     saveSettings,
+    saveDeepSeekKey,
     patchSettings,
     retrySettingsSave,
     settingsDraftStore,
@@ -33,13 +34,25 @@
   import type { AiModelInfo, SelectedModelCapabilitySnapshot } from '../../../shared/aiModelTypes'
   import type { AppSettings } from '../types/types'
   import type { ResourceChangedEvent } from '../../../shared/mcpTypes'
+  import { selectedReviewer, type ReviewerProvider } from '../../../shared/providerSelection'
 
   let selectedTheme: string = $state()
   let showToken: boolean = $state()
   let selectedLanguage: string = $state()
-  let aiProvider: 'openai' | 'openrouter' = $state('openai')
+  let aiProvider: 'openai' | 'openrouter' | 'deepseek' = $state('openai')
   let openaiApiKey: string = $state()
   let openrouterApiKey: string = $state('')
+  let deepseekKeyInput = $state('')
+  let deepseekKeyConfigured = $state(false)
+  let deepseekChatAccountRevision: string | undefined = $state()
+  let credentialBusy: 'chat' | 'web' | '' = $state('')
+  let credentialErrors = $state({ chat: '', web: '' })
+  let reviewerProvider: ReviewerProvider | '' = $state('')
+  let webProvider: 'disabled' | 'deepseek' = $state('disabled')
+  let deepseekWebKeySource: 'separate' | 'chat' = $state('separate')
+  let deepseekWebKeyInput = $state('')
+  let deepseekWebKeyConfigured = $state(false)
+  let deepseekWebAccountRevision: string | undefined = $state()
   let selectedAiModel: string = $state('gpt-5.4-nano')
   let aiReasoningEffort: ReasoningEffort = $state('none')
   let developerPrompt: string = $state()
@@ -64,7 +77,9 @@
     if (
       aiProvider !== provider ||
       openaiApiKey !== settings.openaiApiKey ||
-      openrouterApiKey !== (settings.openrouterApiKey || '')
+      openrouterApiKey !== (settings.openrouterApiKey || '') ||
+      deepseekChatAccountRevision !== settings.deepseekChatAccountRevision ||
+      deepseekKeyConfigured !== Boolean(settings.deepseekKeyConfigured)
     ) {
       catalogGate.invalidate()
       selectedGate.invalidate()
@@ -73,12 +88,21 @@
       isLoadingModels = false
       modelFetchError = 'Provider settings changed. Refresh the model catalog.'
     }
+    if (deepseekChatAccountRevision !== settings.deepseekChatAccountRevision) deepseekKeyInput = ''
+    if (deepseekWebAccountRevision !== settings.agentWebAccountRevision) deepseekWebKeyInput = ''
     selectedTheme = settings.theme
     showToken = settings.showToken
     selectedLanguage = settings.language
     aiProvider = settings.aiProvider || 'openai'
     openaiApiKey = settings.openaiApiKey
     openrouterApiKey = settings.openrouterApiKey || ''
+    deepseekKeyConfigured = Boolean(settings.deepseekKeyConfigured)
+    deepseekChatAccountRevision = settings.deepseekChatAccountRevision
+    reviewerProvider = selectedReviewer(settings) || ''
+    webProvider = settings.webProvider || 'disabled'
+    deepseekWebKeySource = settings.deepseekWebKeySource || 'separate'
+    deepseekWebKeyConfigured = Boolean(settings.deepseekWebKeyConfigured)
+    deepseekWebAccountRevision = settings.agentWebAccountRevision
     selectedAiModel = getSelectedModelForProvider(settings, aiProvider)
     aiReasoningEffort = settings.aiReasoningEffort || 'none'
     developerPrompt = settings.developerPrompt
@@ -141,6 +165,40 @@
     void patchSettings({ openrouterApiKey })
   }
 
+  async function updateDeepSeekCredential(purpose: 'chat' | 'web', clear = false) {
+    if (credentialBusy) return
+    credentialBusy = purpose
+    credentialErrors[purpose] = ''
+    try {
+      await saveDeepSeekKey(
+        purpose,
+        clear ? '' : purpose === 'chat' ? deepseekKeyInput : deepseekWebKeyInput
+      )
+    } catch {
+      credentialErrors[purpose] =
+        'Could not confirm the key update. Reload settings before retrying.'
+    } finally {
+      if (purpose === 'chat') deepseekKeyInput = ''
+      else deepseekWebKeyInput = ''
+      credentialBusy = ''
+    }
+  }
+
+  function updateReviewerProvider(event) {
+    reviewerProvider = event.target.value
+    if (reviewerProvider) void patchSettings({ agentReviewerProvider: reviewerProvider })
+  }
+
+  function updateWebProvider(event) {
+    webProvider = event.target.value
+    void patchSettings({ webProvider })
+  }
+
+  function updateWebKeySource(event) {
+    deepseekWebKeySource = event.target.value
+    void patchSettings({ deepseekWebKeySource })
+  }
+
   async function updateAiProvider(event) {
     catalogGate.invalidate()
     selectedGate.invalidate()
@@ -173,7 +231,13 @@
       selectedCapabilityError = error
       void refreshSelectedCapabilities(
         selectedAiModel,
-        { aiProvider, openaiApiKey, openrouterApiKey },
+        {
+          aiProvider,
+          openaiApiKey,
+          openrouterApiKey,
+          deepseekKeyConfigured,
+          deepseekChatAccountRevision
+        },
         $settingsStore
       )
       return
@@ -199,7 +263,13 @@
         selectedCapabilities = undefined
         void refreshSelectedCapabilities(
           selectedAiModel,
-          { aiProvider, openaiApiKey, openrouterApiKey },
+          {
+            aiProvider,
+            openaiApiKey,
+            openrouterApiKey,
+            deepseekKeyConfigured,
+            deepseekChatAccountRevision
+          },
           $settingsStore
         )
       },
@@ -211,7 +281,13 @@
     const request = catalogGate.begin()
     clearTimeout(catalogExpiryTimer)
     aiModels = []
-    const local = { aiProvider, openaiApiKey, openrouterApiKey }
+    const local = {
+      aiProvider,
+      openaiApiKey,
+      openrouterApiKey,
+      deepseekKeyConfigured,
+      deepseekChatAccountRevision
+    }
     const committed = $settingsStore
     if (!canRefreshModelCatalog(local, committed, $settingsSaveStatus)) {
       isLoadingModels = false
@@ -219,10 +295,12 @@
         'Save provider settings before refreshing the model catalog. Retry any failed settings save first.'
       return
     }
-    if (aiProvider === 'openai' && !openaiApiKey) {
+    if (
+      (aiProvider === 'openai' && !openaiApiKey) ||
+      (aiProvider === 'deepseek' && !deepseekKeyConfigured)
+    ) {
       isLoadingModels = false
-      modelFetchError =
-        'Add an OpenAI API key to fetch OpenAI models. You can still enter a custom model ID.'
+      modelFetchError = `Add a ${aiProvider === 'deepseek' ? 'DeepSeek' : 'OpenAI'} API key to fetch models. You can still enter a custom model ID.`
       return
     }
     isLoadingModels = true
@@ -232,7 +310,13 @@
       if (
         catalogGate.current(request) &&
         canRefreshModelCatalog(
-          { aiProvider, openaiApiKey, openrouterApiKey },
+          {
+            aiProvider,
+            openaiApiKey,
+            openrouterApiKey,
+            deepseekKeyConfigured,
+            deepseekChatAccountRevision
+          },
           $settingsStore,
           $settingsSaveStatus
         ) &&
@@ -278,7 +362,13 @@
     )
   )
   $effect(() => {
-    const local = { aiProvider, openaiApiKey, openrouterApiKey }
+    const local = {
+      aiProvider,
+      openaiApiKey,
+      openrouterApiKey,
+      deepseekKeyConfigured,
+      deepseekChatAccountRevision
+    }
     const committed = $settingsStore
     const model = selectedAiModel
     const status = $settingsSaveStatus
@@ -294,7 +384,13 @@
 
   async function refreshSelectedCapabilities(
     model: string,
-    local: { aiProvider: 'openai' | 'openrouter'; openaiApiKey: string; openrouterApiKey: string },
+    local: {
+      aiProvider: 'openai' | 'openrouter' | 'deepseek'
+      openaiApiKey: string
+      openrouterApiKey: string
+      deepseekKeyConfigured: boolean
+      deepseekChatAccountRevision?: string
+    },
     committed: AppSettings
   ) {
     if (!canRefreshModelCatalog(local, committed, $settingsSaveStatus)) {
@@ -318,7 +414,13 @@
         selectedGate.current(request) &&
         selectedAiModel === model &&
         canRefreshModelCatalog(
-          { aiProvider, openaiApiKey, openrouterApiKey },
+          {
+            aiProvider,
+            openaiApiKey,
+            openrouterApiKey,
+            deepseekKeyConfigured,
+            deepseekChatAccountRevision
+          },
           $settingsStore,
           $settingsSaveStatus
         ) &&
@@ -346,7 +448,13 @@
               aiModels = []
               void refreshSelectedCapabilities(
                 model,
-                { aiProvider, openaiApiKey, openrouterApiKey },
+                {
+                  aiProvider,
+                  openaiApiKey,
+                  openrouterApiKey,
+                  deepseekKeyConfigured,
+                  deepseekChatAccountRevision
+                },
                 $settingsStore
               )
             },
@@ -536,6 +644,7 @@
     <select class="select" value={aiProvider} onchange={updateAiProvider}>
       <option value="openai">OpenAI</option>
       <option value="openrouter">OpenRouter</option>
+      <option value="deepseek">DeepSeek</option>
     </select>
   </div>
 
@@ -543,8 +652,8 @@
     <!-- svelte-ignore a11y_label_has_associated_control -->
     <label class="label">
       <span class="label-text">{$t('openai-api-key')}</span>
-      {#if aiProvider === 'openrouter'}
-        <span class="label-text-alt">Required for AI response moderation</span>
+      {#if aiProvider !== 'openai'}
+        <span class="label-text-alt">Required for Discord $chat response moderation</span>
       {/if}
     </label>
     <input
@@ -571,6 +680,39 @@
   </div>
 
   <div class="form-control">
+    <label class="label" for="deepseek-chat-key">
+      <span class="label-text">DeepSeek API Key</span>
+    </label>
+    <input
+      id="deepseek-chat-key"
+      type="password"
+      class="input w-full"
+      bind:value={deepseekKeyInput}
+      disabled={!!credentialBusy}
+      placeholder="Enter your DeepSeek chat API key..."
+      autocomplete="off"
+    />
+    <div class="flex items-center gap-2 mt-2">
+      <span class="text-xs opacity-70"
+        >{deepseekKeyConfigured ? 'Key configured' : 'No key configured'}</span
+      >
+      <button
+        class="btn btn-sm"
+        disabled={!!credentialBusy || !deepseekKeyInput.trim() || $settingsSaveStatus.saving}
+        onclick={() => updateDeepSeekCredential('chat')}>Save key</button
+      >
+      <button
+        class="btn btn-sm btn-ghost"
+        disabled={!!credentialBusy || !deepseekKeyConfigured || $settingsSaveStatus.saving}
+        onclick={() => updateDeepSeekCredential('chat', true)}>Clear key</button
+      >
+    </div>
+    {#if credentialErrors.chat}<p class="text-xs text-error mt-2" role="alert">
+        {credentialErrors.chat}
+      </p>{/if}
+  </div>
+
+  <div class="form-control">
     <!-- svelte-ignore a11y_label_has_associated_control -->
     <label class="label">
       <span class="label-text">Model</span>
@@ -580,7 +722,11 @@
       models={aiModels}
       provider={aiProvider}
       title="Select $chat model"
-      placeholder={aiProvider === 'openrouter' ? 'openai/gpt-5.4-nano' : 'gpt-5.4-nano'}
+      placeholder={aiProvider === 'deepseek'
+        ? 'deepseek-flash'
+        : aiProvider === 'openrouter'
+          ? 'openai/gpt-5.4-nano'
+          : 'gpt-5.4-nano'}
       error={modelFetchError}
       isLoading={isLoadingModels}
       onRefresh={refreshAiModels}
@@ -636,6 +782,92 @@
       placeholder={$t('enter-your-custom-developer-prompt')}
       rows="4"></textarea>
   </div>
+
+  <div class="form-control mt-4">
+    <label class="label" for="agent-reviewer-provider">
+      <span class="label-text">Auto reviewer</span>
+    </label>
+    <select
+      id="agent-reviewer-provider"
+      class="select"
+      value={reviewerProvider}
+      onchange={updateReviewerProvider}
+    >
+      {#if !reviewerProvider}<option value="" disabled>Choose a reviewer</option>{/if}
+      <option value="openai">OpenAI</option>
+      <option value="openrouter">OpenRouter / TypeSafe</option>
+    </select>
+    <p class="text-xs opacity-70 mt-2">
+      Uses the matching API key above. DeepSeek chat requires a separate supported Auto reviewer.
+      Reviewer changes require a fresh Auto acknowledgment.
+    </p>
+  </div>
+
+  <div class="divider"></div>
+  <h2 class="text-2xl font-bold mb-4">Web</h2>
+  <div class="form-control">
+    <label class="label" for="web-provider"><span class="label-text">Web provider</span></label>
+    <select id="web-provider" class="select" value={webProvider} onchange={updateWebProvider}>
+      <option value="disabled">Disabled</option>
+      <option value="deepseek">DeepSeek</option>
+    </select>
+  </div>
+  {#if webProvider === 'deepseek'}
+    <p class="text-xs opacity-70 mt-2">
+      Web queries and URLs go to DeepSeek and may incur charges. Auto web access needs its own
+      acknowledgment. Provider-side JavaScript behavior is unknown.
+    </p>
+    <div class="form-control mt-2">
+      <label class="label" for="deepseek-web-key-source">
+        <span class="label-text">Web API key</span>
+      </label>
+      <select
+        id="deepseek-web-key-source"
+        class="select"
+        value={deepseekWebKeySource}
+        onchange={updateWebKeySource}
+      >
+        <option value="separate">Use a separate web key</option>
+        <option value="chat">Reuse the DeepSeek chat key</option>
+      </select>
+    </div>
+    {#if deepseekWebKeySource === 'separate'}
+      <div class="form-control mt-2">
+        <label class="label" for="deepseek-web-key">
+          <span class="label-text">DeepSeek Web API Key</span>
+        </label>
+        <input
+          id="deepseek-web-key"
+          type="password"
+          class="input w-full"
+          bind:value={deepseekWebKeyInput}
+          disabled={!!credentialBusy}
+          placeholder="Enter your separate DeepSeek web API key..."
+          autocomplete="off"
+        />
+        <div class="flex items-center gap-2 mt-2">
+          <span class="text-xs opacity-70"
+            >{deepseekWebKeyConfigured ? 'Key configured' : 'No key configured'}</span
+          >
+          <button
+            class="btn btn-sm"
+            disabled={!!credentialBusy || !deepseekWebKeyInput.trim() || $settingsSaveStatus.saving}
+            onclick={() => updateDeepSeekCredential('web')}>Save key</button
+          >
+          <button
+            class="btn btn-sm btn-ghost"
+            disabled={!!credentialBusy || !deepseekWebKeyConfigured || $settingsSaveStatus.saving}
+            onclick={() => updateDeepSeekCredential('web', true)}>Clear key</button
+          >
+        </div>
+        {#if credentialErrors.web}<p class="text-xs text-error mt-2" role="alert">
+            {credentialErrors.web}
+          </p>{/if}
+      </div>
+    {:else if !deepseekKeyConfigured}
+      <p class="text-xs text-warning mt-2">Add a DeepSeek chat key above to reuse it for web.</p>
+    {/if}
+  {/if}
 
   {#if false}
     <div class="divider"></div>

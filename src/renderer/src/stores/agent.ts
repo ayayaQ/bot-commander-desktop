@@ -14,6 +14,8 @@ import {
 } from '../utils/agentProgress'
 import { AUTO_REVIEW_POLICY_REVISION } from '../../../shared/agentAutoReview'
 import type { AgentDecisionAuditInspection } from '../../../shared/agentAutoReview'
+import { AGENT_WEB_POLICY_REVISION, type AgentWebEnrollment } from '../../../shared/agentWeb'
+import { selectedReviewer } from '../../../shared/providerSelection'
 import { settingsStore, loadSettings } from './settings'
 
 const initial: AgentSessionsData = {
@@ -216,11 +218,26 @@ export async function enrollAgentAutoReview(
     provider: 'openai' | 'openrouter'
     accountRevision?: string
     recoveryInspectionId?: string
+    web?: AgentWebEnrollment
   },
   activate = true
 ) {
   if (!expected.accountRevision)
     throw new Error('Wait for settings to load, then reopen Auto review')
+  const before = get(settingsStore)
+  if (
+    selectedReviewer(before) !== expected.provider ||
+    before.agentDecisionAccountRevision !== expected.accountRevision
+  )
+    throw new Error('Selected review account changed; reopen Auto review')
+  if (
+    expected.web &&
+    (expected.web.policyRevision !== AGENT_WEB_POLICY_REVISION ||
+      !expected.web.accountRevision ||
+      before.webProvider !== 'deepseek' ||
+      before.agentWebAccountRevision !== expected.web.accountRevision)
+  )
+    throw new Error('Selected web account changed; reopen Auto review')
   const session: AgentSession = await window.electron.ipcRenderer.invoke(
     'agent:enroll-auto-review',
     sessionId,
@@ -228,6 +245,14 @@ export async function enrollAgentAutoReview(
       policyRevision: AUTO_REVIEW_POLICY_REVISION,
       provider: expected.provider,
       accountRevision: expected.accountRevision,
+      ...(expected.web
+        ? {
+            web: {
+              policyRevision: AGENT_WEB_POLICY_REVISION,
+              accountRevision: expected.web.accountRevision
+            }
+          }
+        : {}),
       ...(expected.recoveryInspectionId
         ? { recoveryInspectionId: expected.recoveryInspectionId }
         : {}),
@@ -238,10 +263,20 @@ export async function enrollAgentAutoReview(
   await loadSettings()
   const current = get(settingsStore)
   if (
-    session.autoReviewEnrollment?.provider !== (current.aiProvider || 'openai') ||
+    session.autoReviewEnrollment?.provider !== selectedReviewer(current) ||
     session.autoReviewEnrollment?.accountRevision !== current.agentDecisionAccountRevision
   )
     throw new Error('Selected review account changed; reopen Auto review')
+  const enrolledWeb = session.autoReviewEnrollment?.web
+  if (
+    (expected.web &&
+      (current.webProvider !== 'deepseek' ||
+        enrolledWeb?.policyRevision !== AGENT_WEB_POLICY_REVISION ||
+        enrolledWeb?.accountRevision !== expected.web.accountRevision ||
+        enrolledWeb?.accountRevision !== current.agentWebAccountRevision)) ||
+    (!expected.web && enrolledWeb)
+  )
+    throw new Error('Selected web account changed; reopen Auto review')
   replaceSession(session)
   return session
 }

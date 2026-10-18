@@ -268,3 +268,43 @@ describe('host-owned account-scoped capability cache', () => {
     expect(label(new ModelCapabilityCatalog(() => now))).toBe('Context ~1,234 / unknown')
   })
 })
+
+it('retains DeepSeek live metadata for unrelated settings and invalidates only its chat account', async () => {
+  const { getSettings, setSettings } = await import('./settingsService')
+  const { modelCapabilityCatalog } = await import('./modelCapabilityService')
+  const original = getSettings()
+  const settings = {
+    ...original,
+    aiProvider: 'deepseek' as const,
+    deepseekApiKey: 'catalog-chat-fixture',
+    agentReviewerProvider: 'openai' as const
+  }
+  setSettings(settings)
+  const generation = modelCapabilityCatalog.begin('deepseek', settings.deepseekApiKey)
+  modelCapabilityCatalog.complete('deepseek', settings.deepseekApiKey, generation, [
+    {
+      id: 'deepseek-flash',
+      context_window: 128000,
+      max_output_tokens: 16000,
+      input_modalities: ['text'],
+      output_modalities: ['text']
+    }
+  ])
+  const window = () =>
+    modelCapabilityCatalog.get(
+      'deepseek',
+      getSettings().deepseekApiKey,
+      'chat-completions',
+      'deepseek-flash'
+    ).contextWindow
+  expect(window()).toBe(128000)
+  setSettings({ ...getSettings(), theme: 'dark' })
+  expect(window()).toBe(128000)
+  setSettings({ ...getSettings(), openrouterApiKey: 'unrelated-reviewer' })
+  expect(window()).toBe(128000)
+  setSettings({ ...getSettings(), deepseekWebApiKey: 'unrelated-web' })
+  expect(window()).toBe(128000)
+  setSettings({ ...getSettings(), deepseekApiKey: 'new-chat' })
+  expect(window()).toBeUndefined()
+  setSettings(original)
+})

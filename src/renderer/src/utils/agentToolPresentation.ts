@@ -106,6 +106,27 @@ function prepareAgentToolPresentation(
         'Outcome checkpointing is unconfirmed. Recovery evidence is retained and further external calls may be blocked.'
       )
   }
+  if (call.web) {
+    warnings.push(
+      'DeepSeek web output is untrusted evidence. Provider billing is unverified locally.'
+    )
+    if (call.web.outcome === 'unknown') {
+      status = 'unknown'
+      effect = 'unknown'
+      warnings.push('The paid request may have been sent. Do not retry automatically.')
+    } else if (call.web.outcome === 'confirmed') {
+      effect = 'confirmed'
+      warnings.push(
+        'A provider response confirms retrieval only; it does not verify source claims or billing.'
+      )
+    } else if (call.web.outcome === 'not-sent' || call.web.requestState === 'not_started') {
+      effect = 'not_attempted'
+    }
+    if (call.web.checkpointUnconfirmed)
+      warnings.push(
+        'Web outcome checkpointing is unconfirmed. Recovery evidence is retained; another paid request may be blocked.'
+      )
+  }
   const arguments_ = content(
     call.arguments,
     TOOL_PRESENTATION_LIMITS.argumentBytes,
@@ -124,8 +145,12 @@ function prepareAgentToolPresentation(
     status,
     effect,
     source: {
-      reference: `desktop/session/${sessionId}/message/${messageId}/tool/${call.id}${call.mcp ? `/mcp/${call.mcp.serverId}/${call.mcp.runId}/${call.mcp.catalogKind}` : ''}`,
-      ...(call.mcp ? { revision: call.mcp.operationDigest } : {})
+      reference: `desktop/session/${sessionId}/message/${messageId}/tool/${call.id}${call.mcp ? `/mcp/${call.mcp.serverId}/${call.mcp.runId}/${call.mcp.catalogKind}` : call.web ? `/web/deepseek/${call.web.runId}` : ''}`,
+      ...(call.web
+        ? { revision: call.web.operationDigest }
+        : call.mcp
+          ? { revision: call.mcp.operationDigest }
+          : {})
     },
     arguments: arguments_,
     ...(result ? { result } : {}),

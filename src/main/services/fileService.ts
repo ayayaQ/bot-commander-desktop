@@ -48,7 +48,9 @@ function serializeSettings(settings: AppSettings): string {
     {
       ...settings,
       openaiApiKey: encryptSecret(settings.openaiApiKey),
-      openrouterApiKey: encryptSecret(settings.openrouterApiKey)
+      openrouterApiKey: encryptSecret(settings.openrouterApiKey),
+      deepseekApiKey: encryptSecret(settings.deepseekApiKey),
+      deepseekWebApiKey: encryptSecret(settings.deepseekWebApiKey)
     },
     null,
     2
@@ -59,7 +61,9 @@ function parseSettings(settings: AppSettings): AppSettings {
   return {
     ...settings,
     openaiApiKey: decryptSecret(settings.openaiApiKey),
-    openrouterApiKey: decryptSecret(settings.openrouterApiKey)
+    openrouterApiKey: decryptSecret(settings.openrouterApiKey),
+    deepseekApiKey: decryptSecret(settings.deepseekApiKey),
+    deepseekWebApiKey: decryptSecret(settings.deepseekWebApiKey)
   }
 }
 
@@ -127,7 +131,7 @@ export async function saveCommands(commands: Commands = getCommands()): Promise<
 
 function parseStoredSettings(data: string): AppSettings {
   const settings = objectValue(data)
-  for (const key of ['openaiApiKey', 'openrouterApiKey']) {
+  for (const key of ['openaiApiKey', 'openrouterApiKey', 'deepseekApiKey', 'deepseekWebApiKey']) {
     if (settings[key] !== undefined && typeof settings[key] !== 'string') {
       throw new Error('Invalid persisted credential')
     }
@@ -153,15 +157,21 @@ export async function loadSettings(): Promise<void> {
     })
     // Secure migration must succeed before the credentials become live.
     if (
-      [stored.raw.openaiApiKey, stored.raw.openrouterApiKey].some(
-        (secret) => secret && !secret.startsWith(ENCRYPTED_SECRET_PREFIX)
-      )
+      [
+        stored.raw.openaiApiKey,
+        stored.raw.openrouterApiKey,
+        stored.raw.deepseekApiKey,
+        stored.raw.deepseekWebApiKey
+      ].some((secret) => secret && !secret.startsWith(ENCRYPTED_SECRET_PREFIX))
     )
       await saveSettings(stored.settings)
     setSettings(stored.settings)
   } catch (error) {
-    if (missing(error)) await saveSettings()
-    else console.error('Error loading settings:', error)
+    if (missing(error)) {
+      const initial = normalizeSettings({ ...getSettings() })
+      await saveSettings(initial)
+      setSettings(initial)
+    } else console.error('Error loading settings:', error)
   }
 }
 

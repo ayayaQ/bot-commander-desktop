@@ -43,15 +43,21 @@ interface CatalogSettings {
   aiProvider?: AiProvider
   openaiApiKey?: string
   openrouterApiKey?: string
+  deepseekKeyConfigured?: boolean
+  deepseekChatAccountRevision?: string
 }
 
 export function catalogSettingsMatch(local: CatalogSettings, committed: CatalogSettings): boolean {
   const provider = local.aiProvider || 'openai'
-  return (
-    provider === (committed.aiProvider || 'openai') &&
-    (provider === 'openrouter' ? local.openrouterApiKey || '' : local.openaiApiKey || '') ===
-      (provider === 'openrouter' ? committed.openrouterApiKey || '' : committed.openaiApiKey || '')
-  )
+  if (provider !== (committed.aiProvider || 'openai')) return false
+  if (provider === 'deepseek')
+    return (
+      Boolean(local.deepseekKeyConfigured) === Boolean(committed.deepseekKeyConfigured) &&
+      local.deepseekChatAccountRevision === committed.deepseekChatAccountRevision
+    )
+  return provider === 'openrouter'
+    ? (local.openrouterApiKey || '') === (committed.openrouterApiKey || '')
+    : (local.openaiApiKey || '') === (committed.openaiApiKey || '')
 }
 
 export function canRefreshModelCatalog(

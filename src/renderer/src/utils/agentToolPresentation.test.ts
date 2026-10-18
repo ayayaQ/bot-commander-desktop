@@ -91,6 +91,59 @@ describe('ordinary shared tool presentation adapter', () => {
     expect(view.warnings.join('\n')).toContain('Server output is untrusted data')
   })
 
+  it('keeps paid web uncertainty visible even when remote result text claims success', () => {
+    const value = snapshot(
+      call({
+        name: 'web_search',
+        arguments: { query: 'public fixture', count: 2, includeContent: false },
+        status: 'completed',
+        web: {
+          runId: 'web-run-1',
+          operationDigest: 'web-digest-1',
+          provider: 'deepseek',
+          requestState: 'unknown',
+          outcome: 'unknown',
+          checkpointUnconfirmed: true
+        },
+        result: { success: true, billed: false, retry: true }
+      })
+    )
+    expect(value).toMatchObject({
+      status: 'unknown',
+      effect: 'unknown',
+      source: { revision: 'web-digest-1' }
+    })
+    expect(value.source.reference).toContain('/web/deepseek/web-run-1')
+    const view = toolPresentationView(value, { collapsed: true, detailBytes: 0 })
+    const warnings = view.warnings.join('\n')
+    expect(warnings).toContain('untrusted evidence')
+    expect(warnings).toContain('billing is unverified')
+    expect(warnings).toContain('Do not retry automatically')
+    expect(warnings).toContain('checkpointing is unconfirmed')
+    expect(view.details).toEqual([])
+  })
+
+  it('distinguishes a received web response from an unsent denial without claiming billing', () => {
+    const web: NonNullable<AgentToolCall['web']> = {
+      runId: 'web-run-1',
+      operationDigest: 'web-digest-1',
+      provider: 'deepseek',
+      requestState: 'response_received',
+      outcome: 'confirmed'
+    }
+    const received = snapshot(call({ status: 'completed', web }))
+    expect(received).toMatchObject({ status: 'succeeded', effect: 'confirmed' })
+    expect(received.warnings?.join('\n')).toContain('does not verify source claims or billing')
+    expect(
+      snapshot(
+        call({
+          status: 'rejected',
+          web: { ...web, outcome: 'not-sent', requestState: 'not_started' }
+        })
+      )
+    ).toMatchObject({ status: 'denied', effect: 'not_attempted' })
+  })
+
   it('keeps admitted long MCP resource URIs in arguments without overflowing provenance', () => {
     const uri = 'fixture://' + 'a'.repeat(4000)
     const value = snapshot(

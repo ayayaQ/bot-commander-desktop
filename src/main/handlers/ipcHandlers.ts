@@ -46,7 +46,12 @@ import type {
 } from '../../shared/agentMcpOAuthTypes'
 import { agentMcpService, agentMcpOAuthService } from '../services/agentMcpService'
 import { interactionPublisher } from '../services/interactionPublicationService'
-import { getSettings, setSettings, normalizeSettings } from '../services/settingsService'
+import {
+  getSettings,
+  setSettings,
+  normalizeSettings,
+  publicSettings
+} from '../services/settingsService'
 import { registerAgentDecisionSecret } from '../services/agentDecisionPrivacy'
 import {
   fetchAiModels,
@@ -328,19 +333,65 @@ export function addIPCHandlers() {
   ipcMain.handle('sync-all-slash-commands', () => interactionPublisher.publish('sync'))
 
   ipcMain.handle('get-settings', () => {
-    return getSettings()
+    return publicSettings()
   })
 
   ipcMain.handle('save-settings', async (_, newSettings: AppSettings) => {
     newSettings = structuredClone(newSettings)
     return withResourceMutationLock('settings', async () => {
-      const next = normalizeSettings(newSettings)
+      const next = normalizeSettings({
+        ...newSettings,
+        deepseekApiKey: getSettings().deepseekApiKey,
+        deepseekWebApiKey: getSettings().deepseekWebApiKey,
+        deepseekChatAccountRevision: getSettings().deepseekChatAccountRevision
+      })
       await saveSettings(next)
       setSettings(next)
-      emitResourceChanged('settings', 'renderer', getSettings())
-      return getSettings()
+      emitResourceChanged('settings', 'renderer', publicSettings())
+      return publicSettings()
     })
   })
+
+  ipcMain.handle(
+    'save-deepseek-key',
+    async (_, request: { purpose: 'chat' | 'web'; value: string; expectedRevision: string }) => {
+      if (
+        !request ||
+        typeof request !== 'object' ||
+        Object.keys(request).sort().join(',') !== 'expectedRevision,purpose,value' ||
+        !['chat', 'web'].includes(request.purpose) ||
+        typeof request.expectedRevision !== 'string' ||
+        typeof request.value !== 'string' ||
+        request.value.length > 4096 ||
+        request.value !== request.value.trim() ||
+        /[^\x21-\x7e]/.test(request.value)
+      )
+        throw new Error('DeepSeek credential request is invalid')
+      return withResourceMutationLock('settings', async () => {
+        const current = getSettings()
+        const revision =
+          request.purpose === 'chat'
+            ? current.deepseekChatAccountRevision
+            : current.agentWebAccountRevision
+        if (request.expectedRevision !== revision)
+          throw new Error('DeepSeek account changed; reload Settings before saving this key.')
+        const next = normalizeSettings({
+          ...current,
+          [request.purpose === 'chat' ? 'deepseekApiKey' : 'deepseekWebApiKey']: request.value
+        })
+        try {
+          await saveSettings(next)
+        } catch {
+          throw new Error(
+            'DeepSeek key could not be saved. The existing key remains active; check secure storage and retry.'
+          )
+        }
+        setSettings(next)
+        emitResourceChanged('settings', 'renderer', publicSettings())
+        return publicSettings()
+      })
+    }
+  )
 
   ipcMain.handle('mcp:get-status', () => getMcpServerStatus())
   ipcMain.handle('mcp:get-activity', () => getMcpActivity())
@@ -408,7 +459,12 @@ export function addIPCHandlers() {
   ipcMain.handle('fetch-ai-models', async (_, options?: { purpose?: string }) => {
     const settings = getSettings()
     const provider = getAiProvider(settings)
-    const apiKey = provider === 'openrouter' ? settings.openrouterApiKey : settings.openaiApiKey
+    const apiKey =
+      provider === 'deepseek'
+        ? settings.deepseekApiKey
+        : provider === 'openrouter'
+          ? settings.openrouterApiKey
+          : settings.openaiApiKey
     const models = await fetchAiModels(
       provider,
       apiKey,
@@ -417,7 +473,11 @@ export function addIPCHandlers() {
     const current = getSettings()
     const currentProvider = getAiProvider(current)
     const currentKey =
-      currentProvider === 'openrouter' ? current.openrouterApiKey : current.openaiApiKey
+      currentProvider === 'deepseek'
+        ? current.deepseekApiKey
+        : currentProvider === 'openrouter'
+          ? current.openrouterApiKey
+          : current.openaiApiKey
     if (provider !== currentProvider || apiKey !== currentKey) {
       throw new Error('Provider settings changed while loading models. Refresh the model catalog.')
     }

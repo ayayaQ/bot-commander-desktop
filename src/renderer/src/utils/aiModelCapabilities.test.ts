@@ -63,6 +63,37 @@ describe('renderer endpoint and catalog freshness controls', () => {
       })
     ).toBe(false)
   })
+  it('binds DeepSeek catalog freshness only to the DeepSeek chat account', () => {
+    const committed = {
+      aiProvider: 'deepseek' as const,
+      deepseekKeyConfigured: true,
+      deepseekChatAccountRevision: 'chat-account-fixture',
+      openaiApiKey: 'moderation-fixture',
+      openrouterApiKey: 'reviewer-fixture'
+    }
+    expect(
+      catalogSettingsMatch(committed, { ...committed, openaiApiKey: 'other-moderation' })
+    ).toBe(true)
+    expect(
+      catalogSettingsMatch(committed, { ...committed, openrouterApiKey: 'other-reviewer' })
+    ).toBe(true)
+    expect(
+      catalogSettingsMatch(committed, {
+        ...committed,
+        deepseekChatAccountRevision: 'other-chat-account'
+      })
+    ).toBe(false)
+    expect(catalogSettingsMatch(committed, { ...committed, deepseekKeyConfigured: false })).toBe(
+      false
+    )
+    expect(canRefreshModelCatalog(committed, committed, { saving: false, unsaved: false })).toBe(
+      true
+    )
+    expect(canRefreshModelCatalog(committed, committed, { saving: true, unsaved: true })).toBe(
+      false
+    )
+  })
+
   it('uses pure selected facts independently of account membership and rejects stale selected snapshots', () => {
     expect(selectedModelCapabilities('openai', 'responses', 'gpt-5.1', [], capabilities)).toEqual(
       capabilities
