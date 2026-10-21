@@ -1,3 +1,4 @@
+import { RUNTIME_VERSION } from './runtime/version'
 import type { BCFDCommand, BCFDInteractionCommand } from '../main/types/types'
 import type {
   PlaygroundExecutionOutcome,
@@ -11,7 +12,7 @@ export type AgentValidationOutcome =
   'passed' | 'failed' | 'blocked' | 'unmatched' | 'unsupported' | 'not_run'
 export type AgentValidationAssertion = { path: string; equals: AgentValidationJSON }
 export type AgentValidationStep = {
-  kind: 'message' | 'slash' | 'button'
+  kind: import('./runtime/dispatch').CommandEvent | 'slash' | 'button'
   senderId: string
   content?: string
   options?: Record<string, string | number | boolean>
@@ -25,7 +26,11 @@ export type AgentValidationCase = {
   state: PlaygroundState
   steps: AgentValidationStep[]
 }
-export type AgentValidationSuite = { cases: AgentValidationCase[] }
+export type AgentValidationSuite = {
+  version?: 2
+  resources?: { commands: BCFDCommand[]; interactions: BCFDInteractionCommand[] }
+  cases: AgentValidationCase[]
+}
 export type AgentValidationRequest = {
   candidateKind: 'command' | 'interaction'
   candidate: BCFDCommand | BCFDInteractionCommand
@@ -51,6 +56,9 @@ export type AgentValidationEffects = {
   botStateChanges: AgentValidationChange[]
   variableChanges: AgentValidationChange[]
   cooldownChanges: AgentValidationChange[]
+  operations?: import('./playground/types').PlaygroundOperation[]
+  channelChanges?: AgentValidationChange[]
+  roleChanges?: AgentValidationChange[]
 }
 export type AgentValidationAssertionResult = {
   path: string
@@ -86,7 +94,8 @@ export type AgentValidationCoverage = {
   notRun: number
 }
 export type AgentValidationReport = {
-  version: 1
+  version: 2
+  runtimeVersion: string
   candidateKind: AgentValidationRequest['candidateKind']
   candidateId: string
   candidateHash: string
@@ -117,12 +126,11 @@ export const AGENT_VALIDATION_LIMITS = {
 } as const
 
 export const AGENT_VALIDATION_LIMITATIONS = [
-  'Offline simulation of one unsaved candidate only; no saved resources, Discord, network or disk access',
-  'AI responses and errors are explicit fixture mocks; AI provider behavior is not tested',
-  'Startup JavaScript is not loaded; initial botState and variables come only from fixtures',
-  'Effects commit atomically per command/action; production partial effects and async timing may differ',
-  'Publication, Discord permissions/limits, event commands, reaction and external-destination effects are not tested',
-  'Only the supplied bounded cases and assertions are tested; this is not a production guarantee'
+  'Offline execution against explicit snapshots and synthetic state; no live Discord, providers or credentials',
+  'External responses require explicit mocks in strict validation; real provider behavior is not tested',
+  'Only explicitly supplied startup JavaScript is initialized in the isolated case VM',
+  'Earlier simulated effects remain visible after failures; network scheduling is synthetic',
+  'Only supplied bounded cases and assertions are tested; delivery and publication are not guaranteed'
 ] as const
 
 export function emptyAgentValidationEffects(): AgentValidationEffects {
@@ -164,7 +172,8 @@ export function createNotRunAgentValidationReport(
     }))
   }))
   const report: AgentValidationReport = {
-    version: 1,
+    version: 2,
+    runtimeVersion: RUNTIME_VERSION,
     candidateKind: request.candidateKind,
     candidateId: request.candidate.id,
     candidateHash: request.candidateHash,

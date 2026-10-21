@@ -151,8 +151,8 @@ const REASONING_EFFORTS = new Set<AgentReasoningEffort>([
 
 const SYSTEM_PROMPT = `You are the Bot Commander agent harness. Help the user inspect and modify their bot configuration.
 The initial context intentionally contains no bot resources. For create or edit tasks, search for a similar persisted command or interaction first, then use exact read tools before editing. Existing resources are preferred synthesis examples, but lint new work and do not copy mistakes blindly.
-Every edit requires the current revision returned by an exact read. Supply a validation suite on create_command, edit_command, create_interaction and edit_interaction before proposing a supported draft. First read_validation_fixture for a complete fresh fake state. Use explicit expected /outcome plus meaningful response, state, moderation or error assertions; do not infer success from empty errors or no output. Include a happy execution and relevant missing argument/option, permission, channel/NSFW, cooldown or button cases. Each case starts a fresh fake session; sequence steps may advanceClockMs without real waiting. Assertion paths address {outcome,reason,errors,state,effects}; for example /effects/messages/0/content equals the intended reply, and /state/botState/count equals the intended state value.
-Validation runs on the exact normalized unsaved draft before approval or auto-save. Failed or missing-fixture validation returns a compact report without saving. Inspect it, correct the draft/fixtures and retry at most three failed validations per resource per run; then stop and explain the remaining issue. Never weaken an expectation just to make an unintended behavior pass. Explicit expected-negative cases require a specific nonempty /reason or /errors/N assertion plus an effects assertion proving no unintended outputs; an unmatched or unsupported case is not an executed success. Event-command dispatch and genuinely unsupported features remain editable with a clearly labeled not-validated report and explicit user approval, including in auto mode. Failed supported assertions, unknown/typo BCFD names, malformed fixtures and unmatched inputs do not qualify for this exception. Startup-dependent scripts and unsupported effects are not validated; simulated AI never validates a real provider. Offline validation is bounded simulation, not Discord delivery, registration or permission-hierarchy proof.
+Every edit requires the current revision returned by an exact read. Supply a validation suite on create_command, edit_command, create_interaction and edit_interaction before proposing any draft. First read_validation_fixture for a complete fresh fake state. Use explicit expected /outcome plus meaningful response, state, moderation or error assertions; do not infer success from empty errors or no output. Include a happy execution and relevant missing argument/option, permission, channel/NSFW, cooldown or button cases. Each case starts a fresh fake session; sequence steps may advanceClockMs without real waiting. Assertion paths address {outcome,reason,errors,state,effects}; for example /effects/messages/0/content equals the intended reply, and /state/botState/count equals the intended state value.
+Validation runs on the exact normalized unsaved draft before approval or auto-save. Failed or missing-fixture validation returns a compact report without saving. Inspect it, correct the draft/fixtures and retry at most three failed validations per resource per run; then stop and explain the remaining issue. Never weaken an expectation just to make an unintended behavior pass. Explicit expected-negative cases require a specific nonempty /reason or /errors/N assertion plus an effects assertion proving no unintended outputs; an unmatched or unsupported case is not an executed success. Every event type requires passing validation; there is no approval bypass for unsupported behavior. Use run_playground for disposable tests in planning mode. Explicit dependency snapshots belong in suite.resources; startupSource, randomSeed, clockMs, failures and exact aiMocks belong in the fake state. Startup helpers run once per case. Simulated AI never validates a real provider. Offline validation is bounded simulation, not Discord delivery, registration or permission-hierarchy proof.
 After an edit, inspect the returned lint diagnostics and repair meaningful errors.
 
 For hosting questions, use read_host_status. It reports local cached evidence only; remote registration, portal permissions and freshness remain unknown. Follow its guidance to the existing Login sidebar and Interactions controls. Never request credentials in chat or claim to connect, disconnect, publish or change portal settings through this tool.
@@ -1416,7 +1416,6 @@ async function runTool(
       call.before = prepared.before
       call.after = prepared.after
       let validationFailed = false
-      let validationNeedsApproval = false
       if (isValidatedResourceMutation(prepared)) {
         call.diagnostics = clipAgentLintDiagnostics(await lintPreparedMutation(prepared))
         assertActiveRun(session, runId, signal)
@@ -1432,11 +1431,6 @@ async function runTool(
             'Draft validation repair limit reached after three failures; explain the remaining issue'
           )
         const validation = await validateAgentMutation(prepared, signal)
-        validationNeedsApproval = validation.requiresApproval
-        if (validationNeedsApproval)
-          validation.report.limitations.push(
-            'This candidate uses a genuinely unsupported feature and is not validated; explicit approval is required, including in auto mode'
-          )
         call.validation = validation.report
         call.validationBinding = validation.binding
         assertActiveRun(session, runId, signal)
@@ -1457,7 +1451,7 @@ async function runTool(
         }
       }
       if (!validationFailed) {
-        if (mode === 'auto' && !validationNeedsApproval) {
+        if (mode === 'auto') {
           await initializeMutationReviewResource(prepared)
           assertActiveRun(session, runId, signal)
           call.status = 'reviewing'
@@ -1512,7 +1506,7 @@ async function runTool(
             reviewed.assertCurrent(snapshot)
           }
         }
-        if (mode === 'manual' || validationNeedsApproval || !reviewed?.automatic) {
+        if (mode === 'manual' || !reviewed?.automatic) {
           const approved = await awaitApproval(session, runId, call, prepared, context)
           assertActiveRun(session, runId, signal)
           if (!approved) {

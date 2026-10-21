@@ -1,3 +1,6 @@
+import { createScriptSession } from '../../../shared/playground/scriptSession'
+import { runAgentValidation } from '../../../shared/playground/agentValidation'
+import type { AgentValidationRequest } from '../../../shared/agentValidationTypes'
 import { runInteraction } from '../../../shared/playground/interactions'
 import { runMessage } from '../../../shared/playground/engine'
 import { PLAYGROUND_LIMITS } from '../../../shared/playground/types'
@@ -6,7 +9,11 @@ import { loadScriptSandboxFactory } from '../../../shared/playground/script'
 
 // Disposable offline worker. JavaScript executes only in the locally bundled QuickJS VM.
 let busy = false
-self.onmessage = async (event: MessageEvent<PlaygroundRequest>) => {
+let scriptSession: ReturnType<typeof createScriptSession> | undefined
+let startupSource: string | undefined
+self.onmessage = async (
+  event: MessageEvent<PlaygroundRequest | { kind: 'validation'; request: AgentValidationRequest }>
+) => {
   if (busy) return
   busy = true
   try {
@@ -14,11 +21,22 @@ self.onmessage = async (event: MessageEvent<PlaygroundRequest>) => {
       throw new Error('Playground request is too large')
     const request = event.data
     const createSandbox = await loadScriptSandboxFactory()
-    // One deadline includes scripts, global reads, result conversion and state extraction.
-    const deadline = Date.now() + 1000
-    const factory = (state: Record<string, unknown>) => createSandbox(state, { deadline })
+    if (request.kind === 'validation') {
+      const report = await runAgentValidation(request.request, createSandbox)
+      self.postMessage({ report })
+      return
+    }
+    if (!scriptSession || startupSource !== request.state.startupSource) {
+      scriptSession?.dispose()
+      startupSource = request.state.startupSource
+      scriptSession = createScriptSession(createSandbox, startupSource)
+    }
+    scriptSession.beginStep(request.state)
+    const factory = scriptSession.factory
     const result =
-      'commands' in request ? runMessage(request, factory) : runInteraction(request, factory)
+      'commands' in request
+        ? await runMessage(request, factory)
+        : await runInteraction(request, factory)
     // Candidate-validation workers consume structured coverage. Preserve this
     // existing UI worker's transcript budget and response shape.
     delete result.resources

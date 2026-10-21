@@ -111,16 +111,16 @@ describe('disposable agent validation main bridge (headless)', () => {
 
   it('maps the main archive path to the explicitly unpacked worker artifact', () => {
     expect(agentValidationWorkerEntry('/resources/app.asar/out/main').href).toBe(
-      'file:///resources/app.asar.unpacked/out/main/agentValidationWorker.mjs'
+      pathToFileURL('/resources/app.asar.unpacked/out/main/agentValidationWorker.mjs').href
     )
     expect(agentValidationWorkerEntry('/resources/My App/app.asar/out/main').href).toBe(
-      'file:///resources/My%20App/app.asar.unpacked/out/main/agentValidationWorker.mjs'
+      pathToFileURL('/resources/My App/app.asar.unpacked/out/main/agentValidationWorker.mjs').href
     )
     expect(agentValidationWorkerEntry('/resources/app.asar.unpacked/out/main').href).toBe(
-      'file:///resources/app.asar.unpacked/out/main/agentValidationWorker.mjs'
+      pathToFileURL('/resources/app.asar.unpacked/out/main/agentValidationWorker.mjs').href
     )
     expect(agentValidationWorkerEntry('/resources/My App/out/main').href).toBe(
-      'file:///resources/My%20App/out/main/agentValidationWorker.mjs'
+      pathToFileURL('/resources/My App/out/main/agentValidationWorker.mjs').href
     )
   })
 
@@ -136,7 +136,7 @@ describe('disposable agent validation main bridge (headless)', () => {
     const input = request()
     const controller = new AbortController()
     const pending = validate(input, controller.signal)
-    expect(launches[0].entry.href).toBe('file:///test/agentValidationWorker.mjs')
+    expect(launches[0].entry.href).toBe(pathToFileURL('/test/agentValidationWorker.mjs').href)
     expect(launches[0].options).toEqual({
       workerData: { requestId: expect.any(String), request: input },
       env: {},

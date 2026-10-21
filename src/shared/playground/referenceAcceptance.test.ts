@@ -97,11 +97,11 @@ beforeAll(async () => {
 })
 
 describe('ordinary reference acceptance sequences', () => {
-  it('renders the documented welcome template exactly on a supported message command', () => {
+  it('renders the documented welcome template exactly on a supported message command', async () => {
     // The tutorial uses Member Join. This only exercises its response on message-received;
     // GuildMemberAdd dispatch is not implemented by the offline runner.
     const state = createPlaygroundState()
-    const report = runAgentValidation(
+    const report = await runAgentValidation(
       request(command(), state, [
         {
           kind: 'message',
@@ -125,7 +125,7 @@ describe('ordinary reference acceptance sequences', () => {
     expect(state.messages).toEqual([])
   })
 
-  it('increments a counter, preserves it and its cooldown on denial, then increments at expiry', () => {
+  it('increments a counter, preserves it and its cooldown on denial, then increments at expiry', async () => {
     const state = createPlaygroundState()
     state.clockMs = 10_000
     const senderId = state.members[0].id
@@ -150,7 +150,7 @@ describe('ordinary reference acceptance sequences', () => {
         { path: '/effects/cooldownChanges/0/after', equals: clockMs }
       ]
     })
-    const report = runAgentValidation(
+    const report = await runAgentValidation(
       request(
         command({
           command: '!count',
@@ -193,7 +193,7 @@ describe('ordinary reference acceptance sequences', () => {
     expect(state.clockMs).toBe(10_000)
   })
 
-  it('allows the ephemeral role button recipient and leaves all members unchanged for another user', () => {
+  it('allows the ephemeral role button recipient and leaves all members unchanged for another user', async () => {
     const state = createPlaygroundState()
     const recipient = state.members[1]
     const wrongRecipient = state.members[2]
@@ -220,7 +220,7 @@ describe('ordinary reference acceptance sequences', () => {
         ]
       })
     }
-    const report = runAgentValidation(
+    const report = await runAgentValidation(
       request(
         candidate,
         state,

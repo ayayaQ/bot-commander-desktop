@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { playgroundReplay } from '../stores/playgroundReplay'
+  import type { AgentValidationSuite } from '../../../shared/agentValidationTypes'
   import type { AgentValidationReport } from '../../../shared/agentValidationTypes'
   import {
     agentValidationReportView,
@@ -10,9 +12,10 @@
     report: AgentValidationReport
     binding?: ValidationReportBinding
     candidate?: unknown
+    suite?: AgentValidationSuite
   }
 
-  let { report, binding, candidate }: Props = $props()
+  let { report, binding, candidate, suite }: Props = $props()
   let view = $derived(agentValidationReportView(report, binding, candidate))
 
   function badgeClass(tone: ValidationReportTone): string {
@@ -30,6 +33,24 @@
       <span class="badge badge-sm ml-auto {badgeClass(view.tone)}">{view.outcome}</span>
     </div>
     <p class="opacity-70">{view.summary}</p>
+    {#if suite && candidate}
+      <button
+        class="btn btn-xs"
+        onclick={() =>
+          playgroundReplay.set(
+            structuredClone({
+              candidateKind: report.candidateKind,
+              candidate:
+                candidate as import('../../../shared/agentValidationTypes').AgentValidationRequest['candidate'],
+              candidateHash: report.candidateHash,
+              fixtureHash: report.fixtureHash,
+              baseRevision: report.baseRevision,
+              wrapEvalInIIFE: report.wrapEvalInIIFE,
+              suite
+            })
+          )}>Open in Playground</button
+      >
+    {/if}
     <div class="flex flex-wrap gap-x-3 gap-y-1 opacity-70" aria-label="Validation coverage">
       {#each view.coverage as item (item.label)}
         <span>{item.label}: <span class="font-medium tabular-nums">{item.count}</span></span>

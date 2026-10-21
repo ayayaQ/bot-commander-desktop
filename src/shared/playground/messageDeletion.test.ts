@@ -77,33 +77,36 @@ function interaction(source: string): BCFDInteractionCommand {
 }
 
 describe('strictly local Playground deleteMessage', () => {
-  it.each(['1', '2'])('deletes just fake message %s without sender permission gates', (id) => {
-    const state = fakeState()
-    const before = structuredClone(state)
-    const result = runMessage({
-      state,
-      commands: [command('before$deleteMessage($args(0))after')],
-      senderId: state.members[1].id,
-      content: `!delete ${id}`
-    })
-    expect(result.errors).toEqual([])
-    expect(result.state.messages.at(-1)?.content).toBe('beforeafter')
-    expect(result.state.messages.slice(0, 5).map((item) => !!item.deleted)).toEqual([
-      id === '1',
-      id === '2',
-      false,
-      false,
-      true
-    ])
-    expect(result.trace).toContain(`Simulated deleteMessage: deleted fake channel message ${id}`)
-    expect(state).toEqual(before)
-  })
+  it.each(['1', '2'])(
+    'deletes just fake message %s without sender permission gates',
+    async (id) => {
+      const state = fakeState()
+      const before = structuredClone(state)
+      const result = await runMessage({
+        state,
+        commands: [command('before$deleteMessage($args(0))after')],
+        senderId: state.members[1].id,
+        content: `!delete ${id}`
+      })
+      expect(result.errors).toEqual([])
+      expect(result.state.messages.at(-1)?.content).toBe('beforeafter')
+      expect(result.state.messages.slice(0, 5).map((item) => !!item.deleted)).toEqual([
+        id === '1',
+        id === '2',
+        false,
+        false,
+        true
+      ])
+      expect(result.trace).toContain(`Simulated deleteMessage: deleted fake channel message ${id}`)
+      expect(state).toEqual(before)
+    }
+  )
 
   it.each(['3', '4', '5', '999', '18446744073709551615'])(
     'excludes missing/DM/ephemeral/deleted target %s',
-    (id) => {
+    async (id) => {
       const state = fakeState()
-      const result = runMessage({
+      const result = await runMessage({
         state,
         commands: [command(`$deleteMessage(${id})`)],
         senderId: state.members[1].id,
@@ -116,9 +119,9 @@ describe('strictly local Playground deleteMessage', () => {
     }
   )
 
-  it('returns NOT_FOUND when repeating deletion and keeps the first successful local effect', () => {
+  it('returns NOT_FOUND when repeating deletion and keeps the first successful local effect', async () => {
     const state = fakeState()
-    const result = runMessage({
+    const result = await runMessage({
       state,
       commands: [command('$deleteMessage(1)$deleteMessage(1)')],
       senderId: state.members[1].id,
@@ -139,11 +142,11 @@ describe('strictly local Playground deleteMessage', () => {
     ['$deleteMessage($option(missing))', DELETE_MESSAGE_ERRORS.invalidId],
     ['$deleteMessage(01)', DELETE_MESSAGE_ERRORS.invalidId],
     ['$deleteMessage(18446744073709551616)', DELETE_MESSAGE_ERRORS.invalidId]
-  ])('matches production inline validation for %s with no mutation', (source, expected) => {
+  ])('matches production inline validation for %s with no mutation', async (source, expected) => {
     const state = fakeState()
     const before = structuredClone(state)
     expect(
-      evaluateTemplate(source, {
+      await evaluateTemplate(source, {
         state,
         sender: state.members[1],
         trigger: '',
@@ -153,7 +156,7 @@ describe('strictly local Playground deleteMessage', () => {
     expect(state).toEqual(before)
   })
 
-  it('supports evaluated slash string options and button literals in the same fake channel', () => {
+  it('supports evaluated slash string options and button literals in the same fake channel', async () => {
     const state = fakeState()
     const saved = interaction('$deleteMessage($option(messageid))slash done')
     saved.rootAction.buttons = [
@@ -165,7 +168,7 @@ describe('strictly local Playground deleteMessage', () => {
         action: { ...saved.rootAction, channelMessage: '$deleteMessage(2)button done', buttons: [] }
       }
     ]
-    const slash = runInteraction({
+    const slash = await runInteraction({
       kind: 'slash',
       state,
       interactions: [saved],
@@ -176,7 +179,7 @@ describe('strictly local Playground deleteMessage', () => {
     expect(slash.errors).toEqual([])
     expect(slash.state.messages[0].deleted).toBe(true)
     expect(slash.state.messages.at(-1)?.content).toBe('slash done')
-    const clicked = runInteraction({
+    const clicked = await runInteraction({
       kind: 'button',
       state: slash.state,
       interactions: [saved],
@@ -191,17 +194,18 @@ describe('strictly local Playground deleteMessage', () => {
     expect(slash.state.messages[1].deleted).toBeUndefined()
   })
 
-  it('keeps successful fake deletion atomic when a later execution failure occurs', () => {
+  it('retains deletion when a later keyword returns an inline production error', async () => {
     const state = fakeState()
-    const result = runMessage({
+    const result = await runMessage({
       state,
       commands: [command('$deleteMessage(1)$sum(not-a-number)')],
       senderId: state.members[1].id,
       content: '!delete'
     })
-    expect(result.errors).toHaveLength(1)
-    expect(result.state.messages.slice(0, 5)).toEqual(state.messages)
-    expect(result.trace).not.toContain('Simulated deleteMessage: deleted fake channel message 1')
+    expect(result.errors).toEqual([])
+    expect(result.state.messages[0].deleted).toBe(true)
+    expect(result.state.messages.at(-1)?.content).toContain('sum requires numeric arguments')
+    expect(result.trace).toContain('Simulated deleteMessage: deleted fake channel message 1')
   })
 
   it('displays the local target ID in each transcript entry', () => {

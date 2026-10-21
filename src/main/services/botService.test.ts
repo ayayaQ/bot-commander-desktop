@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   Client,
+  Collection,
+  ChannelType,
   Events,
   GatewayIntentBits,
   IntentsBitField,
@@ -28,7 +30,10 @@ const mocks = vi.hoisted(() => ({
     updateUserCount: vi.fn(),
     updateServerCount: vi.fn(),
     updateCommandCount: vi.fn(),
-    incrementMessagesReceived: vi.fn()
+    incrementMessagesReceived: vi.fn(),
+    incrementJoinEventsReceived: vi.fn(),
+    incrementPrivateMessagesReceived: vi.fn(),
+    incrementMessagesSent: vi.fn()
   }
 }))
 
@@ -139,6 +144,78 @@ describe('botService Connect', () => {
       clients.push(client)
       return client
     })
+  })
+
+  it('evaluates live member-event templates with the joining member context', async () => {
+    const { Connect, setCommands } = await import('./botService')
+    const { stringInfoAdd } = await import('./stringInfo')
+    const { decodeBCFDCommand } = await import('../../shared/commandCodec')
+    vi.mocked(stringInfoAdd).mockImplementation(async (context) =>
+      context.message.replace('$namePlain', context.user?.displayName ?? '')
+    )
+    const command = decodeBCFDCommand({
+      commandDescription: 'Test',
+      privateMessage: '',
+      channelEmbed: {},
+      privateEmbed: {},
+      id: 'join',
+      type: 2,
+      command: 'join',
+      channelMessage: 'Welcome $namePlain'
+    }).command
+    setCommands({ bcfdCommands: [command], bcfdSlashCommands: [] })
+    Connect(ipcEvent(), 'token')
+    await clients[0].ready()
+    const channel = { id: 'channel', send: vi.fn(async () => {}) }
+    const guild = {
+      id: 'guild',
+      client: clients[0],
+      channels: { cache: new Collection([['channel', channel]]) }
+    }
+    const user = { id: 'member', bot: false, displayName: 'Alex' }
+    await clients[0].emit(Events.GuildMemberAdd, { guild, user })
+    await vi.waitFor(() => expect(channel.send).toHaveBeenCalledWith('Welcome Alex'))
+    expect(stringInfoAdd).toHaveBeenCalledWith(expect.objectContaining({ user, guild, command }))
+  })
+
+  it('dispatches live DMs to DM commands instead of guild message commands', async () => {
+    const { Connect, setCommands } = await import('./botService')
+    const { stringInfoAdd, contextForMessageEvent } = await import('./stringInfo')
+    const { decodeBCFDCommand } = await import('../../shared/commandCodec')
+    vi.mocked(contextForMessageEvent).mockImplementation((message, command, event) => ({
+      message,
+      command,
+      user: event.author
+    }))
+    vi.mocked(stringInfoAdd).mockImplementation(async (context) => context.message)
+    setCommands({
+      bcfdCommands: [0, 1].map(
+        (type) =>
+          decodeBCFDCommand({
+            commandDescription: 'Test',
+            privateMessage: '',
+            channelEmbed: {},
+            privateEmbed: {},
+            id: String(type),
+            type,
+            command: '!test',
+            channelMessage: type ? 'DM reply' : 'Guild reply'
+          }).command
+      ),
+      bcfdSlashCommands: []
+    })
+    Connect(ipcEvent(), 'token')
+    await clients[0].ready()
+    const send = vi.fn(async () => {})
+    await clients[0].emit(Events.MessageCreate, {
+      id: 'input',
+      content: '!test',
+      author: { bot: false, id: 'user' },
+      channel: { type: ChannelType.DM, send },
+      channelId: 'dm'
+    })
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith('DM reply'))
+    expect(send).toHaveBeenCalledTimes(1)
   })
 
   it('uses moderation and all existing intents/partials in the actual login path', async () => {

@@ -1,5 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { get } from 'svelte/store'
+  import { settingsStore } from '../stores/settings'
+  import { playgroundReplay } from '../stores/playgroundReplay'
+  import PlaygroundTests from './PlaygroundTests.svelte'
+  import { commandEvents } from '../../../shared/runtime/dispatch'
+  import { validateAgentValidationState } from '../../../shared/playground/agentValidationFixtures'
   import type { BCFDCommand, BCFDInteractionCommand } from '../types/types'
   import { createPlaygroundState, PLAYGROUND_LIMITS } from '../../../shared/playground/types'
   import type { FakePermission, PlaygroundRequest } from '../../../shared/playground/types'
@@ -11,13 +17,27 @@
   const session = new PlaygroundSession(
     () => new Worker(new URL('../utils/playgroundWorker.ts', import.meta.url), { type: 'module' })
   )
-  const initialWorld = createPlaygroundState()
+  const replayRequest = get(playgroundReplay)
+  playgroundReplay.set(null)
+  const initialWorld = replayRequest?.suite.cases[0]?.state ?? createPlaygroundState()
+  let worldDraft = $state('')
+  let worldError = $state('')
+  let reactionMessageId = $state(1)
   let world = $state(initialWorld)
   let botStateDraft = $state(formatBotStateDraft(initialWorld.botState))
   let botStateDraftError = $state('')
+  const wrapEval = $derived(replayRequest?.wrapEvalInIIFE ?? !$settingsStore.useLegacyInterpreter)
+  let selectedCommandIds = $state<string[]>([])
+  let selectedInteractionIds = $state<string[]>([])
+  let mockPrompt = $state('')
+  let mockResponse = $state('')
   let commands = $state<BCFDCommand[]>([])
   let interactions = $state<BCFDInteractionCommand[]>([])
-  let mode = $state<'message' | 'slash'>('message')
+  const activeCommands = $derived(commands.filter((item) => selectedCommandIds.includes(item.id)))
+  const activeInteractions = $derived(
+    interactions.filter((item) => selectedInteractionIds.includes(item.id))
+  )
+  let mode = $state<(typeof commandEvents)[number] | 'slash'>('message')
   let interactionId = $state('')
   let optionInputs = $state<Record<string, string>>(Object.create(null))
   const selectedInteraction = $derived(
@@ -36,6 +56,25 @@
   const permissions: FakePermission[] = ['admin', 'manageMessages', 'kick', 'ban', 'mute']
 
   async function loadCommands() {
+    if (replayRequest) {
+      commands = replayRequest.suite.resources?.commands ?? []
+      interactions = replayRequest.suite.resources?.interactions ?? []
+      if (replayRequest.candidateKind === 'command') {
+        const candidate = replayRequest.candidate as BCFDCommand
+        commands = commands.some((item) => item.id === candidate.id)
+          ? commands.map((item) => (item.id === candidate.id ? candidate : item))
+          : [...commands, candidate]
+      } else {
+        const candidate = replayRequest.candidate as BCFDInteractionCommand
+        interactions = interactions.some((item) => item.id === candidate.id)
+          ? interactions.map((item) => (item.id === candidate.id ? candidate : item))
+          : [...interactions, candidate]
+      }
+      selectedCommandIds = commands.map((item) => item.id)
+      selectedInteractionIds = interactions.map((item) => item.id)
+      return
+    }
+    session.cancel()
     const generation = ++loadGeneration
     loading = true
     try {
@@ -43,6 +82,8 @@
       if (!saved || !alive || generation !== loadGeneration) return
       commands = saved.commands
       interactions = saved.interactions
+      selectedCommandIds = commands.map((item) => item.id)
+      selectedInteractionIds = interactions.map((item) => item.id)
       errors = saved.errors
       interactionId = interactions[0]?.id ?? ''
       optionInputs = Object.create(null)
@@ -121,10 +162,13 @@
   }
 
   function send() {
-    if (!content.trim()) return
+    if (!content.trim() && ['message', 'dm', 'reaction'].includes(mode)) return
     void runRequest({
       state: structuredClone($state.snapshot(world)),
-      commands: structuredClone($state.snapshot(commands)),
+      commands: structuredClone($state.snapshot(activeCommands)),
+      wrapEvalInIIFE: wrapEval,
+      kind: mode === 'slash' ? 'message' : mode,
+      messageId: mode === 'reaction' ? reactionMessageId : undefined,
       senderId,
       content
     })
@@ -146,7 +190,8 @@
     void runRequest({
       kind: 'slash',
       state: structuredClone($state.snapshot(world)),
-      interactions: structuredClone($state.snapshot(interactions)),
+      interactions: structuredClone($state.snapshot(activeInteractions)),
+      wrapEvalInIIFE: wrapEval,
       senderId,
       commandId: selectedInteraction.id,
       options
@@ -157,7 +202,8 @@
     void runRequest({
       kind: 'button',
       state: structuredClone($state.snapshot(world)),
-      interactions: structuredClone($state.snapshot(interactions)),
+      interactions: structuredClone($state.snapshot(activeInteractions)),
+      wrapEvalInIIFE: wrapEval,
       senderId,
       messageId,
       customId
@@ -229,11 +275,40 @@
     <p class="w-full text-sm">
       Offline fake server. Saved commands are read-only. Scripts, bot state and cooldowns run only
       in this bounded simulation. AI replies and failures are simulated; no provider is contacted.
-      Unsupported effects fail closed. This is not exact Discord network parity.
+      Inspect simulated effects, test failures and replay agent scenarios here.
     </p>
     <p class="w-full text-xs opacity-70">
       Server ID: {world.guildId} · Channel ID: {world.channelId}
     </p>
+    <details class="w-full">
+      <summary class="text-xs cursor-pointer"
+        >Selected command snapshots ({activeCommands.length + activeInteractions.length})</summary
+      >
+      <div class="grid gap-2 mt-2 md:grid-cols-2 max-h-40 overflow-y-auto">
+        {#each commands as command}
+          <label class="text-xs flex gap-2"
+            ><input
+              type="checkbox"
+              bind:group={selectedCommandIds}
+              value={command.id}
+              disabled={busy}
+            />
+            {command.command}</label
+          >
+        {/each}
+        {#each interactions as interaction}
+          <label class="text-xs flex gap-2"
+            ><input
+              type="checkbox"
+              bind:group={selectedInteractionIds}
+              value={interaction.id}
+              disabled={busy}
+            />
+            /{interaction.commandName}</label
+          >
+        {/each}
+      </div>
+    </details>
     <details class="w-full">
       <summary class="text-xs cursor-pointer">Offline session controls</summary>
       <div class="grid gap-3 mt-2 md:grid-cols-2">
@@ -275,7 +350,60 @@
               placeholder="Example: simulated provider unavailable"
             /></label
           >
-          <p class="text-xs opacity-70">These values never call a real AI provider.</p>
+          <p class="text-xs opacity-70">
+            Interactive defaults only. Strict tests require an exact prompt mock.
+          </p>
+          <label class="block text-xs"
+            >Exact AI prompt <input
+              class="input input-sm w-full"
+              bind:value={mockPrompt}
+              disabled={busy}
+            /></label
+          >
+          <label class="block text-xs"
+            >Mock response <input
+              class="input input-sm w-full"
+              bind:value={mockResponse}
+              disabled={busy}
+            /></label
+          >
+          <button
+            class="btn btn-xs"
+            disabled={busy || !mockPrompt || (world.aiMocks?.length ?? 0) >= 100}
+            onclick={() => {
+              world.aiMocks = [
+                ...(world.aiMocks ?? []).filter((item) => item.prompt !== mockPrompt),
+                { prompt: mockPrompt, response: mockResponse }
+              ]
+              mockPrompt = ''
+              mockResponse = ''
+            }}>Add exact mock</button
+          >
+          <p class="text-xs">{world.aiMocks?.length ?? 0} exact prompt mocks configured</p>
+          <label class="block text-xs"
+            >Random seed <input
+              class="input input-sm w-full"
+              type="number"
+              min={0}
+              max={4294967295}
+              value={world.randomSeed ?? 1}
+              onchange={(event) => (world.randomSeed = Number(event.currentTarget.value) >>> 0)}
+              disabled={busy}
+            /></label
+          >
+          <label class="block text-xs"
+            >Startup JavaScript (runs on a fresh session)
+            <textarea
+              class="textarea w-full font-mono text-xs"
+              rows={4}
+              value={world.startupSource ?? ''}
+              maxlength={16384}
+              disabled={busy}
+              onchange={(event) => {
+                session.cancel()
+                world.startupSource = event.currentTarget.value
+              }}></textarea>
+          </label>
         </div>
         <div class="space-y-2">
           <h2 class="font-semibold text-sm">Fake session bot state</h2>
@@ -334,6 +462,54 @@
         >
       </div>
     </details>
+    <details class="border border-base-300 rounded p-3 mt-2">
+      <summary class="font-semibold cursor-pointer">Fake world and operation details</summary>
+      <p class="text-xs my-2">
+        Configure channels, botPermissions, failures, startupSource, randomSeed, and explicit
+        aiMocks. Applying a world starts a fresh script session.
+      </p>
+      <button
+        class="btn btn-xs"
+        disabled={busy}
+        onclick={() => (worldDraft = JSON.stringify($state.snapshot(world), null, 2))}
+        >Inspect current world</button
+      >
+      <textarea
+        class="textarea w-full font-mono text-xs my-2"
+        rows={8}
+        bind:value={worldDraft}
+        maxlength={65536}
+        disabled={busy}
+        aria-label="Fake world JSON"></textarea>
+      <button
+        class="btn btn-xs"
+        disabled={busy || !worldDraft}
+        onclick={() => {
+          try {
+            const next = validateAgentValidationState(JSON.parse(worldDraft))
+            session.cancel()
+            world = next
+            syncBotStateDraft()
+            worldError = ''
+          } catch (error) {
+            worldError = error instanceof Error ? error.message : String(error)
+          }
+        }}>Apply fake world</button
+      >
+      {#if worldError}<p class="text-error text-xs">{worldError}</p>{/if}
+      <pre class="text-xs max-h-48 overflow-auto whitespace-pre-wrap">{JSON.stringify(
+          world.operations ?? [],
+          null,
+          2
+        )}</pre>
+    </details>
+    <PlaygroundTests
+      commands={activeCommands}
+      interactions={activeInteractions}
+      {world}
+      defaultWrapEval={wrapEval}
+      replay={replayRequest}
+    />
   </header>
   <div class="flex grow min-h-0">
     <div class="flex flex-col grow min-w-0">
@@ -412,12 +588,24 @@
           <label class="flex items-center gap-2"
             >Mode
             <select class="select select-sm" bind:value={mode} disabled={busy}
-              ><option value="message">Message</option><option value="slash">Slash command</option
-              ></select
+              ><option value="message">Message</option><option value="dm">Private message</option
+              ><option value="memberJoin">Member joins</option><option value="memberLeave"
+                >Member leaves</option
+              ><option value="memberBan">Member banned</option><option value="reaction"
+                >Reaction added</option
+              ><option value="slash">Slash command</option></select
             >
           </label>
         </div>
-        {#if mode === 'message'}
+        {#if mode === 'reaction'}<label class="text-xs"
+            >Target fake message ID <input
+              class="input input-sm"
+              type="number"
+              min={1}
+              bind:value={reactionMessageId}
+            /></label
+          >{/if}
+        {#if mode !== 'slash'}
           <form
             class="flex gap-2"
             onsubmit={(event) => {
@@ -433,7 +621,11 @@
               maxlength={PLAYGROUND_LIMITS.input}
               disabled={busy || loading}
             />
-            <button class="btn btn-sm btn-primary" disabled={busy || loading || !content.trim()}
+            <button
+              class="btn btn-sm btn-primary"
+              disabled={busy ||
+                loading ||
+                (!content.trim() && ['message', 'dm', 'reaction'].includes(mode))}
               >{busy ? 'Running…' : 'Send'}</button
             >
           </form>

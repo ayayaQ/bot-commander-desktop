@@ -105,7 +105,7 @@ beforeAll(async () => {
 })
 
 describe('playground command execution state', () => {
-  it('persists local botState and cooldown timestamps across successive message and slash requests', () => {
+  it('persists local botState and cooldown timestamps across successive message and slash requests', async () => {
     const saved = messageCommand({
       cooldown: 2,
       cooldownType: 'User',
@@ -114,7 +114,7 @@ describe('playground command execution state', () => {
     })
     const input = messageRequest(saved)
     const original = structuredClone(input)
-    const first = runMessage(input, factory)
+    const first = await runMessage(input, factory)
     expect(first.errors).toEqual([])
     expect(first.state.botState).toEqual({ visits: 1 })
     expect(first.state.cooldowns).toEqual({ [`message:user:${input.senderId}`]: 0 })
@@ -123,7 +123,7 @@ describe('playground command execution state', () => {
 
     const advanced = structuredClone(first.state)
     advanced.clockMs = 2000
-    const second = runMessage(messageRequest(saved, advanced), factory)
+    const second = await runMessage(messageRequest(saved, advanced), factory)
     expect(second.errors).toEqual([])
     expect(second.state.botState).toEqual({ visits: 2 })
     expect(second.state.cooldowns).toEqual({ [`message:user:${input.senderId}`]: 2000 })
@@ -136,7 +136,7 @@ describe('playground command execution state', () => {
         channelMessage: '$eval botState.visits += 1; return botState.visits; $halt'
       })
     })
-    const third = runInteraction(slashRequest(slash, second.state), factory)
+    const third = await runInteraction(slashRequest(slash, second.state), factory)
     expect(third.errors).toEqual([])
     expect(third.state.botState).toEqual({ visits: 3 })
     expect(third.state.cooldowns).toEqual(second.state.cooldowns)
@@ -144,7 +144,7 @@ describe('playground command execution state', () => {
     expect(second.state.botState).toEqual({ visits: 2 })
   })
 
-  it('rolls back script state, replies, deletions, roles and cooldowns when a command later fails', () => {
+  it('retains earlier script commits, replies and effects when a command later fails', async () => {
     const saved = messageCommand({
       cooldown: 5,
       cooldownType: 'Global',
@@ -162,21 +162,17 @@ describe('playground command execution state', () => {
     state.messages = [{ id: 1, kind: 'user', author: 'Sam', content: 'keep me' }]
     state.nextId = 2
     const original = structuredClone(state)
-    const result = runMessage(messageRequest(saved, state), factory)
+    const result = await runMessage(messageRequest(saved, state), factory)
     expect(result.errors).toHaveLength(1)
-    expect(result.state.botState).toEqual(original.botState)
-    expect(result.state.variables).toEqual(original.variables)
-    expect(result.state.cooldowns).toEqual(original.cooldowns)
-    expect(result.state.members).toEqual(original.members)
-    expect(result.state.messages).toEqual([
-      ...original.messages,
-      { id: 2, kind: 'user', author: 'Alex', content: '!test' }
-    ])
-    expect(result.state.nextId).toBe(3)
+    expect(result.state.botState).toEqual({ profile: { count: 5 } })
+    expect(result.state.variables).toEqual({ theme: 'keep', temporary: 'staged' })
+    expect(result.state.cooldowns).toEqual({ ...original.cooldowns, 'message:global': 0 })
+    expect(result.state.messages[0].deleted).toBe(true)
+    expect(result.state.messages.at(-1)?.content).toBe('staged')
     expect(state).toEqual(original)
   })
 
-  it('keeps a prior matching command committed when a later matching command fails', () => {
+  it('keeps a prior matching command committed when a later matching command fails', async () => {
     const first = messageCommand({
       id: 'first',
       channelMessage: '$eval botState.count = 1; return "first"; $halt'
@@ -188,14 +184,21 @@ describe('playground command execution state', () => {
       channelMessage: '$eval botState.count = 2; return "second"; $halt',
       privateMessage: '$unknown'
     })
-    const result = runMessage({ ...messageRequest(first), commands: [first, second] }, factory)
+    const result = await runMessage(
+      { ...messageRequest(first), commands: [first, second] },
+      factory
+    )
     expect(result.errors).toHaveLength(1)
-    expect(result.state.botState).toEqual({ count: 1 })
-    expect(result.state.messages.map((message) => message.content)).toEqual(['!test', 'first'])
-    expect(result.state.cooldowns).toEqual({})
+    expect(result.state.botState).toEqual({ count: 2 })
+    expect(result.state.messages.map((message) => message.content)).toEqual([
+      '!test',
+      'first',
+      'second'
+    ])
+    expect(result.state.cooldowns).toEqual({ 'second:global': 0 })
   })
 
-  it('rolls back an entire failed interaction, including staged botState and transcript changes', () => {
+  it('retains completed interaction effects when a later DM fails', async () => {
     const saved = slashCommand({
       cooldown: 5,
       cooldownType: 'Global',
@@ -218,9 +221,12 @@ describe('playground command execution state', () => {
     state.messages = [{ id: 1, kind: 'user', author: 'Sam', content: 'keep me' }]
     state.nextId = 2
     const original = structuredClone(state)
-    const result = runInteraction(slashRequest(saved, state), factory)
+    const result = await runInteraction(slashRequest(saved, state), factory)
     expect(result.errors).toHaveLength(1)
-    expect(result.state).toEqual(original)
+    expect(result.state.botState).toEqual({ profile: { count: 5 } })
+    expect(result.state.messages[0].deleted).toBe(true)
+    expect(result.state.messages.at(-1)?.content).toBe('staged')
+    expect(result.state.cooldowns).toEqual(original.cooldowns)
     expect(state).toEqual(original)
   })
 
@@ -245,7 +251,7 @@ describe('playground command execution state', () => {
     expect(populated.botState).toEqual({ score: 42 })
   })
 
-  it('preserves explicit $set/$get variables across templates and sends separately from botState', () => {
+  it('preserves explicit $set/$get variables across templates and sends separately from botState', async () => {
     const saved = messageCommand({
       channelMessage: '$set(color,blue)$get(color)',
       privateMessage: '$get(color):$eval return botState.color; $halt',
@@ -253,7 +259,7 @@ describe('playground command execution state', () => {
     })
     const state = createPlaygroundState()
     state.botState = { color: 'persistent' }
-    const first = runMessage(messageRequest(saved, state), factory)
+    const first = await runMessage(messageRequest(saved, state), factory)
     expect(first.errors).toEqual([])
     expect(first.state.messages[1].content).toBe('blue')
     expect(first.state.messages[2].content).toBe('blue:persistent')
@@ -265,19 +271,19 @@ describe('playground command execution state', () => {
       id: 'reader',
       channelMessage: '$get(color):$eval return botState.color; $halt'
     })
-    const sameRequest = runMessage(
+    const sameRequest = await runMessage(
       { ...messageRequest(saved, state), commands: [saved, reader] },
       factory
     )
     expect(sameRequest.errors).toEqual([])
     expect(sameRequest.state.messages.at(-1)?.content).toBe('blue:persistent')
-    const later = runMessage(messageRequest(reader, first.state), factory)
+    const later = await runMessage(messageRequest(reader, first.state), factory)
     expect(later.errors).toEqual([])
     expect(later.state.messages.at(-1)?.content).toBe('blue:persistent')
     expect(later.state.botState).toEqual({ color: 'persistent' })
     expect(later.state.variables).toEqual({ color: 'blue' })
 
-    const changed = runMessage(
+    const changed = await runMessage(
       messageRequest(
         messageCommand({ channelMessage: '$eval color = "green"; return color; $halt' }),
         later.state
@@ -286,12 +292,12 @@ describe('playground command execution state', () => {
     )
     expect(changed.errors).toEqual([])
     expect(changed.state.variables).toEqual({ color: 'green' })
-    const observed = runMessage(messageRequest(reader, changed.state), factory)
+    const observed = await runMessage(messageRequest(reader, changed.state), factory)
     expect(observed.errors).toEqual([])
     expect(observed.state.messages.at(-1)?.content).toBe('green:persistent')
   })
 
-  it('keeps untracked JavaScript globals within a command only, shared across its templates', () => {
+  it('keeps untracked JavaScript globals within a command only, shared across its templates', async () => {
     const writer = messageCommand({
       channelMessage: '$eval globalThis.commandOnly = "temporary"; return commandOnly; $halt',
       privateMessage: '$eval return commandOnly; $halt'
@@ -300,7 +306,10 @@ describe('playground command execution state', () => {
       id: 'reader',
       channelMessage: '$eval return typeof globalThis.commandOnly; $halt'
     })
-    const first = runMessage({ ...messageRequest(writer), commands: [writer, reader] }, factory)
+    const first = await runMessage(
+      { ...messageRequest(writer), commands: [writer, reader] },
+      factory
+    )
     expect(first.errors).toEqual([])
     expect(first.state.messages.map((message) => message.content)).toEqual([
       '!test',
@@ -309,12 +318,12 @@ describe('playground command execution state', () => {
       'undefined'
     ])
     expect(first.state.variables).toEqual({})
-    const later = runMessage(messageRequest(reader, first.state), factory)
+    const later = await runMessage(messageRequest(reader, first.state), factory)
     expect(later.errors).toEqual([])
     expect(later.state.messages.at(-1)?.content).toBe('undefined')
   })
 
-  it('shares tracked interaction variables with embeds, DMs, button labels and later button clicks', () => {
+  it('shares tracked interaction variables with embeds, DMs, button labels and later button clicks', async () => {
     const saved = slashCommand({
       rootAction: action({
         sendChannelMessage: true,
@@ -334,7 +343,7 @@ describe('playground command execution state', () => {
         ]
       })
     })
-    const first = runInteraction(slashRequest(saved), factory)
+    const first = await runInteraction(slashRequest(saved), factory)
     expect(first.errors).toEqual([])
     expect(first.state.messages[0]).toMatchObject({
       content: 'blue',
@@ -344,7 +353,7 @@ describe('playground command execution state', () => {
     expect(first.state.messages[1].content).toBe('blue')
     expect(first.state.botState).toEqual({})
     expect(first.state.variables).toEqual({ color: 'blue' })
-    const clicked = runInteraction(
+    const clicked = await runInteraction(
       {
         kind: 'button',
         state: first.state,
@@ -361,7 +370,7 @@ describe('playground command execution state', () => {
     expect(clicked.state.variables).toEqual({ color: 'blue' })
   })
 
-  it('rolls back an attempt to replace the required botState object with a scalar', () => {
+  it('rolls back an attempt to replace the required botState object with a scalar', async () => {
     const saved = messageCommand({
       cooldown: 5,
       cooldownType: 'Global',
@@ -372,28 +381,28 @@ describe('playground command execution state', () => {
     state.variables = { theme: 'keep' }
     state.cooldowns = { 'older:global': 0 }
     const original = structuredClone(state)
-    const result = runMessage(messageRequest(saved, state), factory)
+    const result = await runMessage(messageRequest(saved, state), factory)
     expect(result.errors).toHaveLength(1)
     expect(result.errors[0]).toContain('JSON')
     expect(result.state.botState).toEqual(original.botState)
     expect(result.state.variables).toEqual(original.variables)
-    expect(result.state.cooldowns).toEqual(original.cooldowns)
+    expect(result.state.cooldowns).toEqual({ ...original.cooldowns, 'message:global': 0 })
     expect(result.state.messages).toEqual([
-      { id: 1, kind: 'user', author: 'Alex', content: '!test' }
+      { id: 1, kind: 'user', author: 'Alex', content: '!test', channelId: state.channelId }
     ])
     expect(state).toEqual(original)
   })
 
-  it('safely converts script results after an explicit variable shadows the String global', () => {
+  it('safely converts script results after an explicit variable shadows the String global', async () => {
     const saved = messageCommand({
       channelMessage: '$set(String,shadow)$eval return 42; $halt:$get(String)'
     })
-    const first = runMessage(messageRequest(saved), factory)
+    const first = await runMessage(messageRequest(saved), factory)
     expect(first.errors).toEqual([])
     expect(first.state.messages.at(-1)?.content).toBe('42:shadow')
     expect(first.state.variables).toEqual({ String: 'shadow' })
     expect(first.state.botState).toEqual({})
-    const later = runMessage(
+    const later = await runMessage(
       messageRequest(
         messageCommand({ channelMessage: '$eval return 7; $halt:$get(String)' }),
         first.state
@@ -407,7 +416,7 @@ describe('playground command execution state', () => {
 })
 
 describe('playground eval template resolution', () => {
-  it('pre-resolves code expressions while preserving quoted text, comments and static template text', () => {
+  it('pre-resolves code expressions while preserving quoted text, comments and static template text', async () => {
     const saved = messageCommand({
       channelMessage: [
         '$eval',
@@ -420,12 +429,12 @@ describe('playground eval template resolution', () => {
         '$halt'
       ].join('\n')
     })
-    const result = runMessage(messageRequest(saved), factory)
+    const result = await runMessage(messageRequest(saved), factory)
     expect(result.errors).toEqual([])
     expect(result.state.messages.at(-1)?.content).toBe('$namePlain|$namePlain|$namePlain|Alex|5')
   })
 
-  it('does not interpret template-looking expressions inside eval literals or comments', () => {
+  it('does not interpret template-looking expressions inside eval literals or comments', async () => {
     const saved = messageCommand({
       channelMessage: [
         '$eval',
@@ -435,12 +444,12 @@ describe('playground eval template resolution', () => {
         '$halt'
       ].join('\n')
     })
-    const result = runMessage(messageRequest(saved), factory)
+    const result = await runMessage(messageRequest(saved), factory)
     expect(result.errors).toEqual([])
     expect(result.state.messages.at(-1)?.content).toBe('$unknown:$unknown')
   })
 
-  it('inserts resolved slash text as a literal value including quotes, backslashes and newlines', () => {
+  it('inserts resolved slash text as a literal value including quotes, backslashes and newlines', async () => {
     const text = 'A "quoted" name, a backslash \\ and a newline\n日本語'
     const saved = slashCommand({
       options: [{ name: 'text', description: 'Text', type: 3, required: true }],
@@ -449,32 +458,32 @@ describe('playground eval template resolution', () => {
         channelMessage: '$eval return $option(text); $halt'
       })
     })
-    const result = runInteraction({ ...slashRequest(saved), options: { text } }, factory)
+    const result = await runInteraction({ ...slashRequest(saved), options: { text } }, factory)
     expect(result.errors).toEqual([])
     expect(result.state.messages[0].content).toBe(text)
     expect(result.state.botState).toEqual({})
   })
 
-  it('allows more than 32 sequential shallow JavaScript template literals before an expression', () => {
+  it('allows more than 32 sequential shallow JavaScript template literals before an expression', async () => {
     const literals = Array.from({ length: 40 }, (_, index) => `\`literal ${index}\``).join(', ')
     const saved = messageCommand({
       channelMessage: `$eval const texts = [${literals}]; return $namePlain + ":" + texts.length; $halt`
     })
-    const result = runMessage(messageRequest(saved), factory)
+    const result = await runMessage(messageRequest(saved), factory)
     expect(result.errors).toEqual([])
     expect(result.state.messages.at(-1)?.content).toBe('Alex:40')
   })
 
-  it('preserves an explicit variable whose name resembles an interpolation binding', () => {
+  it('preserves an explicit variable whose name resembles an interpolation binding', async () => {
     const saved = messageCommand({
       channelMessage:
         '$set(__playground_bcfd_0,keep)$eval return $namePlain $halt$get(__playground_bcfd_0)'
     })
-    const first = runMessage(messageRequest(saved), factory)
+    const first = await runMessage(messageRequest(saved), factory)
     expect(first.errors).toEqual([])
     expect(first.state.messages.at(-1)?.content).toBe('Alexkeep')
     expect(first.state.variables).toEqual({ __playground_bcfd_0: 'keep' })
-    const later = runMessage(
+    const later = await runMessage(
       messageRequest(messageCommand({ channelMessage: '$get(__playground_bcfd_0)' }), first.state),
       factory
     )
@@ -483,12 +492,12 @@ describe('playground eval template resolution', () => {
     expect(later.state.variables).toEqual({ __playground_bcfd_0: 'keep' })
   })
 
-  it('keeps runtime conversion and snapshot helpers out of the script global namespace', () => {
+  it('keeps runtime conversion and snapshot helpers out of the script global namespace', async () => {
     const saved = messageCommand({
       channelMessage:
         '$eval return [typeof botState, typeof text, typeof temp, typeof get, typeof set, typeof remove, typeof snapshot, typeof variables, typeof error].join(","); $halt'
     })
-    const result = runMessage(messageRequest(saved), factory)
+    const result = await runMessage(messageRequest(saved), factory)
     expect(result.errors).toEqual([])
     expect(result.state.messages.at(-1)?.content).toBe(
       ['object', ...Array(8).fill('undefined')].join(',')
@@ -496,7 +505,7 @@ describe('playground eval template resolution', () => {
     expect(result.state.variables).toEqual({})
   })
 
-  it('reports the primary interpolated script error and rolls back all staged state', () => {
+  it('reports the primary interpolated script error and rolls back all staged state', async () => {
     const saved = messageCommand({
       cooldown: 5,
       cooldownType: 'Global',
@@ -508,13 +517,13 @@ describe('playground eval template resolution', () => {
     state.variables = { theme: 'keep' }
     state.cooldowns = { 'older:global': 0 }
     const original = structuredClone(state)
-    const result = runMessage(messageRequest(saved, state), factory)
-    expect(result.errors).toEqual(['!test: Alex'])
+    const result = await runMessage(messageRequest(saved, state), factory)
+    expect(result.errors).toEqual(['!test: JavaScript error: Alex'])
     expect(result.state.botState).toEqual(original.botState)
     expect(result.state.variables).toEqual(original.variables)
-    expect(result.state.cooldowns).toEqual(original.cooldowns)
+    expect(result.state.cooldowns).toEqual({ ...original.cooldowns, 'message:global': 0 })
     expect(result.state.messages).toEqual([
-      { id: 1, kind: 'user', author: 'Alex', content: '!test' }
+      { id: 1, kind: 'user', author: 'Alex', content: '!test', channelId: state.channelId }
     ])
     expect(state).toEqual(original)
   })
@@ -523,16 +532,16 @@ describe('playground eval template resolution', () => {
 describe('playground configurable AI mock', () => {
   it.each(['message', 'slash'] as const)(
     'returns configured inert text for %s templates',
-    (kind) => {
+    async (kind) => {
       const state = createPlaygroundState()
       state.ai.response = 'Mock reply: $unknown, "quoted" and 日本語'
       const result =
         kind === 'message'
-          ? runMessage(
+          ? await runMessage(
               messageRequest(messageCommand({ channelMessage: '$chat(hello)' }), state),
               factory
             )
-          : runInteraction(
+          : await runInteraction(
               slashRequest(
                 slashCommand({
                   rootAction: action({ sendChannelMessage: true, channelMessage: '$chat(hello)' })
@@ -549,8 +558,8 @@ describe('playground configurable AI mock', () => {
   )
 
   it.each(['message', 'slash'] as const)(
-    'fails atomically on a configured AI error after staged %s script effects',
-    (kind) => {
+    'returns configured AI failure text after completed %s script effects',
+    async (kind) => {
       const state = createPlaygroundState()
       state.botState = { count: 4 }
       state.ai = { response: 'ignored response', error: 'Simulated provider unavailable' }
@@ -559,7 +568,7 @@ describe('playground configurable AI mock', () => {
       const original = structuredClone(state)
       const result =
         kind === 'message'
-          ? runMessage(
+          ? await runMessage(
               messageRequest(
                 messageCommand({
                   cooldown: 5,
@@ -571,7 +580,7 @@ describe('playground configurable AI mock', () => {
               ),
               factory
             )
-          : runInteraction(
+          : await runInteraction(
               slashRequest(
                 slashCommand({
                   cooldown: 5,
@@ -587,13 +596,12 @@ describe('playground configurable AI mock', () => {
               ),
               factory
             )
-      expect(result.errors).toHaveLength(1)
-      expect(result.errors[0]).toContain(state.ai.error)
-      expect(result.state.botState).toEqual(original.botState)
-      expect(result.state.variables).toEqual(original.variables)
-      expect(result.state.cooldowns).toEqual({})
+      expect(result.errors).toEqual([])
+      expect(result.state.messages.at(-1)?.content).toBe(state.ai.error)
+      expect(result.state.botState).not.toEqual(original.botState)
+      expect(result.state.variables).not.toEqual(original.variables)
+      expect(result.state.cooldowns).not.toEqual({})
       expect(result.state.ai).toEqual(original.ai)
-      expect(result.state.messages.filter((message) => message.kind !== 'user')).toEqual([])
       expect(state).toEqual(original)
     }
   )
@@ -602,9 +610,9 @@ describe('playground configurable AI mock', () => {
 describe('playground simulated cooldowns', () => {
   it.each(['User', 'Server', 'Global'] as const)(
     'uses production-shaped %s keys and independently scopes commands, senders and servers',
-    (level) => {
+    async (level) => {
       const saved = messageCommand({ cooldown: 5, cooldownType: level, channelMessage: 'executed' })
-      const first = runMessage(messageRequest(saved), factory)
+      const first = await runMessage(messageRequest(saved), factory)
       const state = first.state
       const senderId = state.members[0].id
       const key =
@@ -613,14 +621,17 @@ describe('playground simulated cooldowns', () => {
           : `message:${level.toLowerCase()}:${level === 'User' ? senderId : state.guildId}`
       expect(first.errors).toEqual([])
       expect(state.cooldowns).toEqual({ [key]: 0 })
-      const blocked = runMessage(messageRequest(saved, state), factory)
+      const blocked = await runMessage(messageRequest(saved, state), factory)
       expect(blocked.errors).toEqual([])
       expect(blocked.state.messages.at(-1)?.content).toBe(
         'This command is on cooldown. Try again in 5s.'
       )
       expect(blocked.state.cooldowns).toEqual(state.cooldowns)
 
-      const otherSender = runMessage(messageRequest(saved, state, state.members[1].id), factory)
+      const otherSender = await runMessage(
+        messageRequest(saved, state, state.members[1].id),
+        factory
+      )
       expect(otherSender.errors).toEqual([])
       expect(otherSender.state.messages.at(-1)?.content).toBe(
         level === 'User' ? 'executed' : 'This command is on cooldown. Try again in 5s.'
@@ -634,12 +645,12 @@ describe('playground simulated cooldowns', () => {
 
       const otherServerState = structuredClone(state)
       otherServerState.guildId = '900000000000000004'
-      const otherServer = runMessage(messageRequest(saved, otherServerState), factory)
+      const otherServer = await runMessage(messageRequest(saved, otherServerState), factory)
       expect(otherServer.errors).toEqual([])
       expect(otherServer.state.messages.at(-1)?.content).toBe(
         level === 'Server' ? 'executed' : 'This command is on cooldown. Try again in 5s.'
       )
-      const otherCommand = runMessage(
+      const otherCommand = await runMessage(
         messageRequest(messageCommand({ ...saved, id: 'other' }), state),
         factory
       )
@@ -649,9 +660,9 @@ describe('playground simulated cooldowns', () => {
     }
   )
 
-  it('treats timestamp zero as recorded, rounds remaining seconds up and expires exactly on time', () => {
+  it('treats timestamp zero as recorded, rounds remaining seconds up and expires exactly on time', async () => {
     const saved = messageCommand({ cooldown: 5, cooldownType: 'User', channelMessage: 'executed' })
-    const first = runMessage(messageRequest(saved), factory)
+    const first = await runMessage(messageRequest(saved), factory)
     for (const [clockMs, remaining] of [
       [0, 5],
       [1, 5],
@@ -661,7 +672,7 @@ describe('playground simulated cooldowns', () => {
     ]) {
       const state = structuredClone(first.state)
       state.clockMs = clockMs
-      const blocked = runMessage(messageRequest(saved, state), factory)
+      const blocked = await runMessage(messageRequest(saved, state), factory)
       expect(blocked.errors).toEqual([])
       expect(blocked.state.messages.at(-1)?.content).toBe(
         `This command is on cooldown. Try again in ${remaining}s.`
@@ -670,13 +681,13 @@ describe('playground simulated cooldowns', () => {
     }
     const state = structuredClone(first.state)
     state.clockMs = 5000
-    const expired = runMessage(messageRequest(saved, state), factory)
+    const expired = await runMessage(messageRequest(saved, state), factory)
     expect(expired.errors).toEqual([])
     expect(expired.state.messages.at(-1)?.content).toBe('executed')
     expect(expired.state.cooldowns).toEqual({ [`message:user:${state.members[0].id}`]: 5000 })
   })
 
-  it('renders custom responses with configured and explicit $cooldownRemaining scopes', () => {
+  it('renders custom responses with configured and explicit $cooldownRemaining scopes', async () => {
     const saved = messageCommand({
       cooldown: 5,
       cooldownType: 'Server',
@@ -685,10 +696,10 @@ describe('playground simulated cooldowns', () => {
       cooldownMessage:
         '$cooldownRemaining|$cooldownRemaining(user)|$cooldownRemaining(server)|$cooldownRemaining(global)'
     })
-    const first = runMessage(messageRequest(saved), factory)
+    const first = await runMessage(messageRequest(saved), factory)
     const state = structuredClone(first.state)
     state.clockMs = 2001
-    const blocked = runMessage(messageRequest(saved, state), factory)
+    const blocked = await runMessage(messageRequest(saved, state), factory)
     expect(blocked.errors).toEqual([])
     expect(blocked.state.messages.at(-1)).toMatchObject({ content: '3|0|3|0', replyTo: 3 })
     expect(blocked.state.cooldowns).toEqual(first.state.cooldowns)
@@ -696,15 +707,15 @@ describe('playground simulated cooldowns', () => {
 
   it.each([false, true])(
     'honors ignoreErrorMessage=%s for the default message cooldown reply',
-    (ignore) => {
+    async (ignore) => {
       const saved = messageCommand({
         cooldown: 5,
         cooldownType: 'Global',
         ignoreErrorMessage: ignore,
         channelMessage: 'executed'
       })
-      const first = runMessage(messageRequest(saved), factory)
-      const blocked = runMessage(messageRequest(saved, first.state), factory)
+      const first = await runMessage(messageRequest(saved), factory)
+      const blocked = await runMessage(messageRequest(saved, first.state), factory)
       expect(blocked.errors).toEqual([])
       expect(blocked.state.messages).toHaveLength(ignore ? 3 : 4)
       if (!ignore)
@@ -718,7 +729,7 @@ describe('playground simulated cooldowns', () => {
 
   it.each(['', 'Wait $cooldownRemaining seconds'])(
     'makes a blocked slash response ephemeral, including custom response %s',
-    (cooldownMessage) => {
+    async (cooldownMessage) => {
       const saved = slashCommand({
         cooldown: 5,
         cooldownType: 'Global',
@@ -730,8 +741,8 @@ describe('playground simulated cooldowns', () => {
           deferReply: true
         })
       })
-      const first = runInteraction(slashRequest(saved), factory)
-      const blocked = runInteraction(slashRequest(saved, first.state), factory)
+      const first = await runInteraction(slashRequest(saved), factory)
+      const blocked = await runInteraction(slashRequest(saved, first.state), factory)
       expect(blocked.errors).toEqual([])
       expect(blocked.state.messages.at(-1)).toMatchObject({
         content: cooldownMessage
@@ -745,7 +756,7 @@ describe('playground simulated cooldowns', () => {
     }
   )
 
-  it('lets buttons execute during their saved slash cooldown without recording another usage', () => {
+  it('lets buttons execute during their saved slash cooldown without recording another usage', async () => {
     const saved = slashCommand({
       cooldown: 10,
       cooldownType: 'Global',
@@ -760,13 +771,13 @@ describe('playground simulated cooldowns', () => {
         ]
       })
     })
-    const first = runInteraction(slashRequest(saved), factory)
-    const blocked = runInteraction(slashRequest(saved, first.state), factory)
+    const first = await runInteraction(slashRequest(saved), factory)
+    const blocked = await runInteraction(slashRequest(saved, first.state), factory)
     expect(blocked.errors).toEqual([])
     expect(blocked.state.botState).toEqual({ count: 1 })
     const state = structuredClone(blocked.state)
     state.clockMs = 1000
-    const clicked = runInteraction(
+    const clicked = await runInteraction(
       {
         kind: 'button',
         state,
@@ -784,21 +795,21 @@ describe('playground simulated cooldowns', () => {
     expect(state.botState).toEqual({ count: 1 })
   })
 
-  it('rolls back a failing custom cooldown response without replacing the existing timestamp', () => {
+  it('returns AI failure text in cooldown replies without replacing the timestamp', async () => {
     const saved = messageCommand({
       cooldown: 5,
       cooldownType: 'Global',
       channelMessage: 'executed',
       cooldownMessage: '$eval botState.staged = true; return "staged"; $halt $chat(hello)'
     })
-    const first = runMessage(messageRequest(saved), factory)
+    const first = await runMessage(messageRequest(saved), factory)
     const state = structuredClone(first.state)
     state.ai.error = 'Simulated provider unavailable'
-    const blocked = runMessage(messageRequest(saved, state), factory)
-    expect(blocked.errors).toHaveLength(1)
-    expect(blocked.errors[0]).toContain(state.ai.error)
-    expect(blocked.state.botState).toEqual({})
+    const blocked = await runMessage(messageRequest(saved, state), factory)
+    expect(blocked.errors).toEqual([])
+    expect(blocked.state.messages.at(-1)?.content).toContain(state.ai.error)
+    expect(blocked.state.botState).toEqual({ staged: true })
     expect(blocked.state.cooldowns).toEqual(first.state.cooldowns)
-    expect(blocked.state.messages).toHaveLength(first.state.messages.length + 1)
+    expect(blocked.state.messages).toHaveLength(first.state.messages.length + 2)
   })
 })

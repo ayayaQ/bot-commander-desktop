@@ -19,12 +19,14 @@ const worker = (): DisposableWorker => ({
 afterEach(() => vi.useRealTimers())
 
 describe('disposable playground lifecycle (headless unit tests)', () => {
-  it('terminates after successful result', async () => {
+  it('retains a successful session until reset', async () => {
     const stub = worker(),
       session = new PlaygroundSession(() => stub)
     const promise = session.run(input())
     stub.onmessage!({ data: { result: output() } })
     await expect(promise).resolves.toEqual(output())
+    expect(stub.terminate).not.toHaveBeenCalled()
+    session.cancel()
     expect(stub.terminate).toHaveBeenCalledTimes(1)
   })
 

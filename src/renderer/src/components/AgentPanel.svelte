@@ -771,6 +771,9 @@
                         report={call.validation}
                         binding={call.validationBinding}
                         candidate={call.after}
+                        suite={call.arguments.validation as
+                          | import('../../../shared/agentValidationTypes').AgentValidationSuite
+                          | undefined}
                       />
                     {/if}
                     {#if call.status === 'waiting_approval'}

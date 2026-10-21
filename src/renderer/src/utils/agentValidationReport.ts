@@ -1,3 +1,4 @@
+import { RUNTIME_VERSION } from '../../../shared/runtime/version'
 import type {
   AgentValidationEffects,
   AgentValidationReport,
@@ -115,7 +116,10 @@ function effectViews(effects: AgentValidationEffects): ValidationEffectView[] {
     { label: 'Member changes', values: effects.memberChanges },
     { label: 'Bot state changes', values: effects.botStateChanges },
     { label: 'Variable changes', values: effects.variableChanges },
-    { label: 'Cooldown changes', values: effects.cooldownChanges }
+    { label: 'Cooldown changes', values: effects.cooldownChanges },
+    { label: 'Operations', values: effects.operations ?? [] },
+    { label: 'Channel changes', values: effects.channelChanges ?? [] },
+    { label: 'Role changes', values: effects.roleChanges ?? [] }
   ]
   return groups.map(({ label, values }) => {
     const preview = formatValidationValue(
@@ -196,6 +200,7 @@ export function agentValidationReportView(
     !!binding?.fixtureHash &&
     typeof binding?.wrapEvalInIIFE === 'boolean'
   const stale =
+    report.runtimeVersion !== RUNTIME_VERSION ||
     (hasBinding &&
       (binding.candidateHash !== report.candidateHash ||
         binding.baseRevision !== report.baseRevision ||
@@ -206,7 +211,7 @@ export function agentValidationReportView(
 
   if (stale)
     warnings.push(
-      'This report belongs to a different candidate, revision, fixture set, or interpreter mode.'
+      'This report belongs to a different candidate, revision, fixture set, runtime version, or interpreter mode.'
     )
   if (!hasBinding || currentCandidateId === null)
     warnings.push('The report identity cannot be verified against this tool candidate.')

@@ -1,3 +1,7 @@
+import { validatedCommitGuard } from './agentMutationValidation'
+import { commandEvents } from '../../shared/runtime/dispatch'
+import { playgroundCapabilities } from '../../shared/runtime/capabilities'
+import { validateAgentMutation, assertAgentValidationBinding } from './agentMutationValidation'
 import crypto from 'node:crypto'
 import { readHostStatus } from './hostReadinessService'
 import type { BCFDCommand, BCFDInteractionAction, BCFDInteractionCommand } from '../types/types'
@@ -108,6 +112,12 @@ const objectSchema = (properties: Record<string, unknown>, required: string[] = 
 // Fixtures and expected outcomes are explicit inputs, never inferred from saved/live state.
 const validationSchema = objectSchema(
   {
+    version: { type: 'integer', enum: [2] },
+    resources: {
+      type: 'object',
+      description:
+        'Explicit command/interaction snapshots: {commands: [], interactions: []}. Draft overrides its ID.'
+    },
     cases: {
       type: 'array',
       minItems: 1,
@@ -126,7 +136,7 @@ const validationSchema = objectSchema(
             maxItems: 12,
             items: objectSchema(
               {
-                kind: { type: 'string', enum: ['message', 'slash', 'button'] },
+                kind: { type: 'string', enum: [...commandEvents, 'slash', 'button'] },
                 senderId: { type: 'string' },
                 content: { type: 'string' },
                 options: { type: 'object' },
@@ -164,6 +174,22 @@ const patchSchema = {
 }
 
 export const agentToolDefinitions: ToolDefinition[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'run_playground',
+      description:
+        'Run strict, isolated tests against an unsaved command or interaction without saving. Supply explicit fixtures, snapshots and expected effects. Available in planning mode. Returns exact draft identity and validation evidence.',
+      parameters: objectSchema(
+        {
+          kind: { type: 'string', enum: ['command', 'interaction'] },
+          candidate: { type: 'object' },
+          validation: validationSchema
+        },
+        ['kind', 'candidate', 'validation']
+      )
+    }
+  },
   {
     type: 'function',
     function: {
@@ -315,7 +341,7 @@ export const agentToolDefinitions: ToolDefinition[] = [
     function: {
       name: 'create_command',
       description:
-        'Create a command from defaults; the app assigns its ID once. Supply explicit validation fixtures and expected outcome/effect assertions for message commands. Tests run against this exact unsaved normalized draft before approval or auto-save. Failed tests return the report for bounded repair without saving. Event commands are labeled unsupported.',
+        'Create a command from defaults; the app assigns its ID once. Supply explicit validation fixtures and expected outcome/effect assertions for every command event type. Tests run against this exact unsaved normalized draft before approval or auto-save. Failed tests return the report for bounded repair without saving.',
       parameters: objectSchema({ command: { type: 'object' }, validation: validationSchema }, [
         'command'
       ])
@@ -326,7 +352,7 @@ export const agentToolDefinitions: ToolDefinition[] = [
     function: {
       name: 'edit_command',
       description:
-        'Patch a command using its exact read revision. Supply explicit validation cases for the complete resulting message-command draft, including intended replies/state changes and relevant negative gates. No save occurs when validation fails.',
+        'Patch a command using its exact read revision. Supply explicit validation cases for the complete resulting command draft, including intended replies/state changes and relevant negative gates. No save occurs when validation fails.',
       parameters: objectSchema(
         {
           id: { type: 'string' },
@@ -472,33 +498,11 @@ export const agentToolDefinitions: ToolDefinition[] = [
 ]
 
 // Local host readiness and offline draft fixtures belong only to the app's agent.
-export const agentOnlyToolNames = new Set(['read_host_status', 'read_validation_fixture'])
+export const agentOnlyToolNames = new Set(['read_host_status'])
 
-// External MCP clients retain the pre-existing create/edit surface. Offline draft
-// validation and the fixture helper belong only to the built-in agent harness.
-const MCP_MUTATION_DESCRIPTIONS: Record<string, string> = {
-  create_command:
-    'Create a command by merging the supplied object with command defaults. The app assigns the ID.',
-  edit_command: 'Patch a command. Use the revision returned by read_command.',
-  create_interaction:
-    'Create an interaction by merging the supplied object with defaults. The app assigns the ID.',
-  edit_interaction: 'Patch an interaction. Use the revision returned by read_interaction.'
-}
-export const mcpAgentToolDefinitions: ToolDefinition[] = agentToolDefinitions
-  .filter((tool) => !agentOnlyToolNames.has(tool.function.name))
-  .map((tool) => {
-    const description = MCP_MUTATION_DESCRIPTIONS[tool.function.name]
-    if (!description) return tool
-    const parameters = tool.function.parameters
-    const { validation: _validation, ...properties } = parameters.properties as Record<
-      string,
-      unknown
-    >
-    return {
-      ...tool,
-      function: { ...tool.function, description, parameters: { ...parameters, properties } }
-    }
-  })
+export const mcpAgentToolDefinitions: ToolDefinition[] = agentToolDefinitions.filter(
+  (tool) => !agentOnlyToolNames.has(tool.function.name)
+)
 
 export const mutationToolNames = new Set([
   'create_command',
@@ -815,12 +819,31 @@ export async function executeReadTool(name: string, args: Record<string, any>): 
     )
   }
   if (name === 'read_documentation') return readDocumentation(String(args.id || ''))
+  if (name === 'run_playground') {
+    if (!['command', 'interaction'].includes(String(args.kind)))
+      throw new Error('Invalid playground candidate kind')
+    const prepared = await prepareMutation(
+      args.kind === 'command' ? 'create_command' : 'create_interaction',
+      {
+        [String(args.kind)]: args.candidate,
+        validation: args.validation
+      }
+    )
+    if (typeof args.candidate?.id === 'string' && args.candidate.id) {
+      ;(prepared.after as { id: string }).id = args.candidate.id
+      prepared.target.id = args.candidate.id
+    }
+    const result = await validateAgentMutation(prepared)
+    return { ...result.report, candidate: prepared.after }
+  }
   if (name === 'read_validation_fixture')
     return {
+      version: 2,
+      capabilities: playgroundCapabilities(),
       state: createPlaygroundState(),
       limits: { cases: 6, totalSteps: 12, assertionsPerStep: 8, totalAssertions: 64 },
       guidance:
-        'Each step needs /outcome and a meaningful effect assertion; blocked/error expectations additionally need a specific nonempty /reason or /errors/N assertion. Execution outcomes: executed, blocked, error, unmatched, unsupported, not_run. Assertion paths are JSON Pointers into {outcome,reason,errors,state,effects}. Fresh state per case; advanceClockMs advances the fake clock between sequence steps without sleeping. At least one executed candidate step is needed for an overall pass. Expected-negative steps must include a specific nonempty /reason or /errors/N assertion and an effects assertion proving no unintended outputs. AI is mocked; startup scripts, live state, Discord and providers are never loaded.',
+        'Each step needs /outcome and a meaningful effect assertion; blocked/error expectations additionally need a specific nonempty /reason or /errors/N assertion. Execution outcomes: executed, blocked, error, unmatched, unsupported, not_run. Assertion paths are JSON Pointers into {outcome,reason,errors,state,effects}. Fresh state per case; advanceClockMs advances the fake clock between sequence steps without sleeping. At least one executed candidate step is needed for an overall pass. Expected-negative steps must include a specific nonempty /reason or /errors/N assertion and an effects assertion proving no unintended outputs. AI requires explicit state.aiMocks entries matching the evaluated prompt. state.startupSource runs once per case in the isolated VM. Live state, Discord and providers are never loaded. All command event kinds are supported. Optional resources contains explicitly supplied command/interaction snapshots.',
       exampleAssertions: [
         { path: '/outcome', equals: 'executed' },
         { path: '/effects/messages/0/content', equals: 'Pong!' }
@@ -1210,6 +1233,12 @@ export async function commitMutation(
   signal?: AbortSignal,
   beforeCommit?: (snapshot: PreparedMutation) => void
 ): Promise<unknown> {
+  const validationGuard = validatedCommitGuard(prepared)
+  const suppliedGuard = beforeCommit
+  beforeCommit = (snapshot) => {
+    validationGuard(snapshot)
+    suppliedGuard?.(snapshot)
+  }
   // Approval/retry objects may be reused by callers while this mutation waits its turn.
   prepared = structuredClone(prepared)
   const kind = mutationResourceKind(prepared)
@@ -1242,9 +1271,20 @@ export async function executeAgentTool(
     return { success: false, error: 'Tool is available only to the desktop agent' }
   }
   if (!mutationToolNames.has(name)) return executeReadTool(name, args)
-  if (source === 'mcp' && Object.hasOwn(args, 'validation'))
-    throw new Error(
-      'Draft validation is available only in the built-in agent panel; MCP mutations do not accept validation input'
-    )
-  return commitMutation(await prepareMutation(name, args), source)
+  const prepared = await prepareMutation(name, args)
+  if (prepared.target.type === 'command' || prepared.target.type === 'interaction') {
+    const validation = await validateAgentMutation(prepared)
+    if (!validation.canCommit)
+      return {
+        success: false,
+        saved: false,
+        validation: validation.report,
+        error: 'Validation must pass before saving this draft'
+      }
+    const result = await commitMutation(prepared, source, undefined, (current) => {
+      assertAgentValidationBinding(current, validation.binding, validation.report)
+    })
+    return { ...(result as object), validation: validation.report }
+  }
+  return commitMutation(prepared, source)
 }

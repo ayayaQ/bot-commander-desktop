@@ -75,7 +75,7 @@ const request = (saved = command(), options = {}): PlaygroundInteractionRequest 
 })
 
 describe('saved interaction playground', () => {
-  it('accepts editor-supported Unicode and apostrophe option names', () => {
+  it('accepts editor-supported Unicode and apostrophe option names', async () => {
     const input = request(
       command({
         options: [option('名前', 3), option("it's", 3), option('Foo', 3), option('Όνομα', 3)],
@@ -86,12 +86,12 @@ describe('saved interaction playground', () => {
       }),
       { 名前: '日本語', "it's": 'accepted', Foo: 'upper', Όνομα: 'Greek' }
     )
-    const result = runInteraction(input)
+    const result = await runInteraction(input)
     expect(result.errors).toEqual([])
     expect(result.state.messages[0].content).toBe('日本語:accepted:upper:Greek')
   })
 
-  it('handles legitimate prototype-like option names as inert own values', () => {
+  it('handles legitimate prototype-like option names as inert own values', async () => {
     const values = Object.create(null)
     values.constructor = 'safe'
     values.__proto__ = 'data'
@@ -105,12 +105,12 @@ describe('saved interaction playground', () => {
       }),
       values
     )
-    const result = runInteraction(input)
+    const result = await runInteraction(input)
     expect(result.errors).toEqual([])
     expect(result.state.messages[0].content).toBe('safe:data')
   })
 
-  it('resolves duplicate custom IDs by the first saved match as production does', () => {
+  it('resolves duplicate custom IDs by the first saved match as production does', async () => {
     const first = command({
       id: 'first',
       rootAction: action({
@@ -123,8 +123,8 @@ describe('saved interaction playground', () => {
         buttons: [button('same', { sendChannelMessage: true, channelMessage: 'second saved' })]
       })
     })
-    const original = runInteraction(request(second))
-    const clicked = runInteraction({
+    const original = await runInteraction(request(second))
+    const clicked = await runInteraction({
       kind: 'button',
       state: original.state,
       interactions: [first, second],
@@ -136,8 +136,10 @@ describe('saved interaction playground', () => {
     expect(clicked.state.messages[1].content).toBe('first saved')
   })
 
-  it('traditional deletion excludes ephemeral replies created by slash simulation', () => {
-    const slash = runInteraction(request(command({ rootAction: action({ ephemeral: true }) })))
+  it('traditional deletion excludes ephemeral replies created by slash simulation', async () => {
+    const slash = await runInteraction(
+      request(command({ rootAction: action({ ephemeral: true }) }))
+    )
     const clear = decodeBCFDCommand({
       id: 'clear',
       command: '!clear',
@@ -149,7 +151,7 @@ describe('saved interaction playground', () => {
       privateEmbed: {},
       deleteNum: 100
     }).command
-    const result = runMessage({
+    const result = await runMessage({
       state: slash.state,
       commands: [clear],
       senderId: '100000000000000001',
@@ -160,20 +162,20 @@ describe('saved interaction playground', () => {
     expect(result.state.messages[1].deleted).toBe(true)
   })
 
-  it('works with only saved interactions and no traditional commands or publication', () => {
+  it('works with only saved interactions and no traditional commands or publication', async () => {
     const input = request(
       command({
         rootAction: action({ sendChannelMessage: true, channelMessage: 'Hello $namePlain' })
       })
     )
-    const result = runInteraction(input)
+    const result = await runInteraction(input)
     expect(result.errors).toEqual([])
     expect(result.state.messages[0].content).toBe('Hello Alex')
     expect(input.state.messages).toEqual([])
     expect(input.interactions[0].isRegistered).toBe(false)
   })
 
-  it('returns raw user/channel/role IDs and preserves false and zero option values', () => {
+  it('returns raw user/channel/role IDs and preserves false and zero option values', async () => {
     const state = createPlaygroundState()
     const input = request(
       command({
@@ -198,7 +200,7 @@ describe('saved interaction playground', () => {
         count: 0
       }
     )
-    const result = runInteraction(input)
+    const result = await runInteraction(input)
     expect(result.errors).toEqual([])
     expect(result.state.messages[0].content).toBe(
       `${state.members[1].id}|${state.channelId}|${state.roles[0].id}|false|0|`
@@ -245,7 +247,7 @@ describe('saved interaction playground', () => {
     ).toThrow('Invalid')
   })
 
-  it('honors action flags and does not evaluate inactive stale payloads', () => {
+  it('honors action flags and does not evaluate inactive stale payloads', async () => {
     const input = request(
       command({
         rootAction: action({
@@ -256,14 +258,14 @@ describe('saved interaction playground', () => {
         })
       })
     )
-    const result = runInteraction(input)
+    const result = await runInteraction(input)
     expect(result.errors).toEqual([])
     expect(result.state.messages).toHaveLength(1)
     expect(result.state.messages[0].content).toBe('\u200B')
     expect(result.state.members).toEqual(input.state.members)
   })
 
-  it('models ephemeral/deferred responses and fake DMs/embeds for the invoker', () => {
+  it('models ephemeral/deferred responses and fake DMs/embeds for the invoker', async () => {
     const input = request(
       command({
         rootAction: action({
@@ -282,7 +284,7 @@ describe('saved interaction playground', () => {
         })
       })
     )
-    const result = runInteraction(input)
+    const result = await runInteraction(input)
     expect(result.errors).toEqual([])
     expect(result.state.messages[0]).toMatchObject({
       ephemeral: true,
@@ -301,7 +303,7 @@ describe('saved interaction playground', () => {
 
   it.each(['isKick', 'isBan', 'isVoiceMute'] as const)(
     'targets the configured user option for %s, while roles target invoker',
-    (flag) => {
+    async (flag) => {
       const input = request(
         command({
           options: [option('target', 6)],
@@ -314,20 +316,20 @@ describe('saved interaction playground', () => {
         }),
         { target: '100000000000000002' }
       )
-      const result = runInteraction(input)
+      const result = await runInteraction(input)
       expect(result.errors).toEqual([])
       const key = flag === 'isKick' ? 'kicked' : flag === 'isBan' ? 'banned' : 'muted'
       expect(result.state.members[1][key]).toBe(true)
       expect(result.state.members[0].roles).toContain('200000000000000002')
       expect(result.state.members[1].roles).toEqual([])
       input.state.members[0].permissions = []
-      const failure = runInteraction(input)
+      const failure = await runInteraction(input)
       expect(failure.errors[0]).toContain('permission')
       expect(failure.state).toEqual(input.state)
     }
   )
 
-  it('requires a typed configured target and fails closed after earlier staged deletion', () => {
+  it('requires a typed configured target and retains earlier deletion', async () => {
     const input = request(
       command({
         options: [option('target', 3)],
@@ -342,12 +344,12 @@ describe('saved interaction playground', () => {
     )
     input.state.messages = [{ id: 1, author: 'Sam', content: 'old', kind: 'user' }]
     input.state.nextId = 2
-    const result = runInteraction(input)
+    const result = await runInteraction(input)
     expect(result.errors[0]).toContain('configured user option')
-    expect(result.state.messages[0].deleted).toBeUndefined()
+    expect(result.state.messages[0].deleted).toBe(true)
   })
 
-  it('applies only fake channel deletion and preserves ephemeral/DM entries', () => {
+  it('applies only fake channel deletion and preserves ephemeral/DM entries', async () => {
     const input = request(command({ rootAction: action({ deleteX: true, deleteNum: 100 }) }))
     input.state.messages = [
       { id: 1, kind: 'user', author: 'Sam', content: 'old' },
@@ -355,7 +357,7 @@ describe('saved interaction playground', () => {
       { id: 3, kind: 'bot', author: 'Bot', content: 'private', ephemeral: true }
     ]
     input.state.nextId = 4
-    const result = runInteraction(input)
+    const result = await runInteraction(input)
     expect(result.state.messages.slice(0, 3).map((message) => !!message.deleted)).toEqual([
       true,
       false,
@@ -363,7 +365,7 @@ describe('saved interaction playground', () => {
     ])
   })
 
-  it('keeps option text inert rather than reparsing it as template code', () => {
+  it('keeps option text inert rather than reparsing it as template code', async () => {
     const input = request(
       command({
         options: [option('text', 3)],
@@ -371,12 +373,12 @@ describe('saved interaction playground', () => {
       }),
       { text: '$eval while(true){} $halt' }
     )
-    const result = runInteraction(input)
+    const result = await runInteraction(input)
     expect(result.errors).toEqual([])
     expect(result.state.messages[0].content).toBe('$eval while(true){} $halt')
   })
 
-  it('runs nested button actions with click invoker and no inherited slash options', () => {
+  it('runs nested button actions with click invoker and no inherited slash options', async () => {
     const nested = button('nested', {
       sendChannelMessage: true,
       channelMessage: '$option(text):$namePlain'
@@ -398,9 +400,9 @@ describe('saved interaction playground', () => {
         buttons: [{ ...first, label: '$option(text)' }]
       })
     })
-    const original = runInteraction(request(saved, { text: 'snapshot' }))
+    const original = await runInteraction(request(saved, { text: 'snapshot' }))
     expect(original.state.messages[0].buttons?.[0].label).toBe('snapshot')
-    const clicked = runInteraction({
+    const clicked = await runInteraction({
       kind: 'button',
       state: original.state,
       interactions: [saved],
@@ -416,7 +418,7 @@ describe('saved interaction playground', () => {
       content: 'DM Sam'
     })
     expect(clicked.state.members[1].roles).toContain('200000000000000002')
-    const next = runInteraction({
+    const next = await runInteraction({
       kind: 'button',
       state: clicked.state,
       interactions: [saved],
@@ -428,7 +430,7 @@ describe('saved interaction playground', () => {
     expect(next.state.messages.at(-1)?.content).toBe(':Morgan')
   })
 
-  it('does not perform moderation/delete flags in button actions, matching production', () => {
+  it('does not perform moderation/delete flags in button actions, matching production', async () => {
     const saved = command({
       rootAction: action({
         buttons: [
@@ -443,8 +445,8 @@ describe('saved interaction playground', () => {
         ]
       })
     })
-    const original = runInteraction(request(saved))
-    const clicked = runInteraction({
+    const original = await runInteraction(request(saved))
+    const clicked = await runInteraction({
       kind: 'button',
       state: original.state,
       interactions: [saved],
@@ -460,14 +462,14 @@ describe('saved interaction playground', () => {
     )
   })
 
-  it('rejects disabled/link/deleted/foreign ephemeral buttons and safely handles obsolete saved buttons', () => {
+  it('rejects disabled/link/deleted/foreign ephemeral buttons and safely handles obsolete saved buttons', async () => {
     for (const patch of [
       { disabled: true },
       { style: 5 as const, url: 'https://example.invalid' }
     ]) {
       const saved = command({ rootAction: action({ buttons: [{ ...button('first'), ...patch }] }) })
-      const original = runInteraction(request(saved))
-      const result = runInteraction({
+      const original = await runInteraction(request(saved))
+      const result = await runInteraction({
         kind: 'button',
         state: original.state,
         interactions: [saved],
@@ -479,7 +481,7 @@ describe('saved interaction playground', () => {
       expect(result.state).toEqual(original.state)
     }
     const saved = command({ rootAction: action({ ephemeral: true, buttons: [button('first')] }) })
-    const original = runInteraction(request(saved))
+    const original = await runInteraction(request(saved))
     const input: PlaygroundInteractionRequest = {
       kind: 'button',
       state: original.state,
@@ -488,15 +490,15 @@ describe('saved interaction playground', () => {
       messageId: 1,
       customId: 'first'
     }
-    expect(runInteraction(input).errors[0]).toContain('unavailable')
+    expect((await runInteraction(input)).errors[0]).toContain('unavailable')
     input.senderId = '100000000000000001'
     input.interactions = []
-    expect(runInteraction(input).errors[0]).toContain('no longer active')
+    expect((await runInteraction(input)).errors[0]).toContain('no longer active')
     input.state.messages[0].deleted = true
-    expect(runInteraction(input).errors[0]).toContain('unavailable')
+    expect((await runInteraction(input)).errors[0]).toContain('unavailable')
   })
 
-  it('fails closed for scripts when no sandbox is supplied', () => {
+  it('reports unavailable scripts while retaining the prior reply', async () => {
     for (const saved of [
       command({
         rootAction: action({
@@ -508,9 +510,10 @@ describe('saved interaction playground', () => {
       })
     ]) {
       const input = request(saved),
-        result = runInteraction(input)
+        result = await runInteraction(input)
       expect(result.errors).toHaveLength(1)
-      expect(result.state).toEqual(input.state)
+      expect(result.state.messages[0].content).toBe('first')
+      expect(input.state.messages).toEqual([])
     }
   })
 })

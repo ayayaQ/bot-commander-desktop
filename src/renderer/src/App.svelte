@@ -1,5 +1,6 @@
 <script lang="ts">
   import { initializeInteractionPublication } from './stores/interactionPublication'
+  import { playgroundReplay } from './stores/playgroundReplay'
   import Playground from './components/Playground.svelte'
   import CommandList from './components/CommandList.svelte'
   import InteractionList from './components/InteractionList.svelte'
@@ -36,6 +37,10 @@
     | 'debugger'
     | 'playground'
     | 'agent' = $state('commands')
+
+  $effect(() => {
+    if ($playgroundReplay) selectedMenu = 'playground'
+  })
 
   let leftPanelCollapsed = $state(false)
   let windowFocused = $state(true)

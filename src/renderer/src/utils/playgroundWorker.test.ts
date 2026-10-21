@@ -75,6 +75,7 @@ describe('headless worker entry-point boundary', () => {
       }
     })
     const response = scope.postMessage.mock.calls[0][0]
+    expect(response.error).toBeUndefined()
     expect(
       response.result.errors.some((error: string) => error.includes('Transcript size limit'))
     ).toBe(true)

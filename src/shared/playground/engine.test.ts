@@ -22,7 +22,26 @@ const request = (patch: Record<string, unknown> = {}) => {
 }
 
 describe('isolated playground message simulation', () => {
-  it('supports local fake context changes and added role IDs without touching saved data', () => {
+  it('runs chat with messageAfterCommand using the configured local AI response', async () => {
+    const input = request({
+      command: '!chat',
+      startsWith: true,
+      channelMessage: '$messageAfterCommand: $chat($messageAfterCommand)'
+    })
+    input.content = '!chat   What is the capital of France?  '
+    input.state.ai.response = 'Paris (simulated)'
+    const result = await runMessage(input)
+    expect(result.errors).toEqual([])
+    expect(result.state.messages.at(-1)?.content).toBe(
+      'What is the capital of France?: Paris (simulated)'
+    )
+    expect(result.trace).toContain(
+      'Simulated AI: configured local response/failure; no provider call'
+    )
+    expect(input.state.messages).toEqual([])
+  })
+
+  it('supports local fake context changes and added role IDs without touching saved data', async () => {
     const input = request({
       channelWhitelist: '123',
       serverWhitelist: '456',
@@ -35,29 +54,29 @@ describe('isolated playground message simulation', () => {
     input.state.nsfw = true
     input.state.roles.push({ id: '789', name: 'Saved role fixture' })
     input.state.members[0].roles.push('789')
-    const result = runMessage(input)
+    const result = await runMessage(input)
     expect(result.errors).toEqual([])
     expect(result.state.messages[1].content).toBe('true')
     input.state.channelId = 'invalid'
-    expect(() => runMessage(input)).toThrow('context')
+    await expect(async () => await runMessage(input)).rejects.toThrow('context')
   })
 
-  it('resolves fake roles by raw ID, mention and case-insensitive name', () => {
+  it('resolves fake roles by raw ID, mention and case-insensitive name', async () => {
     const state = createPlaygroundState(),
       ctx = { state, sender: state.members[0], content: '', trigger: '' }
-    expect(evaluateTemplate('$hasRole($ID,moderator)', ctx)).toBe('true')
-    expect(evaluateTemplate('$hasRole($ID,<@&200000000000000001>)', ctx)).toBe('true')
-    expect(evaluateTemplate('$hasRole($ID,900000000000000001)', ctx)).toBe('true')
-    expect(evaluateTemplate('$hasRole($ID,unknown)', ctx)).toBe('false')
+    expect(await evaluateTemplate('$hasRole($ID,moderator)', ctx)).toBe('true')
+    expect(await evaluateTemplate('$hasRole($ID,<@&200000000000000001>)', ctx)).toBe('true')
+    expect(await evaluateTemplate('$hasRole($ID,900000000000000001)', ctx)).toBe('true')
+    expect(await evaluateTemplate('$hasRole($ID,unknown)', ctx)).toBe('false')
   })
 
-  it('includes the current guild-ID @everyone role in every member gate and role query', () => {
+  it('includes the current guild-ID @everyone role in every member gate and role query', async () => {
     for (const guildId of ['900000000000000001', '456']) {
       for (const index of [0, 1, 2]) {
         const input = request({ requiredRole: guildId, channelMessage: 'allowed' })
         input.state.guildId = guildId
         input.senderId = input.state.members[index].id
-        const result = runMessage(input)
+        const result = await runMessage(input)
         expect(result.errors).toEqual([])
         expect(result.state.messages[1].content).toBe('allowed')
         const ctx = {
@@ -66,48 +85,48 @@ describe('isolated playground message simulation', () => {
           content: '',
           trigger: ''
         }
-        expect(evaluateTemplate(`$hasRole($ID,${guildId})`, ctx)).toBe('true')
-        expect(evaluateTemplate(`$hasRole($ID,<@&${guildId}>)`, ctx)).toBe('true')
-        expect(evaluateTemplate('$hasRole($ID,@everyone)', ctx)).toBe('true')
-        expect(evaluateTemplate('$memberRoles', ctx).split(', ')[0]).toBe('@everyone')
-        expect(evaluateTemplate('$memberRoleCount', ctx)).toBe(
+        expect(await evaluateTemplate(`$hasRole($ID,${guildId})`, ctx)).toBe('true')
+        expect(await evaluateTemplate(`$hasRole($ID,<@&${guildId}>)`, ctx)).toBe('true')
+        expect(await evaluateTemplate('$hasRole($ID,@everyone)', ctx)).toBe('true')
+        expect((await evaluateTemplate('$memberRoles', ctx)).split(', ')[0]).toBe('@everyone')
+        expect(await evaluateTemplate('$memberRoleCount', ctx)).toBe(
           String(input.state.members[index].roles.length + 1)
         )
       }
     }
   })
 
-  it('does not duplicate an explicit @everyone fixture or retain a previous guild-ID role', () => {
+  it('does not duplicate an explicit @everyone fixture or retain a previous guild-ID role', async () => {
     const state = createPlaygroundState()
     const sender = state.members[1]
     state.roles.push({ id: state.guildId, name: '@everyone' })
     sender.roles.push(state.guildId)
     const ctx = { state, sender, content: '', trigger: '' }
-    expect(evaluateTemplate('$memberRoles|$memberRoleCount', ctx)).toBe('@everyone|1')
+    expect(await evaluateTemplate('$memberRoles|$memberRoleCount', ctx)).toBe('@everyone|1')
     state.roles.pop()
     sender.roles = []
     state.guildId = '456'
-    expect(evaluateTemplate('$hasRole($ID,900000000000000001)', ctx)).toBe('false')
-    expect(evaluateTemplate('$memberRoles|$memberRoleCount', ctx)).toBe('@everyone|1')
+    expect(await evaluateTemplate('$hasRole($ID,900000000000000001)', ctx)).toBe('false')
+    expect(await evaluateTemplate('$memberRoles|$memberRoleCount', ctx)).toBe('@everyone|1')
     const input = request({ requiredRole: '900000000000000001', channelMessage: 'blocked' })
     input.state.guildId = '456'
-    expect(runMessage(input).state.messages).toHaveLength(1)
+    expect((await runMessage(input)).state.messages).toHaveLength(1)
   })
 
-  it('interpolates identity, nested functions, arguments and conditions using fake fixtures', () => {
+  it('interpolates identity, nested functions, arguments and conditions using fake fixtures', async () => {
     const input = request({
       startsWith: true,
       channelMessage:
         '$namePlain $sum(2,$sum(1,3)) $args(0) $if($ID == 100000000000000001)yes$else no$endif'
     })
     input.content = '!test words'
-    const result = runMessage(input)
+    const result = await runMessage(input)
     expect(result.errors).toEqual([])
     expect(result.state.messages[1].content).toBe('Alex 6 words yes')
     expect(input.state.messages).toEqual([])
   })
 
-  it('matches production exact, case-insensitive phrase, prefix and wildcard rules', () => {
+  it('matches production exact, case-insensitive phrase, prefix and wildcard rules', async () => {
     const input = request()
     input.commands = [
       command({ command: '!exact', channelMessage: 'exact' }),
@@ -117,32 +136,30 @@ describe('isolated playground message simulation', () => {
     ]
     input.content = '!prefix WORD'
     expect(
-      runMessage(input)
-        .state.messages.slice(1)
-        .map((message) => message.content)
+      (await runMessage(input)).state.messages.slice(1).map((message) => message.content)
     ).toEqual(['phrase', 'prefix', 'wild'])
   })
 
-  it('requires fake roles/admin and respects whitelist and NSFW gates', () => {
+  it('requires fake roles/admin and respects whitelist and NSFW gates', async () => {
     for (const patch of [
       { requiredRole: 'unknown' },
       { channelWhitelist: 'other' },
       { serverWhitelist: 'other' },
       { isNSFW: true }
     ]) {
-      const result = runMessage(request({ channelMessage: 'blocked', ...patch }))
+      const result = await runMessage(request({ channelMessage: 'blocked', ...patch }))
       expect(result.state.messages).toHaveLength(1)
       expect(result.trace.some((line) => /Skipped|Blocked/.test(line))).toBe(true)
     }
     const input = request({ isAdmin: true, channelMessage: 'blocked' })
     input.senderId = input.state.members[1].id
-    expect(runMessage(input).state.messages).toHaveLength(1)
+    expect((await runMessage(input)).state.messages).toHaveLength(1)
   })
 
-  it('toggles roles on the invoker, not the mentioned moderation target', () => {
+  it('toggles roles on the invoker, not the mentioned moderation target', async () => {
     const input = request({ isKick: true, roleToAssign: '200000000000000002' })
     input.content += ` <@${input.state.members[1].id}>`
-    const result = runMessage(input)
+    const result = await runMessage(input)
     expect(result.errors).toEqual([])
     expect(result.state.members[0].roles).toContain('200000000000000002')
     expect(result.state.members[1].roles).toEqual([])
@@ -151,26 +168,26 @@ describe('isolated playground message simulation', () => {
 
   it.each(['isKick', 'isBan', 'isVoiceMute'])(
     'simulates %s only with permission and exact moderation syntax',
-    (flag) => {
+    async (flag) => {
       const input = request({ [flag]: true })
       input.content += ` <@${input.state.members[1].id}>`
       const key = flag === 'isKick' ? 'kicked' : flag === 'isBan' ? 'banned' : 'muted'
-      expect(runMessage(input).state.members[1][key]).toBe(true)
+      expect((await runMessage(input)).state.members[1][key]).toBe(true)
       input.state.members[0].permissions = []
-      const result = runMessage(input)
-      expect(result.errors[0]).toContain('permission')
+      const result = await runMessage(input)
+      expect(result.resources?.[0].reason).toContain('permission')
       expect(result.state.members[1][key]).toBe(false)
     }
   )
 
-  it('emits fake replies, DMs and inert embed URLs, with no input mutation', () => {
+  it('emits fake replies, DMs and inert embed URLs, with no input mutation', async () => {
     const input = request({
       channelMessage: 'reply',
       channelMessageAsReply: true,
       privateMessage: 'DM $namePlain',
       channelEmbed: { title: '$namePlain', imageURL: 'https://example.invalid/image.png' }
     })
-    const result = runMessage(input)
+    const result = await runMessage(input)
     expect(result.errors).toEqual([])
     expect(result.state.messages[1].replyTo).toBe(1)
     expect(result.state.messages[2]).toMatchObject({
@@ -182,14 +199,14 @@ describe('isolated playground message simulation', () => {
     expect(input.state.nextId).toBe(1)
   })
 
-  it('deletes only fake channel messages and preserves fake DMs', () => {
+  it('deletes only fake channel messages and preserves fake DMs', async () => {
     const input = request({ deleteNum: 2 })
     input.state.messages = [
       { id: 1, author: 'Bot', kind: 'dm', content: 'private' },
       { id: 2, author: 'Sam', kind: 'user', content: 'old' }
     ]
     input.state.nextId = 3
-    const result = runMessage(input)
+    const result = await runMessage(input)
     expect(result.state.messages.map((message) => !!message.deleted)).toEqual([false, true, true])
   })
 
@@ -202,57 +219,68 @@ describe('isolated playground message simulation', () => {
     '$createChannel(foo)',
     '$unknown',
     '$if(false)$eval return 1 $halt$else safe$endif'
-  ])('fails closed without a script sandbox or on unsupported effects: %s', (template) => {
-    const input = request({
-      channelMessage: 'would send',
-      privateMessage: template,
-      roleToAssign: '200000000000000002',
-      deleteAfter: true
-    })
-    const result = runMessage(input)
-    expect(result.errors).toHaveLength(1)
-    expect(result.state.messages).toHaveLength(1)
-    expect(result.state.messages[0].deleted).toBeUndefined()
-    expect(result.state.members[0].roles).toEqual(input.state.members[0].roles)
-  })
+  ])(
+    'preserves earlier effects while evaluating the production behavior of %s',
+    async (template) => {
+      const input = request({
+        channelMessage: 'would send',
+        privateMessage: template,
+        roleToAssign: '200000000000000002',
+        deleteAfter: true
+      })
+      const result = await runMessage(input)
+      expect(result.errors.length).toBe(/^\$(eval|ai|unknown)/.test(template) ? 1 : 0)
+      expect(result.state.messages[1].content).toBe('would send')
+      expect(result.state.messages[0].deleted).toBe(true)
+      expect(input.state.messages).toEqual([])
+    }
+  )
 
-  it('does not run reactions or unknown destinations', () => {
+  it('simulates reactions and uses production fallback for unknown destinations', async () => {
     for (const patch of [{ reaction: 'emoji' }, { specificChannel: 'outside' }]) {
-      const result = runMessage(request({ channelMessage: 'not sent', ...patch }))
-      expect(result.errors).toHaveLength(1)
-      expect(result.state.messages).toHaveLength(1)
+      const result = await runMessage(request({ channelMessage: 'not sent', ...patch }))
+      expect(result.errors).toEqual([])
+      expect(result.state.messages[1].content).toBe('not sent')
+      if ('reaction' in patch) expect(result.state.messages[0].reactions).toEqual(['emoji'])
     }
   })
 
-  it('bounds inputs, command count, transcript size, templates and amplified outputs', () => {
+  it('bounds inputs, command count, transcript size, templates and amplified outputs', async () => {
     const input = request()
-    expect(() =>
-      runMessage({ ...input, content: 'a'.repeat(PLAYGROUND_LIMITS.input + 1) })
-    ).toThrow('limit')
-    expect(() =>
-      runMessage({
-        ...input,
-        commands: Array.from({ length: PLAYGROUND_LIMITS.commands + 1 }, () => command())
-      })
-    ).toThrow('limit')
+    await expect(
+      async () => await runMessage({ ...input, content: 'a'.repeat(PLAYGROUND_LIMITS.input + 1) })
+    ).rejects.toThrow('limit')
+    await expect(
+      async () =>
+        await runMessage({
+          ...input,
+          commands: Array.from({ length: PLAYGROUND_LIMITS.commands + 1 }, () => command())
+        })
+    ).rejects.toThrow('limit')
     input.state.messages = Array.from({ length: PLAYGROUND_LIMITS.messages }, (_, index) => ({
       id: index + 1,
       author: 'Sam',
       kind: 'user' as const,
       content: ''
     }))
-    expect(() => runMessage(input)).toThrow('limit')
+    await expect(async () => await runMessage(input)).rejects.toThrow('limit')
     const state = createPlaygroundState()
     const ctx = { state, sender: state.members[0], content: '', trigger: '' }
-    expect(() => evaluateTemplate('x'.repeat(PLAYGROUND_LIMITS.template + 1), ctx)).toThrow('limit')
-    expect(() =>
-      evaluateTemplate(`$replace(${'a'.repeat(100)},a,${'b'.repeat(1000)})`, ctx)
-    ).toThrow('limit')
-    expect(() => evaluateTemplate('$upper('.repeat(100) + 'x' + ')'.repeat(100), ctx)).toThrow(
-      'nesting'
-    )
-    expect(() =>
-      evaluateTemplate(`$replace($replace(aaa,a,${'b'.repeat(6000)}),b,${'c'.repeat(6000)})`, ctx)
-    ).toThrow('limit')
+    await expect(
+      async () => await evaluateTemplate('x'.repeat(PLAYGROUND_LIMITS.template + 1), ctx)
+    ).rejects.toThrow('limit')
+    await expect(
+      async () => await evaluateTemplate(`$replace(${'a'.repeat(100)},a,${'b'.repeat(1000)})`, ctx)
+    ).rejects.toThrow('limit')
+    await expect(
+      async () => await evaluateTemplate('$upper('.repeat(100) + 'x' + ')'.repeat(100), ctx)
+    ).rejects.toThrow('nesting')
+    await expect(
+      async () =>
+        await evaluateTemplate(
+          `$replace($replace(aaa,a,${'b'.repeat(6000)}),b,${'c'.repeat(6000)})`,
+          ctx
+        )
+    ).rejects.toThrow('limit')
   })
 })

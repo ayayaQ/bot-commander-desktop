@@ -52,7 +52,8 @@ function step(overrides: Partial<AgentValidationStepReport> = {}): AgentValidati
 
 function report(overrides: Partial<AgentValidationReport> = {}): AgentValidationReport {
   return {
-    version: 1,
+    version: 2,
+    runtimeVersion: '2.0.0',
     wrapEvalInIIFE: true,
     candidateKind: 'command',
     candidateId: candidate.id,
@@ -173,7 +174,7 @@ describe('agent validation report presentation', () => {
       expect(view.outcome).toBe('Stale report')
       expect(view.tone).toBe('warning')
       expect(view.warnings).toContain(
-        'This report belongs to a different candidate, revision, fixture set, or interpreter mode.'
+        'This report belongs to a different candidate, revision, fixture set, runtime version, or interpreter mode.'
       )
     }
   )
@@ -387,7 +388,7 @@ describe('agent validation report presentation', () => {
     expect(view.cases[0].steps[1].tone).toBe('error')
   })
 
-  it('shows effects and before/after state diffs in six labeled groups', () => {
+  it('shows effects and before/after state diffs with operation and entity groups', () => {
     const effects = emptyAgentValidationEffects()
     effects.messages = [
       { id: 2, author: 'Bot', content: 'Pong!', kind: 'bot' },
@@ -417,7 +418,7 @@ describe('agent validation report presentation', () => {
     })
     const views = agentValidationReportView(value, binding(value), candidate).cases[0].steps[0]
       .effects
-    expect(views).toEqual([
+    expect(views.slice(0, 6)).toEqual([
       {
         label: 'Messages',
         count: 2,
@@ -500,7 +501,7 @@ describe('agent validation report presentation', () => {
     const value = report()
     const effects = agentValidationReportView(value, binding(value), candidate).cases[0].steps[0]
       .effects
-    expect(effects).toHaveLength(6)
+    expect(effects).toHaveLength(9)
     expect(
       effects.every(
         (effect) =>

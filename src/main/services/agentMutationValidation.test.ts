@@ -242,7 +242,7 @@ describe('exact unsaved candidate validation binding', () => {
     ).not.toThrow()
   })
 
-  it('allows genuinely unsupported matched features only through explicit approval', async () => {
+  it('rejects unsupported evidence without an approval bypass', async () => {
     validate.mockImplementation(async (input) => {
       const report = passed(input)
       report.outcome = report.cases[0].outcome = report.cases[0].steps[0].outcome = 'unsupported'
@@ -254,8 +254,8 @@ describe('exact unsaved candidate validation binding', () => {
       return report
     })
     expect(await validateAgentMutation(draft())).toMatchObject({
-      canCommit: true,
-      requiresApproval: true
+      canCommit: false,
+      requiresApproval: false
     })
   })
 
@@ -306,7 +306,7 @@ describe('exact unsaved candidate validation binding', () => {
     }
   )
 
-  it('blocks wrong-kind supplied event fixtures while retaining absent event fixtures', async () => {
+  it('blocks wrong-kind supplied event fixtures and absent event fixtures', async () => {
     const input = suite()
     input.cases[0].steps[0].kind = 'slash'
     delete input.cases[0].steps[0].content
@@ -318,9 +318,9 @@ describe('exact unsaved candidate validation binding', () => {
     })
     delete prepared.arguments.validation
     expect(await validateAgentMutation(prepared)).toMatchObject({
-      canCommit: true,
-      requiresApproval: true,
-      report: { outcome: 'unsupported' }
+      canCommit: false,
+      requiresApproval: false,
+      report: { outcome: 'not_run' }
     })
   })
 
@@ -339,26 +339,26 @@ describe('exact unsaved candidate validation binding', () => {
     }
   )
 
-  it('permits recognized but unsimulated features only through explicit approval', async () => {
+  it('requires matching assertions for newly simulated features', async () => {
     validate.mockImplementation(async (input) => runAgentValidation(input))
     const prepared = draft()
     ;(prepared.after as { channelMessage: string }).channelMessage = '$createChannel(no)'
     const result = await validateAgentMutation(prepared)
     expect(result).toMatchObject({
-      canCommit: true,
-      requiresApproval: true,
-      report: { outcome: 'unsupported' }
+      canCommit: false,
+      requiresApproval: false,
+      report: { outcome: 'failed' }
     })
   })
 
-  it('preserves event command editing without pretending unsupported dispatch was tested', async () => {
+  it('validates event command edits through the same worker', async () => {
     const prepared = draft()
     ;(prepared.after as { type: number }).type = 2
     const result = await validateAgentMutation(prepared)
     expect(result).toMatchObject({
       canCommit: true,
-      report: { outcome: 'unsupported', coverage: { executed: 0 } }
+      report: { outcome: 'passed', coverage: { executed: 1 } }
     })
-    expect(validate).not.toHaveBeenCalled()
+    expect(validate).toHaveBeenCalled()
   })
 })

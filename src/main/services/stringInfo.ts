@@ -56,7 +56,7 @@ export async function stringInfoAdd(ctx: StringInfoContext): Promise<string> {
   const cmdSource = ctx.command || ctx.interactionCommand
   const result = await withBotStateTransaction(
     async (vmContext) => {
-      const interpreterCtx: InterpreterContext = {
+      const interpreterCtx = {
         user: ctx.user,
         member: ctx.member,
         client: ctx.client,
@@ -77,7 +77,7 @@ export async function stringInfoAdd(ctx: StringInfoContext): Promise<string> {
         guildId: ctx.guild?.id
       }
 
-      return interpret(ctx.message, interpreterCtx)
+      return interpret(ctx.message, interpreterCtx as unknown as InterpreterContext)
     },
     {
       shouldCommit: (result) => result.errors.length === 0,
@@ -105,10 +105,14 @@ export async function stringInfoAdd(ctx: StringInfoContext): Promise<string> {
 export function contextForReactionEvent(
   message: string,
   event: MessageReaction,
-  command: BCFDCommand
+  command: BCFDCommand,
+  user?: User,
+  member?: GuildMember
 ): StringInfoContext {
   return {
     message,
+    user,
+    member,
     client: event.client,
     guild: event.message.guild ?? undefined,
     textChannel: event.message.channel as TextChannel,
