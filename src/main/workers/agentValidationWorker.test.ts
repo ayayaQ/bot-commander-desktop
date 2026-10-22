@@ -117,7 +117,10 @@ describe('production disposable agent validation worker (headless)', () => {
   })
 
   it('keeps the worker entry unpacked when electron-builder creates app.asar', async () => {
-    const builderConfig = await readFile(resolve('electron-builder.yml'), 'utf8')
+    const builderConfig = (await readFile(resolve('electron-builder.yml'), 'utf8')).replace(
+      /\r\n/g,
+      '\n'
+    )
     const unpack = /asarUnpack:\n((?:  - .+\n)+)/.exec(builderConfig)?.[1] ?? ''
     expect(unpack.split('\n')).toContain(`  - out/main/${SERVICE_WORKER_FILENAME}`)
     const packageConfig = JSON.parse(await readFile(resolve('package.json'), 'utf8'))
@@ -142,9 +145,15 @@ describe('production disposable agent validation worker (headless)', () => {
     await write.call(context)
     const initial = await readFile(join(output, SERVICE_WORKER_FILENAME), 'utf8')
     expect(initial).toBe(source)
-    expect(watched).toContain(resolve('src/main/workers/agentValidationWorker.ts'))
-    expect(watched).toContain(resolve('src/shared/playground/agentValidation.ts'))
-    expect(watched).toContain(resolve('src/shared/playground/script.ts'))
+    expect(watched.map((file) => resolve(file))).toContain(
+      resolve('src/main/workers/agentValidationWorker.ts')
+    )
+    expect(watched.map((file) => resolve(file))).toContain(
+      resolve('src/shared/playground/agentValidation.ts')
+    )
+    expect(watched.map((file) => resolve(file))).toContain(
+      resolve('src/shared/playground/script.ts')
+    )
     // The exact hook runs after each main watch build too; stale chunks aren't reused.
     await write.call(context)
     expect(await readFile(join(output, SERVICE_WORKER_FILENAME), 'utf8')).toBe(source)
@@ -234,29 +243,32 @@ describe('production disposable agent validation worker (headless)', () => {
       expect(report.coverage.executed).toBe(0)
       const step = report.cases[0].steps[0]
       expect(step.executionOutcome).toBe('error')
-      expect(step.errors.join(' ')).toContain('Unknown BCFD expression')
-      expect(step.effects).toEqual({
+      expect(step.errors.join(' ')).toMatch(/Unknown (function|variable)/)
+      expect(step.effects).toMatchObject({
         messages: [],
         deletedMessageIds: [],
         memberChanges: [],
         botStateChanges: [],
         variableChanges: [],
-        cooldownChanges: []
+        cooldownChanges: [
+          { path: '/cooldowns/offline-candidate:user:100000000000000001', after: 0 }
+        ]
       })
     },
     10_000
   )
 
-  it('keeps known unimplemented BCFD operations structurally unsupported and matched', async () => {
+  it('executes channel creation in the packaged worker', async () => {
     const validate = createAgentValidationService({ workerEntry: entry })
-    const report = await validate(request('$createChannel(no)'))
-    expect(report.outcome).toBe('unsupported')
-    expect(report.coverage.unsupported).toBe(1)
-    expect(report.coverage.executed).toBe(0)
-    const step = report.cases[0].steps[0]
-    expect(step.executionOutcome).toBe('unsupported')
-    expect(step.matched).toBe(true)
-    expect(step.effects.messages).toEqual([])
+    const input = request('$createChannel(no)')
+    input.suite.cases[0].steps[0].assertions = [
+      { path: '/outcome', equals: 'executed' },
+      { path: '/effects/operations/0/name', equals: 'channel.create' }
+    ]
+    const report = await validate(input)
+    expect(report.outcome).toBe('passed')
+    expect(report.coverage.executed).toBe(1)
+    expect(report.cases[0].steps[0].effects.operations?.[0].name).toBe('channel.create')
   }, 10_000)
 
   it('has no host globals available to user JavaScript', async () => {

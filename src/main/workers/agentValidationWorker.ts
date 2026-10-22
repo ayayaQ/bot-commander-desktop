@@ -41,7 +41,7 @@ async function main(): Promise<void> {
     if (JSON.stringify(request).length > PLAYGROUND_LIMITS.requestBytes)
       throw new Error('Agent validation request exceeds the offline playground limit')
     const factory = await loadScriptSandboxFactory()
-    const report = runAgentValidation(request, factory)
+    const report = await runAgentValidation(request, factory)
     if (JSON.stringify(report).length > PLAYGROUND_LIMITS.requestBytes)
       throw new Error('Agent validation report exceeds the offline playground limit')
     parentPort?.postMessage({ requestId, report })

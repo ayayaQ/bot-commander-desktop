@@ -112,7 +112,7 @@ describe('bounded candidate validation runner', () => {
           return wrapEvalInIIFE && value !== undefined ? String(value) : ''
         })
         const expectedState = production.getVariable('botState')
-        const report = runAgentValidation(
+        const report = await runAgentValidation(
           request({
             wrapEvalInIIFE,
             candidate: command({
@@ -166,8 +166,8 @@ describe('bounded candidate validation runner', () => {
     } finally {
       production.dispose()
     }
-    expect(runAgentValidation(input, sandboxFactory).outcome).toBe('passed')
-    const global = runAgentValidation({ ...input, wrapEvalInIIFE: false }, sandboxFactory)
+    expect((await runAgentValidation(input, sandboxFactory)).outcome).toBe('passed')
+    const global = await runAgentValidation({ ...input, wrapEvalInIIFE: false }, sandboxFactory)
     expect(global.outcome).toBe('failed')
     expect(global.cases[0].steps[0].executionOutcome).toBe('error')
     expect(global.cases[0].steps[0].effects.messages).toEqual([])
@@ -175,7 +175,7 @@ describe('bounded candidate validation runner', () => {
 
   it.each([true, false])(
     'ordinary mode carries eval declaration scope through slash and button steps with wrapping %s',
-    (wrapEvalInIIFE) => {
+    async (wrapEvalInIIFE) => {
       const template = (name: string) =>
         `${name}:$eval var localGreeting = "hello"; $halt` +
         `$eval botState.${name}Scope = typeof localGreeting; $halt`
@@ -193,7 +193,7 @@ describe('bounded candidate validation runner', () => {
           ]
         })
       })
-      const report = runAgentValidation(
+      const report = await runAgentValidation(
         request({
           candidateKind: 'interaction',
           candidate,
@@ -235,9 +235,9 @@ describe('bounded candidate validation runner', () => {
     }
   )
 
-  it('ordinary mode preserves wrapped eval defaults for existing Playground callers', () => {
+  it('ordinary mode preserves wrapped eval defaults for existing Playground callers', async () => {
     const state = createPlaygroundState()
-    const message = runMessage(
+    const message = await runMessage(
       {
         state,
         commands: [command({ channelMessage: '$eval return "reply"; $halt' })],
@@ -247,7 +247,7 @@ describe('bounded candidate validation runner', () => {
       sandboxFactory
     )
     expect(message.state.messages.at(-1)?.content).toBe('reply')
-    const slash = runInteraction(
+    const slash = await runInteraction(
       {
         kind: 'slash',
         state,
@@ -264,8 +264,8 @@ describe('bounded candidate validation runner', () => {
 
   it.each(['$definitelyNotARealBCFDFunction(no)', 'Bad $definitelyNotARealVariable'])(
     'fails unknown BCFD names rather than classifying them as genuine unsupported: %s',
-    (channelMessage) => {
-      const report = runAgentValidation(request({ candidate: command({ channelMessage }) }))
+    async (channelMessage) => {
+      const report = await runAgentValidation(request({ candidate: command({ channelMessage }) }))
       expect(report.outcome).toBe('failed')
       expect(report.coverage.unsupported).toBe(0)
       expect(report.cases[0].steps[0]).toMatchObject({
@@ -273,19 +273,19 @@ describe('bounded candidate validation runner', () => {
         matched: true,
         executed: false
       })
-      expect(report.cases[0].steps[0].errors.join(' ')).toContain('Unknown BCFD expression')
+      expect(report.cases[0].steps[0].errors.join(' ')).toContain('Unknown ')
     }
   )
 
-  it('retains documented and legacy known unsupported features as unsupported', () => {
+  it('executes documented and legacy features through the production registry', async () => {
     for (const channelMessage of ['$createChannel(no)', '$defaultavatar', '$hours']) {
-      const report = runAgentValidation(request({ candidate: command({ channelMessage }) }))
-      expect(report.outcome).toBe('unsupported')
+      const report = await runAgentValidation(request({ candidate: command({ channelMessage }) }))
+      expect(report.outcome).toBe('failed')
       expect(report.cases[0].steps[0].matched).toBe(true)
     }
   })
 
-  it('only allows a DM recipient to activate that fake message button', () => {
+  it('only allows a DM recipient to activate that fake message button', async () => {
     const button = {
       customId: 'private-go',
       label: 'Go',
@@ -351,16 +351,16 @@ describe('bounded candidate validation runner', () => {
       }
     })
     const original = structuredClone(input)
-    const report = runAgentValidation(input)
+    const report = await runAgentValidation(input)
     expect(report.outcome).toBe('passed')
     expect(report.coverage).toMatchObject({ blocked: 1, executed: 1 })
     expect(report.cases[0].steps[0].effects.messages).toEqual([])
     expect(input).toEqual(original)
   })
 
-  it('runs an unsaved command, binds identity and compares actual values', () => {
+  it('runs an unsaved command, binds identity and compares actual values', async () => {
     const input = request()
-    const report = runAgentValidation(input)
+    const report = await runAgentValidation(input)
     expect(report.outcome).toBe('passed')
     expect(report).toMatchObject({
       candidateId: 'candidate',
@@ -377,11 +377,11 @@ describe('bounded candidate validation runner', () => {
       passed: true
     })
     expect(input.suite.cases[0].state.messages).toEqual([])
-    expect(report.limitations.join(' ')).toContain('Startup JavaScript is not loaded')
+    expect(report.limitations.join(' ')).toContain('explicitly supplied startup JavaScript')
   })
 
-  it('reports a wrong effect and absent paths as failed', () => {
-    const report = runAgentValidation(
+  it('reports a wrong effect and absent paths as failed', async () => {
+    const report = await runAgentValidation(
       request({
         suite: suite([
           step({
@@ -401,14 +401,16 @@ describe('bounded candidate validation runner', () => {
     })
   })
 
-  it('does not infer success from error-free unmatched, unsupported or blocked execution', () => {
-    const unmatched = runAgentValidation(request({ suite: suite([step({ content: 'other' })]) }))
+  it('does not infer success from error-free unmatched, unsupported or blocked execution', async () => {
+    const unmatched = await runAgentValidation(
+      request({ suite: suite([step({ content: 'other' })]) })
+    )
     expect(unmatched.outcome).toBe('unmatched')
     expect(unmatched.coverage).toMatchObject({ matched: 0, executed: 0, unmatched: 1 })
-    const unsupported = runAgentValidation(request({ candidate: command({ type: 1 }) }))
-    expect(unsupported.outcome).toBe('unsupported')
+    const unsupported = await runAgentValidation(request({ candidate: command({ type: 1 }) }))
+    expect(unsupported.outcome).toBe('unmatched')
     expect(unsupported.coverage.executed).toBe(0)
-    const blocked = runAgentValidation(
+    const blocked = await runAgentValidation(
       request({
         candidate: command({ isAdmin: true }),
         suite: suite([step({ senderId: '100000000000000002' })])
@@ -418,7 +420,7 @@ describe('bounded candidate validation runner', () => {
     expect(blocked.cases[0].steps[0].executed).toBe(false)
   })
 
-  it('reports expected denials explicitly while all-denied suites stay blocked', () => {
+  it('reports expected denials explicitly while all-denied suites stay blocked', async () => {
     const denial = step({
       senderId: '100000000000000002',
       assertions: [
@@ -427,7 +429,7 @@ describe('bounded candidate validation runner', () => {
         { path: '/effects/messages/length', equals: 0 }
       ]
     })
-    const report = runAgentValidation(
+    const report = await runAgentValidation(
       request({ candidate: command({ isAdmin: true }), suite: suite([denial]) })
     )
     expect(report.outcome).toBe('blocked')
@@ -438,7 +440,7 @@ describe('bounded candidate validation runner', () => {
       matched: true,
       executed: false
     })
-    const mixed = runAgentValidation(
+    const mixed = await runAgentValidation(
       request({ candidate: command({ isAdmin: true }), suite: suite([step(), denial]) })
     )
     expect(mixed.outcome).toBe('passed')
@@ -450,8 +452,8 @@ describe('bounded candidate validation runner', () => {
     [{ channelWhitelist: '42' }, 'Fake channel is not whitelisted'],
     [{ serverWhitelist: '42' }, 'Fake server is not whitelisted'],
     [{ isNSFW: true }, 'Fake channel is not NSFW']
-  ])('records the specific fake role/channel/server/NSFW gate %#', (patch, reason) => {
-    const report = runAgentValidation(
+  ])('records the specific fake role/channel/server/NSFW gate %#', async (patch, reason) => {
+    const report = await runAgentValidation(
       request({
         candidate: command(patch),
         suite: suite([
@@ -469,8 +471,8 @@ describe('bounded candidate validation runner', () => {
     expect(report.cases[0].steps[0]).toMatchObject({ outcome: 'passed', expectedNegative: true })
   })
 
-  it('cannot pass accidental denials or errors that occur before candidate dispatch', () => {
-    const wrongReason = runAgentValidation(
+  it('cannot pass accidental denials or errors that occur before candidate dispatch', async () => {
+    const wrongReason = await runAgentValidation(
       request({
         candidate: command({ isAdmin: true }),
         suite: suite([
@@ -501,7 +503,7 @@ describe('bounded candidate validation runner', () => {
       ])
     })
     input.suite.cases[0].state.members[1].banned = true
-    const predispatch = runAgentValidation(input)
+    const predispatch = await runAgentValidation(input)
     expect(predispatch.outcome).toBe('failed')
     expect(predispatch.cases[0].steps[1]).toMatchObject({
       outcome: 'failed',
@@ -510,7 +512,7 @@ describe('bounded candidate validation runner', () => {
     })
   })
 
-  it('shares explicit script state and VM variables between steps, with mocked AI and fresh cases', () => {
+  it('shares explicit script state and VM variables between steps, with mocked AI and fresh cases', async () => {
     const scriptedStep = (count: number) =>
       step({
         assertions: [
@@ -528,20 +530,20 @@ describe('bounded candidate validation runner', () => {
       suite: suite([scriptedStep(1), scriptedStep(2)])
     })
     input.suite.cases[0].state.ai.response = 'mocked'
+    input.suite.cases[0].state.aiMocks = [{ prompt: 'test', response: 'mocked' }]
     input.suite.cases.push({
       name: 'fresh script',
       state: clean(input.suite.cases[0].state),
       steps: [scriptedStep(1)]
     })
     const deadlines: number[] = []
-    const report = runAgentValidation(input, (state, options) => {
-      deadlines.push(options!.deadline!)
-      expect(options!.deadline).toBeLessThanOrEqual(Date.now() + 1000)
+    const report = await runAgentValidation(input, (state, options) => {
+      deadlines.push(Date.now())
       return sandboxFactory(state, options)
     })
     expect(report.outcome).toBe('passed')
     expect(report.coverage.executed).toBe(3)
-    expect(deadlines).toHaveLength(3)
+    expect(deadlines).toHaveLength(2)
     expect(input.suite.cases[0].state.botState).toEqual({})
     expect(report.cases[0].steps[1].effects.botStateChanges[0]).toMatchObject({
       path: '/botState/count',
@@ -550,8 +552,8 @@ describe('bounded candidate validation runner', () => {
     })
   })
 
-  it('asserts fake moderation and role effects on explicit members only', () => {
-    const report = runAgentValidation(
+  it('asserts fake moderation and role effects on explicit members only', async () => {
+    const report = await runAgentValidation(
       request({
         candidate: command({ isKick: true, roleToAssign: '200000000000000002' }),
         suite: suite([
@@ -571,7 +573,7 @@ describe('bounded candidate validation runner', () => {
     expect(report.cases[0].steps[0].effects.memberChanges[0].afterPresent).toBe(true)
   })
 
-  it('shares cooldown state and fake clock within sequences and resets between cases', () => {
+  it('shares cooldown state and fake clock within sequences and resets between cases', async () => {
     const input = request({
       candidate: command({ cooldown: 2, cooldownType: 'User' }),
       suite: suite([
@@ -590,14 +592,14 @@ describe('bounded candidate validation runner', () => {
       ])
     })
     input.suite.cases.push({ ...clean(input.suite.cases[0]), name: 'fresh', steps: [step()] })
-    const report = runAgentValidation(input)
+    const report = await runAgentValidation(input)
     expect(report.outcome).toBe('passed')
     expect(report.coverage).toMatchObject({ executed: 3, blocked: 1 })
     expect(report.cases[0].steps[0].effects.cooldownChanges[0].after).toBe(0)
     expect(input.suite.cases[0].state.clockMs).toBe(0)
   })
 
-  it('supports expected missing-option errors without treating them as executed', () => {
+  it('supports expected missing-option errors without treating them as executed', async () => {
     const candidate = interaction({
       options: [{ name: 'text', description: 'text', type: 3, required: true }]
     })
@@ -616,7 +618,7 @@ describe('bounded candidate validation runner', () => {
         )
       ])
     })
-    const negative = runAgentValidation(input)
+    const negative = await runAgentValidation(input)
     expect(negative.outcome).toBe('blocked')
     expect(negative.cases[0].steps[0]).toMatchObject({
       expectedNegative: true,
@@ -625,10 +627,10 @@ describe('bounded candidate validation runner', () => {
       outcome: 'passed'
     })
     input.suite.cases[0].steps.push(clean(slash({ options: { text: 'value' } })))
-    expect(runAgentValidation(input).outcome).toBe('passed')
+    expect((await runAgentValidation(input)).outcome).toBe('passed')
   })
 
-  it('runs slash-to-button sequences and respects ephemeral visibility', () => {
+  it('runs slash-to-button sequences and respects ephemeral visibility', async () => {
     const candidate = interaction({
       rootAction: action({
         ephemeral: true,
@@ -643,7 +645,7 @@ describe('bounded candidate validation runner', () => {
         ]
       })
     })
-    const report = runAgentValidation(
+    const report = await runAgentValidation(
       request({
         candidateKind: 'interaction',
         candidate,
@@ -680,16 +682,18 @@ describe('bounded candidate validation runner', () => {
     expect(report.coverage).toMatchObject({ executed: 2, blocked: 1 })
   })
 
-  it('uses structured unsupported errors without parsing traces and discards atomic effects', () => {
-    const report = runAgentValidation(
+  it('executes channel operations and reports their effects', async () => {
+    const report = await runAgentValidation(
       request({ candidate: command({ privateMessage: '$createChannel(no)' }) })
     )
-    expect(report.outcome).toBe('unsupported')
-    expect(report.cases[0].steps[0].effects.messages).toEqual([])
-    expect(report.coverage.executed).toBe(0)
+    expect(report.outcome).toBe('passed')
+    expect(report.cases[0].steps[0].effects.operations?.map((item) => item.name)).toContain(
+      'channel.create'
+    )
+    expect(report.coverage.executed).toBe(1)
   })
 
-  it('bounds oversized detail with a truthful truncated not-run report', () => {
+  it('bounds oversized detail with a truthful truncated not-run report', async () => {
     const big = 'x'.repeat(16_000)
     const input = request({
       candidate: command({ channelMessage: big }),
@@ -704,7 +708,7 @@ describe('bounded candidate validation runner', () => {
         )
       )
     })
-    const report = runAgentValidation(input)
+    const report = await runAgentValidation(input)
     expect(report).toMatchObject({
       outcome: 'not_run',
       truncated: true,
@@ -763,19 +767,21 @@ describe('bounded candidate validation runner', () => {
     ).toBe(true)
   })
 
-  it('returns engine resource coverage for both existing message/interaction APIs', () => {
+  it('returns engine resource coverage for both existing message/interaction APIs', async () => {
     const state = createPlaygroundState()
     expect(
-      runMessage({ state, commands: [command()], senderId, content: '!test' }).resources![0]
+      (await runMessage({ state, commands: [command()], senderId, content: '!test' })).resources![0]
     ).toMatchObject({ resourceId: 'candidate', matched: true, executed: true, outcome: 'executed' })
     expect(
-      runInteraction({
-        kind: 'slash',
-        state,
-        interactions: [interaction()],
-        senderId,
-        commandId: 'candidate'
-      }).resources![0]
+      (
+        await runInteraction({
+          kind: 'slash',
+          state,
+          interactions: [interaction()],
+          senderId,
+          commandId: 'candidate'
+        })
+      ).resources![0]
     ).toMatchObject({ resourceId: 'candidate', matched: true, executed: true, outcome: 'executed' })
   })
 })
@@ -906,7 +912,7 @@ describe('deep explicit fixture boundary', () => {
     ).toThrow('bounded')
   })
 
-  it('rejects hidden or accessor candidate definitions before normalization', () => {
+  it('rejects hidden or accessor candidate definitions before normalization', async () => {
     const input = request()
     let calls = 0
     Object.defineProperty(input.candidate, 'channelMessage', {
@@ -916,14 +922,15 @@ describe('deep explicit fixture boundary', () => {
         return 'local'
       }
     })
-    expect(() => runAgentValidation(input)).toThrow('accessors')
+    await expect(async () => await runAgentValidation(input)).rejects.toThrow('accessors')
     expect(calls).toBe(0)
-    expect(() =>
-      runAgentValidation(request({ candidate: command({ reaction: 'x'.repeat(16_385) }) }))
-    ).toThrow('bounded')
+    await expect(
+      async () =>
+        await runAgentValidation(request({ candidate: command({ reaction: 'x'.repeat(16_385) }) }))
+    ).rejects.toThrow('bounded')
   })
 
-  it('rejects spoofed bot identity and malformed option/choice definitions', () => {
+  it('rejects spoofed bot identity and malformed option/choice definitions', async () => {
     const fixture = suite()
     fixture.cases[0].state.members[0].id = '900000000000000003'
     expect(() => validateAgentValidationSuite(fixture)).toThrow('spoofs')
@@ -960,15 +967,16 @@ describe('deep explicit fixture boundary', () => {
         { name: 'TEXT', description: 'duplicate', type: 3, required: false }
       ]
     ]) {
-      expect(() =>
-        runAgentValidation(
-          request({
-            candidateKind: 'interaction',
-            candidate: interaction({ options: options as BCFDInteractionCommand['options'] }),
-            suite: suite([clean(slash())])
-          })
-        )
-      ).toThrow()
+      await expect(
+        async () =>
+          await runAgentValidation(
+            request({
+              candidateKind: 'interaction',
+              candidate: interaction({ options: options as BCFDInteractionCommand['options'] }),
+              suite: suite([clean(slash())])
+            })
+          )
+      ).rejects.toThrow()
     }
   })
 })

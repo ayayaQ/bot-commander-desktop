@@ -10,6 +10,8 @@ export interface DisposableWorker {
 
 export class PlaygroundSession {
   private generation = 0
+  private worker?: DisposableWorker
+  private idle?: ReturnType<typeof setTimeout>
   private pending?: {
     worker: DisposableWorker
     timer: ReturnType<typeof setTimeout>
@@ -30,25 +32,32 @@ export class PlaygroundSession {
 
   cancel(): void {
     this.generation++
+    clearTimeout(this.idle)
+    this.worker?.terminate()
+    this.worker = undefined
     if (!this.pending) return
     clearTimeout(this.pending.timer)
-    this.pending.worker.terminate()
     this.pending.reject(new Error('Playground execution cancelled'))
     this.pending = undefined
   }
 
   run(request: PlaygroundRequest): Promise<PlaygroundResult> {
-    this.cancel()
+    if (this.pending) this.cancel()
+    clearTimeout(this.idle)
+    this.generation++
     const generation = this.generation
     if (JSON.stringify(request).length > PLAYGROUND_LIMITS.requestBytes)
       return Promise.reject(new Error('Playground request is too large'))
     return new Promise((resolve, reject) => {
-      const worker = this.createWorker()
+      const worker = (this.worker ??= this.createWorker())
       const finish = (result?: PlaygroundResult, error?: string) => {
         if (generation !== this.generation || this.pending?.worker !== worker) return
         clearTimeout(this.pending.timer)
-        worker.terminate()
         this.pending = undefined
+        if (error || !result) {
+          worker.terminate()
+          this.worker = undefined
+        } else this.idle = setTimeout(() => this.cancel(), 600_000)
         if (error || !result) reject(new Error(error ?? 'Invalid worker result'))
         else resolve(result)
       }

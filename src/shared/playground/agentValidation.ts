@@ -1,3 +1,6 @@
+import { RUNTIME_VERSION } from '../runtime/version'
+import { commandEvents } from '../runtime/dispatch'
+import { createScriptSession } from './scriptSession'
 import type { BCFDCommand, BCFDInteractionCommand } from '../../main/types/types'
 import {
   AGENT_VALIDATION_LIMITATIONS,
@@ -99,7 +102,10 @@ function effects(before: PlaygroundState, after: PlaygroundState): AgentValidati
     memberChanges: changes(before.members, after.members, '/members'),
     botStateChanges: changes(before.botState, after.botState, '/botState'),
     variableChanges: changes(before.variables, after.variables, '/variables'),
-    cooldownChanges: changes(before.cooldowns, after.cooldowns, '/cooldowns')
+    cooldownChanges: changes(before.cooldowns, after.cooldowns, '/cooldowns'),
+    operations: (after.operations ?? []).slice(before.operations?.length ?? 0),
+    channelChanges: changes(before.channels ?? [], after.channels ?? [], '/channels'),
+    roleChanges: changes(before.roles, after.roles, '/roles')
   }
 }
 function actualAt(root: unknown, path: string): { present: boolean; value: unknown } {
@@ -119,12 +125,18 @@ function combined(steps: AgentValidationStepReport[]): AgentValidationOutcome {
   return steps.length ? 'passed' : 'not_run'
 }
 
+function replaceCandidate<T extends { id: string }>(resources: T[], candidate: T): T[] {
+  return resources.some((item) => item.id === candidate.id)
+    ? resources.map((item) => (item.id === candidate.id ? candidate : item))
+    : [...resources, candidate]
+}
+
 /** Pure off-main runner. Each case starts fresh; steps share only their case's explicit fake state. */
-export function runAgentValidation(
+export async function runAgentValidation(
   request: AgentValidationRequest,
   sandboxFactory?: ScriptSandboxFactory,
   hooks: { beforeStep?: () => void } = {}
-): AgentValidationReport {
+): Promise<AgentValidationReport> {
   request = copyAgentValidationJSON(
     request,
     AGENT_VALIDATION_LIMITS.fixtureChars + AGENT_VALIDATION_LIMITS.candidateChars + 4096
@@ -148,6 +160,11 @@ export function runAgentValidation(
     throw new Error('Invalid base revision')
   const suite = validateAgentValidationSuite(request.suite)
   validateAgentValidationCandidate(request.candidateKind, request.candidate)
+  if (!sandboxFactory && suite.cases.some((item) => item.state.startupSource?.trim()))
+    return createNotRunAgentValidationReport(
+      request,
+      'Startup validation requires a script sandbox'
+    )
   const safeCandidate = copyAgentValidationJSON(
     request.candidate,
     AGENT_VALIDATION_LIMITS.candidateChars
@@ -158,7 +175,8 @@ export function runAgentValidation(
   else snapshotInteractions([safeCandidate])
   const candidate = safeCandidate as BCFDCommand | BCFDInteractionCommand
   const report: AgentValidationReport = {
-    version: 1,
+    version: 2,
+    runtimeVersion: RUNTIME_VERSION,
     candidateKind: request.candidateKind,
     candidateId: candidate.id,
     candidateHash: request.candidateHash,
@@ -183,61 +201,76 @@ export function runAgentValidation(
   }
   for (const fixture of suite.cases) {
     let state = structuredClone(fixture.state)
-    const steps: AgentValidationStepReport[] = []
-    for (const [index, step] of fixture.steps.entries()) {
-      const nextClock = state.clockMs + (step.advanceClockMs ?? 0)
-      if (!Number.isSafeInteger(nextClock))
-        throw new Error('Fake clock exceeds the safe integer limit')
-      state.clockMs = nextClock
-      const before = structuredClone(state)
-      hooks.beforeStep?.()
-      const deadline = Date.now() + AGENT_VALIDATION_LIMITS.stepTimeoutMs
-      const factory: ScriptSandboxFactory | undefined = sandboxFactory
-        ? (botState, options) =>
-            sandboxFactory(botState, {
-              ...options,
-              deadline: Math.min(options?.deadline ?? deadline, deadline)
-            })
-        : undefined
-      let result: PlaygroundResult
-      if (
-        (request.candidateKind === 'command' && step.kind !== 'message') ||
-        (request.candidateKind === 'interaction' && step.kind === 'message')
-      ) {
-        result = {
-          state,
-          trace: [],
-          errors: [],
-          resources: [
-            {
-              resourceId: candidate.id,
-              kind: request.candidateKind,
-              matched: false,
-              executed: false,
-              outcome: 'unsupported',
-              reason: 'Step kind cannot invoke this candidate kind'
-            }
-          ]
-        }
-      } else {
-        try {
-          result =
-            step.kind === 'message'
-              ? runMessage(
+    state.strictMocks = true
+    const session = sandboxFactory
+      ? createScriptSession(sandboxFactory, state.startupSource)
+      : undefined
+    try {
+      const steps: AgentValidationStepReport[] = []
+      for (const [index, step] of fixture.steps.entries()) {
+        const nextClock = state.clockMs + (step.advanceClockMs ?? 0)
+        if (!Number.isSafeInteger(nextClock))
+          throw new Error('Fake clock exceeds the safe integer limit')
+        state.clockMs = nextClock
+        const before = structuredClone(state)
+        hooks.beforeStep?.()
+        const deadline = Date.now() + AGENT_VALIDATION_LIMITS.stepTimeoutMs
+        const factory: ScriptSandboxFactory | undefined = sandboxFactory
+          ? (botState, options) =>
+              (session?.factory ?? sandboxFactory)(botState, {
+                ...options,
+                deadline: Math.min(options?.deadline ?? deadline, deadline)
+              })
+          : undefined
+        let result: PlaygroundResult
+        if (
+          (request.candidateKind === 'command' &&
+            !commandEvents.includes(step.kind as (typeof commandEvents)[number])) ||
+          (request.candidateKind === 'interaction' &&
+            commandEvents.includes(step.kind as (typeof commandEvents)[number]))
+        ) {
+          result = {
+            state,
+            trace: [],
+            errors: [],
+            resources: [
+              {
+                resourceId: candidate.id,
+                kind: request.candidateKind,
+                matched: false,
+                executed: false,
+                outcome: 'unsupported',
+                reason: 'Step kind cannot invoke this candidate kind'
+              }
+            ]
+          }
+        } else {
+          try {
+            session?.beginStep(state)
+            result = commandEvents.includes(step.kind as (typeof commandEvents)[number])
+              ? await runMessage(
                   {
                     state,
-                    commands: [candidate as BCFDCommand],
+                    commands: replaceCandidate(
+                      suite.resources?.commands ?? [],
+                      candidate as BCFDCommand
+                    ),
                     senderId: step.senderId,
                     wrapEvalInIIFE: request.wrapEvalInIIFE,
-                    content: step.content!
+                    kind: step.kind as (typeof commandEvents)[number],
+                    messageId: step.messageId,
+                    content: step.content ?? ''
                   },
                   factory
                 )
-              : runInteraction(
+              : await runInteraction(
                   {
-                    kind: step.kind,
+                    kind: step.kind as 'slash' | 'button',
                     state,
-                    interactions: [candidate as BCFDInteractionCommand],
+                    interactions: replaceCandidate(
+                      suite.resources?.interactions ?? [],
+                      candidate as BCFDInteractionCommand
+                    ),
                     senderId: step.senderId,
                     wrapEvalInIIFE: request.wrapEvalInIIFE,
                     commandId: candidate.id,
@@ -247,100 +280,110 @@ export function runAgentValidation(
                   },
                   factory
                 )
-        } catch (error) {
-          const reason = error instanceof Error ? error.message : 'Validation execution failed'
-          result = {
-            state: before,
-            trace: [],
-            errors: [reason],
-            resources: [
-              {
-                resourceId: candidate.id,
-                kind: request.candidateKind,
-                matched: false,
-                executed: false,
-                outcome: error instanceof PlaygroundExecutionError ? error.outcome : 'error',
-                reason,
-                error: reason
-              }
-            ]
+          } catch (error) {
+            const reason = error instanceof Error ? error.message : 'Validation execution failed'
+            result = {
+              state: before,
+              trace: [],
+              errors: [reason],
+              resources: [
+                {
+                  resourceId: candidate.id,
+                  kind: request.candidateKind,
+                  matched: false,
+                  executed: false,
+                  outcome: error instanceof PlaygroundExecutionError ? error.outcome : 'error',
+                  reason,
+                  error: reason
+                }
+              ]
+            }
           }
         }
-      }
-      state = result.state
-      const resource = result.resources?.find(
-        (item) => item.resourceId === candidate.id && item.kind === request.candidateKind
-      )
-      const executionOutcome = resource?.outcome ?? 'not_run'
-      const reason =
-        resource?.reason ?? (resource ? '' : 'Engine did not provide structured resource coverage')
-      const observedEffects = effects(before, state)
-      const observation = {
-        outcome: executionOutcome,
-        reason,
-        state,
-        effects: observedEffects,
-        errors: result.errors
-      }
-      const assertions = step.assertions.map((assertion): AgentValidationAssertionResult => {
-        const actual = actualAt(observation, assertion.path)
-        return {
-          path: assertion.path,
-          expected: assertion.equals,
-          actual: actual.present ? json(actual.value) : null,
-          actualPresent: actual.present,
-          passed: actual.present && equal(actual.value, assertion.equals)
-        }
-      })
-      const expectedOutcome = step.assertions.find(
-        (assertion) => assertion.path === '/outcome'
-      )!.equals
-      const expectedNegative =
-        resource?.matched === true &&
-        (executionOutcome === 'blocked' || executionOutcome === 'error') &&
-        expectedOutcome === executionOutcome
-      const satisfied = assertions.every((assertion) => assertion.passed)
-      let outcome: AgentValidationOutcome = satisfied ? 'passed' : 'failed'
-      if (['unsupported', 'unmatched', 'not_run'].includes(executionOutcome))
-        outcome = executionOutcome as AgentValidationOutcome
-      else if (executionOutcome === 'blocked' && !expectedNegative) outcome = 'blocked'
-      else if (executionOutcome === 'error' && !expectedNegative) outcome = 'failed'
-      const timedOut =
-        Date.now() >= deadline ||
-        result.errors.some((error) =>
-          /Script execution time limit exceeded|interrupted/.test(error)
+        state = result.state
+        const resource = result.resources?.find(
+          (item) => item.resourceId === candidate.id && item.kind === request.candidateKind
         )
-      if (timedOut) outcome = 'not_run'
-      steps.push({
-        index,
-        kind: step.kind,
-        outcome,
-        executionOutcome,
-        expectedNegative,
-        matched: !!resource?.matched,
-        executed: !!resource?.executed,
-        reason,
-        assertions,
-        effects: observedEffects,
-        trace: result.trace,
-        errors: result.errors,
-        timedOut,
-        cancelled: false,
-        truncated: false
-      })
-      report.coverage.matched += Number(!!resource?.matched)
-      report.coverage.executed += Number(!!resource?.executed)
-      const coverageKey = {
-        blocked: 'blocked',
-        error: 'errors',
-        unmatched: 'unmatched',
-        unsupported: 'unsupported',
-        not_run: 'notRun'
-      }[executionOutcome]
-      if (coverageKey) report.coverage[coverageKey]++
-      report.timedOut ||= timedOut
+        const executionOutcome = resource?.outcome ?? 'not_run'
+        const reason =
+          resource?.reason ??
+          (resource ? '' : 'Engine did not provide structured resource coverage')
+        const observedEffects = effects(before, state)
+        const observation = {
+          outcome: executionOutcome,
+          reason,
+          state,
+          effects: observedEffects,
+          errors: result.errors
+        }
+        const assertions = step.assertions.map((assertion): AgentValidationAssertionResult => {
+          const actual = actualAt(observation, assertion.path)
+          return {
+            path: assertion.path,
+            expected: assertion.equals,
+            actual: actual.present ? json(actual.value) : null,
+            actualPresent: actual.present,
+            passed: actual.present && equal(actual.value, assertion.equals)
+          }
+        })
+        const expectedOutcome = step.assertions.find(
+          (assertion) => assertion.path === '/outcome'
+        )!.equals
+        const expectedNegative =
+          resource?.matched === true &&
+          (executionOutcome === 'blocked' || executionOutcome === 'error') &&
+          expectedOutcome === executionOutcome
+        const satisfied = assertions.every((assertion) => assertion.passed)
+        let outcome: AgentValidationOutcome = satisfied ? 'passed' : 'failed'
+        if (['unsupported', 'unmatched', 'not_run'].includes(executionOutcome))
+          outcome = executionOutcome as AgentValidationOutcome
+        else if (executionOutcome === 'blocked' && !expectedNegative) outcome = 'blocked'
+        else if (executionOutcome === 'error' && !expectedNegative) outcome = 'failed'
+        const timedOut =
+          Date.now() >= deadline ||
+          result.errors.some((error) =>
+            /Script execution time limit exceeded|interrupted/.test(error)
+          )
+        if (timedOut || result.errors.some((error) => error.includes('Missing explicit AI mock')))
+          outcome = 'not_run'
+        const truncated = observedEffects.operations?.some((item) => item.truncated) ?? false
+        if (truncated) {
+          outcome = 'not_run'
+          report.truncated = true
+        }
+        steps.push({
+          index,
+          kind: step.kind,
+          outcome,
+          executionOutcome,
+          expectedNegative,
+          matched: !!resource?.matched,
+          executed: !!resource?.executed,
+          reason,
+          assertions,
+          effects: observedEffects,
+          trace: result.trace,
+          errors: result.errors,
+          timedOut,
+          cancelled: false,
+          truncated
+        })
+        report.coverage.matched += Number(!!resource?.matched)
+        report.coverage.executed += Number(!!resource?.executed)
+        const coverageKey = {
+          blocked: 'blocked',
+          error: 'errors',
+          unmatched: 'unmatched',
+          unsupported: 'unsupported',
+          not_run: 'notRun'
+        }[executionOutcome]
+        if (coverageKey) report.coverage[coverageKey]++
+        report.timedOut ||= timedOut
+      }
+      report.cases.push({ name: fixture.name, outcome: combined(steps), steps })
+    } finally {
+      session?.dispose()
     }
-    report.cases.push({ name: fixture.name, outcome: combined(steps), steps })
   }
   const allSteps = report.cases.flatMap((item) => item.steps)
   report.outcome = combined(allSteps)

@@ -113,7 +113,7 @@ export function createAgentValidationService(options: AgentValidationServiceOpti
         if (reply.requestId !== requestId) return
         if (
           !reply.report ||
-          reply.report.version !== 1 ||
+          reply.report.version !== 2 ||
           reply.report.candidateKind !== input.candidateKind ||
           reply.report.candidateId !== input.candidate.id ||
           reply.report.candidateHash !== input.candidateHash ||

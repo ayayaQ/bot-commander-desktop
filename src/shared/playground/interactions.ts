@@ -1,3 +1,5 @@
+import { operation, requireBotPermission } from './runtimeContext'
+import { runInteractionActions } from '../runtime/actions'
 import { PLAYGROUND_OPTION_NAME } from './optionName'
 import type {
   BCFDInteractionAction,
@@ -76,7 +78,12 @@ export function validateOptions(
         !state.members.some((member) => member.id === value && !member.kicked && !member.banned)
       )
         fail()
-      if (definition.type === 7 && value !== state.channelId) fail()
+      if (
+        definition.type === 7 &&
+        value !== state.channelId &&
+        !state.channels?.some((channel) => channel.id === value)
+      )
+        fail()
       if (definition.type === 8 && !state.roles.some((role) => role.id === value)) fail()
     }
     if (
@@ -125,12 +132,13 @@ function findButton(
   return undefined
 }
 
-function renderButtons(
+async function renderButtons(
   buttons: BCFDInteractionButton[],
   ctx: TemplateContext
-): BCFDInteractionButton[] {
+): Promise<BCFDInteractionButton[]> {
   if (!Array.isArray(buttons)) throw new Error('Invalid action buttons')
-  return buttons.slice(0, 5).map((button) => {
+  const output: BCFDInteractionButton[] = []
+  for (const button of buttons.slice(0, 5)) {
     if (
       !button ||
       typeof button.customId !== 'string' ||
@@ -138,11 +146,15 @@ function renderButtons(
       ![1, 2, 3, 4, 5].includes(button.style)
     )
       throw new Error('Invalid button')
-    return { ...structuredClone(button), label: evaluateTemplate(button.label || 'Button', ctx) }
-  })
+    output.push({
+      ...structuredClone(button),
+      label: await evaluateTemplate(button.label || 'Button', ctx)
+    })
+  }
+  return output
 }
 
-function executeAction(
+async function executeAction(
   state: PlaygroundState,
   command: BCFDInteractionCommand,
   action: BCFDInteractionAction,
@@ -151,10 +163,10 @@ function executeAction(
   isButton: boolean,
   trace: string[],
   ctx: TemplateContext
-): void {
+): Promise<void> {
   const sender = state.members.find((member) => member.id === senderId)!
   // Production interaction contexts have no messageEvent/mentionedMember.
-  const render = (text: string) => evaluateTemplate(text, ctx)
+  const render = async (text: string) => await evaluateTemplate(text, ctx)
   if (!isButton) {
     if (action.deleteX) {
       if (!hasPermission(sender, 'manageMessages'))
@@ -184,56 +196,77 @@ function executeAction(
         if (!enabled) continue
         if (!hasPermission(sender, permission))
           throw new PlaygroundExecutionError(`${permission} permission required`, 'blocked')
-        target[key] = true
+        operation(state, `member.${key}`, [target.id], () => {
+          requireBotPermission(
+            state,
+            { kicked: 'KickMembers', banned: 'BanMembers', muted: 'MuteMembers' }[key]
+          )
+          if (target.manageable === false) throw new Error('Member is not manageable')
+          target[key] = true
+        })
         trace.push(`${key}: ${target.name}`)
       }
     }
   } else if (action.deleteX || action.isKick || action.isBan || action.isVoiceMute) {
     trace.push('Button moderation/deletion flags are ignored by the production button handler')
   }
-  let response =
-    action.sendChannelMessage && action.channelMessage ? render(action.channelMessage) : ''
-  const embed = action.sendChannelEmbed ? buildFakeEmbed(action.channelEmbed, ctx) : undefined
-  if (!response && !embed) response = '\u200B'
-  const buttons = renderButtons(action.buttons, ctx)
-  addMessage(state, {
-    kind: 'bot',
-    author: 'Playground Bot',
-    content: response,
-    embed,
-    buttons,
-    ephemeral: !!action.ephemeral,
-    recipient: action.ephemeral ? sender.id : undefined,
-    deferred: !!action.deferReply
+  await runInteractionActions({
+    response: async () => {
+      let response =
+        action.sendChannelMessage && action.channelMessage
+          ? await render(action.channelMessage)
+          : ''
+      const embed = action.sendChannelEmbed
+        ? await buildFakeEmbed(action.channelEmbed, ctx)
+        : undefined
+      if (!response && !embed) response = '\u200B'
+      const buttons = await renderButtons(action.buttons, ctx)
+      addMessage(state, {
+        kind: 'bot',
+        author: 'Playground Bot',
+        content: response,
+        embed,
+        buttons,
+        ephemeral: !!action.ephemeral,
+        recipient: action.ephemeral ? sender.id : undefined,
+        deferred: !!action.deferReply
+      })
+      trace.push(
+        action.deferReply ? 'Deferred reply then edit (timing not modeled)' : 'Interaction reply'
+      )
+    },
+    dm: async () => {
+      if (action.sendPrivateMessage && action.privateMessage)
+        addMessage(state, {
+          kind: 'dm',
+          author: 'Playground Bot',
+          recipient: sender.id,
+          content: await render(action.privateMessage)
+        })
+    },
+    dmEmbed: async () => {
+      if (action.sendPrivateEmbed)
+        addMessage(state, {
+          kind: 'dm',
+          author: 'Playground Bot',
+          recipient: sender.id,
+          content: '',
+          embed: await buildFakeEmbed(action.privateEmbed, ctx)
+        })
+    },
+    role: async () => {
+      if (action.isRoleAssigner && action.roleToAssign) {
+        toggleRole(state, sender, await render(action.roleToAssign))
+        trace.push(`Toggled role on invoking member ${sender.name}`)
+      }
+    }
   })
-  trace.push(
-    action.deferReply ? 'Deferred reply then edit (timing not modeled)' : 'Interaction reply'
-  )
-  if (action.sendPrivateMessage && action.privateMessage)
-    addMessage(state, {
-      kind: 'dm',
-      author: 'Playground Bot',
-      recipient: sender.id,
-      content: render(action.privateMessage)
-    })
-  if (action.sendPrivateEmbed)
-    addMessage(state, {
-      kind: 'dm',
-      author: 'Playground Bot',
-      recipient: sender.id,
-      content: '',
-      embed: buildFakeEmbed(action.privateEmbed, ctx)
-    })
-  if (action.isRoleAssigner && action.roleToAssign) {
-    toggleRole(state, sender, render(action.roleToAssign))
-    trace.push(`Toggled role on invoking member ${sender.name}`)
-  }
 }
 
-export function runInteraction(
+export async function runInteraction(
   request: PlaygroundInteractionRequest,
   factory?: ScriptSandboxFactory
-): PlaygroundResult {
+): Promise<PlaygroundResult> {
   validateState(request.state)
   if (
     !Array.isArray(request.interactions) ||
@@ -324,7 +357,7 @@ export function runInteraction(
           ephemeral: true,
           recipient: sender.id,
           content: command.cooldownMessage
-            ? evaluateTemplate(command.cooldownMessage, scope.context)
+            ? await evaluateTemplate(command.cooldownMessage, scope.context)
             : `This command is on cooldown. Try again in ${remaining}s.`
         })
         trace.push(
@@ -336,7 +369,7 @@ export function runInteraction(
         return { state: draft, trace, errors, resources }
       }
     }
-    executeAction(
+    await executeAction(
       draft,
       command,
       action,
@@ -373,8 +406,8 @@ export function runInteraction(
     }
     errors.push(error instanceof Error ? error.message : 'Interaction execution failed')
     return {
-      state: original,
-      trace: ['Failed closed; no interaction effects applied'],
+      state: draft,
+      trace: [...trace, 'Failed; earlier interaction effects retained'],
       errors,
       resources
     }

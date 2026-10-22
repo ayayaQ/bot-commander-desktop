@@ -12,6 +12,9 @@ export interface ScriptSandboxOptions {
 }
 
 export interface ScriptSandbox {
+  beginStep?(): void
+  configureEnvironment?(clockMs: number, seed: number): void
+  randomState?(): number
   set(name: string, value: unknown): void
   temp(value: string): string
   get(name: string): string
@@ -227,7 +230,7 @@ const BOOTSTRAP = `(() => {
 class OfflineScriptSandbox implements ScriptSandbox {
   private readonly runtime: QuickJSRuntime
   private readonly context: QuickJSContext
-  private readonly deadline: number
+  private deadline: number
   private readonly helpers = new Map<string, QuickJSHandle>()
   private disposed = false
   private failed = false
@@ -291,6 +294,67 @@ class OfflineScriptSandbox implements ScriptSandbox {
       } finally {
         nameHandle.dispose()
         if (valueHandle !== this.context.undefined) valueHandle.dispose()
+      }
+    })
+  }
+
+  beginStep(): void {
+    if (this.disposed || this.failed)
+      throw new Error('Script session is unavailable; reset the playground')
+    this.deadline = performance.now() + LIFETIME_MS
+  }
+
+  configureEnvironment(clockMs: number, seed: number): void {
+    this.guard(() => {
+      if (!Number.isSafeInteger(clockMs) || !Number.isSafeInteger(seed))
+        throw new Error('Invalid script environment')
+      if (!this.helpers.has('configureClock')) {
+        const toolkit = this.unwrap(
+          this.context.evalCode(
+            `(() => {
+          const NativeDate = Date, construct = Reflect.construct;
+          let now = 0, seed = 1;
+          function SimulatedDate(...args) {
+            if (!new.target) return new NativeDate(now).toString();
+            return construct(NativeDate, args.length ? args : [now], new.target);
+          }
+          SimulatedDate.parse = NativeDate.parse;
+          SimulatedDate.UTC = NativeDate.UTC;
+          Object.defineProperty(NativeDate.prototype, "constructor", { value: SimulatedDate, writable: true, configurable: true });
+          SimulatedDate.prototype = NativeDate.prototype;
+          SimulatedDate.now = () => now;
+          globalThis.Date = SimulatedDate;
+          Math.random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+          return { configureClock(time, initial) { now = time; seed = initial >>> 0; }, randomState() { return seed; } };
+        })()`,
+            'playground-clock.js'
+          )
+        )
+        try {
+          for (const key of ['configureClock', 'randomState'])
+            this.helpers.set(key, this.context.getProp(toolkit, key))
+        } finally {
+          toolkit.dispose()
+        }
+      }
+      const time = this.context.newNumber(clockMs),
+        initial = this.context.newNumber(seed)
+      try {
+        this.call('configureClock', [time, initial]).dispose()
+      } finally {
+        time.dispose()
+        initial.dispose()
+      }
+    })
+  }
+
+  randomState(): number {
+    return this.guard(() => {
+      const value = this.call('randomState')
+      try {
+        return this.context.getNumber(value)
+      } finally {
+        value.dispose()
       }
     })
   }

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { basename, dirname, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 describe('headless playground security boundary', () => {
@@ -14,7 +14,7 @@ describe('headless playground security boundary', () => {
       )) {
         const specifier = match[1]
         if (
-          file.endsWith('/script.ts') &&
+          basename(file) === 'script.ts' &&
           new Set([
             'quickjs-emscripten-core',
             '@jitl/quickjs-wasmfile-release-sync/ffi',
@@ -31,12 +31,12 @@ describe('headless playground security boundary', () => {
         inspect(target)
       }
       expect(source).not.toMatch(
-        /\b(?:fetch|XMLHttpRequest|WebSocket|eval|Function|importScripts|require)\s*\(/
+        /(?<![.\w])(?:fetch|XMLHttpRequest|WebSocket|eval|Function|importScripts|require)\s*\(/
       )
       expect(source).not.toMatch(/ipcRenderer|localStorage|sessionStorage|process\.env|document\./)
     }
     inspect(resolve('src/renderer/src/utils/playgroundWorker.ts'))
-    expect([...seen].some((file) => file.endsWith('/parser.ts'))).toBe(true)
+    expect([...seen].some((file) => basename(file) === 'parser.ts')).toBe(true)
   })
 
   it('reads saved commands only and keeps embed assets inert in the renderer source', () => {

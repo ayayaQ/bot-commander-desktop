@@ -1,3 +1,5 @@
+import { commandEvents } from '../runtime/dispatch'
+import { validateWorldExtensions } from './worldValidation'
 import type {
   BCFDEmbedMessageTemplate,
   BCFDInteractionAction,
@@ -205,7 +207,17 @@ export function validateAgentValidationState(value: unknown): PlaygroundState {
       'members',
       'roles',
       'messages',
-      'nextId'
+      'nextId',
+      'channels',
+      'randomSeed',
+      'operations',
+      'failures',
+      'botPermissions',
+      'presence',
+      'startupSource',
+      'strictMocks',
+      'aiMocks',
+      'commandCount'
     ],
     'state'
   )
@@ -225,7 +237,7 @@ export function validateAgentValidationState(value: unknown): PlaygroundState {
   array(source.roles, 'state.roles', PLAYGROUND_LIMITS.roles)
   const roles = source.roles.map((value) => {
     const role = record(value, 'state.roles')
-    keys(role, ['id', 'name'], 'state.roles')
+    keys(role, ['id', 'name', 'color', 'position', 'managed', 'editable'], 'state.roles')
     id(role.id, 'role.id')
     text(role.name, 'role.name', 100, true)
     if (role.id === source.channelId || role.id === FAKE_BOT_ID)
@@ -235,7 +247,25 @@ export function validateAgentValidationState(value: unknown): PlaygroundState {
   unique(roles, 'state.roles')
   const members = source.members.map((value) => {
     const member = record(value, 'state.members')
-    keys(member, ['id', 'name', 'roles', 'permissions', 'kicked', 'banned', 'muted'], 'member')
+    keys(
+      member,
+      [
+        'id',
+        'name',
+        'roles',
+        'permissions',
+        'kicked',
+        'banned',
+        'muted',
+        'bot',
+        'nickname',
+        'createdTimestamp',
+        'joinedTimestamp',
+        'voiceChannelId',
+        'manageable'
+      ],
+      'member'
+    )
     id(member.id, 'member.id')
     if ([source.guildId, source.channelId, FAKE_BOT_ID, ...roles].includes(member.id))
       throw new Error('Member ID spoofs a fake role/channel/guild')
@@ -275,6 +305,8 @@ export function validateAgentValidationState(value: unknown): PlaygroundState {
         'id',
         'author',
         'content',
+        'channelId',
+        'reactions',
         'kind',
         'recipient',
         'replyTo',
@@ -337,6 +369,7 @@ export function validateAgentValidationState(value: unknown): PlaygroundState {
   validateSessionState(state)
   if (JSON.stringify(state).length > PLAYGROUND_LIMITS.stateBytes)
     throw new Error('Fake state exceeds the size limit')
+  validateWorldExtensions(state)
   return state
 }
 
@@ -345,7 +378,25 @@ export function validateAgentValidationSuite(value: unknown): AgentValidationSui
     copyAgentValidationJSON(value, AGENT_VALIDATION_LIMITS.fixtureChars),
     'suite'
   )
-  keys(suite, ['cases'], 'suite')
+  keys(suite, ['version', 'resources', 'cases'], 'suite')
+  if (suite.version !== undefined && suite.version !== 2)
+    throw new Error('Unsupported validation version')
+  if (suite.resources !== undefined) {
+    const resources = record(suite.resources, 'resources')
+    keys(resources, ['commands', 'interactions'], 'resources')
+    array(resources.commands, 'resources.commands', PLAYGROUND_LIMITS.commands)
+    array(resources.interactions, 'resources.interactions', PLAYGROUND_LIMITS.commands)
+    unique(
+      resources.commands.map((item) => (item as { id: string }).id),
+      'resources.commands'
+    )
+    unique(
+      resources.interactions.map((item) => (item as { id: string }).id),
+      'resources.interactions'
+    )
+    for (const item of resources.commands) validateAgentValidationCandidate('command', item)
+    for (const item of resources.interactions) validateAgentValidationCandidate('interaction', item)
+  }
   array(suite.cases, 'suite.cases', AGENT_VALIDATION_LIMITS.cases)
   if (!suite.cases.length) throw new Error('Validation requires at least one explicit fixture case')
   let steps = 0,
@@ -378,16 +429,27 @@ export function validateAgentValidationSuite(value: unknown): AgentValidationSui
         ],
         'step'
       )
-      if (!['message', 'slash', 'button'].includes(step.kind as string))
+      if (![...commandEvents, 'slash', 'button'].includes(step.kind as string))
         throw new Error('Unsupported validation step kind')
       id(step.senderId, 'step.senderId')
       if (!state.members.some((member) => member.id === step.senderId))
         throw new Error('Step sender references an unknown fake member')
       if (Object.hasOwn(step, 'advanceClockMs'))
         integer(step.advanceClockMs, 'step.advanceClockMs', 0, 86_400_000)
-      if (step.kind === 'message') {
-        text(step.content, 'step.content', PLAYGROUND_LIMITS.input)
-        if (['options', 'customId', 'messageId'].some((key) => Object.hasOwn(step, key)))
+      if (commandEvents.includes(step.kind as (typeof commandEvents)[number])) {
+        if (
+          step.kind === 'message' ||
+          step.kind === 'dm' ||
+          step.kind === 'reaction' ||
+          Object.hasOwn(step, 'content')
+        )
+          text(step.content, 'step.content', PLAYGROUND_LIMITS.input)
+        if (step.kind === 'reaction') integer(step.messageId, 'step.messageId', 1)
+        if (
+          ['options', 'customId', ...(step.kind === 'reaction' ? [] : ['messageId'])].some((key) =>
+            Object.hasOwn(step, key)
+          )
+        )
           throw new Error('Message step contains interaction fields')
       } else if (step.kind === 'slash') {
         if (['content', 'customId', 'messageId'].some((key) => Object.hasOwn(step, key)))

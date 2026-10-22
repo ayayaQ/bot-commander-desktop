@@ -1,3 +1,5 @@
+import { runTraditionalActions, runInteractionActions } from '../../shared/runtime/actions'
+import { matchesCommand } from '../../shared/runtime/dispatch'
 import {
   ActionRowBuilder,
   ActivityType,
@@ -552,46 +554,52 @@ async function executeInteractionCommand(
 
   // Send response
   try {
-    if (action.deferReply) {
-      await interaction.editReply({ ...response, components })
-    } else {
-      await interaction.reply({
-        ...response,
-        components,
-        ephemeral: action.ephemeral
-      })
-    }
-
-    // Handle DM actions after the reply
-    if (action.sendPrivateMessage && action.privateMessage) {
-      const dmContent = await stringInfoAdd(
-        contextForInteractionEvent(action.privateMessage, interaction, command)
-      )
-      await interaction.user.send(dmContent).catch(() => {
-        rendererConsole.warning(`Could not send DM to ${interaction.user.username}`)
-      })
-    }
-
-    if (action.sendPrivateEmbed) {
-      const embed = await buildEmbed(action.privateEmbed, interaction, command)
-      await interaction.user.send({ embeds: [embed] }).catch(() => {
-        rendererConsole.warning(`Could not send DM embed to ${interaction.user.username}`)
-      })
-    }
-
-    // Handle role assignment
-    if (action.isRoleAssigner && action.roleToAssign && interaction.member) {
-      const roleId = await stringInfoAdd(
-        contextForInteractionEvent(action.roleToAssign, interaction, command)
-      )
-      const member = interaction.member as GuildMember
-      if (member.roles.cache.has(roleId)) {
-        await member.roles.remove(roleId)
-      } else {
-        await member.roles.add(roleId)
+    await runInteractionActions({
+      response: async () => {
+        if (action.deferReply) {
+          await interaction.editReply({ ...response, components })
+        } else {
+          await interaction.reply({
+            ...response,
+            components,
+            ephemeral: action.ephemeral
+          })
+        }
+      },
+      dm: async () => {
+        // Handle DM actions after the reply
+        if (action.sendPrivateMessage && action.privateMessage) {
+          const dmContent = await stringInfoAdd(
+            contextForInteractionEvent(action.privateMessage, interaction, command)
+          )
+          await interaction.user.send(dmContent).catch(() => {
+            rendererConsole.warning(`Could not send DM to ${interaction.user.username}`)
+          })
+        }
+      },
+      dmEmbed: async () => {
+        if (action.sendPrivateEmbed) {
+          const embed = await buildEmbed(action.privateEmbed, interaction, command)
+          await interaction.user.send({ embeds: [embed] }).catch(() => {
+            rendererConsole.warning(`Could not send DM embed to ${interaction.user.username}`)
+          })
+        }
+      },
+      role: async () => {
+        // Handle role assignment
+        if (action.isRoleAssigner && action.roleToAssign && interaction.member) {
+          const roleId = await stringInfoAdd(
+            contextForInteractionEvent(action.roleToAssign, interaction, command)
+          )
+          const member = interaction.member as GuildMember
+          if (member.roles.cache.has(roleId)) {
+            await member.roles.remove(roleId)
+          } else {
+            await member.roles.add(roleId)
+          }
+        }
       }
-    }
-
+    })
     stats.incrementMessagesSent()
   } catch (error) {
     rendererConsole.error(`Error executing interaction command: ${error}`)
@@ -734,46 +742,52 @@ async function executeButtonAction(
 
   // Send response
   try {
-    if (action.deferReply) {
-      await interaction.editReply({ ...response, components })
-    } else {
-      await interaction.reply({
-        ...response,
-        components,
-        ephemeral: action.ephemeral
-      })
-    }
-
-    // Handle DM actions after the reply
-    if (action.sendPrivateMessage && action.privateMessage) {
-      const dmContent = await stringInfoAdd(
-        contextForInteractionEvent(action.privateMessage, interaction, command)
-      )
-      await interaction.user.send(dmContent).catch(() => {
-        rendererConsole.warning(`Could not send DM to ${interaction.user.username}`)
-      })
-    }
-
-    if (action.sendPrivateEmbed) {
-      const embed = await buildEmbed(action.privateEmbed, interaction, command)
-      await interaction.user.send({ embeds: [embed] }).catch(() => {
-        rendererConsole.warning(`Could not send DM embed to ${interaction.user.username}`)
-      })
-    }
-
-    // Handle role assignment
-    if (action.isRoleAssigner && action.roleToAssign && interaction.member) {
-      const roleId = await stringInfoAdd(
-        contextForInteractionEvent(action.roleToAssign, interaction, command)
-      )
-      const member = interaction.member as GuildMember
-      if (member.roles.cache.has(roleId)) {
-        await member.roles.remove(roleId)
-      } else {
-        await member.roles.add(roleId)
+    await runInteractionActions({
+      response: async () => {
+        if (action.deferReply) {
+          await interaction.editReply({ ...response, components })
+        } else {
+          await interaction.reply({
+            ...response,
+            components,
+            ephemeral: action.ephemeral
+          })
+        }
+      },
+      dm: async () => {
+        // Handle DM actions after the reply
+        if (action.sendPrivateMessage && action.privateMessage) {
+          const dmContent = await stringInfoAdd(
+            contextForInteractionEvent(action.privateMessage, interaction, command)
+          )
+          await interaction.user.send(dmContent).catch(() => {
+            rendererConsole.warning(`Could not send DM to ${interaction.user.username}`)
+          })
+        }
+      },
+      dmEmbed: async () => {
+        if (action.sendPrivateEmbed) {
+          const embed = await buildEmbed(action.privateEmbed, interaction, command)
+          await interaction.user.send({ embeds: [embed] }).catch(() => {
+            rendererConsole.warning(`Could not send DM embed to ${interaction.user.username}`)
+          })
+        }
+      },
+      role: async () => {
+        // Handle role assignment
+        if (action.isRoleAssigner && action.roleToAssign && interaction.member) {
+          const roleId = await stringInfoAdd(
+            contextForInteractionEvent(action.roleToAssign, interaction, command)
+          )
+          const member = interaction.member as GuildMember
+          if (member.roles.cache.has(roleId)) {
+            await member.roles.remove(roleId)
+          } else {
+            await member.roles.add(roleId)
+          }
+        }
       }
-    }
-
+    })
     stats.incrementMessagesSent()
   } catch (error) {
     rendererConsole.error(`Error executing button action: ${error}`)
@@ -1268,83 +1282,60 @@ async function react(
   return true
 }
 
+/** Member events share dispatch ordering and template semantics with the playground. */
+async function runMemberEvent(
+  event: 'memberJoin' | 'memberLeave' | 'memberBan',
+  guild: Guild,
+  user: User,
+  member?: GuildMember | PartialGuildMember
+) {
+  if (user.bot) return
+  for (const command of commands.bcfdCommands.filter((c) => matchesCommand(c, event, ''))) {
+    if (
+      command.serverWhitelist?.trim() &&
+      !command.serverWhitelist
+        .split(',')
+        .map((id) => id.trim())
+        .includes(guild.id)
+    )
+      continue
+    const channel = commandCapabilities.usesSpecificChannel(command)
+      ? resolveSpecificGuildChannel(guild, command.specificChannel)
+      : getFirstSendableGuildChannel(guild)
+    const render = (message: string) =>
+      stringInfoAdd({
+        message,
+        command,
+        user,
+        member: member as GuildMember,
+        guild,
+        client: guild.client,
+        textChannel: channel as TextChannel
+      })
+    await runTraditionalActions(
+      {
+        role: () => member && roleAssigner(command, member as GuildMember, render),
+        embed: () => channel && sendChannelEmbed(command, channel, render),
+        message: () =>
+          channel && channelMessage(command, channel, () => render(command.channelMessage)),
+        dmEmbed: () => sendPrivateEmbed(command, user, render),
+        dm: () => privateMessage(command, user, () => render(command.privateMessage))
+      },
+      (task) => {
+        void task.catch((error) => rendererConsole.error(String(error)))
+      },
+      event
+    )
+  }
+}
 async function onGuildMemberAdd(member: GuildMember) {
-  if (member.user.bot) return
-
-  let filteredCommands = commands.bcfdCommands.filter((c) => c.type == 2)
-
-  for (const command of filteredCommands) {
-    if (command.serverWhitelist?.trim()) {
-      const ids = command.serverWhitelist.split(',').map((s) => s.trim())
-      if (!ids.includes(member.guild.id)) continue
-    }
-
-    if (commandCapabilities.assignsRole(command)) {
-      roleAssigner(command, member, async (field) => field)
-    }
-
-    const channel = commandCapabilities.usesSpecificChannel(command)
-      ? resolveSpecificGuildChannel(member.guild, command.specificChannel)
-      : getFirstSendableGuildChannel(member.guild)
-
-    if (channel) {
-      sendChannelEmbed(command, channel, async (field) => field)
-      channelMessage(command, channel, async () => command.channelMessage)
-    }
-
-    sendPrivateEmbed(command, member.user, async (field) => field)
-    privateMessage(command, member.user, async () => command.privateMessage)
-  }
+  await runMemberEvent('memberJoin', member.guild, member.user, member)
 }
-
 async function onGuildMemberRemove(member: GuildMember | PartialGuildMember) {
-  if (member.user.bot) return
-
-  let filteredCommands = commands.bcfdCommands.filter((c) => c.type == 3)
-
-  for (const command of filteredCommands) {
-    if (command.serverWhitelist?.trim()) {
-      const ids = command.serverWhitelist.split(',').map((s) => s.trim())
-      if (!ids.includes(member.guild.id)) continue
-    }
-
-    const channel = commandCapabilities.usesSpecificChannel(command)
-      ? resolveSpecificGuildChannel(member.guild, command.specificChannel)
-      : getFirstSendableGuildChannel(member.guild)
-
-    if (channel) {
-      sendChannelEmbed(command, channel, async (field) => field)
-      channelMessage(command, channel, async () => command.channelMessage)
-    }
-
-    sendPrivateEmbed(command, member.user, async (field) => field)
-    privateMessage(command, member.user, async () => command.privateMessage)
-  }
+  await runMemberEvent('memberLeave', member.guild, member.user, member)
 }
-
 async function onGuildBanAdd(ban: GuildBan) {
-  if (ban.user.bot) return
-
-  let filteredCommands = commands.bcfdCommands.filter((c) => c.type == 4)
-
-  for (const command of filteredCommands) {
-    if (command.serverWhitelist?.trim()) {
-      const ids = command.serverWhitelist.split(',').map((s) => s.trim())
-      if (!ids.includes(ban.guild.id)) continue
-    }
-
-    const channel = commandCapabilities.usesSpecificChannel(command)
-      ? resolveSpecificGuildChannel(ban.guild, command.specificChannel)
-      : getFirstSendableGuildChannel(ban.guild)
-
-    if (channel) {
-      sendChannelEmbed(command, channel, async (field) => field)
-      channelMessage(command, channel, async () => command.channelMessage)
-    }
-
-    sendPrivateEmbed(command, ban.user, async (field) => field)
-    privateMessage(command, ban.user, async () => command.privateMessage)
-  }
+  await runMemberEvent('memberBan', ban.guild, ban.user)
 }
 
 async function onMessageReactionAdd(
@@ -1443,54 +1434,33 @@ async function onMessageReactionAdd(
         (message.channel as GuildSendableChannel))
       : (message.channel as GuildSendableChannel)
 
-    // Handle channel message
-    if (commandCapabilities.sendsChannelMessage(command)) {
-      channelMessage(
-        command,
-        reactionTargetChannel,
-        async () => {
-          return await stringInfoAdd(
-            contextForReactionEvent(command.channelMessage, reaction, command)
-          )
-        },
-        message as OmitPartialGroupDMChannel<Message<boolean>>
-      )
-    }
-
-    // Handle private message
-    if (commandCapabilities.sendsPrivateMessage(command)) {
-      privateMessage(command, user, async () => {
-        return await stringInfoAdd(
-          contextForReactionEvent(command.privateMessage, reaction, command)
-        )
-      })
-    }
-
-    // Handle channel embed
-    if (commandCapabilities.sendsChannelEmbed(command)) {
-      sendChannelEmbed(
-        command,
-        reactionTargetChannel,
-        async (field) => {
-          return await stringInfoAdd(contextForReactionEvent(field, reaction, command))
-        },
-        message as OmitPartialGroupDMChannel<Message<boolean>>
-      )
-    }
-
-    // Handle private embed
-    if (commandCapabilities.sendsPrivateEmbed(command)) {
-      sendPrivateEmbed(command, user, async (field) => {
-        return await stringInfoAdd(contextForReactionEvent(field, reaction, command))
-      })
-    }
-
-    // Handle role assignment
-    if (commandCapabilities.assignsRole(command)) {
-      roleAssigner(command, member, async (field) => {
-        return await stringInfoAdd(contextForReactionEvent(field, reaction, command))
-      })
-    }
+    const render = (source: string) =>
+      stringInfoAdd(contextForReactionEvent(source, reaction, command, user as User, member))
+    await runTraditionalActions(
+      {
+        message: () =>
+          channelMessage(
+            command,
+            reactionTargetChannel,
+            () => render(command.channelMessage),
+            message as OmitPartialGroupDMChannel<Message<boolean>>
+          ),
+        dm: () => privateMessage(command, user, () => render(command.privateMessage)),
+        embed: () =>
+          sendChannelEmbed(
+            command,
+            reactionTargetChannel,
+            render,
+            message as OmitPartialGroupDMChannel<Message<boolean>>
+          ),
+        dmEmbed: () => sendPrivateEmbed(command, user, render),
+        role: () => roleAssigner(command, member, render)
+      },
+      (task) => {
+        void task.catch((error) => rendererConsole.error(String(error)))
+      },
+      'reaction'
+    )
 
     // Increment stats if messages were sent
     if (
@@ -1516,14 +1486,12 @@ async function onMessageCreate(
   let firstItem = message.content.split(' ')[0]
   let messageWordCount = message.content.split(' ').length
 
-  let filteredCommands = commands.bcfdCommands.filter(
-    (c) =>
-      c.type == 0 &&
-      (message.content == c.command ||
-        (c.startsWith && message.content.startsWith(c.command)) ||
-        (c.phrase && message.content.toLowerCase().includes(c.command.toLowerCase())) ||
-        c.command == '*' ||
-        ((c.isBan || c.isKick || c.isVoiceMute) && c.command == firstItem && messageWordCount == 2))
+  const filteredCommands = commands.bcfdCommands.filter((command) =>
+    matchesCommand(
+      command,
+      message.channel.type === ChannelType.DM ? 'dm' : 'message',
+      message.content
+    )
   )
 
   for (const command of filteredCommands) {
@@ -1581,70 +1549,53 @@ async function onMessageCreate(
 
     rendererConsole.info(`Executing command: "${command.command}"`)
 
-    deleteIf(command, message)
-
-    if (!(await deleteX(command, message))) {
-      continue
-    }
-
     const msgTargetChannel = commandCapabilities.usesSpecificChannel(command)
       ? (resolveSpecificGuildChannel(message.guild, command.specificChannel) ?? message.channel)
       : message.channel
-
-    channelMessage(
-      command,
-      msgTargetChannel,
-      async () =>
-        await stringInfoAdd(contextForMessageEvent(command.channelMessage, command, message)),
-      message
+    const dispatched = await runTraditionalActions(
+      {
+        deleteIf: () => deleteIf(command, message),
+        purge: () => deleteX(command, message),
+        message: () =>
+          channelMessage(
+            command,
+            msgTargetChannel,
+            async () =>
+              stringInfoAdd(contextForMessageEvent(command.channelMessage, command, message)),
+            message
+          ),
+        dm: () =>
+          privateMessage(command, message.author, async () =>
+            stringInfoAdd(contextForMessageEvent(command.privateMessage, command, message))
+          ),
+        kick: () => kick(command, message, firstItem, messageWordCount),
+        ban: () => ban(command, message, firstItem, messageWordCount),
+        mute: () => voiceMute(command, message, firstItem, messageWordCount),
+        role: () =>
+          message.member
+            ? roleAssigner(command, message.member, async (field) =>
+                stringInfoAdd(contextForMessageEvent(field, command, message))
+              )
+            : undefined,
+        embed: () =>
+          sendChannelEmbed(
+            command,
+            msgTargetChannel,
+            async (field) => stringInfoAdd(contextForMessageEvent(field, command, message)),
+            message
+          ),
+        dmEmbed: () =>
+          sendPrivateEmbed(command, message.author, async (field) =>
+            stringInfoAdd(contextForMessageEvent(field, command, message))
+          ),
+        reaction: () => react(command, message),
+        deleteAfter: () => (command.deleteAfter ? message.delete() : undefined)
+      },
+      (task, name) => {
+        void task.catch((error) => rendererConsole.error(`Command ${name}: ${String(error)}`))
+      }
     )
-
-    privateMessage(
-      command,
-      message.author,
-      async () =>
-        await stringInfoAdd(contextForMessageEvent(command.privateMessage, command, message))
-    )
-
-    if (!(await kick(command, message, firstItem, messageWordCount))) {
-      continue
-    }
-
-    if (!(await ban(command, message, firstItem, messageWordCount))) {
-      continue
-    }
-
-    if (!(await voiceMute(command, message, firstItem, messageWordCount))) {
-      continue
-    }
-
-    if (message.member) {
-      roleAssigner(
-        command,
-        message.member,
-        async (field) => await stringInfoAdd(contextForMessageEvent(field, command, message))
-      )
-    }
-
-    sendChannelEmbed(
-      command,
-      msgTargetChannel,
-      async (field) => await stringInfoAdd(contextForMessageEvent(field, command, message)),
-      message
-    )
-
-    sendPrivateEmbed(
-      command,
-      message.author,
-      async (field) => await stringInfoAdd(contextForMessageEvent(field, command, message))
-    )
-
-    react(command, message)
-
-    if (command.deleteAfter) {
-      // delete the message
-      message.delete()
-    }
+    if (dispatched.blockedBy) continue
 
     if (
       commandCapabilities.sendsChannelMessage(command) ||

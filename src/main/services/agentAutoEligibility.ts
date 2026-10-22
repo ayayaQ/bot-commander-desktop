@@ -365,7 +365,7 @@ function validationReason(
     AGENT_VALIDATION_LIMITS.reportChars
   ) as unknown as AgentValidationReport
   if (
-    report.version !== 1 ||
+    report.version !== 2 ||
     report.candidateKind !== 'command' ||
     report.candidateId !== prepared.target.id ||
     report.candidateHash !== hash(prepared.after) ||

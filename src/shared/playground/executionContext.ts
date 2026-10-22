@@ -2,7 +2,7 @@ import type { ScriptSandbox, ScriptSandboxFactory } from './script'
 import type { TemplateContext } from './template'
 import { validateBotState } from './sessionState'
 
-/** One VM per command/action. A failed command discards both VM and cloned fixture. */
+/** Borrow a case VM; commit bot state after each successful template. */
 export function executionContext(base: TemplateContext, factory?: ScriptSandboxFactory) {
   let script: ScriptSandbox | undefined
   const names = new Set(Object.keys(base.state.variables))
@@ -26,7 +26,7 @@ export function executionContext(base: TemplateContext, factory?: ScriptSandboxF
       if (name !== 'botState') names.add(name)
     }
   }
-  return {
+  const scope = {
     context,
     commit() {
       if (!script) return
@@ -41,4 +41,6 @@ export function executionContext(base: TemplateContext, factory?: ScriptSandboxF
       script?.dispose()
     }
   }
+  context.commitTemplate = () => scope.commit()
+  return scope
 }

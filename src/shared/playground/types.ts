@@ -14,8 +14,42 @@ export type FakeMember = {
   kicked: boolean
   banned: boolean
   muted: boolean
+  bot?: boolean
+  nickname?: string
+  createdTimestamp?: number
+  joinedTimestamp?: number
+  voiceChannelId?: string
+  manageable?: boolean
 }
-export type FakeRole = { id: string; name: string }
+export type FakeRole = {
+  id: string
+  name: string
+  color?: number
+  position?: number
+  managed?: boolean
+  editable?: boolean
+}
+export type FakeChannel = {
+  deleted?: boolean
+  id: string
+  guildId: string
+  name: string
+  type: number
+  topic: string
+  nsfw: boolean
+  parentId: string | null
+  position: number
+  slowmode: number
+  overwrites: Record<string, { ViewChannel?: boolean; SendMessages?: boolean }>
+}
+export type PlaygroundOperation = {
+  index: number
+  truncated?: boolean
+  name: string
+  args: unknown[]
+  result?: unknown
+  error?: string
+}
 export type PlaygroundMessage = {
   id: number
   author: string
@@ -28,6 +62,8 @@ export type PlaygroundMessage = {
   ephemeral?: boolean
   deferred?: boolean
   buttons?: BCFDInteractionButton[]
+  channelId?: string
+  reactions?: string[]
 }
 export type PlaygroundState = {
   /** Local JSON state only. No saved/live bot state is read or written. */
@@ -45,6 +81,16 @@ export type PlaygroundState = {
   roles: FakeRole[]
   messages: PlaygroundMessage[]
   nextId: number
+  channels?: FakeChannel[]
+  randomSeed?: number
+  operations?: PlaygroundOperation[]
+  failures?: Record<string, string>
+  botPermissions?: string[]
+  presence?: { status: string; activity: string; text: string }
+  startupSource?: string
+  strictMocks?: boolean
+  aiMocks?: { prompt: string; response?: string; error?: string }[]
+  commandCount?: number
 }
 export type PlaygroundExecutionOutcome =
   'executed' | 'blocked' | 'error' | 'unmatched' | 'unsupported' | 'not_run'
@@ -75,7 +121,8 @@ export class PlaygroundExecutionError extends Error {
   }
 }
 export type PlaygroundMessageRequest = {
-  kind?: 'message'
+  kind?: import('../runtime/dispatch').CommandEvent
+  messageId?: number
   state: PlaygroundState
   commands: BCFDCommand[]
   senderId: string
@@ -155,6 +202,20 @@ export function createPlaygroundState(): PlaygroundState {
     roles: [
       { id: '200000000000000001', name: 'Moderator' },
       { id: '200000000000000002', name: 'Member' }
+    ],
+    channels: [
+      {
+        id: '900000000000000002',
+        guildId: '900000000000000001',
+        name: 'playground',
+        type: 0,
+        topic: '',
+        nsfw: false,
+        parentId: null,
+        position: 0,
+        slowmode: 0,
+        overwrites: {}
+      }
     ],
     messages: [],
     nextId: 1

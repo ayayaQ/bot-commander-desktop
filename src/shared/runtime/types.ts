@@ -1,0 +1,187 @@
+import type {
+  RuntimeUser,
+  RuntimeMember,
+  RuntimeClient,
+  RuntimeGuild,
+  RuntimeChannel,
+  RuntimeScript
+} from './ports'
+/**
+ * BCFD Template Language - Types
+ *
+ * Type definitions for the tokenizer, parser, and interpreter.
+ */
+
+// ============================================================================
+// Token Types
+// ============================================================================
+
+export enum TokenType {
+  TEXT = 'TEXT', // Plain text
+  DOLLAR = 'DOLLAR', // $ character (start of expression)
+  IDENTIFIER = 'IDENTIFIER', // Function/variable name
+  LPAREN = 'LPAREN', // (
+  RPAREN = 'RPAREN', // )
+  LBRACE = 'LBRACE', // {
+  RBRACE = 'RBRACE', // }
+  COMMA = 'COMMA', // ,
+  PIPE = 'PIPE', // |
+  EVAL = 'EVAL', // $eval keyword
+  HALT = 'HALT', // $halt keyword
+  EVAL_CONTENT = 'EVAL_CONTENT', // Content between $eval and $halt
+  EOF = 'EOF' // End of input
+}
+
+export interface Token {
+  type: TokenType
+  value: string
+  position: number // Start position in source
+  length: number // Length of token
+  valuePosition?: number // Start position of value in source, for trimmed tokens
+}
+
+// ============================================================================
+// AST Node Types
+// ============================================================================
+
+export enum NodeType {
+  PROGRAM = 'PROGRAM', // Root node containing a list of nodes
+  TEXT = 'TEXT', // Plain text literal
+  VARIABLE = 'VARIABLE', // $variableName (no arguments)
+  FUNCTION_CALL = 'FUNCTION_CALL', // $functionName(...) or $functionName{...}
+  EVAL_BLOCK = 'EVAL_BLOCK', // $eval ... $halt
+  IF_BLOCK = 'IF_BLOCK', // $if ... $endif
+  ERROR = 'ERROR' // Error placeholder
+}
+
+export interface BaseNode {
+  type: NodeType
+  position: number // Start position in source
+  length: number // Length in source
+}
+
+export interface ProgramNode extends BaseNode {
+  type: NodeType.PROGRAM
+  children: ASTNode[]
+}
+
+export interface TextNode extends BaseNode {
+  type: NodeType.TEXT
+  value: string
+}
+
+export interface VariableNode extends BaseNode {
+  type: NodeType.VARIABLE
+  name: string
+}
+
+export interface FunctionCallNode extends BaseNode {
+  type: NodeType.FUNCTION_CALL
+  name: string
+  arguments: ASTNode[][] // Each argument can be a sequence of nodes (for interpolation)
+  syntax: 'paren' | 'brace' // Which syntax was used
+}
+
+export interface EvalBlockNode extends BaseNode {
+  type: NodeType.EVAL_BLOCK
+  code: string // Raw JavaScript code (with $expressions already resolved)
+  codePosition: number // Start position of code in source
+  innerNodes: ASTNode[] // Parsed nodes within the eval block for pre-resolution
+}
+
+export interface IfBlockNode extends BaseNode {
+  type: NodeType.IF_BLOCK
+  branches: { condition: ConditionNode; body: ASTNode[] }[]
+  elseBranch: ASTNode[] | null
+}
+
+// Condition expression types for $if/$elseif conditions
+export type ConditionNode =
+  ConditionBinaryNode | ConditionUnaryNode | ConditionGroupNode | ConditionValueNode
+
+export interface ConditionBinaryNode {
+  type: 'binary'
+  op: '==' | '!=' | '>' | '<' | '>=' | '<=' | '&' | '|'
+  left: ConditionNode
+  right: ConditionNode
+}
+
+export interface ConditionUnaryNode {
+  type: 'unary'
+  op: '!'
+  operand: ConditionNode
+}
+
+export interface ConditionGroupNode {
+  type: 'group'
+  expr: ConditionNode
+}
+
+export interface ConditionValueNode {
+  type: 'value'
+  nodes: ASTNode[]
+}
+
+export interface ErrorNode extends BaseNode {
+  type: NodeType.ERROR
+  message: string
+  originalText: string
+}
+
+export type ASTNode =
+  ProgramNode | TextNode | VariableNode | FunctionCallNode | EvalBlockNode | IfBlockNode | ErrorNode
+
+// ============================================================================
+// Interpreter Types
+// ============================================================================
+
+export interface BCFDError {
+  message: string
+  position: number
+  length: number
+  detail?: string
+  lineNumber?: number
+  columnNumber?: number
+  sourceContext?: string
+}
+
+export interface InterpreterResult {
+  output: string
+  errors: BCFDError[]
+}
+
+// Function signature for built-in functions
+// Can return string directly or Promise<string> for async functions
+export type BCFDFunction = (args: string[], ctx: BCFDContext) => string | Promise<string>
+
+// Context passed to all functions during evaluation
+export interface BCFDContext {
+  // Discord context
+  user?: RuntimeUser
+  member?: RuntimeMember
+  client?: RuntimeClient
+  guild?: RuntimeGuild
+  textChannel?: RuntimeChannel
+  mentionedUser?: RuntimeUser
+  mentionedMember?: RuntimeMember
+  messageEvent?: { content: string }
+  command?: import('../../main/types/types').BCFDCommand
+
+  // Interaction context (for slash commands)
+  interactionCommand?: import('../../main/types/types').BCFDInteractionCommand
+  interactionOptions?: { get(name: string): { value?: string | number | boolean } | null }
+
+  // Script context for $eval blocks
+  vmContext?: RuntimeScript
+  wrapEvalInIIFE?: boolean
+
+  // Cooldown context
+  commandId?: string
+  cooldown?: number
+  cooldownType?: string
+  userId?: string
+  guildId?: string
+}
+
+// Registry of all available functions
+export type FunctionRegistry = Map<string, BCFDFunction>

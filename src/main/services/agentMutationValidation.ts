@@ -1,3 +1,5 @@
+import { RUNTIME_VERSION } from '../../shared/runtime/version'
+import { commandEvents } from '../../shared/runtime/dispatch'
 import crypto from 'node:crypto'
 import type { BCFDCommand, BCFDInteractionCommand } from '../types/types'
 import type {
@@ -14,6 +16,22 @@ import { resourceRevision } from './resourceChangeService'
 import { validatePreparedResource } from './agentValidationService'
 import { getSettings } from './settingsService'
 import type { PreparedMutation } from './agentTools'
+
+const evidence = new WeakMap<
+  PreparedMutation,
+  { binding: AgentValidationBinding; report: AgentValidationReport }
+>()
+
+/** Only evidence produced by this process may authorize a resource commit. */
+export function validatedCommitGuard(
+  prepared: PreparedMutation
+): (snapshot: PreparedMutation) => void {
+  if (!isValidatedResourceMutation(prepared)) return () => {}
+  const validated = evidence.get(prepared)
+  if (!validated)
+    throw new Error('Passing playground validation is required before saving this draft')
+  return (snapshot) => assertAgentValidationBinding(snapshot, validated.binding, validated.report)
+}
 
 export type AgentValidationBinding = {
   candidateHash: string
@@ -56,6 +74,7 @@ export function assertAgentValidationBinding(
 ): void {
   const current = bindingFor(prepared)
   if (
+    report.runtimeVersion !== RUNTIME_VERSION ||
     current.candidateHash !== binding.candidateHash ||
     current.baseRevision !== binding.baseRevision ||
     current.fixtureHash !== binding.fixtureHash ||
@@ -73,7 +92,13 @@ export function assertAgentValidationBinding(
 }
 
 export function isValidatedResourceMutation(prepared: PreparedMutation): boolean {
-  return prepared.target.type === 'command' || prepared.target.type === 'interaction'
+  return (
+    ['create_command', 'edit_command', 'create_interaction', 'edit_interaction'].includes(
+      prepared.name
+    ) ||
+    prepared.target.type === 'command' ||
+    prepared.target.type === 'interaction'
+  )
 }
 
 export async function validateAgentMutation(
@@ -85,6 +110,7 @@ export async function validateAgentMutation(
   canCommit: boolean
   requiresApproval: boolean
 }> {
+  evidence.delete(prepared)
   const binding = bindingFor(prepared)
   const request: AgentValidationRequest = {
     candidateKind: prepared.target.type as 'command' | 'interaction',
@@ -92,14 +118,15 @@ export async function validateAgentMutation(
     ...binding,
     suite: { cases: [] }
   }
-  // Supplied fixtures must be valid even for an unsupported dispatch kind.
-  // Absence of fixtures is permitted only for genuinely unsupported event commands.
+  // Every command and interaction write requires explicit fixtures.
   if (prepared.arguments.validation !== undefined) {
     try {
       request.suite = validateAgentValidationSuite(prepared.arguments.validation)
       const wrongKind = request.suite.cases.some((item) =>
         item.steps.some((step) =>
-          request.candidateKind === 'command' ? step.kind !== 'message' : step.kind === 'message'
+          request.candidateKind === 'command'
+            ? !commandEvents.includes(step.kind as (typeof commandEvents)[number])
+            : commandEvents.includes(step.kind as (typeof commandEvents)[number])
         )
       )
       if (wrongKind) throw new Error('Validation step kind cannot invoke this candidate kind')
@@ -114,15 +141,6 @@ export async function validateAgentMutation(
         requiresApproval: false
       }
     }
-  }
-  if (request.candidateKind === 'command' && (request.candidate as BCFDCommand).type !== 0) {
-    const report = createNotRunAgentValidationReport(
-      request,
-      'Event-command dispatch is unsupported by the offline Playground'
-    )
-    report.outcome = 'unsupported'
-    report.coverage.unsupported = 1
-    return { binding, report, canCommit: true, requiresApproval: true }
   }
   if (prepared.arguments.validation === undefined) {
     return {
@@ -156,22 +174,6 @@ export async function validateAgentMutation(
         step.assertions.length >= 2 &&
         step.assertions.every((item) => item.passed && item.actualPresent)
     )
-  // Only a structured unsupported feature after matching this candidate can be
-  // reviewed without a pass. Wrong-kind fixtures, unmatched inputs, malformed
-  // requests and failing supported assertions cannot become an approval bypass.
-  const unsupported =
-    report.outcome === 'unsupported' &&
-    !report.timedOut &&
-    !report.cancelled &&
-    !report.truncated &&
-    steps.length > 0 &&
-    steps.some((step) => step.executionOutcome === 'unsupported' && step.matched) &&
-    steps.every((step) =>
-      step.executionOutcome === 'unsupported'
-        ? step.matched
-        : step.outcome === 'passed' &&
-          step.assertions.length >= 2 &&
-          step.assertions.every((item) => item.passed)
-    )
-  return { binding, report, canCommit: passed || unsupported, requiresApproval: unsupported }
+  if (passed) evidence.set(prepared, structuredClone({ binding, report }))
+  return { binding, report, canCommit: passed, requiresApproval: false }
 }

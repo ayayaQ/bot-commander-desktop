@@ -93,6 +93,41 @@ vi.mock('../utils/rendererConsole', () => ({
       .slice(-limit)
 }))
 
+vi.mock('./agentValidationService', () => ({
+  validatePreparedResource: async (request) =>
+    (await import('../../shared/playground/agentValidation')).runAgentValidation(request)
+}))
+async function validateForCommit(prepared: import('./agentTools').PreparedMutation) {
+  const { createPlaygroundState } = await import('../../shared/playground/types')
+  const { validateAgentMutation } = await import('./agentMutationValidation')
+  const candidate = prepared.after as any
+  if (!prepared.arguments.validation) {
+    const state = createPlaygroundState()
+    prepared.arguments.validation = {
+      cases: [
+        {
+          name: 'save fixture',
+          state,
+          steps: [
+            {
+              kind: prepared.target.type === 'command' ? 'message' : 'slash',
+              senderId: state.members[0].id,
+              ...(prepared.target.type === 'command' ? { content: candidate.command } : {}),
+              assertions: [
+                { path: '/outcome', equals: 'executed' },
+                candidate.channelMessage
+                  ? { path: '/effects/messages/0/content', equals: candidate.channelMessage }
+                  : { path: '/effects/botStateChanges', equals: [] }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+  expect((await validateAgentMutation(prepared)).canCommit).toBe(true)
+}
+
 describe('agent resource tools', () => {
   it('returns fresh offline fixtures without saved state and lints an unsaved draft without saving', async () => {
     const tools = await import('./agentTools')
@@ -221,14 +256,14 @@ describe('agent resource tools', () => {
     expect(agentToolTargetLabel('read_bot_state', {})).toBeUndefined()
   })
 
-  it('keeps validation schema/promises in the built-in catalog and out of MCP', async () => {
+  it('keeps validation schema/promises in both the built-in and MCP catalogs', async () => {
     const { agentToolDefinitions, mcpAgentToolDefinitions } = await import('./agentTools')
     expect(
       agentToolDefinitions.some((tool) => tool.function.name === 'read_validation_fixture')
     ).toBe(true)
     expect(
       mcpAgentToolDefinitions.some((tool) => tool.function.name === 'read_validation_fixture')
-    ).toBe(false)
+    ).toBe(true)
     for (const name of [
       'create_command',
       'edit_command',
@@ -238,12 +273,12 @@ describe('agent resource tools', () => {
       const builtin = agentToolDefinitions.find((tool) => tool.function.name === name)!
       const external = mcpAgentToolDefinitions.find((tool) => tool.function.name === name)!
       expect(builtin.function.parameters.properties).toHaveProperty('validation')
-      expect(external.function.parameters.properties).not.toHaveProperty('validation')
-      expect(external.function.description).not.toContain('validation')
+      expect(external.function.parameters.properties).toHaveProperty('validation')
+      expect(external.function.description).toBe(builtin.function.description)
     }
   })
 
-  it('rejects supplied MCP validation instead of silently ignoring a failing suite and saving', async () => {
+  it('returns a failing MCP validation report without saving', async () => {
     const { executeAgentTool } = await import('./agentTools')
     await expect(
       executeAgentTool(
@@ -254,9 +289,71 @@ describe('agent resource tools', () => {
         },
         'mcp'
       )
-    ).rejects.toThrow('built-in agent panel')
+    ).resolves.toMatchObject({ success: false, saved: false })
     expect(mocks.saveCommands).not.toHaveBeenCalled()
     expect(mocks.state.commands.bcfdCommands).toEqual([])
+  })
+
+  it('supports read-only external playground runs and validates an external save', async () => {
+    const { executeAgentTool } = await import('./agentTools')
+    const { createPlaygroundState } = await import('../../shared/playground/types')
+    const state = createPlaygroundState()
+    const command = {
+      id: 'draft-id',
+      command: '!ping',
+      commandDescription: 'Ping',
+      channelMessage: 'Pong!'
+    }
+    const validation = {
+      version: 2,
+      cases: [
+        {
+          name: 'Ping',
+          state,
+          steps: [
+            {
+              kind: 'message',
+              senderId: state.members[0].id,
+              content: '!ping',
+              assertions: [
+                { path: '/outcome', equals: 'executed' },
+                { path: '/effects/messages/0/content', equals: 'Pong!' }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+    const report = await executeAgentTool(
+      'run_playground',
+      { kind: 'command', candidate: command, validation },
+      'mcp'
+    )
+    expect(report).toMatchObject({
+      outcome: 'passed',
+      candidateId: 'draft-id',
+      runtimeVersion: '2.0.0'
+    })
+    expect(mocks.saveCommands).not.toHaveBeenCalled()
+    const saved = await executeAgentTool('create_command', { command, validation }, 'mcp')
+    expect(saved).toMatchObject({ success: true, validation: { outcome: 'passed' } })
+    expect(mocks.saveCommands).toHaveBeenCalledOnce()
+    expect(mocks.state.commands.bcfdCommands).toHaveLength(1)
+  })
+
+  it('rejects direct resource commits without evidence, even with a caller supplied guard', async () => {
+    const { prepareMutation, commitMutation } = await import('./agentTools')
+    const prepared = await prepareMutation('create_command', {
+      command: { command: '!unsafe', channelMessage: 'No' }
+    })
+    await expect(commitMutation(prepared, 'mcp', undefined, () => {})).rejects.toThrow(
+      'Passing playground validation'
+    )
+    expect(mocks.saveCommands).not.toHaveBeenCalled()
+    await validateForCommit(prepared)
+    ;(prepared.after as any).channelMessage = 'Changed'
+    await expect(commitMutation(prepared)).rejects.toThrow('stale')
+    expect(mocks.saveCommands).not.toHaveBeenCalled()
   })
 
   it('creates canonical commands and returns automatic lint diagnostics', async () => {
@@ -265,6 +362,7 @@ describe('agent resource tools', () => {
       command: { command: 'ping', commandDescription: 'Ping command', channelMessage: 'Pong' }
     })
 
+    await validateForCommit(prepared)
     const result = (await commitMutation(prepared)) as any
     const stored = mocks.state.commands.bcfdCommands[0]
 
@@ -283,6 +381,7 @@ describe('agent resource tools', () => {
     const created = await prepareMutation('create_command', {
       command: { command: 'ping', commandDescription: 'Ping command' }
     })
+    await validateForCommit(created)
     await commitMutation(created)
     const command = mocks.state.commands.bcfdCommands[0]
     const read = (await executeReadTool('read_command', { id: command.id })) as any
@@ -327,6 +426,7 @@ describe('agent resource tools', () => {
     const prepared = await prepareMutation('create_command', {
       command: { command: 'reliable', commandDescription: 'Retry fixture', channelMessage: 'ok' }
     })
+    await validateForCommit(prepared)
     mocks.saveCommands.mockRejectedValueOnce(new Error('Disk full'))
     await expect(commitMutation(prepared)).rejects.toThrow('Disk full')
     expect(mocks.state.commands.bcfdCommands).toEqual([])
@@ -365,8 +465,9 @@ describe('agent resource tools', () => {
   it('keeps a failed interaction creation retryable and duplicate-safe', async () => {
     const { prepareMutation, commitMutation } = await import('./agentTools')
     const prepared = await prepareMutation('create_interaction', {
-      interaction: { commandName: 'status', commandDescription: 'Status', actions: [] }
+      interaction: { commandName: 'status', commandDescription: 'Status' }
     })
+    await validateForCommit(prepared)
     mocks.saveInteractions.mockRejectedValueOnce(new Error('Write failed'))
     await expect(commitMutation(prepared)).rejects.toThrow('Write failed')
     expect(mocks.state.interactions).toEqual([])
@@ -392,6 +493,7 @@ describe('agent resource tools', () => {
     const prepared = await prepareMutation('create_command', {
       command: { command: 'snapshot', commandDescription: 'Approved', channelMessage: 'ok' }
     })
+    await validateForCommit(prepared)
     let resolve: () => void
     mocks.saveCommands.mockImplementationOnce(
       () =>
@@ -446,6 +548,7 @@ describe('agent resource tools', () => {
     const prepared = await prepareMutation('create_command', {
       command: { command: 'cancelled', channelMessage: 'Do not save' }
     })
+    await validateForCommit(prepared)
     const controller = new AbortController()
     const pending = commitMutation(prepared, 'agent', controller.signal)
     const rejected = expect(pending).rejects.toThrow('cancelled before mutation started')
@@ -491,6 +594,7 @@ describe('agent resource tools', () => {
       command: { command: '!ping', channelMessage: 'Pong!' },
       validation
     })
+    await validateForCommit(prepared)
     const binding = {
       candidateHash: validationHash(prepared.after),
       baseRevision: null,
@@ -526,7 +630,7 @@ describe('agent resource tools', () => {
     release()
     await holding
     await rejected
-    expect(guard).toHaveBeenCalledOnce()
+    expect(guard).not.toHaveBeenCalled()
     expect(mocks.saveCommands).not.toHaveBeenCalled()
     expect(mocks.state.commands.bcfdCommands).toEqual([])
 

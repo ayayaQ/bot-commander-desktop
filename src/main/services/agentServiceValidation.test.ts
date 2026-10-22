@@ -507,7 +507,7 @@ describe('draft validation before existing approval/save', () => {
     expect(run.events.some((event) => event.type === 'approval')).toBe(false)
   })
 
-  it('requires explicit approval for unsupported event drafts even in auto mode', async () => {
+  it('rejects event drafts without fixtures instead of offering an approval bypass', async () => {
     const normalPrepare = mocks.prepare.getMockImplementation()!
     mocks.prepare.mockImplementation(async (name, args) => {
       const prepared = await normalPrepare(name, args)
@@ -515,28 +515,11 @@ describe('draft validation before existing approval/save', () => {
       return prepared
     })
     mocks.provider.mockResolvedValueOnce(turn('event', { command: {} }))
-    let seen!: () => void
-    const approval = new Promise<void>((resolve) => {
-      seen = resolve
-    })
-    const run = await begin('auto', (event) => {
-      if (event.type === 'approval') seen()
-    })
-    await approval
-    const call = run.events.find((event) => event.type === 'approval')!.toolCall!
-    expect(call.validation).toMatchObject({ outcome: 'unsupported', coverage: { executed: 0 } })
-    expect(call.validation!.limitations.join(' ')).toContain('explicit approval is required')
-    expect(mocks.validate).not.toHaveBeenCalled()
-    expect(mocks.commit).not.toHaveBeenCalled()
-    await run.service.resolveAgentApproval(
-      run.session.id,
-      'event',
-      true,
-      run.events.find((event) => event.type === 'approval')!.toolCall!.approvalId
-    )
+    const run = await begin('auto')
     await run.finished
-    expect(mocks.commit).toHaveBeenCalledOnce()
-    expect((await run.service.loadAgentSessions()).sessions[0].mode).toBe('auto')
+    expect(run.events.some((event) => event.type === 'approval')).toBe(false)
+    expect(mocks.commit).not.toHaveBeenCalled()
+    expect(mocks.validate).not.toHaveBeenCalled()
   })
 
   it('returns valid bounded repair JSON even when real lint diagnostics contain huge unknown names', async () => {
