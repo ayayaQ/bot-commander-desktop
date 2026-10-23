@@ -156,7 +156,8 @@ JSON/output/work limits and a shorter cumulative script deadline. It rejects Pro
 and reads error descriptors without invoking guest accessors. Non-JSON tracked variable snapshots
 and irreversible alias rollback produce incomplete evidence and require reset; live rollback can
 attempt visible-state recovery and logs the need to restart. Ordinary thrown eval errors preserve
-the session. Global objects outside `botState` are retained in the VM but are not a complete JSON
+the session. The captured native InternalError family is conservatively incomplete, including
+explicitly constructed instances; changing its display name does not change that classification. Global objects outside `botState` are retained in the VM but are not a complete JSON
 snapshot of all JavaScript bindings.
 Local transcript IDs are positive integers; channel, role and member IDs are decimal strings.
 The synthetic world currently models one active guild, with multiple channels. Clock control

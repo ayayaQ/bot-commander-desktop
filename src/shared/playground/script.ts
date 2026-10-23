@@ -100,6 +100,7 @@ const BOOTSTRAP = `(() => {
   const finite = Number.isFinite
   const integer = Number.isInteger
   const ErrorClass = Error
+  const internalErrorPrototype = InternalError.prototype
   const SetClass = Set
   const setHas = Set.prototype.has
   const setAdd = Set.prototype.add
@@ -240,6 +241,14 @@ const BOOTSTRAP = `(() => {
       details.incomplete = apply(setHas, limitErrors, [value])
       if (details.incomplete) apply(setDelete, limitErrors, [value])
       if (value !== null && (typeof value === 'object' || typeof value === 'function')) {
+        // Capture identity before guest code runs; display names/messages are mutable.
+        // Conservatively reject this entire native error family, including guest-created
+        // instances, rather than allow resource failures to become passing diagnostics.
+        let errorPrototype = prototype(value)
+        for (let depth = 0; errorPrototype && depth < 8; depth++) {
+          if (errorPrototype === internalErrorPrototype) details.incomplete = true
+          errorPrototype = prototype(errorPrototype)
+        }
         for (const key of ['message', 'name', 'stack', 'lineNumber', 'columnNumber']) {
           let current = value
           for (let depth = 0; current && depth < 8; depth++, current = prototype(current)) {
@@ -522,12 +531,7 @@ class OfflineScriptSandbox implements ScriptSandbox {
       // Ordinary guest exceptions leave the VM usable, as in live execution. Resource
       // exhaustion and host bounds invalidate the session and cannot count as negative tests.
       const message = error instanceof Error ? error.message : String(error)
-      if (
-        error instanceof IncompleteSimulationError ||
-        (error instanceof ScriptExecutionError &&
-          error.details.name === 'InternalError' &&
-          /interrupted|out of memory|stack overflow/i.test(error.details.message))
-      ) {
+      if (error instanceof IncompleteSimulationError) {
         this.failed = true
         throw new IncompleteSimulationError(message)
       }
