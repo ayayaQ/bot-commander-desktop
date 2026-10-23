@@ -15,7 +15,6 @@
     fallback?: Pick<ToolPresentationView, 'header' | 'warnings'>
     detailBytes?: number
   } = $props()
-  let expanded = $state(false)
   // A replacement snapshot may update status while retaining the same call/card.
   // Only plain JSON is admitted, including after an IPC/persistence transfer.
   const snapshot = $derived.by(() => {
@@ -27,7 +26,7 @@
   })
   const view = $derived.by(() => {
     try {
-      return snapshot ? toolPresentationView(snapshot, { collapsed: !expanded, detailBytes }) : null
+      return snapshot ? toolPresentationView(snapshot, { collapsed: false, detailBytes }) : null
     } catch {
       return null
     }
@@ -48,15 +47,14 @@
         {#each view.warnings as warning}<p>{warning}</p>{/each}
       </div>
     {/if}
-    <details class="border-t border-base-300" bind:open={expanded}>
-      <summary class="px-3 py-2 cursor-pointer opacity-70">Arguments / result details</summary>
+    <div class="border-t border-base-300 pt-3" aria-label="Arguments / result details">
       {#each view.details as detail}
         <div class="px-3 pb-3">
           <div class="font-semibold mb-1">{detail.label}</div>
           <pre class="max-h-64 overflow-auto whitespace-pre-wrap break-words">{detail.text}</pre>
         </div>
       {/each}
-    </details>
+    </div>
     {#if view.notice}<p class="px-3 pb-3 opacity-70">{view.notice}</p>{/if}
   {:else}
     {#if fallback}

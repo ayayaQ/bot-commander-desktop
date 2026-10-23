@@ -86,7 +86,7 @@ if (process.argv.includes('--validate-expressions')) {
   process.exit(0)
 }
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..').replaceAll('\\', '/')
 const fixtureDir = await mkdtemp(join(root, '.agent-presentation-ui-'))
 let vite
 let chromium
@@ -96,11 +96,34 @@ const flows = []
 let phase = 'fixture preparation'
 let primaryError
 let evaluate
+let command
+
+async function screenshot(name) {
+  if (!process.env.PRESENTATION_UI_SCREENSHOTS) return
+  const directory = resolve(process.env.PRESENTATION_UI_SCREENSHOTS)
+  await mkdir(directory, { recursive: true })
+  await evaluate(
+    'await Promise.race([document.fonts.ready, new Promise(done => setTimeout(done, 1000))]); await new Promise(done => setTimeout(done, 350))'
+  )
+  const { data } = await command('Page.captureScreenshot', { format: 'png' })
+  await writeFile(join(directory, name + '.png'), Buffer.from(data, 'base64'))
+}
 
 try {
+  let iconStyle = ''
+  if (process.env.PRESENTATION_UI_ICON_FONT) {
+    await writeFile(
+      join(fixtureDir, 'icons.ttf'),
+      await readFile(process.env.PRESENTATION_UI_ICON_FONT)
+    )
+    iconStyle =
+      '<style>@font-face{font-family:MaterialSymbols;src:url(/icons.ttf)}.material-symbols-outlined{font-family:MaterialSymbols;font-weight:normal;font-style:normal;line-height:1;display:inline-block;white-space:nowrap;font-feature-settings:"liga"}</style>'
+  }
   await writeFile(
     join(fixtureDir, 'index.html'),
-    '<!doctype html><html data-theme="light"><head><meta charset="utf-8"><title>Offline shared tool presentation</title></head><body><main id="app" style="height:1000px"></main><script type="module" src="/main.js"></script></body></html>'
+    '<!doctype html><html data-theme="dark"><head><meta charset="utf-8"><title>Offline shared tool presentation</title>' +
+      iconStyle +
+      '</head><body style="margin:0;overflow:hidden"><main id="app" style="height:100vh"></main><script type="module" src="/main.js"></script></body></html>'
   )
   await writeFile(
     join(fixtureDir, 'main.js'),
@@ -115,6 +138,7 @@ const clone = (value) => structuredClone(value)
 const mcp = { runId: 'offline-run', serverId: 'offline-server', operationDigest: 'offline-digest', catalogKind: 'tools', remoteKey: 'offline-key', outcome: 'pending', requestSent: false, disclosure: 'Exact offline action: change ordinary fixture. Host approval only.' }
 const call = { id: 'offline-call', name: 'offline_tool', arguments: { resource: 'fixture', limit: 5 }, status: 'waiting_approval', approvalId: 'offline-approval', createdAt: '2026-10-10T00:00:00.000Z', mcp }
 let session = { id: 'offline-session', title: 'Offline agent fixture', model: 'fixture-model', reasoningEffort: 'none', mode: 'manual', status: 'waiting_approval', activeRunId: 'offline-run', messages: [{ id: 'user-1', role: 'user', content: 'User first', timestamp: call.createdAt }, { id: 'assistant-1', role: 'assistant', content: 'Assistant second', timestamp: call.createdAt }, { id: 'tool-1', role: 'tool', content: '', toolCalls: [clone(call)], timestamp: call.createdAt }, { id: 'assistant-2', role: 'assistant', content: 'Assistant last', timestamp: call.createdAt }], createdAt: call.createdAt, updatedAt: call.createdAt, tokenCount: 0, planReady: false }
+session.lastRunMetrics = { runId: 'offline-run', status: 'completed', startedAt: call.createdAt, finishedAt: '2026-10-10T00:00:42.000Z', providerRounds: 3, inputTokens: 1200, outputTokens: 340, totalTokens: 1540, cachedInputTokens: 200, documentationCalls: 2, uniqueDocumentationCalls: 1, duplicateDocumentationCalls: 1, documentationResultChars: 640, usageReconciled: true, tools: [{ id: call.id, name: call.name, status: 'completed' }] }
 const listeners = new Map()
 const calls = []
 const data = () => ({ sessions: [clone(session)], activeSessionId: session.id, modelDefaultsByProvider: {} })
@@ -136,6 +160,10 @@ window.__fixture = {
   calls,
   corpus: clone(toolPresentationCorpus),
   snapshot: () => data(),
+  setMetrics(patch) {
+    session = { ...session, lastRunMetrics: { ...session.lastRunMetrics, ...clone(patch) } }
+    agentSessions.set(data())
+  },
   setCall(patch, runStatus = 'completed') {
     session = { ...session, status: runStatus, messages: session.messages.map(message => message.toolCalls ? { ...message, toolCalls: [{ ...message.toolCalls[0], ...clone(patch) }] } : message) }
     for (const listener of listeners.get('agent:event') || []) listener({ sessionId: session.id, runId: session.activeRunId, type: 'session', session: clone(session) })
@@ -174,7 +202,12 @@ render()
     configFile: false,
     root: fixtureDir,
     plugins: [svelte()],
-    server: { host: '127.0.0.1', port: 0, fs: { allow: [root] } },
+    server: {
+      host: '127.0.0.1',
+      port: 0,
+      fs: { allow: [root] },
+      watch: { ignored: ['**/chromium-profile/**'] }
+    },
     logLevel: 'error'
   })
   await vite.listen()
@@ -270,12 +303,12 @@ render()
     })
   const { targetId } = await send('Target.createTarget', { url: 'about:blank' })
   const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true })
-  const command = (method, params) => send(method, params, sessionId)
+  command = (method, params) => send(method, params, sessionId)
   await command('Runtime.enable')
   await command('Page.enable')
   await command('Emulation.setDeviceMetricsOverride', {
-    width: 1100,
-    height: 1000,
+    width: 1400,
+    height: 900,
     deviceScaleFactor: 1,
     mobile: false
   })
@@ -330,14 +363,14 @@ render()
     await evaluate(`location.hash = ${JSON.stringify(hash)}`)
     await wait(`document.getElementById('app').dataset.route === ${JSON.stringify(hash)}`)
   }
-  const visible = () =>
-    evaluate(
-      'const node = document.querySelector(\'[aria-label="Shared tool presentation"]\'); return node.innerText'
-    )
+  const visible = () => evaluate('return document.body.innerText')
+  const card = 'details[aria-label^="Tool call:"]'
+  const collapse = async () => {
+    await evaluate(`document.querySelector(${JSON.stringify(card + ' > summary')}).click()`)
+    await wait(`!document.querySelector(${JSON.stringify(card)}).open`)
+  }
   const expand = async () => {
-    await evaluate(
-      'document.querySelector(\'[aria-label="Shared tool presentation"] summary\').focus()'
-    )
+    await evaluate(`document.querySelector(${JSON.stringify(card + ' > summary')}).focus()`)
     await command('Input.dispatchKeyEvent', {
       type: 'keyDown',
       key: ' ',
@@ -350,45 +383,40 @@ render()
       code: 'Space',
       windowsVirtualKeyCode: 32
     })
-    await wait('document.querySelector(\'[aria-label="Shared tool presentation"] details\').open')
-    await wait('!!document.querySelector("[aria-label=\\\"Shared tool presentation\\\"] pre")')
+    await wait(`document.querySelector(${JSON.stringify(card)}).open`)
   }
   phase = 'shared semantic corpus'
   await command('Page.navigate', { url: `http://127.0.0.1:${port}/#corpus-0` })
-  await wait('!!window.__fixture && !!document.querySelector("details")')
+  await wait(
+    '!!window.__fixture && !!document.querySelector("[aria-label=\\\"Shared tool presentation\\\"]")'
+  )
   const corpus = await evaluate('return window.__fixture.corpus')
   for (const [index, fixture] of corpus.entries()) {
     await route('#corpus-' + index)
-    let text = await visible()
+    const text = await visible()
     assert.ok(text.includes('Status: ' + fixture.status))
     assert.ok(text.includes('Effect: ' + fixture.effect))
     assert.ok(text.includes(fixture.source.reference))
     assert.ok(text.includes(fixture.source.revision))
-    assert.equal(await evaluate('return document.querySelector("details").open'), false)
+    assert.equal(await evaluate('return !!document.querySelector("details")'), false)
     if (fixture.status === 'approval_required') assert.match(text, /Approval required/)
     if (fixture.status === 'denied') assert.match(text, /request denied/)
     if (fixture.status === 'failed') assert.match(text, /Tool failed/)
     if (fixture.effect === 'unknown') assert.match(text, /Do not retry automatically/)
     if (fixture.progress) assert.ok(text.includes(fixture.progress.text))
     for (const warning of fixture.warnings || []) assert.ok(text.includes(warning))
-    await expand()
-    text = await visible()
     assert.ok(text.includes('{"limit":5,"resource":"fixture"}'))
     if (fixture.result?.kind === 'future-card') {
       assert.match(text, /unsupported presentation kind/)
       assert.ok(text.includes(fixture.result.text))
       assert.equal(text.includes('Automatically retry this operation'), false)
     }
-    await evaluate('document.querySelector("summary").click()')
-    await wait('!document.querySelector("details").open')
-    assert.ok((await visible()).includes(fixture.source.reference))
   }
   flows.push(
-    'All nine common CORE-13 semantic fixtures preserve exact status/effect, source/revision, arguments, result, progress and warnings across keyboard expansion and repeated collapse'
+    'All nine common CORE-13 semantic fixtures show exact status/effect, source/revision, arguments, result, progress and warnings together without a nested disclosure'
   )
   await route('#long')
   assert.match(await visible(), /unsupported presentation kind/)
-  await expand()
   assert.equal(
     await evaluate(
       'return new TextEncoder().encode([...document.querySelectorAll("pre")].map(node => node.textContent).join("")).length <= 64'
@@ -413,6 +441,10 @@ render()
   phase = 'actual AgentPanel entries and host-owned approval'
   await route('#panel')
   await wait("document.body.innerText.includes('Approval required')")
+  await collapse()
+  assert.equal((await visible()).includes('Status: approval_required'), false)
+  assert.equal((await visible()).includes('Exact offline action:'), false)
+  await expand()
   assert.equal(await count('agent:approve'), 0)
   const before = await evaluate('return window.__fixture.snapshot()')
   const order = await evaluate('return document.body.innerText')
@@ -425,6 +457,7 @@ render()
     ),
     true
   )
+  await collapse()
   await expand()
   assert.equal(await count('agent:approve'), 0)
   // Enter outside the host's deliberate approval button never authorizes a tool.
@@ -461,6 +494,10 @@ render()
     "window.__fixture.setCall({ status: 'rejected', mcp: { ...window.__fixture.snapshot().sessions[0].messages[2].toolCalls[0].mcp, outcome: 'not-sent', requestSent: false } })"
   )
   await wait("document.body.innerText.includes('Status: denied')")
+  await collapse()
+  assert.equal((await visible()).includes('Status: denied'), false)
+  await expand()
+  await wait("document.body.innerText.includes('Status: denied')")
   assert.equal(
     await evaluate(
       'return [...document.querySelectorAll("button")].some(button => button.textContent.trim() === "Approve once")'
@@ -489,21 +526,23 @@ render()
   await route('#other')
   await evaluate('history.back()')
   await wait(
-    "document.getElementById('app').dataset.route === '#panel' && document.body.innerText.includes('Status: unknown')"
+    "document.getElementById('app').dataset.route === '#panel' && !!document.querySelector('details[aria-label^=\"Tool call:\"]')"
   )
   assert.equal(await count('agent:approve'), 2)
   await evaluate('history.forward()')
   await wait("document.getElementById('app').dataset.route === '#other'")
   await route('#panel')
-  await wait("document.body.innerText.includes('Status: unknown')")
+  await wait('!!document.querySelector(\'details[aria-label^="Tool call:"]\')')
   assert.equal(
-    await evaluate(
-      'return document.querySelector(\'[aria-label="Shared tool presentation"] details\').open'
-    ),
+    await evaluate('return document.querySelector(\'details[aria-label^="Tool call:"]\').open'),
     false
   )
+  assert.equal((await visible()).includes('Status: unknown'), false)
+  await expand()
+  assert.match(await visible(), /Status: unknown/)
+  assert.match(await visible(), /checkpointing is unconfirmed/)
   flows.push(
-    'Interrupted/unknown host evidence and checkpoint warning survive remount/Back/Forward collapsed; no approval or execution is replayed'
+    'Interrupted/unknown entries remount as header-only cards; one keyboard expansion restores host evidence and checkpoint warnings without replaying approval or execution'
   )
   await evaluate('window.__fixture.setNewCall()')
   await wait('document.body.innerText.includes(\'call "second-call"\')')
@@ -536,6 +575,7 @@ render()
     "window.__fixture.setCall({ status: 'error', error: 'Cancelled offline call; no external request was attempted.', mcp: { ...window.__fixture.snapshot().sessions[0].messages[2].toolCalls[0].mcp, outcome: 'not-sent', requestSent: false } }, 'cancelled')"
   )
   await wait("document.body.innerText.includes('Status: failed')")
+  await wait("document.body.innerText.includes('Status: failed')")
   assert.match(await visible(), /Effect: not_attempted/)
   assert.equal(
     await evaluate(
@@ -549,6 +589,10 @@ render()
   await evaluate(
     "window.__fixture.setCall({ id: 'host-' + 'a'.repeat(1000), status: 'error', error: 'Unknown offline outcome', mcp: { ...window.__fixture.snapshot().sessions[0].messages[2].toolCalls[0].mcp, outcome: 'unknown', requestSent: true, checkpointUnconfirmed: true } }, 'interrupted')"
   )
+  await wait(
+    'document.querySelector(\'details[aria-label^="Tool call:"]\')?.getAttribute("aria-label").includes("offline_tool")'
+  )
+  await expand()
   await wait("document.body.innerText.includes('Tool presentation is invalid')")
   assert.match(await visible(), /Status: unknown/)
   assert.match(await visible(), /Effect: unknown/)
@@ -562,7 +606,7 @@ render()
   )
   await evaluate('window.__fixture.setTemplateCall()')
   await wait("document.body.innerText.includes('Exact resource template:')")
-  // Human approval disclosure is separate from the collapsed display-only presentation.
+  // Approval requests open automatically with the exact action and deliberate approval controls.
   const templateText = await evaluate(
     'return [...document.querySelectorAll("pre")].find(node => node.textContent.startsWith("Exact resource template:"))?.innerText'
   )
@@ -583,10 +627,11 @@ render()
     "window.__fixture.setCall({ status: 'rejected', mcp: { ...window.__fixture.snapshot().sessions[0].messages[2].toolCalls[0].mcp, outcome: 'not-sent', requestSent: false } }, 'completed')"
   )
   await wait("document.body.innerText.includes('Status: denied')")
+  await wait("document.body.innerText.includes('Status: denied')")
   await route('#other')
   await evaluate('history.back()')
   await wait(
-    "document.getElementById('app').dataset.route === '#panel' && document.body.innerText.includes('Status: denied')"
+    "document.getElementById('app').dataset.route === '#panel' && !!document.querySelector('details[aria-label^=\"Tool call:\"]')"
   )
   assert.equal(await count('agent:approve'), 4)
   assert.equal(
@@ -598,6 +643,95 @@ render()
   flows.push(
     'Exact template, scalar values, expanded URI and resources/read route appear in existing human approval; approval uses the captured identity and denied remount never replays it'
   )
+  phase = 'header-only completed tools and run summary dialog'
+  await evaluate(
+    "window.__fixture.setCall({ id: 'completed-call', name: 'lint_command', targetLabel: '!whatchaos', arguments: { commandName: '!whatchaos' }, status: 'completed', error: undefined, mcp: undefined, result: [{ severity: 'warning', message: 'Example lint warning' }] })"
+  )
+  await wait(
+    'document.querySelector(\'details[aria-label^="Tool call:"]\')?.innerText.includes("lint_command")'
+  )
+  assert.equal(
+    await evaluate('return document.querySelector(\'details[aria-label^="Tool call:"]\').open'),
+    false
+  )
+  const collapsedText = await visible()
+  assert.ok(collapsedText.includes('lint_command'))
+  assert.equal(collapsedText.includes('Effect:'), false)
+  assert.equal(collapsedText.includes('Details collapsed'), false)
+  assert.equal(collapsedText.includes('Example lint warning'), false)
+  assert.equal(
+    await evaluate(
+      'return !!document.querySelector("footer [aria-label=\\\"Open run summary\\\"]")'
+    ),
+    true
+  )
+  assert.match(collapsedText, /1,540 recorded tokens/)
+  assert.match(collapsedText, /0:42 elapsed/)
+  assert.match(collapsedText, /Tools: 1 attempted/)
+  await screenshot('tool-collapsed')
+  await expand()
+  assert.match(await visible(), /Effect: unreported/)
+  assert.match(await visible(), /Example lint warning/)
+  assert.match(await visible(), /commandName/)
+  assert.equal(
+    await evaluate(
+      'return document.querySelectorAll(\'details[aria-label^="Tool call:"] details\').length'
+    ),
+    0
+  )
+  await screenshot('tool-expanded')
+  await collapse()
+  await evaluate(
+    'const button = document.querySelector("[aria-label=\\\"Open run summary\\\"]"); button.focus(); button.click()'
+  )
+  await wait('!!document.querySelector("dialog[aria-label=\\\"Agent run summary\\\"]:modal")')
+  assert.match(await visible(), /Recorded input tokens/)
+  assert.match(await visible(), /Unreported cache counts are unavailable/)
+  await screenshot('run-summary-dialog')
+  await command('Input.dispatchKeyEvent', {
+    type: 'keyDown',
+    key: 'Escape',
+    code: 'Escape',
+    windowsVirtualKeyCode: 27
+  })
+  await command('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: 'Escape',
+    code: 'Escape',
+    windowsVirtualKeyCode: 27
+  })
+  await wait('!document.querySelector("dialog[aria-label=\\\"Agent run summary\\\"]").open')
+  assert.equal(
+    await evaluate('return document.activeElement?.getAttribute("aria-label")'),
+    'Open run summary'
+  )
+  await evaluate('document.querySelector("[aria-label=\\\"Open run summary\\\"]").click()')
+  await wait('!!document.querySelector("dialog[aria-label=\\\"Agent run summary\\\"]:modal")')
+  await evaluate('window.__fixture.setMetrics({ totalTokens: 1600 })')
+  await wait(
+    'document.querySelector("dialog[aria-label=\\\"Agent run summary\\\"]").innerText.includes("1,600")'
+  )
+  assert.equal(
+    await evaluate(
+      'return document.querySelector("dialog[aria-label=\\\"Agent run summary\\\"]").open'
+    ),
+    true
+  )
+  await evaluate('document.querySelector("[aria-label=\\\"Close run summary\\\"]").click()')
+  await wait('!document.querySelector("dialog[aria-label=\\\"Agent run summary\\\"]").open')
+  await evaluate('document.querySelector("[aria-label=\\\"Open run summary\\\"]").click()')
+  await wait('!!document.querySelector("dialog[aria-label=\\\"Agent run summary\\\"]:modal")')
+  await evaluate(
+    "window.__fixture.setMetrics({ runId: 'next-run', status: 'running', usageReconciled: false, totalTokens: undefined, tools: undefined })"
+  )
+  await wait('!document.querySelector("dialog[aria-label=\\\"Agent run summary\\\"]").open')
+  assert.match(await visible(), /Current run/)
+  assert.match(await visible(), /Partial usage/)
+  assert.match(await visible(), /Unavailable recorded tokens/)
+  assert.match(await visible(), /Tools: Unavailable/)
+  flows.push(
+    'Completed tools collapse to only their header; one expansion reveals metadata, warnings, arguments and results. The fixed composer summary shows outcome, elapsed time, tokens and tools, and opens a modal that closes with Escape and restores focus.'
+  )
   assert.deepEqual(browserErrors, [])
   const report = {
     passed: true,
@@ -606,7 +740,7 @@ render()
     calls: await evaluate('return window.__fixture.calls'),
     browserErrors,
     limitations: [
-      'Actual Svelte AgentPanel/shared component with fake IPC in Linux Chromium; no Electron main or live effects',
+      'Actual Svelte AgentPanel/shared component with fake IPC in headless Chromium; no Electron main or live effects',
       'Physical GUI, macOS and live provider/bot/external-server acceptance remain separate'
     ]
   }
