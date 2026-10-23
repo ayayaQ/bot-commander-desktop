@@ -1,3 +1,6 @@
+import { ScriptExecutionError, type ScriptExecutionErrorDetails } from '../runtime/scriptError'
+import { STATE_CHECKPOINT_FACTORY, type StateCheckpoint } from '../runtime/stateCheckpoint'
+import { IncompleteSimulationError } from '../runtime/errors'
 import { QuickJSWASMModule } from 'quickjs-emscripten-core'
 import type { QuickJSContext, QuickJSHandle, QuickJSRuntime } from 'quickjs-emscripten-core'
 import { QuickJSFFI } from '@jitl/quickjs-wasmfile-release-sync/ffi'
@@ -12,6 +15,9 @@ export interface ScriptSandboxOptions {
 }
 
 export interface ScriptSandbox {
+  /** Session owns initialization; do not replace guest bindings with JSON snapshots. */
+  persistent?: boolean
+  checkpoint(): StateCheckpoint
   beginStep?(): void
   configureEnvironment?(clockMs: number, seed: number): void
   randomState?(): number
@@ -99,14 +105,20 @@ const BOOTSTRAP = `(() => {
   const setAdd = Set.prototype.add
   const setDelete = Set.prototype.delete
   const apply = Reflect.apply
+  const limitErrors = new SetClass()
+  const failLimit = message => {
+    const error = new ErrorClass(message)
+    apply(setAdd, limitErrors, [error])
+    throw error
+  }
   const fail = () => { throw new ErrorClass('botState must contain only plain JSON data') }
   // No proxies may enter from the host, and scripts cannot construct one. This
   // prevents transparent proxies from masquerading as ordinary JSON objects.
   define(global, 'Proxy', { value: undefined, writable: false, configurable: false })
-  define(global, 'botState', { value: {}, writable: true, configurable: false })
+  define(global, 'botState', { value: {}, writable: true, enumerable: true, configurable: true })
   let temporaryCounter = 0
   const boundedText = output => {
-    if (output.length > ${MAX_STRING}) throw new ErrorClass('Script output exceeds the playground limit')
+    if (output.length > ${MAX_STRING}) failLimit('Script output exceeds the playground limit')
     return output
   }
   const text = value => {
@@ -120,13 +132,13 @@ const BOOTSTRAP = `(() => {
     let json
     try { json = stringify(value) } catch { json = undefined }
     if (json === undefined) json = string(value)
-    if (json.length > ${MAX_JSON}) throw new ErrorClass('Script result exceeds the playground limit')
+    if (json.length > ${MAX_JSON}) failLimit('Script result exceeds the playground limit')
     let dumped
     try { dumped = parse(json) } catch { return boundedText(json) }
     let count = 0
     const dumpText = (item, depth) => {
       if (++count > ${MAX_VALUES} || depth > ${MAX_DEPTH})
-        throw new ErrorClass('Script result exceeds the playground limit')
+        failLimit('Script result exceeds the playground limit')
       if (item === null || typeof item !== 'object') return boundedText(string(item))
       if (!isArray(item)) {
         // JSON data cannot contain callable methods. An own toString shadows the
@@ -148,7 +160,7 @@ const BOOTSTRAP = `(() => {
     const seen = new SetClass()
     let count = 0
     const clone = (value, depth) => {
-      if (++count > ${MAX_VALUES} || depth > ${MAX_DEPTH}) fail()
+      if (++count > ${MAX_VALUES} || depth > ${MAX_DEPTH}) failLimit('botState exceeds the playground limit')
       if (value === null || typeof value === 'boolean' || typeof value === 'string') return value
       if (typeof value === 'number') { if (!finite(value)) fail(); return value }
       if (typeof value !== 'object') fail()
@@ -164,7 +176,8 @@ const BOOTSTRAP = `(() => {
       if (array) {
         const lengthDescriptor = descriptor(value, 'length')
         length = lengthDescriptor.value
-        if (!integer(length) || length < 0 || length > ${MAX_VALUES}) fail()
+        if (length > ${MAX_VALUES}) failLimit('botState exceeds the playground limit')
+        if (!integer(length) || length < 0) fail()
         if (keys.length !== length + 1) fail() // Reject sparse arrays and extra properties.
       }
       for (let index = 0; index < keys.length; index++) {
@@ -181,15 +194,17 @@ const BOOTSTRAP = `(() => {
     }
     if (state === null || typeof state !== 'object' || isArray(state)) fail()
     const output = stringify(clone(state, 0))
-    if (output.length > ${MAX_JSON}) throw new ErrorClass('botState exceeds the playground limit')
+    if (output.length > ${MAX_JSON}) failLimit('botState exceeds the playground limit')
     return output
   }
+  const checkpoint = ${STATE_CHECKPOINT_FACTORY}(() => false)
   return {
+    checkpoint: () => checkpoint('botState'),
     text,
     temp: value => {
       let name
       do {
-        if (temporaryCounter > ${MAX_VALUES}) throw new ErrorClass('Temporary script bindings exceed the playground limit')
+        if (temporaryCounter > ${MAX_VALUES}) failLimit('Temporary script bindings exceed the playground limit')
         name = '__playground_bcfd_' + temporaryCounter++
       } while (descriptor(global, name))
       define(global, name, { value, writable: true, enumerable: true, configurable: true })
@@ -197,12 +212,15 @@ const BOOTSTRAP = `(() => {
     },
     get: name => text(global[name]),
     set: (name, json) => {
-      const value = json === undefined ? undefined : parse(json)
-      if (name === 'botState') global.botState = value
-      else define(global, name, { value, writable: true, enumerable: true, configurable: true })
+      'use strict'
+      global[name] = json === undefined ? undefined : parse(json)
     },
     remove: name => { if (!delete global[name]) throw new ErrorClass('Cannot delete protected script variable') },
-    snapshot: () => serialize(global.botState),
+    snapshot: () => {
+      const entry = descriptor(global, 'botState')
+      if (!entry || !apply(own, entry, ['value'])) fail()
+      return serialize(entry.value)
+    },
     variables: json => {
       const names = parse(json)
       const values = create(null)
@@ -217,12 +235,24 @@ const BOOTSTRAP = `(() => {
       return serialize(values)
     },
     error: value => {
+      const details = create(null)
+      details.message = 'Script execution failed'
+      details.incomplete = apply(setHas, limitErrors, [value])
+      if (details.incomplete) apply(setDelete, limitErrors, [value])
       if (value !== null && (typeof value === 'object' || typeof value === 'function')) {
-        const message = descriptor(value, 'message')
-        if (message && typeof message.value === 'string') return message.value.slice(0, 500)
-        return 'Script execution failed'
-      }
-      return string(value).slice(0, 500)
+        for (const key of ['message', 'name', 'stack', 'lineNumber', 'columnNumber']) {
+          let current = value
+          for (let depth = 0; current && depth < 8; depth++, current = prototype(current)) {
+            const entry = descriptor(current, key)
+            if (entry) {
+              if (typeof entry.value === 'string' || typeof entry.value === 'number')
+                details[key] = typeof entry.value === 'string' ? entry.value.slice(0, 2000) : entry.value
+              break
+            }
+          }
+        }
+      } else details.message = string(value).slice(0, 500)
+      return stringify(details)
     }
   }
 })()`
@@ -241,9 +271,9 @@ class OfflineScriptSandbox implements ScriptSandbox {
     options: ScriptSandboxOptions = {}
   ) {
     if (options.timeoutMs != null && !Number.isFinite(options.timeoutMs))
-      throw new Error('Invalid script timeout')
+      throw new IncompleteSimulationError('Invalid script timeout')
     if (options.deadline != null && !Number.isFinite(options.deadline))
-      throw new Error('Invalid script deadline')
+      throw new IncompleteSimulationError('Invalid script deadline')
     const timeout = Math.max(0, Math.min(options.timeoutMs ?? LIFETIME_MS, LIFETIME_MS))
     const remaining =
       options.deadline == null ? timeout : Math.min(timeout, options.deadline - Date.now())
@@ -260,6 +290,7 @@ class OfflineScriptSandbox implements ScriptSandbox {
       const toolkit = this.unwrap(this.context.evalCode(BOOTSTRAP, 'playground-bootstrap.js'))
       try {
         for (const name of [
+          'checkpoint',
           'text',
           'temp',
           'get',
@@ -300,14 +331,14 @@ class OfflineScriptSandbox implements ScriptSandbox {
 
   beginStep(): void {
     if (this.disposed || this.failed)
-      throw new Error('Script session is unavailable; reset the playground')
+      throw new IncompleteSimulationError('Script session is unavailable; reset the playground')
     this.deadline = performance.now() + LIFETIME_MS
   }
 
   configureEnvironment(clockMs: number, seed: number): void {
     this.guard(() => {
       if (!Number.isSafeInteger(clockMs) || !Number.isSafeInteger(seed))
-        throw new Error('Invalid script environment')
+        throw new IncompleteSimulationError('Invalid script environment')
       if (!this.helpers.has('configureClock')) {
         const toolkit = this.unwrap(
           this.context.evalCode(
@@ -362,7 +393,7 @@ class OfflineScriptSandbox implements ScriptSandbox {
   temp(value: string): string {
     return this.guard(() => {
       if (typeof value !== 'string' || value.length > MAX_STRING)
-        throw new Error('Temporary script value exceeds the playground limit')
+        throw new IncompleteSimulationError('Temporary script value exceeds the playground limit')
       const input = this.context.newString(value)
       try {
         const name = this.call('temp', [input])
@@ -390,14 +421,14 @@ class OfflineScriptSandbox implements ScriptSandbox {
   evaluate(code: string, options: { wrapReturn?: boolean } = {}): string {
     return this.guard(() => {
       if (typeof code !== 'string' || code.length > 65_536)
-        throw new Error('Script exceeds the playground limit')
+        throw new IncompleteSimulationError('Script exceeds the playground limit')
       const wrapped = options.wrapReturn !== false
       const value = this.unwrap(
-        this.context.evalCode(
-          wrapped ? `(function() {\n${code}\n})()` : code,
-          'playground-eval.js',
-          { type: 'global' }
-        )
+        this.context.evalCode(wrapped ? `(function() {\n${code}\n})()` : code, 'bcfd-eval.js', {
+          type: 'global'
+        }),
+        wrapped ? 1 : 0,
+        code
       )
       try {
         if (!wrapped) return ''
@@ -411,6 +442,30 @@ class OfflineScriptSandbox implements ScriptSandbox {
         value.dispose()
       }
     })
+  }
+
+  checkpoint(): StateCheckpoint {
+    const restore = this.guard(() => this.call('checkpoint'))
+    let disposed = false
+    return {
+      restore: () => {
+        if (disposed) throw new IncompleteSimulationError('Script checkpoint is disposed')
+        try {
+          this.guard(() =>
+            this.unwrap(this.context.callFunction(restore, this.context.undefined)).dispose()
+          )
+        } catch {
+          this.failed = true
+          throw new IncompleteSimulationError(
+            'Bot state alias rollback failed; reset the playground'
+          )
+        }
+      },
+      dispose: () => {
+        if (!disposed) restore.dispose()
+        disposed = true
+      }
+    }
   }
 
   state(): Record<string, unknown> {
@@ -450,9 +505,11 @@ class OfflineScriptSandbox implements ScriptSandbox {
   }
 
   private assertActive(): void {
-    if (this.disposed) throw new Error('Script sandbox is disposed')
-    if (this.failed) throw new Error('Script sandbox failed; discard this command')
-    if (performance.now() >= this.deadline) throw new Error('Script execution time limit exceeded')
+    if (this.disposed) throw new IncompleteSimulationError('Script sandbox is disposed')
+    if (this.failed)
+      throw new IncompleteSimulationError('Script sandbox failed; reset the playground')
+    if (performance.now() >= this.deadline)
+      throw new IncompleteSimulationError('Script execution time limit exceeded')
   }
 
   private guard<T>(operation: () => T): T {
@@ -462,7 +519,18 @@ class OfflineScriptSandbox implements ScriptSandbox {
       this.assertActive()
       return result
     } catch (error) {
-      this.failed = true
+      // Ordinary guest exceptions leave the VM usable, as in live execution. Resource
+      // exhaustion and host bounds invalidate the session and cannot count as negative tests.
+      const message = error instanceof Error ? error.message : String(error)
+      if (
+        error instanceof IncompleteSimulationError ||
+        (error instanceof ScriptExecutionError &&
+          error.details.name === 'InternalError' &&
+          /interrupted|out of memory|stack overflow/i.test(error.details.message))
+      ) {
+        this.failed = true
+        throw new IncompleteSimulationError(message)
+      }
       throw error
     }
   }
@@ -484,7 +552,7 @@ class OfflineScriptSandbox implements ScriptSandbox {
 
   private checkName(name: string): void {
     if (typeof name !== 'string' || name.length > MAX_STRING)
-      throw new Error('Script variable name exceeds the playground limit')
+      throw new IncompleteSimulationError('Script variable name exceeds the playground limit')
   }
 
   private call(method: string, args: QuickJSHandle[] = []): QuickJSHandle {
@@ -493,12 +561,21 @@ class OfflineScriptSandbox implements ScriptSandbox {
     )
   }
 
-  private unwrap(result: ReturnType<QuickJSContext['evalCode']>): QuickJSHandle {
+  private unwrap(
+    result: ReturnType<QuickJSContext['evalCode']>,
+    lineOffset = 0,
+    source?: string
+  ): QuickJSHandle {
     if (result.error) {
       let message =
         performance.now() >= this.deadline
           ? 'Script execution time limit exceeded'
           : 'Script execution failed'
+      // If exhaustion prevents inspecting the exception, evidence is incomplete.
+      let details: ScriptExecutionErrorDetails & { incomplete?: boolean } = {
+        message,
+        incomplete: true
+      }
       try {
         const formatter = this.helpers.get('error')
         if (formatter && performance.now() < this.deadline) {
@@ -510,7 +587,8 @@ class OfflineScriptSandbox implements ScriptSandbox {
           if (converted.error) converted.error.dispose()
           else {
             try {
-              message = this.context.getString(converted.value)
+              details = JSON.parse(this.context.getString(converted.value))
+              message = details.message
             } finally {
               converted.value.dispose()
             }
@@ -519,7 +597,29 @@ class OfflineScriptSandbox implements ScriptSandbox {
       } finally {
         result.error.dispose()
       }
-      throw new Error(message)
+      if (details.incomplete || performance.now() >= this.deadline)
+        throw new IncompleteSimulationError(details.message)
+      const location = details.stack?.match(/bcfd-eval\.js:(\d+):(\d+)/)
+      if (location) {
+        details.lineNumber ??= Number(location[1])
+        details.columnNumber ??= Number(location[2])
+      }
+      if (details.lineNumber != null && details.lineNumber > lineOffset)
+        details.lineNumber -= lineOffset
+      if (source && details.message === 'not a function' && details.lineNumber != null) {
+        const line = source.split('\n')[details.lineNumber - 1] ?? ''
+        const calls = [...line.matchAll(/\.([A-Za-z_$][\w$]*)\s*\(/g)]
+        const callee =
+          calls.at(-1)?.[1] ??
+          [...line.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)]
+            .filter(
+              (match) =>
+                !['if', 'for', 'while', 'switch', 'catch', 'function', 'return'].includes(match[1])
+            )
+            .at(-1)?.[1]
+        if (callee) details.message = `"${callee}" is not a function`
+      }
+      throw new ScriptExecutionError(details)
     }
     return result.value
   }
@@ -537,7 +637,8 @@ function hostJson(value: unknown): string {
     const invalid = () => {
       throw new Error('Script inputs must contain only plain JSON data')
     }
-    if (++count > MAX_VALUES || depth > MAX_DEPTH) return invalid()
+    if (++count > MAX_VALUES || depth > MAX_DEPTH)
+      throw new IncompleteSimulationError('Script input exceeds the playground limit')
     if (input === null || typeof input === 'string' || typeof input === 'boolean') return input
     if (typeof input === 'number') return Number.isFinite(input) ? input : invalid()
     if (typeof input !== 'object') return invalid()
@@ -569,6 +670,7 @@ function hostJson(value: unknown): string {
     return output
   }
   const json = JSON.stringify(clone(value, 0))
-  if (json.length > MAX_JSON) throw new Error('Script input exceeds the playground limit')
+  if (json.length > MAX_JSON)
+    throw new IncompleteSimulationError('Script input exceeds the playground limit')
   return json
 }

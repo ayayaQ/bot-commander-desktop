@@ -1,3 +1,4 @@
+import { incompleteReasons, recordFailure, IncompleteSimulationError } from './failures'
 import { runTraditionalActions } from '../runtime/actions'
 import { matchesCommand, type CommandEvent } from '../runtime/dispatch'
 import { fakeChannels, operation, requireBotPermission } from './runtimeContext'
@@ -61,13 +62,13 @@ export function addMessage(
         throw new Error('Channel was deleted')
     }
     if (state.messages.length >= PLAYGROUND_LIMITS.messages)
-      throw new Error('Message limit reached; reset the playground')
+      throw new IncompleteSimulationError('Message limit reached; reset the playground')
     const result = { ...message, id: state.nextId++ }
     state.messages.push(result)
     if (JSON.stringify(state).length > PLAYGROUND_LIMITS.requestBytes - 65_536) {
       state.messages.pop()
       state.nextId--
-      throw new Error('Transcript size limit reached; reset the playground')
+      throw new IncompleteSimulationError('Transcript size limit reached; reset the playground')
     }
     return result
   }
@@ -307,6 +308,7 @@ async function executeCommand(
       (task) => {
         pending.push(
           task.catch((error) => {
+            recordFailure(state, error)
             failures.push(error instanceof Error ? error.message : String(error))
           })
         )
@@ -346,7 +348,9 @@ export async function runMessage(
     throw new Error('Choose an available fake sender')
   let state = structuredClone(request.state)
   const trace: string[] = [],
-    errors: string[] = []
+    errors: string[] = [],
+    diagnostics: string[] = [],
+    incomplete: string[] = []
   const memberEvent = ['memberJoin', 'memberLeave', 'memberBan'].includes(request.kind ?? '')
   const input = memberEvent
     ? { id: 0 }
@@ -401,7 +405,8 @@ export async function runMessage(
         wrapEvalInIIFE: request.wrapEvalInIIFE,
         trigger: command.command,
         command,
-        trace: commandTrace
+        trace: commandTrace,
+        diagnostics
       },
       factory
     )
@@ -423,6 +428,7 @@ export async function runMessage(
       state = draft
       trace.push(...commandTrace)
     } catch (error) {
+      recordFailure(draft, error)
       resource.outcome = error instanceof PlaygroundExecutionError ? error.outcome : 'error'
       resource.reason = error instanceof Error ? error.message : 'Execution failed'
       resource.error = resource.reason
@@ -432,8 +438,14 @@ export async function runMessage(
       state = draft
       trace.push(...commandTrace, `Failed: ${command.command}; earlier effects retained`)
     } finally {
+      const reasons = incompleteReasons(draft)
+      if (reasons.length) {
+        resource.outcome = 'not_run'
+        resource.reason = reasons.join('; ')
+        incomplete.push(...reasons)
+      }
       scope.dispose()
     }
   }
-  return { state, trace, errors, resources }
+  return { state, trace, errors, diagnostics, incomplete, resources }
 }

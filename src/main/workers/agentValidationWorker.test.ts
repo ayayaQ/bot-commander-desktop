@@ -233,19 +233,25 @@ describe('production disposable agent validation worker (headless)', () => {
   }, 15_000)
 
   it.each(['$definitelyNotARealBCFDFunction(no)', 'Bad $definitelyNotARealVariable'])(
-    'reports unknown BCFD expressions as errors rather than unsupported: %s',
+    'reports unknown BCFD expressions as inline diagnostics rather than unsupported: %s',
     async (template) => {
       const validate = createAgentValidationService({ workerEntry: entry })
       const report = await validate(request(template))
       expect(report.outcome).toBe('failed')
-      expect(report.coverage.errors).toBe(1)
+      expect(report.coverage.errors).toBe(0)
       expect(report.coverage.unsupported).toBe(0)
-      expect(report.coverage.executed).toBe(0)
+      expect(report.coverage.executed).toBe(1)
       const step = report.cases[0].steps[0]
-      expect(step.executionOutcome).toBe('error')
-      expect(step.errors.join(' ')).toMatch(/Unknown (function|variable)/)
+      expect(step.executionOutcome).toBe('executed')
+      expect(step.diagnostics?.join(' ')).toMatch(/Unknown (function|variable)/)
       expect(step.effects).toMatchObject({
-        messages: [],
+        messages: [
+          expect.objectContaining({
+            content: expect.stringContaining(
+              template.startsWith('$') ? '$definitelyNotARealBCFDFunction' : template
+            )
+          })
+        ],
         deletedMessageIds: [],
         memberChanges: [],
         botStateChanges: [],

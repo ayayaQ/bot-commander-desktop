@@ -16,7 +16,16 @@ import { PLAYGROUND_OPTION_NAME } from './optionName'
 
 const FAKE_BOT_ID = '900000000000000003'
 
-const ASSERTION_ROOTS = new Set(['outcome', 'reason', 'errors', 'state', 'effects'])
+const ASSERTION_ROOTS = new Set([
+  'outcome',
+  'reason',
+  'errors',
+  'diagnostics',
+  'warnings',
+  'incomplete',
+  'state',
+  'effects'
+])
 
 /** RFC 6901 string pointers, limited to the assertion view's supported roots. */
 function isSupportedAssertionPointer(path: string): boolean {

@@ -1,3 +1,4 @@
+import { RUNTIME_VERSION } from '../../shared/runtime/version'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => {
@@ -332,7 +333,7 @@ describe('agent resource tools', () => {
     expect(report).toMatchObject({
       outcome: 'passed',
       candidateId: 'draft-id',
-      runtimeVersion: '2.0.0'
+      runtimeVersion: RUNTIME_VERSION
     })
     expect(mocks.saveCommands).not.toHaveBeenCalled()
     const saved = await executeAgentTool('create_command', { command, validation }, 'mcp')

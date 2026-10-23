@@ -125,7 +125,11 @@
       if (!alive || !session.isCurrent(revision)) return
       world = result.state
       syncBotStateDraft()
-      trace = result.trace
+      trace = [
+        ...result.trace,
+        ...(result.warnings ?? []).map((warning) => `Delivery warning: ${warning}`),
+        ...(result.incomplete ?? []).map((reason) => `Incomplete simulation: ${reason}`)
+      ]
       errors = result.errors
       content = ''
       if (

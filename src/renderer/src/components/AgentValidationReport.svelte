@@ -146,6 +146,15 @@
                   {step.hiddenAssertions} more assertions omitted from this view
                 </p>
               {/if}
+              {#each step.diagnostics as diagnostic}
+                <p class="text-warning break-words">Inline diagnostic: {diagnostic}</p>
+              {/each}
+              {#each step.warnings as warning}
+                <p class="text-warning break-words">Delivery warning: {warning}</p>
+              {/each}
+              {#each step.incomplete as reason}
+                <p class="text-warning break-words">Incomplete simulation: {reason}</p>
+              {/each}
               {#if step.errors.length > 0}
                 <ul class="space-y-1 text-error">
                   {#each step.errors as error}

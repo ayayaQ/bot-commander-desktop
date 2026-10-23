@@ -200,7 +200,8 @@ describe('offline playground QuickJS sandbox', () => {
     try {
       expect(() => vm.evaluate(code)).toThrow()
       expect(performance.now() - started).toBeLessThan(1000)
-      expect(() => vm.state()).toThrow(/failed|time limit/)
+      if (_ === 'error conversion') expect(vm.state()).toEqual({})
+      else expect(() => vm.state()).toThrow(/failed|time limit/)
     } finally {
       vm.dispose()
     }

@@ -229,7 +229,8 @@ describe('isolated playground message simulation', () => {
         deleteAfter: true
       })
       const result = await runMessage(input)
-      expect(result.errors.length).toBe(/^\$(eval|ai|unknown)/.test(template) ? 1 : 0)
+      expect(result.errors.length).toBe(/^\$(eval|set|get)/.test(template) ? 1 : 0)
+      expect(result.diagnostics?.length).toBe(/^\$(ai|unknown)/.test(template) ? 1 : 0)
       expect(result.state.messages[1].content).toBe('would send')
       expect(result.state.messages[0].deleted).toBe(true)
       expect(input.state.messages).toEqual([])

@@ -107,6 +107,12 @@ export type PlaygroundResult = {
   state: PlaygroundState
   trace: string[]
   errors: string[]
+  /** Modeled template diagnostics rendered inline; execution continues. */
+  diagnostics?: string[]
+  /** Host limits or missing capabilities; never usable as expected command failures. */
+  incomplete?: string[]
+  /** Nonfatal adapter delivery failures. */
+  warnings?: string[]
   /** Explicit engine coverage. Optional only for older UI fixtures; validation fails closed without it. */
   resources?: PlaygroundResourceResult[]
 }

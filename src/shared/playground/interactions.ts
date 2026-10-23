@@ -1,3 +1,5 @@
+import { deliverInteractionDM } from '../runtime/errors'
+import { incompleteReasons, recordFailure } from './failures'
 import { operation, requireBotPermission } from './runtimeContext'
 import { runInteractionActions } from '../runtime/actions'
 import { PLAYGROUND_OPTION_NAME } from './optionName'
@@ -162,7 +164,8 @@ async function executeAction(
   options: Record<string, string | number | boolean> | undefined,
   isButton: boolean,
   trace: string[],
-  ctx: TemplateContext
+  ctx: TemplateContext,
+  warnings: string[]
 ): Promise<void> {
   const sender = state.members.find((member) => member.id === senderId)!
   // Production interaction contexts have no messageEvent/mentionedMember.
@@ -236,23 +239,35 @@ async function executeAction(
       )
     },
     dm: async () => {
-      if (action.sendPrivateMessage && action.privateMessage)
-        addMessage(state, {
-          kind: 'dm',
-          author: 'Playground Bot',
-          recipient: sender.id,
-          content: await render(action.privateMessage)
-        })
+      if (action.sendPrivateMessage && action.privateMessage) {
+        const content = await render(action.privateMessage)
+        await deliverInteractionDM(
+          () =>
+            addMessage(state, {
+              kind: 'dm',
+              author: 'Playground Bot',
+              recipient: sender.id,
+              content
+            }),
+          (error) => warnings.push(`Could not send DM: ${String(error)}`)
+        )
+      }
     },
     dmEmbed: async () => {
-      if (action.sendPrivateEmbed)
-        addMessage(state, {
-          kind: 'dm',
-          author: 'Playground Bot',
-          recipient: sender.id,
-          content: '',
-          embed: await buildFakeEmbed(action.privateEmbed, ctx)
-        })
+      if (action.sendPrivateEmbed) {
+        const embed = await buildFakeEmbed(action.privateEmbed, ctx)
+        await deliverInteractionDM(
+          () =>
+            addMessage(state, {
+              kind: 'dm',
+              author: 'Playground Bot',
+              recipient: sender.id,
+              content: '',
+              embed
+            }),
+          (error) => warnings.push(`Could not send DM embed: ${String(error)}`)
+        )
+      }
     },
     role: async () => {
       if (action.isRoleAssigner && action.roleToAssign) {
@@ -280,7 +295,9 @@ export async function runInteraction(
   const original = structuredClone(request.state),
     draft = structuredClone(request.state)
   const trace: string[] = [],
-    errors: string[] = []
+    errors: string[] = [],
+    diagnostics: string[] = [],
+    warnings: string[] = []
   const resources: PlaygroundResourceResult[] = request.interactions.map((command) => ({
     resourceId: command.id,
     kind: 'interaction',
@@ -344,7 +361,8 @@ export async function runInteraction(
         trigger: '',
         options,
         command,
-        trace
+        trace,
+        diagnostics
       },
       factory
     )
@@ -366,7 +384,15 @@ export async function runInteraction(
         scope.commit()
         resource.outcome = 'blocked'
         resource.reason = `Cooldown; ${remaining}s remaining`
-        return { state: draft, trace, errors, resources }
+        return {
+          state: draft,
+          trace,
+          errors,
+          diagnostics,
+          warnings,
+          incomplete: incompleteReasons(draft),
+          resources
+        }
       }
     }
     await executeAction(
@@ -377,15 +403,25 @@ export async function runInteraction(
       options,
       request.kind === 'button',
       trace,
-      scope.context
+      scope.context,
+      warnings
     )
     if (request.kind === 'slash') recordCooldown(draft, command, request.senderId)
     scope.commit()
     resource.outcome = 'executed'
     resource.executed = true
     resource.reason = undefined
-    return { state: draft, trace, errors, resources }
+    return {
+      state: draft,
+      trace,
+      errors,
+      diagnostics,
+      warnings,
+      incomplete: incompleteReasons(draft),
+      resources
+    }
   } catch (error) {
+    recordFailure(draft, error)
     // A denied button can still target an existing candidate; coverage is derived
     // from structured resource resolution, never user-facing trace strings.
     if (!resource && request.kind === 'button') {
@@ -409,9 +445,16 @@ export async function runInteraction(
       state: draft,
       trace: [...trace, 'Failed; earlier interaction effects retained'],
       errors,
+      diagnostics,
+      warnings,
+      incomplete: incompleteReasons(draft),
       resources
     }
   } finally {
+    if (resource && incompleteReasons(draft).length) {
+      resource.outcome = 'not_run'
+      resource.reason = incompleteReasons(draft).join('; ')
+    }
     scope?.dispose()
   }
 }

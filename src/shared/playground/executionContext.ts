@@ -1,3 +1,4 @@
+import { IncompleteSimulationError } from '../runtime/errors'
 import type { ScriptSandbox, ScriptSandboxFactory } from './script'
 import type { TemplateContext } from './template'
 import { validateBotState } from './sessionState'
@@ -10,7 +11,8 @@ export function executionContext(base: TemplateContext, factory?: ScriptSandboxF
     if (!factory) return undefined
     if (!script) {
       script = factory(base.state.botState)
-      for (const [name, value] of Object.entries(base.state.variables)) script.set(name, value)
+      if (!script.persistent)
+        for (const [name, value] of Object.entries(base.state.variables)) script.set(name, value)
     }
     return script
   }
@@ -21,7 +23,7 @@ export function executionContext(base: TemplateContext, factory?: ScriptSandboxF
     },
     setVariable(name, value) {
       const vm = getScript()
-      if (!vm) throw new Error('Script sandbox is unavailable')
+      if (!vm) throw new IncompleteSimulationError('Script sandbox is unavailable')
       vm.set(name, value)
       if (name !== 'botState') names.add(name)
     }
@@ -32,9 +34,16 @@ export function executionContext(base: TemplateContext, factory?: ScriptSandboxF
       if (!script) return
       const state = script.state()
       validateBotState(state)
-      base.state.botState = state
-      const variables = script.variables([...names])
+      let variables: Record<string, unknown>
+      try {
+        variables = script.variables([...names])
+      } catch (error) {
+        throw new IncompleteSimulationError(
+          `Cannot snapshot script variables: ${error instanceof Error ? error.message : String(error)}`
+        )
+      }
       validateBotState(variables)
+      base.state.botState = state
       base.state.variables = variables
     },
     dispose() {

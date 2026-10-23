@@ -218,6 +218,50 @@ describe('botService Connect', () => {
     expect(send).toHaveBeenCalledTimes(1)
   })
 
+  it('observes detached DM rejection while later channel effects complete', async () => {
+    const { Connect, setCommands } = await import('./botService')
+    const { stringInfoAdd, contextForMessageEvent } = await import('./stringInfo')
+    const { decodeBCFDCommand } = await import('../../shared/commandCodec')
+    vi.mocked(contextForMessageEvent).mockImplementation((message, command, event) => ({
+      message,
+      command,
+      user: event.author
+    }))
+    vi.mocked(stringInfoAdd).mockImplementation(async (context) => context.message)
+    setCommands({
+      bcfdCommands: [
+        decodeBCFDCommand({
+          id: 'failure',
+          type: 1,
+          command: '!test',
+          commandDescription: 'Detached failure',
+          channelMessage: 'first',
+          privateMessage: 'private',
+          channelEmbed: { title: 'later' },
+          privateEmbed: {}
+        }).command
+      ],
+      bcfdSlashCommands: []
+    })
+    Connect(ipcEvent(), 'token')
+    await clients[0].ready()
+    const delivery = deferred<void>()
+    const send = vi.fn(async () => {})
+    await clients[0].emit(Events.MessageCreate, {
+      id: 'input',
+      content: '!test',
+      author: { bot: false, id: 'user', send: () => delivery.promise },
+      channel: { type: ChannelType.DM, send },
+      channelId: 'dm'
+    })
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2))
+    expect(send).toHaveBeenNthCalledWith(1, 'first')
+    delivery.reject(new Error('DMs disabled'))
+    await vi.waitFor(() =>
+      expect(mocks.consoleError).toHaveBeenCalledWith('Command dm: Error: DMs disabled')
+    )
+  })
+
   it('uses moderation and all existing intents/partials in the actual login path', async () => {
     const { Connect } = await import('./botService')
     Connect(ipcEvent(), 'test-token')

@@ -1,3 +1,4 @@
+import { RUNTIME_VERSION } from '../../../shared/runtime/version'
 import { describe, expect, it } from 'vitest'
 import {
   emptyAgentValidationEffects,
@@ -53,7 +54,7 @@ function step(overrides: Partial<AgentValidationStepReport> = {}): AgentValidati
 function report(overrides: Partial<AgentValidationReport> = {}): AgentValidationReport {
   return {
     version: 2,
-    runtimeVersion: '2.0.0',
+    runtimeVersion: RUNTIME_VERSION,
     wrapEvalInIIFE: true,
     candidateKind: 'command',
     candidateId: candidate.id,
