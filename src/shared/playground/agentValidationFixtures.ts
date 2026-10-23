@@ -211,6 +211,8 @@ export function validateAgentValidationState(value: unknown): PlaygroundState {
       'cooldowns',
       'clockMs',
       'timing',
+      'cascades',
+      'events',
       'ai',
       'guildId',
       'guildName',
@@ -451,6 +453,7 @@ export function validateAgentValidationSuite(value: unknown): AgentValidationSui
           'content',
           'options',
           'customId',
+          'commandId',
           'messageId',
           'advanceClockMs',
           'assertions'
@@ -489,12 +492,16 @@ export function validateAgentValidationSuite(value: unknown): AgentValidationSui
             ? id(step.messageId, 'step.messageId')
             : integer(step.messageId, 'step.messageId', 1)
         if (
-          ['options', 'customId', ...(step.kind === 'reaction' ? [] : ['messageId'])].some((key) =>
-            Object.hasOwn(step, key)
-          )
+          [
+            'options',
+            'customId',
+            'commandId',
+            ...(step.kind === 'reaction' ? [] : ['messageId'])
+          ].some((key) => Object.hasOwn(step, key))
         )
           throw new Error('Message step contains interaction fields')
       } else if (step.kind === 'slash') {
+        if (Object.hasOwn(step, 'commandId')) text(step.commandId, 'step.commandId', 256, true)
         if (['content', 'customId', 'messageId'].some((key) => Object.hasOwn(step, key)))
           throw new Error('Slash step contains unrelated fields')
         if (Object.hasOwn(step, 'options')) {
@@ -513,7 +520,7 @@ export function validateAgentValidationSuite(value: unknown): AgentValidationSui
         text(step.customId, 'step.customId', 100, true)
         if (state.world) id(step.messageId, 'step.messageId')
         else integer(step.messageId, 'step.messageId', 1)
-        if (['content', 'options'].some((key) => Object.hasOwn(step, key)))
+        if (['content', 'options', 'commandId'].some((key) => Object.hasOwn(step, key)))
           throw new Error('Button step contains unrelated fields')
       }
       array(step.assertions, 'step.assertions', AGENT_VALIDATION_LIMITS.assertionsPerStep)

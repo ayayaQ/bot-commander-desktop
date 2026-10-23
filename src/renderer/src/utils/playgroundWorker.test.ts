@@ -47,6 +47,7 @@ describe('headless worker entry-point boundary', () => {
         kind: 'slash',
         state,
         interactions: [],
+        commands: [],
         senderId: state.members[0].id,
         commandId: 'missing'
       }

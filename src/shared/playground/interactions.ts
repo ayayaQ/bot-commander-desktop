@@ -1,4 +1,10 @@
 import { withScheduler } from './scheduling'
+import {
+  consumeCascadeWork,
+  currentGatewayEvent,
+  inheritCascade,
+  runGatewayCascade
+} from './cascades'
 import { prepareWorldEvent, commitWorld, assertManageable } from './world'
 import { deliverInteractionDM } from '../runtime/errors'
 import { incompleteReasons, recordFailure } from './failures'
@@ -11,7 +17,14 @@ import type {
   BCFDInteractionCommand,
   BCFDSlashCommandOption
 } from '../../main/types/types'
-import { sendMessage, buildFakeEmbed, hasPermission, toggleRole, validateState } from './engine'
+import {
+  sendMessage,
+  buildFakeEmbed,
+  hasPermission,
+  toggleRole,
+  validateState,
+  runMessageEvent
+} from './engine'
 import { evaluateTemplate } from './template'
 import type { TemplateContext } from './template'
 import type { ScriptSandboxFactory } from './script'
@@ -296,11 +309,24 @@ export async function runInteraction(
   request: PlaygroundInteractionRequest,
   factory?: ScriptSandboxFactory
 ): Promise<PlaygroundResult> {
+  return runGatewayCascade(
+    request,
+    (input) => runInteractionEvent(input as PlaygroundInteractionRequest, factory),
+    (input) => runMessageEvent(input, factory)
+  )
+}
+
+async function runInteractionEvent(
+  request: PlaygroundInteractionRequest,
+  factory?: ScriptSandboxFactory
+): Promise<PlaygroundResult> {
   validateState(request.state)
+  const previous = request.state
   request = {
     ...request,
     state: prepareWorldEvent(request.state, request.context, request.kind, request.senderId)
   }
+  inheritCascade(previous, request.state)
   if (
     !Array.isArray(request.interactions) ||
     request.interactions.length > PLAYGROUND_LIMITS.commands
@@ -312,11 +338,13 @@ export async function runInteraction(
   if (!sender) throw new Error('Choose an available fake sender')
   const original = structuredClone(request.state),
     draft = structuredClone(request.state)
+  inheritCascade(request.state, draft)
   const trace: string[] = [],
     errors: string[] = [],
     diagnostics: string[] = [],
     warnings: string[] = []
   const resources: PlaygroundResourceResult[] = request.interactions.map((command) => ({
+    eventId: currentGatewayEvent(draft)?.id,
     resourceId: command.id,
     kind: 'interaction',
     matched: false,
@@ -327,6 +355,7 @@ export async function runInteraction(
   let resource: PlaygroundResourceResult | undefined
   let scope: ReturnType<typeof executionContext> | undefined
   try {
+    consumeCascadeWork(draft)
     return await withScheduler(draft, async () => {
       let command: BCFDInteractionCommand, action: BCFDInteractionAction
       let options: Record<string, string | number | boolean> | undefined

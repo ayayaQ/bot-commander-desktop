@@ -3,6 +3,7 @@ import { createFunctionRegistry } from './keywords'
 import { commandEvents } from './dispatch'
 import { TIMED_OPERATIONS } from '../playground/scheduling'
 import { SCHEDULER_LIMITS } from '../playground/scheduler'
+import { CASCADE_LIMITS } from '../playground/cascades'
 
 export { RUNTIME_VERSION } from './version'
 import { RUNTIME_VERSION } from './version'
@@ -49,6 +50,27 @@ export function playgroundCapabilities() {
     actionOrder: Object.fromEntries(commandEvents.map((event) => [event, actionOrder(event)])),
     scripts: ['wrapped', 'global', 'startup'],
     externalMocks: ['ai.chat'],
+    cascades: {
+      fixture: 'state.cascades',
+      limits: { ...CASCADE_LIMITS },
+      effects: {
+        'member.kicked': ['memberLeave'],
+        'member.banned': ['memberBan', 'memberLeave (if still present)'],
+        'message.send': ['message (non-ephemeral)'],
+        'message.dm': ['dm'],
+        'message.react': ['reaction (new bot reaction only)']
+      },
+      filtering: 'Live bot-origin filter; no implicit external user responses',
+      ordering:
+        'Completion/insertion order; handlers dispatch after the current input event drains',
+      evidence: [
+        'effects.events',
+        'operations.id',
+        'operations.eventId',
+        'parentOperationId',
+        'parentEventId'
+      ]
+    },
     timing: {
       fixture: 'state.timing',
       operations: [...TIMED_OPERATIONS],

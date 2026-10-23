@@ -11,6 +11,12 @@ import {
 } from './world'
 import { validateNormalizedWorld } from './normalizedWorldValidation'
 import { withScheduler } from './scheduling'
+import {
+  consumeCascadeWork,
+  currentGatewayEvent,
+  inheritCascade,
+  runGatewayCascade
+} from './cascades'
 import { incompleteReasons, recordFailure, IncompleteSimulationError } from './failures'
 import { runTraditionalActions } from '../runtime/actions'
 import { matchesCommand, type CommandEvent } from '../runtime/dispatch'
@@ -477,7 +483,20 @@ export async function runMessage(
   request: PlaygroundMessageRequest,
   factory?: ScriptSandboxFactory
 ): Promise<PlaygroundResult> {
+  return runGatewayCascade(
+    request,
+    (input) => runMessageEvent(input as PlaygroundMessageRequest, factory),
+    (input) => runMessageEvent(input, factory)
+  )
+}
+
+/** One injected or synthesized event; the cascade owner controls downstream dispatch. */
+export async function runMessageEvent(
+  request: PlaygroundMessageRequest,
+  factory?: ScriptSandboxFactory
+): Promise<PlaygroundResult> {
   validateState(request.state)
+  const previous = request.state
   request = {
     ...request,
     state: prepareWorldEvent(
@@ -487,6 +506,7 @@ export async function runMessage(
       request.senderId
     )
   }
+  inheritCascade(previous, request.state)
   if (!Array.isArray(request.commands) || request.commands.length > PLAYGROUND_LIMITS.commands)
     throw new Error('Saved-command limit exceeded')
   if (typeof request.content !== 'string' || request.content.length > PLAYGROUND_LIMITS.input)
@@ -498,6 +518,7 @@ export async function runMessage(
   )
     throw new Error('Choose an available fake sender')
   let state = structuredClone(request.state)
+  inheritCascade(request.state, state)
   const trace: string[] = [],
     errors: string[] = [],
     diagnostics: string[] = [],
@@ -512,13 +533,15 @@ export async function runMessage(
             !item.deleted &&
             (!state.world || item.channelId === state.channelId)
         )
-      : addMessage(state, {
-          kind: 'user',
-          author: sender.name,
-          ...(state.world ? { authorId: sender.id } : {}),
-          content: request.content,
-          channelId: state.channelId
-        })
+      : currentGatewayEvent(state)?.parentEventId && request.messageId !== undefined
+        ? state.messages.find((message) => message.id === request.messageId)
+        : addMessage(state, {
+            kind: 'user',
+            author: sender.name,
+            ...(state.world ? { authorId: sender.id } : {}),
+            content: request.content,
+            channelId: state.channelId
+          })
   if (!input) throw new Error('Reaction message not found')
   state.commandCount = request.commands.length
   const matching = request.commands.filter(
@@ -531,6 +554,7 @@ export async function runMessage(
       ) && !sender.bot
   )
   const resources: PlaygroundResourceResult[] = request.commands.map((command) => ({
+    eventId: currentGatewayEvent(state)?.id,
     resourceId: command.id,
     kind: 'command',
     matched: matching.includes(command),
@@ -543,6 +567,7 @@ export async function runMessage(
     const resource = resources[request.commands.indexOf(command)]
     const draft = structuredClone(state),
       commandTrace: string[] = []
+    inheritCascade(state, draft)
     const sender = draft.members.find((member) => member.id === request.senderId)!
     const mentioned = draft.members.find(
       (member) => member.id === /<@!?(\d+)>/.exec(request.content)?.[1]
@@ -573,6 +598,7 @@ export async function runMessage(
       factory
     )
     try {
+      consumeCascadeWork(draft)
       const execution = await withScheduler(draft, () =>
         executeCommand(
           draft,

@@ -34,7 +34,7 @@ self.onmessage = async (
     scriptSession.beginStep(request.state)
     const factory = scriptSession.factory
     const result =
-      'commands' in request
+      'content' in request
         ? await runMessage(request, factory)
         : await runInteraction(request, factory)
     // Candidate-validation workers consume structured coverage. Preserve this
