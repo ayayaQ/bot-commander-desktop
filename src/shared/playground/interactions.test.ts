@@ -325,7 +325,8 @@ describe('saved interaction playground', () => {
       input.state.members[0].permissions = []
       const failure = await runInteraction(input)
       expect(failure.errors[0]).toContain('permission')
-      expect(failure.state).toEqual(input.state)
+      expect({ ...failure.state, events: input.state.events }).toEqual(input.state)
+      expect(failure.state.events!.at(-1)!.resources![0].outcome).toBe('blocked')
     }
   )
 
@@ -478,7 +479,8 @@ describe('saved interaction playground', () => {
         customId: 'first'
       })
       expect(result.errors[0]).toContain('disabled, inert')
-      expect(result.state).toEqual(original.state)
+      expect({ ...result.state, events: original.state.events }).toEqual(original.state)
+      expect(result.state.events!.at(-1)!.resources![0].outcome).toBe('blocked')
     }
     const saved = command({ rootAction: action({ ephemeral: true, buttons: [button('first')] }) })
     const original = await runInteraction(request(saved))

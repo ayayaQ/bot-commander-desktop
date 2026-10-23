@@ -219,6 +219,7 @@
       kind: 'slash',
       state: structuredClone($state.snapshot(world)),
       interactions: structuredClone($state.snapshot(activeInteractions)),
+      commands: structuredClone($state.snapshot(activeCommands)),
       wrapEvalInIIFE: wrapEval,
       senderId,
       commandId: selectedInteraction.id,
@@ -231,6 +232,7 @@
       kind: 'button',
       state: structuredClone($state.snapshot(world)),
       interactions: structuredClone($state.snapshot(activeInteractions)),
+      commands: structuredClone($state.snapshot(activeCommands)),
       wrapEvalInIIFE: wrapEval,
       senderId,
       messageId,
@@ -574,10 +576,28 @@
       >
       {#if worldError}<p class="text-error text-xs">{worldError}</p>{/if}
       <pre class="text-xs max-h-48 overflow-auto whitespace-pre-wrap">{JSON.stringify(
-          world.operations ?? [],
+          { events: world.events ?? [], operations: world.operations ?? [] },
           null,
           2
         )}</pre>
+    </details>
+    <details class="text-xs">
+      <summary class="cursor-pointer">Causal events ({world.events?.length ?? 0})</summary>
+      <ol class="max-h-48 overflow-auto space-y-2 py-2" aria-label="Causal events">
+        {#each world.events ?? [] as event (event.id)}
+          <li>
+            <code>{event.id}</code>: {event.kind} · {event.status}
+            {#if event.parentOperationId}
+              <span>caused by {event.parentOperationId} in {event.parentEventId}</span>
+            {/if}
+            <div class="opacity-60">
+              User {event.senderId} · guild {event.context.guildId ?? 'DM'} · scheduled {event.scheduledAt}ms
+              · dispatched {event.dispatchedAt ?? 'pending'}ms
+              {#if event.reason}· {event.reason}{/if}
+            </div>
+          </li>
+        {/each}
+      </ol>
     </details>
     <PlaygroundTests
       commands={activeCommands}

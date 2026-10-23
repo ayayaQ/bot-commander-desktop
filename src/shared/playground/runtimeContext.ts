@@ -1,4 +1,5 @@
 import { schedulerFor } from './scheduling'
+import { consumeCascadeWork, currentGatewayEvent, observeGatewayEffect } from './cascades'
 import {
   allocateEntityId,
   effectivePermissions,
@@ -66,9 +67,12 @@ export function fakeChannels(state: PlaygroundState): FakeChannel[] {
 }
 
 function beginOperation(state: PlaygroundState, name: string, args: unknown[]) {
+  consumeCascadeWork(state)
   state.operations ??= []
   if (state.operations.length >= 1000) throw incompleteLimit(state, 'Operation limit exceeded')
   const entry = {
+    id: `operation:${state.operations.length + 1}`,
+    eventId: currentGatewayEvent(state)?.id,
     ...(state.world
       ? { context: { guildId: state.guildId || null, channelId: state.channelId } }
       : {}),
@@ -103,6 +107,7 @@ export function operation<T>(
   try {
     const failure = state.timing?.operations?.[name]?.failure ?? state.failures?.[name]
     if (failure) throw new Error(failure)
+    const observe = observeGatewayEffect(state, name, args)
     const value = run()
     entry.result = value === undefined ? null : JSON.parse(JSON.stringify(value))
     if (name === 'message.send' || name === 'message.dm')
@@ -113,6 +118,7 @@ export function operation<T>(
     }
     entry.status = 'completed'
     entry.completedAt = state.clockMs
+    observe(entry, value)
     return value
   } catch (error) {
     recordFailure(state, error)

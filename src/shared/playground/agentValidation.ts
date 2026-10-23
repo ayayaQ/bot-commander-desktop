@@ -108,6 +108,9 @@ function effects(before: PlaygroundState, after: PlaygroundState): AgentValidati
     variableChanges: changes(before.variables, after.variables, '/variables'),
     cooldownChanges: changes(before.cooldowns, after.cooldowns, '/cooldowns'),
     operations: (after.operations ?? []).slice(before.operations?.length ?? 0),
+    events: (after.events ?? [])
+      .slice(before.events?.length ?? 0)
+      .map((event) => json(event)) as AgentValidationEffects['events'],
     timing: {
       startedAt: before.clockMs,
       completedAt: after.clockMs,
@@ -237,83 +240,68 @@ export async function runAgentValidation(
               })
           : undefined
         let result: PlaygroundResult
-        if (
-          (request.candidateKind === 'command' &&
-            !commandEvents.includes(step.kind as (typeof commandEvents)[number])) ||
-          (request.candidateKind === 'interaction' &&
-            commandEvents.includes(step.kind as (typeof commandEvents)[number]))
-        ) {
+        try {
+          session?.beginStep(state)
+          result = commandEvents.includes(step.kind as (typeof commandEvents)[number])
+            ? await runMessage(
+                {
+                  state,
+                  commands:
+                    request.candidateKind === 'command'
+                      ? replaceCandidate(suite.resources?.commands ?? [], candidate as BCFDCommand)
+                      : (suite.resources?.commands ?? []),
+                  senderId: step.senderId,
+                  context: step.context,
+                  wrapEvalInIIFE: request.wrapEvalInIIFE,
+                  kind: step.kind as (typeof commandEvents)[number],
+                  messageId: step.messageId,
+                  content: step.content ?? ''
+                },
+                factory
+              )
+            : await runInteraction(
+                {
+                  kind: step.kind as 'slash' | 'button',
+                  state,
+                  interactions:
+                    request.candidateKind === 'interaction'
+                      ? replaceCandidate(
+                          suite.resources?.interactions ?? [],
+                          candidate as BCFDInteractionCommand
+                        )
+                      : (suite.resources?.interactions ?? []),
+                  commands:
+                    request.candidateKind === 'command'
+                      ? replaceCandidate(suite.resources?.commands ?? [], candidate as BCFDCommand)
+                      : (suite.resources?.commands ?? []),
+                  senderId: step.senderId,
+                  context: step.context,
+                  wrapEvalInIIFE: request.wrapEvalInIIFE,
+                  commandId:
+                    request.candidateKind === 'interaction' ? candidate.id : step.commandId,
+                  options: step.options,
+                  messageId: step.messageId,
+                  customId: step.customId
+                },
+                factory
+              )
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : 'Validation execution failed'
           result = {
-            state,
+            state: before,
             trace: [],
-            errors: [],
+            errors: [reason],
             resources: [
               {
                 resourceId: candidate.id,
                 kind: request.candidateKind,
                 matched: false,
                 executed: false,
-                outcome: 'unsupported',
-                reason: 'Step kind cannot invoke this candidate kind'
+                outcome: error instanceof PlaygroundExecutionError ? error.outcome : 'not_run',
+                reason,
+                error: reason
               }
             ]
-          }
-        } else {
-          try {
-            session?.beginStep(state)
-            result = commandEvents.includes(step.kind as (typeof commandEvents)[number])
-              ? await runMessage(
-                  {
-                    state,
-                    commands: replaceCandidate(
-                      suite.resources?.commands ?? [],
-                      candidate as BCFDCommand
-                    ),
-                    senderId: step.senderId,
-                    context: step.context,
-                    wrapEvalInIIFE: request.wrapEvalInIIFE,
-                    kind: step.kind as (typeof commandEvents)[number],
-                    messageId: step.messageId,
-                    content: step.content ?? ''
-                  },
-                  factory
-                )
-              : await runInteraction(
-                  {
-                    kind: step.kind as 'slash' | 'button',
-                    state,
-                    interactions: replaceCandidate(
-                      suite.resources?.interactions ?? [],
-                      candidate as BCFDInteractionCommand
-                    ),
-                    senderId: step.senderId,
-                    context: step.context,
-                    wrapEvalInIIFE: request.wrapEvalInIIFE,
-                    commandId: candidate.id,
-                    options: step.options,
-                    messageId: step.messageId,
-                    customId: step.customId
-                  },
-                  factory
-                )
-          } catch (error) {
-            const reason = error instanceof Error ? error.message : 'Validation execution failed'
-            result = {
-              state: before,
-              trace: [],
-              errors: [reason],
-              resources: [
-                {
-                  resourceId: candidate.id,
-                  kind: request.candidateKind,
-                  matched: false,
-                  executed: false,
-                  outcome: error instanceof PlaygroundExecutionError ? error.outcome : 'not_run',
-                  reason,
-                  error: reason
-                }
-              ]
-            }
           }
         }
         state = result.state
@@ -359,6 +347,7 @@ export async function runAgentValidation(
           outcome = executionOutcome as AgentValidationOutcome
         else if (executionOutcome === 'blocked' && !expectedNegative) outcome = 'blocked'
         else if (executionOutcome === 'error' && !expectedNegative) outcome = 'failed'
+        if (result.errors.length && executionOutcome === 'executed') outcome = 'failed'
         if (
           result.diagnostics?.length &&
           !step.assertions.some(

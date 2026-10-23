@@ -17,6 +17,8 @@ export type AgentValidationStep = {
   content?: string
   options?: Record<string, string | number | boolean>
   customId?: string
+  /** Selected fixture interaction when the candidate is a downstream traditional command. */
+  commandId?: string
   messageId?: string | number
   context?: import('./playground/types').PlaygroundEventContext
   advanceClockMs?: number
@@ -58,6 +60,7 @@ export type AgentValidationEffects = {
   variableChanges: AgentValidationChange[]
   cooldownChanges: AgentValidationChange[]
   operations?: import('./playground/types').PlaygroundOperation[]
+  events?: import('./playground/types').PlaygroundGatewayEvent[]
   timing?: {
     startedAt: number
     completedAt: number
