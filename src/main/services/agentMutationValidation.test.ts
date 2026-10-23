@@ -1,3 +1,4 @@
+import { normalizeWorld } from '../../shared/playground/world'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { decodeBCFDCommand } from '../../shared/commandCodec'
 import { createPlaygroundState } from '../../shared/playground/types'
@@ -160,6 +161,28 @@ describe('exact unsaved candidate validation binding', () => {
     expect(result.canCommit).toBe(true)
     expect(prepared).toEqual(before)
   })
+
+  it.each(['users', 'guilds', 'memberships', 'roles', 'channels', 'context'] as const)(
+    'invalidates normalized world evidence when %s changes',
+    async (part) => {
+      const validation = suite()
+      validation.version = 3
+      const state = normalizeWorld(validation.cases[0].state)
+      validation.cases[0].state = state
+      validation.cases[0].steps[0].context = { guildId: state.guildId, channelId: state.channelId }
+      const prepared = draft(validation)
+      const result = await validateAgentMutation(prepared)
+      expect(result.canCommit).toBe(true)
+      if (part === 'users') state.world!.users[0].name = 'Changed'
+      if (part === 'guilds') state.world!.guilds[0].name = 'Changed'
+      if (part === 'memberships') state.world!.memberships[1].muted = true
+      if (part === 'roles') state.world!.roles[0].position = 42
+      if (part === 'channels')
+        state.world!.channels[0].overwrites[state.guildId] = { SendMessages: false }
+      if (part === 'context') validation.cases[0].steps[0].context!.guildId = '123'
+      expect(() => assertAgentValidationBinding(prepared, result.binding, result.report)).toThrow()
+    }
+  )
 
   it('binds edit evidence to the exact read revision', async () => {
     const prepared = draft()

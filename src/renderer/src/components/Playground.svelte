@@ -1,4 +1,10 @@
 <script lang="ts">
+  import {
+    normalizeWorld,
+    commitWorld,
+    selectWorldContext,
+    dmChannel
+  } from '../../../shared/playground/world'
   import { onMount } from 'svelte'
   import { get } from 'svelte/store'
   import { settingsStore } from '../stores/settings'
@@ -7,7 +13,7 @@
   import { commandEvents } from '../../../shared/runtime/dispatch'
   import { validateAgentValidationState } from '../../../shared/playground/agentValidationFixtures'
   import type { BCFDCommand, BCFDInteractionCommand } from '../types/types'
-  import { createPlaygroundState, PLAYGROUND_LIMITS } from '../../../shared/playground/types'
+  import { PLAYGROUND_LIMITS } from '../../../shared/playground/types'
   import type { FakePermission, PlaygroundRequest } from '../../../shared/playground/types'
   import { formatBotStateDraft, parseBotStateDraft } from '../../../shared/playground/botStateDraft'
   import { PlaygroundSavedData } from '../utils/playgroundSavedData'
@@ -19,10 +25,10 @@
   )
   const replayRequest = get(playgroundReplay)
   playgroundReplay.set(null)
-  const initialWorld = replayRequest?.suite.cases[0]?.state ?? createPlaygroundState()
+  const initialWorld = replayRequest?.suite.cases[0]?.state ?? normalizeWorld()
   let worldDraft = $state('')
   let worldError = $state('')
-  let reactionMessageId = $state(1)
+  let reactionMessageId = $state('1')
   let world = $state(initialWorld)
   let botStateDraft = $state(formatBotStateDraft(initialWorld.botState))
   let botStateDraftError = $state('')
@@ -104,7 +110,7 @@
     loadGeneration++
     loading = false
     busy = false
-    world = createPlaygroundState()
+    world = normalizeWorld()
     syncBotStateDraft()
     senderId = world.members[0].id
     content = ''
@@ -118,9 +124,19 @@
   async function runRequest(request: PlaygroundRequest) {
     if (busy || loading) return
     busy = true
-    const promise = session.run(request)
-    const revision = session.revision
+    let revision = session.revision
     try {
+      if (request.state.world) {
+        commitWorld(request.state)
+        const channel =
+          request.kind === 'dm' ? dmChannel(request.state, request.senderId) : undefined
+        request.context = {
+          guildId: channel ? null : request.state.guildId || null,
+          channelId: channel?.id ?? request.state.channelId
+        }
+      }
+      const promise = session.run(request)
+      revision = session.revision
       const result = await promise
       if (!alive || !session.isCurrent(revision)) return
       world = result.state
@@ -133,9 +149,12 @@
       errors = result.errors
       content = ''
       if (
-        !world.members.some((member) => member.id === senderId && !member.kicked && !member.banned)
+        !world.members.some(
+          (member) => member.id === senderId && !member.bot && !member.kicked && !member.banned
+        )
       )
-        senderId = world.members.find((member) => !member.kicked && !member.banned)?.id ?? ''
+        senderId =
+          world.members.find((member) => !member.bot && !member.kicked && !member.banned)?.id ?? ''
     } catch (error) {
       if (alive && session.isCurrent(revision))
         errors = [error instanceof Error ? error.message : 'Playground execution failed']
@@ -172,7 +191,12 @@
       commands: structuredClone($state.snapshot(activeCommands)),
       wrapEvalInIIFE: wrapEval,
       kind: mode === 'slash' ? 'message' : mode,
-      messageId: mode === 'reaction' ? reactionMessageId : undefined,
+      messageId:
+        mode === 'reaction'
+          ? world.world
+            ? reactionMessageId
+            : Number(reactionMessageId)
+          : undefined,
       senderId,
       content
     })
@@ -202,7 +226,7 @@
     })
   }
 
-  function clickButton(messageId: number, customId: string) {
+  function clickButton(messageId: string | number, customId: string) {
     void runRequest({
       kind: 'button',
       state: structuredClone($state.snapshot(world)),
@@ -225,6 +249,7 @@
       return
     }
     world.roles = [...world.roles, { id: roleIdDraft, name: roleNameDraft.trim().slice(0, 100) }]
+    commitWorld(world)
     roleIdDraft = ''
     roleNameDraft = ''
     errors = []
@@ -242,6 +267,7 @@
               : [...member.roles, roleId]
           }
     )
+    commitWorld(world)
   }
 
   function changePermission(memberId: string, permission: FakePermission) {
@@ -256,6 +282,7 @@
               : [...member.permissions, permission]
           }
     )
+    commitWorld(world)
   }
 
   onMount(() => {
@@ -439,13 +466,39 @@
     </details>
     <details class="w-full">
       <summary class="text-xs cursor-pointer">Fake channel/server context</summary>
+      {#if world.world}
+        <label class="text-xs"
+          >Event channel
+          <select
+            class="select select-xs"
+            disabled={busy}
+            value={world.channelId}
+            onchange={(event) => {
+              commitWorld(world)
+              const channel = world.world!.channels.find(
+                (item) => item.id === event.currentTarget.value
+              )!
+              selectWorldContext(world, { guildId: channel.guildId || null, channelId: channel.id })
+              senderId =
+                world.members.find((member) => !member.bot && !member.kicked && !member.banned)
+                  ?.id ?? ''
+            }}
+          >
+            {#each world.world.channels.filter((channel) => !channel.deleted) as channel}
+              <option value={channel.id}
+                >{world.world.guilds.find((guild) => guild.id === channel.guildId)?.name ?? 'DM'} / {channel.name}</option
+              >
+            {/each}
+          </select>
+        </label>
+      {/if}
       <div class="flex flex-wrap gap-2 mt-2">
         <label class="text-xs"
           >Server ID <input
             class="input input-xs"
             bind:value={world.guildId}
             maxlength={20}
-            disabled={busy}
+            disabled={busy || !!world.world}
           /></label
         >
         <label class="text-xs"
@@ -453,7 +506,7 @@
             class="input input-xs"
             bind:value={world.channelId}
             maxlength={20}
-            disabled={busy}
+            disabled={busy || !!world.world}
           /></label
         >
         <label class="flex items-center gap-1 text-xs"
@@ -461,16 +514,33 @@
             type="checkbox"
             class="checkbox checkbox-xs"
             bind:checked={world.nsfw}
+            onchange={(event) => {
+              const channel = world.channels?.find((item) => item.id === world.channelId)
+              world.nsfw = event.currentTarget.checked
+              if (channel) channel.nsfw = world.nsfw
+              commitWorld(world)
+            }}
             disabled={busy}
           />Fake NSFW channel</label
         >
       </div>
     </details>
+    {#if !world.world}
+      <button
+        class="btn btn-xs"
+        disabled={busy}
+        onclick={() => {
+          world = normalizeWorld($state.snapshot(world))
+          session.cancel()
+        }}>Upgrade world to string IDs and guild permissions</button
+      >
+    {/if}
     <details class="border border-base-300 rounded p-3 mt-2">
       <summary class="font-semibold cursor-pointer">Fake world and operation details</summary>
       <p class="text-xs my-2">
-        Configure channels, botPermissions, failures, startupSource, randomSeed, and explicit
-        aiMocks. Applying a world starts a fresh script session.
+        Configure world.users, guilds, memberships, roles (permissions and positions), and channels
+        (overwrites), plus failures, startupSource, randomSeed, and explicit aiMocks. Applying a
+        world starts a fresh script session.
       </p>
       <button
         class="btn btn-xs"
@@ -492,6 +562,8 @@
           try {
             const next = validateAgentValidationState(JSON.parse(worldDraft))
             session.cancel()
+            if (next.world)
+              selectWorldContext(next, { guildId: next.guildId || null, channelId: next.channelId })
             world = next
             syncBotStateDraft()
             worldError = ''
@@ -584,7 +656,7 @@
           <label class="flex items-center gap-2"
             >Send as
             <select class="select select-sm" bind:value={senderId} disabled={busy}>
-              {#each world.members.filter((member) => !member.kicked && !member.banned) as member}<option
+              {#each world.members.filter((member) => !member.bot && !member.kicked && !member.banned) as member}<option
                   value={member.id}>{member.name}</option
                 >{/each}
             </select>
@@ -604,8 +676,8 @@
         {#if mode === 'reaction'}<label class="text-xs"
             >Target fake message ID <input
               class="input input-sm"
-              type="number"
-              min={1}
+              type="text"
+              inputmode="numeric"
               bind:value={reactionMessageId}
             /></label
           >{/if}
@@ -681,7 +753,7 @@
                       bind:value={optionInputs[option.name]}
                       disabled={busy}
                       ><option value="">Choose fake user…</option
-                      >{#each world.members.filter((member) => !member.kicked && !member.banned) as member}<option
+                      >{#each world.members.filter((member) => !member.bot && !member.kicked && !member.banned) as member}<option
                           value={member.id}>{member.name}</option
                         >{/each}</select
                     >

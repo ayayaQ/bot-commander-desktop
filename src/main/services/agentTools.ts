@@ -6,7 +6,7 @@ import crypto from 'node:crypto'
 import { readHostStatus } from './hostReadinessService'
 import type { BCFDCommand, BCFDInteractionAction, BCFDInteractionCommand } from '../types/types'
 import type { AgentLintDiagnostic, AgentMemory, AgentPatchOperation } from '../../shared/agentTypes'
-import { createPlaygroundState } from '../../shared/playground/types'
+import { normalizeWorld } from '../../shared/playground/world'
 import { lintBCFD } from '../../shared/bcfdLint'
 import { decodeBCFDCommand } from '../../shared/commandCodec'
 import { getCommands, setCommands, getCommandRuntimeReviewRevision } from './botService'
@@ -112,7 +112,7 @@ const objectSchema = (properties: Record<string, unknown>, required: string[] = 
 // Fixtures and expected outcomes are explicit inputs, never inferred from saved/live state.
 const validationSchema = objectSchema(
   {
-    version: { type: 'integer', enum: [2] },
+    version: { type: 'integer', enum: [2, 3] },
     resources: {
       type: 'object',
       description:
@@ -138,10 +138,20 @@ const validationSchema = objectSchema(
               {
                 kind: { type: 'string', enum: [...commandEvents, 'slash', 'button'] },
                 senderId: { type: 'string' },
+                context: objectSchema(
+                  { guildId: { type: ['string', 'null'] }, channelId: { type: 'string' } },
+                  ['guildId', 'channelId']
+                ),
                 content: { type: 'string' },
                 options: { type: 'object' },
                 customId: { type: 'string' },
-                messageId: { type: 'integer' },
+                messageId: {
+                  anyOf: [
+                    { type: 'string', pattern: '^[1-9][0-9]{0,19}$' },
+                    { type: 'integer', minimum: 1 }
+                  ],
+                  description: 'Version 3 decimal string ID; legacy version 2 safe integer ID.'
+                },
                 advanceClockMs: { type: 'integer', minimum: 0 },
                 assertions: {
                   type: 'array',
@@ -838,9 +848,12 @@ export async function executeReadTool(name: string, args: Record<string, any>): 
   }
   if (name === 'read_validation_fixture')
     return {
-      version: 2,
+      version: 3,
       capabilities: playgroundCapabilities(),
-      state: createPlaygroundState(),
+      state: normalizeWorld(),
+      exampleContext: { guildId: '900000000000000001', channelId: '900000000000000002' },
+      compatibility:
+        'Version 2 fixtures retain numeric message IDs and legacy permissions. Version 3 requires state.world, string message IDs and step.context {guildId,channelId}; use null guildId for a configured DM channel. Canonical users, guilds, memberships, roles and channels live in state.world. Top-level members/roles/channels are a derived active projection. The complete fixture is bound to validation evidence.',
       limits: { cases: 6, totalSteps: 12, assertionsPerStep: 8, totalAssertions: 64 },
       guidance:
         'Each step needs /outcome and a meaningful effect assertion; blocked/error expectations additionally need a specific nonempty /reason or /errors/N assertion. Execution outcomes: executed, blocked, error, unmatched, unsupported, not_run. Assertion paths are JSON Pointers into {outcome,reason,errors,diagnostics,warnings,incomplete,state,effects}. Inline interpreter diagnostics preserve executed output and require an explicit passing /diagnostics assertion. Interaction DM delivery failures are warnings and later actions continue. Incomplete simulation can never authorize a save, including expected-error tests. Fresh state per case; advanceClockMs advances the fake clock between sequence steps without sleeping. At least one executed candidate step is needed for an overall pass. Expected-negative steps must include a specific nonempty /reason or /errors/N assertion and an effects assertion proving no unintended outputs. AI requires explicit state.aiMocks entries matching the evaluated prompt. state.startupSource runs once per case in the isolated VM. Live state, Discord and providers are never loaded. All command event kinds are supported. Optional resources contains explicitly supplied command/interaction snapshots.',

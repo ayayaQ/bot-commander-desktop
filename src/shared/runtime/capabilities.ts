@@ -19,6 +19,27 @@ export function playgroundCapabilities() {
   })
   return {
     runtimeVersion: RUNTIME_VERSION,
+    fixtureVersions: [2, 3],
+    world: {
+      normalized: ['users', 'guilds', 'memberships', 'roles', 'channels', 'messages'],
+      eventContext: ['guildId (null for DM)', 'channelId', 'senderId'],
+      permissions: [
+        'guild roles',
+        'everyone/role/member overwrites',
+        'owner/administrator bypass',
+        'role hierarchy',
+        'managed/editable restrictions'
+      ],
+      limitations: [
+        'thread inheritance',
+        'timeouts',
+        '2FA',
+        'intents',
+        'registrations',
+        'live Discord access'
+      ],
+      messageIds: 'v3 decimal strings; v2 retains safe integer IDs'
+    },
     keywords: [...registry.keys()].sort(),
     events: [...commandEvents, 'slash', 'button'],
     actions: [...traditionalActionNames],

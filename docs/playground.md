@@ -16,7 +16,8 @@ Snapshots are read-only; executing a command never invokes Discord or saves a re
 
 The session controls expose fake identities, roles and permissions, channel/server context,
 bot state, a controllable clock, a random seed, startup JavaScript and AI responses. The complete
-world JSON editor also exposes channels, role metadata, bot permissions, exact prompt mocks and
+world JSON editor also exposes normalized users, guilds, memberships, roles with permissions and
+positions, channels with overwrites, exact prompt mocks and
 injected operation failures. Apply validates and resets the worker. Reset and navigation discard
 all session state. Reload explicitly refreshes saved snapshots.
 
@@ -38,7 +39,7 @@ and create a case from the current world. Edit the scenario JSON to add steps, n
 options, button targets, mocks and assertions. Each case starts with its own explicit world;
 steps within it share state. These scenarios are temporary and do not save commands or suites.
 
-Version 2 suites contain `cases` and optional `resources: {commands, interactions}` snapshots.
+Version 2 and 3 suites contain `cases` and optional `resources: {commands, interactions}` snapshots.
 The candidate replaces a snapshot with the same ID in place; otherwise it is appended. Only
 execution of the candidate counts toward candidate coverage. No live bot state or startup source
 is loaded implicitly. Startup source belongs in `state.startupSource`.
@@ -50,6 +51,7 @@ Every step requires `/outcome` and an effect/error assertion. JSON Pointers addr
 {
   "kind": "message",
   "senderId": "100000000000000001",
+  "context": { "guildId": "900000000000000001", "channelId": "900000000000000002" },
   "content": "!chat hello",
   "assertions": [
     { "path": "/outcome", "equals": "executed" },
@@ -69,6 +71,76 @@ an effects assertion. At least one successful candidate execution is required fo
 pass. Unmatched, unsupported, timed out, cancelled, truncated or incomplete runs cannot authorize
 a save. Reports include assertions, candidate coverage, messages, state/entity differences,
 ordered adapter operations and the runtime version.
+
+## Normalized worlds (version 3)
+
+New Playground sessions and `read_validation_fixture` use version 3. Canonical entities live in
+`state.world`: `users` hold global identity, `guilds` hold identity and `ownerId`, `memberships`
+reference a user by `id` and a guild by `guildId`, and `roles` and `channels` each carry `guildId`.
+The same user can belong to several guilds with independent roles, nickname, moderation and voice
+state. Each guild includes an explicit `@everyone` role whose ID is its guild ID. The simulated
+bot (`900000000000000003`) is an explicit user and needs its own membership/roles in each guild.
+Entity IDs must be unique decimal strings within the unsigned 64-bit range (the everyone/guild
+identity is the sole shared ID). Membership identity is the pair `(guildId, id)`.
+
+Every v3 suite step supplies `context: {guildId, channelId}`. `senderId` resolves a membership in
+that guild. Invalid memberships, foreign channels/roles, message targets in another channel,
+parents from another guild and dangling overwrite targets are rejected. Select an event channel
+in the UI; use the world JSON editor to add guilds, users, memberships and channels. Top-level
+`members`, `roles`, `channels`, guild/channel names and NSFW status are the active projection;
+edit canonical `state.world` in JSON. Execution regenerates the projection and commits local
+mutations back to the matching guild. Bot state, variables and global/user cooldowns remain
+intentionally shared across a case, as in production; server cooldowns use the event guild.
+
+DM steps use `guildId: null` and a type-1 channel with `guildId: ""` and `recipientId`. DMs have
+no roles or guild membership. Incoming DM authors must be the recipient; guild-only events
+cannot use a DM context. Interactive DM sends can create this channel automatically. Outgoing
+private messages create/reuse the recipient's DM channel and carry `guildId: null`.
+
+Supported permissions are `Administrator`, `ViewChannel`, `SendMessages`, `ReadMessageHistory`,
+`AddReactions`, `ManageMessages`, `ManageChannels`, `ManageRoles`, `KickMembers`, `BanMembers`
+and `MuteMembers`. Put permission names in `role.permissions`. Legacy membership permission
+flags remain explicit additive guild grants for compatibility. Channel `overwrites` map a role
+or member ID to permission booleans: false denies, true allows, omission inherits. Resolution
+combines everyone and member roles, applies the everyone overwrite, combines all role denies
+then all role allows, and finally applies the member overwrite. Owners/administrators bypass
+overwrites. Hidden channels remove modeled channel permissions. This follows the supported
+subset of [Discord's permission rules](https://docs.discord.com/developers/topics/permissions).
+
+The bot's role must outrank a target member/role for moderation or role management; administrator
+permission does not bypass hierarchy. Guild owners and the bot itself cannot be moderated;
+managed roles, `editable: false` roles, everyone and `manageable: false` members are protected.
+Equal role positions are conservatively treated as a hierarchy failure. Deleting one's own
+message needs channel access; deleting another author's message needs Manage Messages. Purge,
+button and reaction targets are confined to the event channel. Logs include event context and
+reports include `/effects/worldChanges` with canonical JSON paths.
+
+Permission gaps remain explicit: thread membership/inherited permissions, voice connection
+state prerequisites, timeout-derived restrictions, 2FA, permission grant ceilings when editing
+overwrites, Discord error codes and network ordering are not modeled. Reaction permission checks
+are conservative even for an already-present reaction. Category overwrites are not implicitly
+inherited: supply the effective overwrite fixture on the channel. These are local scenarios and
+do not establish deployed Discord access, intents or command registration.
+
+### Existing fixtures and ID migration
+
+Version 2 (including suites with no version) continues to run with its original numeric transcript
+IDs, single-guild projections and simplified permission flags. Existing numeric assertions do not
+silently change meaning. The UI offers **Upgrade world to string IDs and guild permissions**;
+`normalizeWorld` provides the same explicit conversion for code callers. It converts existing
+message/reply IDs using exact decimal strings and seeds a normalized guild/bot membership.
+Unsafe numeric IDs cannot be migrated. Generated v3 IDs use an integer sequence and BigInt
+arithmetic, serialize as strings, and avoid collisions with existing world/message IDs.
+`nextId` remains a safe integer allocation counter, not a Discord ID.
+
+To migrate a suite, set `version: 3`, normalize every case state, add `context` to each step and
+convert reaction/button `messageId` plus message/reply/deleted-ID assertions to strings. Revisit
+assertions for changed ownership, permissions, hierarchy, new IDs and canonical world effects;
+upgrading is explicit because these semantics are stronger than v2. Keep snowflakes as strings
+through JSON, reports and replay?never pass them through `Number`. `read_validation_fixture`
+returns a v3 starting world and context example. The entire canonical world, every context and
+assertion are included in fixture evidence; changing any of them invalidates the report. Runtime
+version 3 also invalidates evidence generated before these semantics were introduced.
 
 ## Agent workflow and save boundary
 
@@ -147,7 +219,7 @@ and awaits async bare keywords. These corrections share the same evaluator and d
 in production and simulation.
 
 This is an offline behavioral test, not a guarantee of Discord delivery. Network concurrency,
-latency, gateway event cascades, permission hierarchy and intent/registration availability are
+latency, gateway event cascades and intent/registration availability are
 not fully reproduced. Permission fixtures and injected failures exercise local failure paths;
 they cannot prove a live bot has access. The synthetic dispatcher waits for detached tasks to
 settle before reporting; live delivery completion order depends on the network. Injected adapter
@@ -159,8 +231,8 @@ attempt visible-state recovery and logs the need to restart. Ordinary thrown eva
 the session. The captured native InternalError family is conservatively incomplete, including
 explicitly constructed instances; changing its display name does not change that classification. Global objects outside `botState` are retained in the VM but are not a complete JSON
 snapshot of all JavaScript bindings.
-Local transcript IDs are positive integers; channel, role and member IDs are decimal strings.
-The synthetic world currently models one active guild, with multiple channels. Clock control
+Version 3 uses decimal string IDs for all Discord entities, including transcript messages.
+A world can contain multiple guilds; each event selects one guild/channel and membership. Clock control
 covers elapsed time and Date.now; host timezone-dependent formatting is not configurable.
 
 ## Isolation and bounds

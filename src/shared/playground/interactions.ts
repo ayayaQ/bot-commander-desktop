@@ -1,3 +1,4 @@
+import { prepareWorldEvent, commitWorld, assertManageable } from './world'
 import { deliverInteractionDM } from '../runtime/errors'
 import { incompleteReasons, recordFailure } from './failures'
 import { operation, requireBotPermission } from './runtimeContext'
@@ -83,7 +84,9 @@ export function validateOptions(
       if (
         definition.type === 7 &&
         value !== state.channelId &&
-        !state.channels?.some((channel) => channel.id === value)
+        !state.channels?.some(
+          (channel) => channel.id === value && !channel.deleted && channel.guildId === state.guildId
+        )
       )
         fail()
       if (definition.type === 8 && !state.roles.some((role) => role.id === value)) fail()
@@ -172,11 +175,18 @@ async function executeAction(
   const render = async (text: string) => await evaluateTemplate(text, ctx)
   if (!isButton) {
     if (action.deleteX) {
-      if (!hasPermission(sender, 'manageMessages'))
+      if (!hasPermission(sender, 'manageMessages', state))
         throw new PlaygroundExecutionError('Manage Messages permission required', 'blocked')
       const count = Math.min(Math.max(Number(action.deleteNum) || 0, 1), 100)
+      if (state.world) requireBotPermission(state, 'ManageMessages', state.channelId)
       state.messages
-        .filter((message) => message.kind !== 'dm' && !message.deleted && !message.ephemeral)
+        .filter(
+          (message) =>
+            message.kind !== 'dm' &&
+            !message.deleted &&
+            !message.ephemeral &&
+            (!state.world || message.channelId === state.channelId)
+        )
         .slice(-count)
         .forEach((message) => (message.deleted = true))
       trace.push(`Deleted up to ${count} fake channel messages`)
@@ -197,14 +207,15 @@ async function executeAction(
         [action.isVoiceMute, 'mute', 'muted']
       ] as const) {
         if (!enabled) continue
-        if (!hasPermission(sender, permission))
+        if (!hasPermission(sender, permission, state, target.voiceChannelId))
           throw new PlaygroundExecutionError(`${permission} permission required`, 'blocked')
         operation(state, `member.${key}`, [target.id], () => {
           requireBotPermission(
             state,
-            { kicked: 'KickMembers', banned: 'BanMembers', muted: 'MuteMembers' }[key]
+            { kicked: 'KickMembers', banned: 'BanMembers', muted: 'MuteMembers' }[key],
+            key === 'muted' ? (target.voiceChannelId ?? state.channelId) : undefined
           )
-          if (target.manageable === false) throw new Error('Member is not manageable')
+          assertManageable(state, target)
           target[key] = true
         })
         trace.push(`${key}: ${target.name}`)
@@ -283,6 +294,10 @@ export async function runInteraction(
   factory?: ScriptSandboxFactory
 ): Promise<PlaygroundResult> {
   validateState(request.state)
+  request = {
+    ...request,
+    state: prepareWorldEvent(request.state, request.context, request.kind, request.senderId)
+  }
   if (
     !Array.isArray(request.interactions) ||
     request.interactions.length > PLAYGROUND_LIMITS.commands
@@ -327,7 +342,10 @@ export async function runInteraction(
       )
     } else {
       const message = original.messages.find(
-        (item) => item.id === request.messageId && !item.deleted
+        (item) =>
+          item.id === request.messageId &&
+          !item.deleted &&
+          (!original.world || item.channelId === original.channelId)
       )
       if (
         !message ||
@@ -385,7 +403,7 @@ export async function runInteraction(
         resource.outcome = 'blocked'
         resource.reason = `Cooldown; ${remaining}s remaining`
         return {
-          state: draft,
+          state: commitWorld(draft),
           trace,
           errors,
           diagnostics,
@@ -412,7 +430,7 @@ export async function runInteraction(
     resource.executed = true
     resource.reason = undefined
     return {
-      state: draft,
+      state: commitWorld(draft),
       trace,
       errors,
       diagnostics,
@@ -442,7 +460,7 @@ export async function runInteraction(
     }
     errors.push(error instanceof Error ? error.message : 'Interaction execution failed')
     return {
-      state: draft,
+      state: commitWorld(draft),
       trace: [...trace, 'Failed; earlier interaction effects retained'],
       errors,
       diagnostics,

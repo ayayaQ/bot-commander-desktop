@@ -1,3 +1,5 @@
+import { validateNormalizedWorld } from './normalizedWorldValidation'
+import { prepareWorldEvent } from './world'
 import { commandEvents } from '../runtime/dispatch'
 import { validateWorldExtensions } from './worldValidation'
 import type {
@@ -203,6 +205,7 @@ export function validateAgentValidationState(value: unknown): PlaygroundState {
   keys(
     source,
     [
+      'world',
       'botState',
       'variables',
       'cooldowns',
@@ -230,6 +233,18 @@ export function validateAgentValidationState(value: unknown): PlaygroundState {
     ],
     'state'
   )
+  if (source.world !== undefined) {
+    const state = source as PlaygroundState
+    validateNormalizedWorld(state)
+    for (const message of state.messages) {
+      if (message.embed) embed(message.embed, 'message.embed')
+      if (message.buttons) {
+        array(message.buttons, 'message.buttons', 5)
+        for (const button of message.buttons) validateButton(button, 'message.buttons', 0)
+      }
+    }
+    return state
+  }
   id(source.guildId, 'state.guildId')
   id(source.channelId, 'state.channelId')
   if (source.guildId === FAKE_BOT_ID || source.channelId === FAKE_BOT_ID)
@@ -388,7 +403,7 @@ export function validateAgentValidationSuite(value: unknown): AgentValidationSui
     'suite'
   )
   keys(suite, ['version', 'resources', 'cases'], 'suite')
-  if (suite.version !== undefined && suite.version !== 2)
+  if (suite.version !== undefined && suite.version !== 2 && suite.version !== 3)
     throw new Error('Unsupported validation version')
   if (suite.resources !== undefined) {
     const resources = record(suite.resources, 'resources')
@@ -417,6 +432,8 @@ export function validateAgentValidationSuite(value: unknown): AgentValidationSui
     text(item.name, 'case.name', 100, true)
     names.push(item.name)
     const state = validateAgentValidationState(item.state)
+    if ((suite.version === 3) !== !!state.world)
+      throw new Error('Version 3 requires a normalized world; version 2 uses legacy state')
     array(item.steps, 'case.steps', AGENT_VALIDATION_LIMITS.steps)
     if (!item.steps.length) throw new Error('Each validation case requires steps')
     steps += item.steps.length
@@ -429,6 +446,7 @@ export function validateAgentValidationSuite(value: unknown): AgentValidationSui
         [
           'kind',
           'senderId',
+          'context',
           'content',
           'options',
           'customId',
@@ -441,7 +459,19 @@ export function validateAgentValidationSuite(value: unknown): AgentValidationSui
       if (![...commandEvents, 'slash', 'button'].includes(step.kind as string))
         throw new Error('Unsupported validation step kind')
       id(step.senderId, 'step.senderId')
-      if (!state.members.some((member) => member.id === step.senderId))
+      if (state.world) {
+        const context = record(step.context, 'step.context')
+        keys(context, ['guildId', 'channelId'], 'step.context')
+        if (context.guildId !== null) id(context.guildId, 'step.context.guildId')
+        id(context.channelId, 'step.context.channelId')
+        prepareWorldEvent(
+          state,
+          context as { guildId: string | null; channelId: string },
+          String(step.kind),
+          String(step.senderId)
+        )
+      }
+      if (!(state.world?.users ?? state.members).some((member) => member.id === step.senderId))
         throw new Error('Step sender references an unknown fake member')
       if (Object.hasOwn(step, 'advanceClockMs'))
         integer(step.advanceClockMs, 'step.advanceClockMs', 0, 86_400_000)
@@ -453,7 +483,10 @@ export function validateAgentValidationSuite(value: unknown): AgentValidationSui
           Object.hasOwn(step, 'content')
         )
           text(step.content, 'step.content', PLAYGROUND_LIMITS.input)
-        if (step.kind === 'reaction') integer(step.messageId, 'step.messageId', 1)
+        if (step.kind === 'reaction')
+          state.world
+            ? id(step.messageId, 'step.messageId')
+            : integer(step.messageId, 'step.messageId', 1)
         if (
           ['options', 'customId', ...(step.kind === 'reaction' ? [] : ['messageId'])].some((key) =>
             Object.hasOwn(step, key)
@@ -477,7 +510,8 @@ export function validateAgentValidationSuite(value: unknown): AgentValidationSui
         }
       } else {
         text(step.customId, 'step.customId', 100, true)
-        integer(step.messageId, 'step.messageId', 1)
+        if (state.world) id(step.messageId, 'step.messageId')
+        else integer(step.messageId, 'step.messageId', 1)
         if (['content', 'options'].some((key) => Object.hasOwn(step, key)))
           throw new Error('Button step contains unrelated fields')
       }

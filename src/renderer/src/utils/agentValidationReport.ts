@@ -122,7 +122,8 @@ function effectViews(effects: AgentValidationEffects): ValidationEffectView[] {
     { label: 'Cooldown changes', values: effects.cooldownChanges },
     { label: 'Operations', values: effects.operations ?? [] },
     { label: 'Channel changes', values: effects.channelChanges ?? [] },
-    { label: 'Role changes', values: effects.roleChanges ?? [] }
+    { label: 'Role changes', values: effects.roleChanges ?? [] },
+    ...(effects.worldChanges ? [{ label: 'World changes', values: effects.worldChanges }] : [])
   ]
   return groups.map(({ label, values }) => {
     const preview = formatValidationValue(

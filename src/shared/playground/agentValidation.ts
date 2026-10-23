@@ -47,7 +47,12 @@ function equal(left: unknown, right: unknown): boolean {
     keys.every((key) => Object.hasOwn(right, key) && equal(left[key], right[key]))
   )
 }
-function changes(before: unknown, after: unknown, base = ''): AgentValidationChange[] {
+function changes(
+  before: unknown,
+  after: unknown,
+  base = '',
+  deepArrays = false
+): AgentValidationChange[] {
   const result: AgentValidationChange[] = []
   const walk = (
     left: unknown,
@@ -64,8 +69,7 @@ function changes(before: unknown, after: unknown, base = ''): AgentValidationCha
       right &&
       typeof left === 'object' &&
       typeof right === 'object' &&
-      !Array.isArray(left) &&
-      !Array.isArray(right)
+      (deepArrays || (!Array.isArray(left) && !Array.isArray(right)))
     ) {
       for (const key of new Set([...Object.keys(left), ...Object.keys(right)]))
         walk(
@@ -105,7 +109,8 @@ function effects(before: PlaygroundState, after: PlaygroundState): AgentValidati
     cooldownChanges: changes(before.cooldowns, after.cooldowns, '/cooldowns'),
     operations: (after.operations ?? []).slice(before.operations?.length ?? 0),
     channelChanges: changes(before.channels ?? [], after.channels ?? [], '/channels'),
-    roleChanges: changes(before.roles, after.roles, '/roles')
+    roleChanges: changes(before.roles, after.roles, '/roles'),
+    ...(after.world ? { worldChanges: changes(before.world, after.world, '/world', true) } : {})
   }
 }
 function actualAt(root: unknown, path: string): { present: boolean; value: unknown } {
@@ -256,6 +261,7 @@ export async function runAgentValidation(
                       candidate as BCFDCommand
                     ),
                     senderId: step.senderId,
+                    context: step.context,
                     wrapEvalInIIFE: request.wrapEvalInIIFE,
                     kind: step.kind as (typeof commandEvents)[number],
                     messageId: step.messageId,
@@ -272,6 +278,7 @@ export async function runAgentValidation(
                       candidate as BCFDInteractionCommand
                     ),
                     senderId: step.senderId,
+                    context: step.context,
                     wrapEvalInIIFE: request.wrapEvalInIIFE,
                     commandId: candidate.id,
                     options: step.options,
