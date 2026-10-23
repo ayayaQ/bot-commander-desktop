@@ -169,8 +169,9 @@ describe('bounded candidate validation runner', () => {
     expect((await runAgentValidation(input, sandboxFactory)).outcome).toBe('passed')
     const global = await runAgentValidation({ ...input, wrapEvalInIIFE: false }, sandboxFactory)
     expect(global.outcome).toBe('failed')
-    expect(global.cases[0].steps[0].executionOutcome).toBe('error')
-    expect(global.cases[0].steps[0].effects.messages).toEqual([])
+    expect(global.cases[0].steps[0].executionOutcome).toBe('executed')
+    expect(global.cases[0].steps[0].effects.messages[0].content).toContain('[BCFD Error:')
+    expect(global.cases[0].steps[0].diagnostics).toHaveLength(1)
   })
 
   it.each([true, false])(
@@ -269,11 +270,11 @@ describe('bounded candidate validation runner', () => {
       expect(report.outcome).toBe('failed')
       expect(report.coverage.unsupported).toBe(0)
       expect(report.cases[0].steps[0]).toMatchObject({
-        executionOutcome: 'error',
+        executionOutcome: 'executed',
         matched: true,
-        executed: false
+        executed: true
       })
-      expect(report.cases[0].steps[0].errors.join(' ')).toContain('Unknown ')
+      expect(report.cases[0].steps[0].diagnostics?.join(' ')).toContain('Unknown ')
     }
   )
 
@@ -504,9 +505,9 @@ describe('bounded candidate validation runner', () => {
     })
     input.suite.cases[0].state.members[1].banned = true
     const predispatch = await runAgentValidation(input)
-    expect(predispatch.outcome).toBe('failed')
+    expect(predispatch.outcome).toBe('not_run')
     expect(predispatch.cases[0].steps[1]).toMatchObject({
-      outcome: 'failed',
+      outcome: 'not_run',
       expectedNegative: false,
       matched: false
     })

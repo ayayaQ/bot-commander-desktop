@@ -1,3 +1,4 @@
+import { commitsTemplate } from '../../shared/runtime/errors'
 import {
   ButtonInteraction,
   ChatInputCommandInteraction,
@@ -80,7 +81,7 @@ export async function stringInfoAdd(ctx: StringInfoContext): Promise<string> {
       return interpret(ctx.message, interpreterCtx as unknown as InterpreterContext)
     },
     {
-      shouldCommit: (result) => result.errors.length === 0,
+      shouldCommit: commitsTemplate,
       onCommitted: (state) => emitResourceChanged('bot-state', 'system', state)
     }
   )

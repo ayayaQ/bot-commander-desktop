@@ -1,3 +1,4 @@
+import { IncompleteSimulationError } from './errors'
 import { NodeType } from './types'
 import type {
   ASTNode,
@@ -39,7 +40,9 @@ export class Interpreter {
       const inspect = (value: unknown, depth: number) => {
         if (!value || typeof value !== 'object') return
         if (++count > this.limits!.nodes || depth > this.limits!.depth * 4)
-          throw new Error('Template nesting or work exceeds the playground limit')
+          throw new IncompleteSimulationError(
+            'Template nesting or work exceeds the playground limit'
+          )
         for (const child of Object.values(value)) inspect(child, depth + 1)
       }
       inspect(ast, 0)
@@ -60,7 +63,7 @@ export class Interpreter {
    */
   private async evaluateNode(node: ASTNode, ctx: BCFDContext): Promise<string> {
     if (this.limits && ++this.visited > this.limits.nodes)
-      throw new Error('Template work exceeds the playground limit')
+      throw new IncompleteSimulationError('Template work exceeds the playground limit')
     switch (node.type) {
       case NodeType.PROGRAM:
         return this.evaluateProgram(node, ctx)
@@ -98,7 +101,7 @@ export class Interpreter {
     }
     const output = parts.join('')
     if (this.limits && output.length > this.limits.output)
-      throw new Error('Output exceeds the playground limit')
+      throw new IncompleteSimulationError('Output exceeds the playground limit')
     return output
   }
 
@@ -115,6 +118,7 @@ export class Interpreter {
     try {
       return await func([], ctx)
     } catch (e) {
+      if (e instanceof IncompleteSimulationError) throw e
       const message = e instanceof Error ? e.message : 'Unknown error'
       this.addError(`Error evaluating '$${node.name}': ${message}`, node.position, node.length)
       return `[BCFD Error: ${message}]`
@@ -158,6 +162,7 @@ export class Interpreter {
       }
       return result
     } catch (e) {
+      if (e instanceof IncompleteSimulationError) throw e
       const message = e instanceof Error ? e.message : 'Unknown error'
       this.addError(`Error evaluating '$${node.name}': ${message}`, node.position, node.length)
       return `[BCFD Error: ${message}]`
@@ -235,6 +240,7 @@ export class Interpreter {
       })
       return wrapEvalInIIFE && result !== undefined ? String(result) : ''
     } catch (e) {
+      if (e instanceof IncompleteSimulationError) throw e
       const jsError = this.describeJavaScriptError(e)
       const position = this.evalErrorPosition(
         node,

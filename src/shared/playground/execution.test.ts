@@ -163,12 +163,13 @@ describe('playground command execution state', () => {
     state.nextId = 2
     const original = structuredClone(state)
     const result = await runMessage(messageRequest(saved, state), factory)
-    expect(result.errors).toHaveLength(1)
+    expect(result.errors).toEqual([])
+    expect(result.diagnostics).toEqual(["Unknown variable '$unknown'"])
     expect(result.state.botState).toEqual({ profile: { count: 5 } })
     expect(result.state.variables).toEqual({ theme: 'keep', temporary: 'staged' })
     expect(result.state.cooldowns).toEqual({ ...original.cooldowns, 'message:global': 0 })
     expect(result.state.messages[0].deleted).toBe(true)
-    expect(result.state.messages.at(-1)?.content).toBe('staged')
+    expect(result.state.messages.at(-1)?.content).toBe('$unknown')
     expect(state).toEqual(original)
   })
 
@@ -188,12 +189,14 @@ describe('playground command execution state', () => {
       { ...messageRequest(first), commands: [first, second] },
       factory
     )
-    expect(result.errors).toHaveLength(1)
+    expect(result.errors).toEqual([])
+    expect(result.diagnostics).toEqual(["Unknown variable '$unknown'"])
     expect(result.state.botState).toEqual({ count: 2 })
     expect(result.state.messages.map((message) => message.content)).toEqual([
       '!test',
       'first',
-      'second'
+      'second',
+      '$unknown'
     ])
     expect(result.state.cooldowns).toEqual({ 'second:global': 0 })
   })
@@ -222,11 +225,12 @@ describe('playground command execution state', () => {
     state.nextId = 2
     const original = structuredClone(state)
     const result = await runInteraction(slashRequest(saved, state), factory)
-    expect(result.errors).toHaveLength(1)
+    expect(result.errors).toEqual([])
+    expect(result.diagnostics).toEqual(["Unknown variable '$unknown'"])
     expect(result.state.botState).toEqual({ profile: { count: 5 } })
     expect(result.state.messages[0].deleted).toBe(true)
-    expect(result.state.messages.at(-1)?.content).toBe('staged')
-    expect(result.state.cooldowns).toEqual(original.cooldowns)
+    expect(result.state.messages.at(-1)?.content).toBe('$unknown')
+    expect(result.state.cooldowns).toEqual({ ...original.cooldowns, 'slash:global': 0 })
     expect(state).toEqual(original)
   })
 
@@ -385,11 +389,9 @@ describe('playground command execution state', () => {
     expect(result.errors).toHaveLength(1)
     expect(result.errors[0]).toContain('JSON')
     expect(result.state.botState).toEqual(original.botState)
-    expect(result.state.variables).toEqual(original.variables)
+    expect(result.state.variables).toEqual({ ...original.variables, temporary: 'staged' })
     expect(result.state.cooldowns).toEqual({ ...original.cooldowns, 'message:global': 0 })
-    expect(result.state.messages).toEqual([
-      { id: 1, kind: 'user', author: 'Alex', content: '!test', channelId: state.channelId }
-    ])
+    expect(result.state.messages).toHaveLength(1)
     expect(state).toEqual(original)
   })
 
@@ -505,7 +507,7 @@ describe('playground eval template resolution', () => {
     expect(result.state.variables).toEqual({})
   })
 
-  it('reports the primary interpolated script error and rolls back all staged state', async () => {
+  it('renders interpolated script diagnostics, rolls back bot state and retains global variables', async () => {
     const saved = messageCommand({
       cooldown: 5,
       cooldownType: 'Global',
@@ -518,13 +520,12 @@ describe('playground eval template resolution', () => {
     state.cooldowns = { 'older:global': 0 }
     const original = structuredClone(state)
     const result = await runMessage(messageRequest(saved, state), factory)
-    expect(result.errors).toEqual(['!test: JavaScript error: Alex'])
+    expect(result.errors).toEqual([])
+    expect(result.diagnostics?.[0]).toContain('JavaScript error: Alex')
     expect(result.state.botState).toEqual(original.botState)
-    expect(result.state.variables).toEqual(original.variables)
+    expect(result.state.variables).toEqual({ ...original.variables, temporary: 'staged' })
     expect(result.state.cooldowns).toEqual({ ...original.cooldowns, 'message:global': 0 })
-    expect(result.state.messages).toEqual([
-      { id: 1, kind: 'user', author: 'Alex', content: '!test', channelId: state.channelId }
-    ])
+    expect(result.state.messages.at(-1)?.content).toContain('[BCFD Error: Alex')
     expect(state).toEqual(original)
   })
 })

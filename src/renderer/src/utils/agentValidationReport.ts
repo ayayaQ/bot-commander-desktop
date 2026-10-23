@@ -41,6 +41,9 @@ export interface ValidationStepView {
   hiddenTrace: number
   errors: string[]
   hiddenErrors: number
+  diagnostics: string[]
+  warnings: string[]
+  incomplete: string[]
 }
 
 export interface ValidationEffectView {
@@ -302,7 +305,16 @@ export function agentValidationReportView(
         trace: step.trace.slice(0, AGENT_VALIDATION_DISPLAY_LIMITS.lines).map(boundedText),
         hiddenTrace: Math.max(0, step.trace.length - AGENT_VALIDATION_DISPLAY_LIMITS.lines),
         errors: step.errors.slice(0, AGENT_VALIDATION_DISPLAY_LIMITS.lines).map(boundedText),
-        hiddenErrors: Math.max(0, step.errors.length - AGENT_VALIDATION_DISPLAY_LIMITS.lines)
+        hiddenErrors: Math.max(0, step.errors.length - AGENT_VALIDATION_DISPLAY_LIMITS.lines),
+        diagnostics: (step.diagnostics ?? [])
+          .slice(0, AGENT_VALIDATION_DISPLAY_LIMITS.lines)
+          .map(boundedText),
+        warnings: (step.warnings ?? [])
+          .slice(0, AGENT_VALIDATION_DISPLAY_LIMITS.lines)
+          .map(boundedText),
+        incomplete: (step.incomplete ?? [])
+          .slice(0, AGENT_VALIDATION_DISPLAY_LIMITS.lines)
+          .map(boundedText)
       }))
     }))
   const limitations = [...new Set(report.limitations)].map(boundedText)

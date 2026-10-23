@@ -1,14 +1,24 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { getQuickJS } from 'quickjs-emscripten'
+import {
+  createScriptSandboxFactory,
+  type ScriptSandboxFactory
+} from '../../../shared/playground/script'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { decodeBCFDCommand } from '../../../shared/commandCodec'
 import { createPlaygroundState } from '../../../shared/playground/types'
 
 const { load } = vi.hoisted(() => ({ load: vi.fn() }))
-vi.mock('../../../shared/playground/script', () => ({ loadScriptSandboxFactory: load }))
+vi.mock('../../../shared/playground/script', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  loadScriptSandboxFactory: load
+}))
+let factory: ScriptSandboxFactory
+beforeAll(async () => {
+  factory = createScriptSandboxFactory(await getQuickJS())
+})
 beforeEach(() => {
   load.mockReset()
-  load.mockResolvedValue(() => {
-    throw new Error('Script sandbox was unexpectedly needed for pure fixture tests')
-  })
+  load.mockResolvedValue(factory)
 })
 
 async function workerHarness() {

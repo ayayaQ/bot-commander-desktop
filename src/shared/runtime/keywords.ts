@@ -1,3 +1,4 @@
+import { IncompleteSimulationError } from './errors'
 import type { RuntimeGuild } from './ports'
 import type { BCFDContext, BCFDFunction, FunctionRegistry } from './types'
 import type { RuntimeServices } from './services'
@@ -1235,7 +1236,7 @@ export function createFunctionRegistry(host: RuntimeServices): FunctionRegistry 
         position += find.length
       }
       if (text.length + count * (replacement.length - find.length) > host.maxOutput)
-        throw new Error('Output exceeds the playground limit')
+        throw new IncompleteSimulationError('Output exceeds the playground limit')
     }
     return text.split(find).join(replacement)
   })

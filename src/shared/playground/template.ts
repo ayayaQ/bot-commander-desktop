@@ -1,3 +1,5 @@
+import { commitsTemplate, IncompleteSimulationError } from '../runtime/errors'
+import { markIncomplete, recordFailure } from './failures'
 import { Interpreter } from '../runtime/evaluator'
 import { createFakeRuntime } from './runtimeContext'
 import { PLAYGROUND_LIMITS } from './types'
@@ -19,6 +21,7 @@ export type TemplateContext = {
   command?: CooldownCommand
   trace?: string[]
   commitTemplate?: () => void
+  diagnostics?: string[]
 }
 
 /** Production language semantics, with a strictly local capability adapter. */
@@ -33,11 +36,40 @@ export function evaluateTemplate(source: string, ctx: TemplateContext): Promise<
 }
 async function evaluate(source: string, ctx: TemplateContext): Promise<string> {
   if (typeof source !== 'string' || source.length > PLAYGROUND_LIMITS.template)
-    throw new Error('Template exceeds the playground limit')
-  const { context, registry } = createFakeRuntime(ctx)
-  const result = await new Interpreter(registry, PLAYGROUND_LIMITS).interpret(source, context)
-  for (const error of result.errors) ctx.trace?.push(`BCFD: ${error.message}`)
-  if (result.errors.length) throw new Error(result.errors.map((error) => error.message).join('; '))
-  ctx.commitTemplate?.()
-  return result.output
+    throw new IncompleteSimulationError('Template exceeds the playground limit')
+  const script = ctx.script
+  const checkpoint = script?.checkpoint()
+  let restored = false
+  const restore = () => {
+    restored = true
+    checkpoint?.restore()
+  }
+  try {
+    const { context, registry } = createFakeRuntime(ctx)
+    const result = await new Interpreter(registry, PLAYGROUND_LIMITS).interpret(source, context)
+    for (const error of result.errors) {
+      ctx.trace?.push(`Inline diagnostic: ${error.message}`)
+      ctx.diagnostics?.push(error.message)
+    }
+    if (!commitsTemplate(result)) restore()
+    ctx.commitTemplate?.()
+    return result.output
+  } catch (error) {
+    recordFailure(ctx.state, error)
+    if (!restored) {
+      try {
+        restore()
+        ctx.commitTemplate?.()
+      } catch (rollbackError) {
+        markIncomplete(
+          ctx.state,
+          rollbackError instanceof Error ? rollbackError.message : 'State rollback failed'
+        )
+        throw rollbackError
+      }
+    }
+    throw error
+  } finally {
+    checkpoint?.dispose()
+  }
 }

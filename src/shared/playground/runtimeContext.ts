@@ -1,3 +1,4 @@
+import { IncompleteSimulationError, markIncomplete, recordFailure } from './failures'
 import { parsePresence } from '../runtime/presence'
 import type { BCFDContext } from '../runtime/types'
 import type { RuntimeServices } from '../runtime/services'
@@ -62,7 +63,7 @@ export function operation<T>(
   run: () => T
 ): T {
   state.operations ??= []
-  if (state.operations.length >= 1000) throw new Error('Operation limit exceeded')
+  if (state.operations.length >= 1000) throw incompleteLimit(state, 'Operation limit exceeded')
   const entry = {
     index: state.operations.length,
     name,
@@ -76,7 +77,7 @@ export function operation<T>(
     JSON.stringify(state).length + JSON.stringify(entry).length >
     PLAYGROUND_LIMITS.requestBytes - 32_768
   )
-    throw new Error('Operation log size limit reached; reset the playground')
+    throw incompleteLimit(state, 'Operation log size limit reached; reset the playground')
   state.operations.push(entry)
   try {
     if (state.failures?.[name]) throw new Error(state.failures[name])
@@ -90,6 +91,7 @@ export function operation<T>(
     }
     return value
   } catch (error) {
+    recordFailure(state, error)
     entry.error = error instanceof Error ? error.message : String(error)
     throw error
   }
@@ -328,7 +330,8 @@ export function createFakeRuntime(ctx: TemplateContext) {
           ],
           () => {
             permission('ManageChannels')
-            if (channels.length >= 100) throw new Error('Channel limit exceeded')
+            if (channels.length >= 100)
+              throw new IncompleteSimulationError('Channel limit exceeded')
             if (data.parent && !channels.some((item) => item.id === data.parent && item.type === 4))
               throw new Error('Category not found')
             const channel: FakeChannel = {
@@ -368,7 +371,7 @@ export function createFakeRuntime(ctx: TemplateContext) {
       create: async (data: { name: string; color: number }) => {
         const role = operation(state, 'role.create', [data], () => {
           permission('ManageRoles')
-          if (state.roles.length >= 50) throw new Error('Role limit exceeded')
+          if (state.roles.length >= 50) throw new IncompleteSimulationError('Role limit exceeded')
           const role = { id: allocateId(), ...data }
           state.roles.push(role)
           return role
@@ -448,7 +451,12 @@ export function createFakeRuntime(ctx: TemplateContext) {
         ctx.options && Object.hasOwn(ctx.options, name) ? { value: ctx.options[name] } : null
     },
     get vmContext() {
-      return ctx.script ? vm : undefined
+      if (!ctx.script) {
+        const reason = 'Script sandbox is unavailable'
+        markIncomplete(state, reason)
+        throw new IncompleteSimulationError(reason)
+      }
+      return vm
     },
     wrapEvalInIIFE: ctx.wrapEvalInIIFE
   } as unknown as BCFDContext
@@ -480,8 +488,11 @@ export function createFakeRuntime(ctx: TemplateContext) {
     chat: async (prompt) => {
       ctx.trace?.push('Simulated AI: configured local response/failure; no provider call')
       const mock = state.aiMocks?.find((item) => item.prompt === prompt)
-      if (state.strictMocks && !mock)
-        throw new Error(`Missing explicit AI mock for prompt: ${prompt}`)
+      if (state.strictMocks && !mock) {
+        const reason = `Missing explicit AI mock for prompt: ${prompt}`
+        markIncomplete(state, reason)
+        throw new IncompleteSimulationError(reason)
+      }
       return operation(state, 'ai.chat', [prompt], () =>
         mock ? (mock.error ?? mock.response ?? '') : state.ai.error || state.ai.response
       )
@@ -502,4 +513,9 @@ export function createFakeRuntime(ctx: TemplateContext) {
     }
   }
   return { context, registry: createFunctionRegistry(services) }
+}
+
+function incompleteLimit(state: PlaygroundState, reason: string): Error {
+  markIncomplete(state, reason)
+  return new IncompleteSimulationError(reason)
 }

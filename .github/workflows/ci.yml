@@ -44,6 +44,9 @@ jobs:
       - name: Check shared tool presentation adapter
         run: npm test -- src/renderer/src/utils/agentToolPresentation.test.ts
 
+      - name: Check Playground error classification
+        run: npm test -- src/shared/playground/scriptErrorClassification.test.ts
+
       - name: Build production application
         run: npm run build
       - name: Verify packaged production dependencies and SDK validator resolution

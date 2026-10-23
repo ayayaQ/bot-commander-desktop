@@ -44,7 +44,7 @@ execution of the candidate counts toward candidate coverage. No live bot state o
 is loaded implicitly. Startup source belongs in `state.startupSource`.
 
 Every step requires `/outcome` and an effect/error assertion. JSON Pointers address
-`{outcome, reason, errors, state, effects}`. For example:
+`{outcome, reason, errors, diagnostics, warnings, incomplete, state, effects}`. For example:
 
 ```json
 {
@@ -96,7 +96,49 @@ Traditional message actions preserve the live awaited versus detached ordering. 
 use role (join only), channel embed, channel text, DM embed and DM text order. Reactions use
 channel text, DM text, channel embed, DM embed and role order. Slash/button response effects use
 the shared sequential response, DM, DM embed and role dispatcher. A failed later operation does
-not erase earlier simulated Discord effects. Bot-state snapshots commit after successful templates.
+not erase earlier simulated Discord effects. Traditional detached task failures are collected
+without preventing later scheduled actions. Interaction DM delivery failures are warnings and
+continue to DM embeds and role assignment; rendering/transaction failures and response/role
+failures still stop that interaction. The shared delivery helper wraps only the actual DM send.
+
+Each template is a bot-state transaction. Interpreter diagnostics return the live rendered output
+(including inline error text or the original unknown keyword), roll back that template's bot state,
+and allow later templates/actions to continue. A thrown adapter/transaction error is a command
+failure. Successful earlier templates stay committed, even when their subsequent delivery fails.
+The same checkpoint implementation restores the original bot-state object graph in both VMs,
+including nested objects and arrays referenced by aliases. Non-state global bindings and `$set`
+variables survive diagnostics; they are not part of the bot-state transaction. Wrapped eval keeps
+local declarations private, while global eval declarations survive later templates and steps.
+Session snapshots do not replace unchanged VM objects or global bindings between steps.
+
+Reports separate `errors` (command failures), `diagnostics` (inline interpreter diagnostics),
+`warnings` (nonfatal interaction delivery failures), and `incomplete` (simulation limitations).
+A diagnostic-bearing execution remains `executed`, but validation requires an explicit passing
+`/diagnostics` assertion as well as the ordinary outcome/effect assertions. Unexpected diagnostics
+fail validation. Missing mocks, absent script capability, resource limits, failed alias rollback,
+unserializable variable evidence and incomplete runs cannot become passing expected-error tests.
+Changing these semantics increments the runtime version so earlier reports cannot authorize saves.
+
+### Offline failure parity matrix
+
+`src/shared/playground/failureParity.test.ts` compares the production interpreter/QuickJS context
+and shared dispatch against the synthetic engine. Each row checks rendered output, ordered
+operations, bot state, errors and diagnostics; delivery failures also check warnings and continuation.
+No Discord or provider access is needed.
+
+| Event                 | Failed eval after successful template              | Failed DM after successful response                  | Continuation                    |
+| --------------------- | -------------------------------------------------- | ---------------------------------------------------- | ------------------------------- |
+| Message               | Inline diagnostic; only failed template rolls back | Earlier send/state retained; detached error recorded | Later detached actions continue |
+| DM command            | Same                                               | Same                                                 | Same                            |
+| Member join/leave/ban | Same in member action order                        | Same                                                 | Same                            |
+| Reaction              | Same in reaction action order                      | Same                                                 | Same                            |
+| Slash                 | Same                                               | Delivery warning; response/state retained            | DM embed and role still run     |
+| Button                | Same; no inherited slash options                   | Same                                                 | Same                            |
+
+Additional regressions compare wrapped/global eval across steps, nested object/array aliases,
+replacement of `botState`, surviving globals, irreversible rollback, missing mocks and resource
+limits. Live service coverage verifies rejected detached DM promises are observed while later
+channel effects finish.
 Worker timeout/crash/reset discards the pending result at the UI boundary.
 
 This change also corrects live DM matching to select DM commands, evaluates member-event
@@ -107,8 +149,16 @@ in production and simulation.
 This is an offline behavioral test, not a guarantee of Discord delivery. Network concurrency,
 latency, gateway event cascades, permission hierarchy and intent/registration availability are
 not fully reproduced. Permission fixtures and injected failures exercise local failure paths;
-they cannot prove a live bot has access. Template diagnostics currently stop that simulated
-response and are reported as execution errors; live string rendering can emit inline diagnostics.
+they cannot prove a live bot has access. The synthetic dispatcher waits for detached tasks to
+settle before reporting; live delivery completion order depends on the network. Injected adapter
+failures describe fixture behavior, not Discord's full error catalogue. Playground uses stricter
+JSON/output/work limits and a shorter cumulative script deadline. It rejects Proxy construction,
+and reads error descriptors without invoking guest accessors. Non-JSON tracked variable snapshots
+and irreversible alias rollback produce incomplete evidence and require reset; live rollback can
+attempt visible-state recovery and logs the need to restart. Ordinary thrown eval errors preserve
+the session. The captured native InternalError family is conservatively incomplete, including
+explicitly constructed instances; changing its display name does not change that classification. Global objects outside `botState` are retained in the VM but are not a complete JSON
+snapshot of all JavaScript bindings.
 Local transcript IDs are positive integers; channel, role and member IDs are decimal strings.
 The synthetic world currently models one active guild, with multiple channels. Clock control
 covers elapsed time and Date.now; host timezone-dependent formatting is not configurable.

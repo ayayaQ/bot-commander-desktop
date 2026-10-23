@@ -80,6 +80,9 @@ export type AgentValidationStepReport = {
   effects: AgentValidationEffects
   trace: string[]
   errors: string[]
+  diagnostics?: string[]
+  warnings?: string[]
+  incomplete?: string[]
   timedOut: boolean
   cancelled: boolean
   truncated: boolean

@@ -1,3 +1,4 @@
+import { deliverInteractionDM } from '../../shared/runtime/errors'
 import { runTraditionalActions, runInteractionActions } from '../../shared/runtime/actions'
 import { matchesCommand } from '../../shared/runtime/dispatch'
 import {
@@ -572,17 +573,23 @@ async function executeInteractionCommand(
           const dmContent = await stringInfoAdd(
             contextForInteractionEvent(action.privateMessage, interaction, command)
           )
-          await interaction.user.send(dmContent).catch(() => {
-            rendererConsole.warning(`Could not send DM to ${interaction.user.username}`)
-          })
+          await deliverInteractionDM(
+            () => interaction.user.send(dmContent),
+            () => {
+              rendererConsole.warning(`Could not send DM to ${interaction.user.username}`)
+            }
+          )
         }
       },
       dmEmbed: async () => {
         if (action.sendPrivateEmbed) {
           const embed = await buildEmbed(action.privateEmbed, interaction, command)
-          await interaction.user.send({ embeds: [embed] }).catch(() => {
-            rendererConsole.warning(`Could not send DM embed to ${interaction.user.username}`)
-          })
+          await deliverInteractionDM(
+            () => interaction.user.send({ embeds: [embed] }),
+            () => {
+              rendererConsole.warning(`Could not send DM embed to ${interaction.user.username}`)
+            }
+          )
         }
       },
       role: async () => {
@@ -760,17 +767,23 @@ async function executeButtonAction(
           const dmContent = await stringInfoAdd(
             contextForInteractionEvent(action.privateMessage, interaction, command)
           )
-          await interaction.user.send(dmContent).catch(() => {
-            rendererConsole.warning(`Could not send DM to ${interaction.user.username}`)
-          })
+          await deliverInteractionDM(
+            () => interaction.user.send(dmContent),
+            () => {
+              rendererConsole.warning(`Could not send DM to ${interaction.user.username}`)
+            }
+          )
         }
       },
       dmEmbed: async () => {
         if (action.sendPrivateEmbed) {
           const embed = await buildEmbed(action.privateEmbed, interaction, command)
-          await interaction.user.send({ embeds: [embed] }).catch(() => {
-            rendererConsole.warning(`Could not send DM embed to ${interaction.user.username}`)
-          })
+          await deliverInteractionDM(
+            () => interaction.user.send({ embeds: [embed] }),
+            () => {
+              rendererConsole.warning(`Could not send DM embed to ${interaction.user.username}`)
+            }
+          )
         }
       },
       role: async () => {
@@ -1052,7 +1065,7 @@ async function privateMessage(
 ): Promise<boolean> {
   if (commandCapabilities.sendsPrivateMessage(command)) {
     // sends a private message to the user
-    user.send(await stringInfoMethod())
+    await user.send(await stringInfoMethod())
   }
 
   return true
@@ -1146,9 +1159,9 @@ async function roleAssigner(
 
     // add the role to the member if they dont have it, and if they have it remove it
     if (!member.roles.cache.has(role)) {
-      member.roles.add(role)
+      await member.roles.add(role)
     } else {
-      member.roles.remove(role)
+      await member.roles.remove(role)
     }
   }
 
@@ -1256,7 +1269,7 @@ async function sendPrivateEmbed(
     }
 
     // send the embed
-    user.send({ embeds: [embed] })
+    await user.send({ embeds: [embed] })
   }
 
   return true

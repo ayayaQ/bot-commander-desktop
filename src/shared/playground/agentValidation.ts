@@ -292,7 +292,7 @@ export async function runAgentValidation(
                   kind: request.candidateKind,
                   matched: false,
                   executed: false,
-                  outcome: error instanceof PlaygroundExecutionError ? error.outcome : 'error',
+                  outcome: error instanceof PlaygroundExecutionError ? error.outcome : 'not_run',
                   reason,
                   error: reason
                 }
@@ -314,7 +314,10 @@ export async function runAgentValidation(
           reason,
           state,
           effects: observedEffects,
-          errors: result.errors
+          errors: result.errors,
+          diagnostics: result.diagnostics ?? [],
+          warnings: result.warnings ?? [],
+          incomplete: result.incomplete ?? []
         }
         const assertions = step.assertions.map((assertion): AgentValidationAssertionResult => {
           const actual = actualAt(observation, assertion.path)
@@ -329,7 +332,8 @@ export async function runAgentValidation(
         const expectedOutcome = step.assertions.find(
           (assertion) => assertion.path === '/outcome'
         )!.equals
-        const expectedNegative =
+        let expectedNegative =
+          !result.incomplete?.length &&
           resource?.matched === true &&
           (executionOutcome === 'blocked' || executionOutcome === 'error') &&
           expectedOutcome === executionOutcome
@@ -339,18 +343,32 @@ export async function runAgentValidation(
           outcome = executionOutcome as AgentValidationOutcome
         else if (executionOutcome === 'blocked' && !expectedNegative) outcome = 'blocked'
         else if (executionOutcome === 'error' && !expectedNegative) outcome = 'failed'
+        if (
+          result.diagnostics?.length &&
+          !step.assertions.some(
+            (assertion) =>
+              (assertion.path === '/diagnostics' || assertion.path.startsWith('/diagnostics/')) &&
+              assertions.find((item) => item.path === assertion.path)?.passed
+          )
+        )
+          outcome = 'failed'
         const timedOut =
           Date.now() >= deadline ||
-          result.errors.some((error) =>
+          [...result.errors, ...(result.incomplete ?? [])].some((error) =>
             /Script execution time limit exceeded|interrupted/.test(error)
           )
-        if (timedOut || result.errors.some((error) => error.includes('Missing explicit AI mock')))
+        if (
+          result.incomplete?.length ||
+          timedOut ||
+          result.errors.some((error) => error.includes('Missing explicit AI mock'))
+        )
           outcome = 'not_run'
         const truncated = observedEffects.operations?.some((item) => item.truncated) ?? false
         if (truncated) {
           outcome = 'not_run'
           report.truncated = true
         }
+        if (outcome === 'not_run' || truncated || timedOut) expectedNegative = false
         steps.push({
           index,
           kind: step.kind,
@@ -364,6 +382,9 @@ export async function runAgentValidation(
           effects: observedEffects,
           trace: result.trace,
           errors: result.errors,
+          diagnostics: result.diagnostics ?? [],
+          warnings: result.warnings ?? [],
+          incomplete: result.incomplete ?? [],
           timedOut,
           cancelled: false,
           truncated
