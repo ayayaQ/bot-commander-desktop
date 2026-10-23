@@ -506,3 +506,41 @@ describe('normalized multi-guild world', () => {
     ).toThrow('step.context')
   })
 })
+
+describe('normalized role creation', () => {
+  it.each([
+    { template: '$createRole(NewRole,#112233)', hoist: false, mentionable: false },
+    { template: '$createRole(NewRole,#112233,true,true)', hoist: true, mentionable: true }
+  ])(
+    'preserves role flags and accepts the next event: $template',
+    async ({ template, hoist, mentionable }) => {
+      const state = normalizeWorld()
+      const first = await runMessage({
+        state,
+        commands: [command({ channelMessage: template })],
+        senderId: USER,
+        content: '!test'
+      })
+      expect(first.errors).toEqual([])
+      const role = first.state.world!.roles.find((item) => item.name === 'NewRole')!
+      expect(role).toMatchObject({ hoist, mentionable, color: 0x112233 })
+      const serialized = JSON.parse(JSON.stringify(first.state))
+      expect(() => validateAgentValidationState(serialized)).not.toThrow()
+      const next = await runMessage({
+        state: serialized,
+        commands: [command()],
+        senderId: USER,
+        content: '!test'
+      })
+      expect(next.errors).toEqual([])
+      expect(next.state.messages.at(-1)!.content).toBe('ok')
+      expect(next.state.world!.roles.find((item) => item.id === role.id)).toEqual(role)
+    }
+  )
+
+  it.each(['hoist', 'mentionable'])('rejects a non-boolean role %s flag', (flag) => {
+    const state = normalizeWorld()
+    Object.assign(state.world!.roles[0], { [flag]: 'true' })
+    expect(() => validateAgentValidationState(state)).toThrow(`role.${flag}`)
+  })
+})

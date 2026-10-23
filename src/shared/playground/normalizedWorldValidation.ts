@@ -95,7 +95,18 @@ export function validateNormalizedWorld(state: PlaygroundState): void {
   for (const role of world.roles) {
     fields(
       role,
-      ['id', 'guildId', 'name', 'color', 'position', 'managed', 'editable', 'permissions'],
+      [
+        'id',
+        'guildId',
+        'name',
+        'color',
+        'position',
+        'managed',
+        'editable',
+        'hoist',
+        'mentionable',
+        'permissions'
+      ],
       'role'
     )
     assert(

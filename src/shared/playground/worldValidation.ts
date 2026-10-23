@@ -108,7 +108,7 @@ export function validateWorldExtensions(state: PlaygroundState): void {
       assert(id(member.voiceChannelId), 'member.voiceChannelId')
   }
   for (const role of state.roles) {
-    for (const key of ['managed', 'editable'])
+    for (const key of ['managed', 'editable', 'hoist', 'mentionable'])
       if (role[key] !== undefined) assert(typeof role[key] === 'boolean', `role.${key}`)
     if (role.color !== undefined)
       assert(integer(role.color) && role.color <= 0xffffff, 'role.color')

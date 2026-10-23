@@ -464,7 +464,12 @@ export function createFakeRuntime(ctx: TemplateContext) {
         return roles()
       },
       everyone: { id: state.guildId },
-      create: async (data: { name: string; color: number }) => {
+      create: async (data: {
+        name: string
+        color: number
+        hoist?: boolean
+        mentionable?: boolean
+      }) => {
         const role = operation(state, 'role.create', [data], () => {
           permission('ManageRoles')
           if (state.roles.length >= 50) throw new IncompleteSimulationError('Role limit exceeded')

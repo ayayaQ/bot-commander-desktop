@@ -28,6 +28,8 @@ export type FakeRole = {
   position?: number
   managed?: boolean
   editable?: boolean
+  hoist?: boolean
+  mentionable?: boolean
   permissions?: string[]
 }
 export type FakeChannel = {
