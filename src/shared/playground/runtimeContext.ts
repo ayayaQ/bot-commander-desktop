@@ -1,3 +1,4 @@
+import { schedulerFor } from './scheduling'
 import {
   allocateEntityId,
   effectivePermissions,
@@ -64,12 +65,7 @@ export function fakeChannels(state: PlaygroundState): FakeChannel[] {
   return state.channels
 }
 
-export function operation<T>(
-  state: PlaygroundState,
-  name: string,
-  args: unknown[],
-  run: () => T
-): T {
+function beginOperation(state: PlaygroundState, name: string, args: unknown[]) {
   state.operations ??= []
   if (state.operations.length >= 1000) throw incompleteLimit(state, 'Operation limit exceeded')
   const entry = {
@@ -77,6 +73,8 @@ export function operation<T>(
       ? { context: { guildId: state.guildId || null, channelId: state.channelId } }
       : {}),
     index: state.operations.length,
+    scheduledAt: state.clockMs,
+    status: 'scheduled',
     name,
     args: JSON.parse(JSON.stringify(args))
   } as NonNullable<PlaygroundState['operations']>[number]
@@ -90,8 +88,21 @@ export function operation<T>(
   )
     throw incompleteLimit(state, 'Operation log size limit reached; reset the playground')
   state.operations.push(entry)
+  return entry
+}
+
+export function operation<T>(
+  state: PlaygroundState,
+  name: string,
+  args: unknown[],
+  run: () => T,
+  entry = beginOperation(state, name, args)
+): T {
+  entry.startedAt ??= state.clockMs
+  entry.status = 'started'
   try {
-    if (state.failures?.[name]) throw new Error(state.failures[name])
+    const failure = state.timing?.operations?.[name]?.failure ?? state.failures?.[name]
+    if (failure) throw new Error(failure)
     const value = run()
     entry.result = value === undefined ? null : JSON.parse(JSON.stringify(value))
     if (name === 'message.send' || name === 'message.dm')
@@ -100,11 +111,77 @@ export function operation<T>(
       entry.result = '[Operation result omitted: log size limit]'
       entry.truncated = true
     }
+    entry.status = 'completed'
+    entry.completedAt = state.clockMs
     return value
   } catch (error) {
     recordFailure(state, error)
     entry.error = error instanceof Error ? error.message : String(error)
+    entry.status = 'failed'
+    entry.failedAt = state.clockMs
     throw error
+  }
+}
+
+export async function scheduledOperation<T>(
+  state: PlaygroundState,
+  name: string,
+  args: unknown[],
+  run: () => T
+): Promise<T> {
+  const scheduler = schedulerFor(state)
+  const timing = state.timing?.operations?.[name]
+  // Zero-duration calls retain existing promise ordering and cost no queue turns.
+  if (!state.timing) return operation(state, name, args, run)
+  if (!scheduler) {
+    const error = incompleteLimit(state, 'Timed operation requires an active virtual scheduler')
+    throw error
+  }
+  const entry = beginOperation(state, name, args)
+  try {
+    if (timing?.delayMs) {
+      entry.dueAt = state.clockMs + timing.delayMs
+      await scheduler.schedule(timing.delayMs, () => {}).promise
+    }
+    entry.startedAt = state.clockMs
+    entry.status = 'started'
+    entry.dueAt = state.clockMs + (timing?.latencyMs ?? 0)
+    return await scheduler.schedule(timing?.latencyMs ?? 0, () =>
+      operation(state, name, args, run, entry)
+    ).promise
+  } catch (error) {
+    recordFailure(state, error)
+    if (entry.status !== 'failed') {
+      entry.status = 'cancelled'
+      entry.cancelledAt = state.clockMs
+      entry.error = error instanceof Error ? error.message : String(error)
+    }
+    throw error
+  }
+}
+
+/** Production sends typing immediately, refreshes every 8s, and stops after delivery. */
+export function startTyping(state: PlaygroundState, channelId: string, enabled: boolean) {
+  const scheduler = schedulerFor(state)
+  if (!enabled || !scheduler) return () => {}
+  let stopped = false
+  let refresh: ReturnType<VirtualTypingTask> | undefined
+  type VirtualTypingTask = typeof scheduler.schedule<void>
+  const send = () => {
+    if (stopped) return
+    void scheduledOperation(state, 'channel.typing', [channelId], () => {}).catch((error) => {
+      recordFailure(state, error)
+    })
+    refresh = scheduler.schedule(8000, send)
+    // Refresh cancellation is ordinary completion, not incomplete required delivery.
+    void refresh.promise.catch((error) => {
+      if (!stopped) recordFailure(state, error)
+    })
+  }
+  send()
+  return () => {
+    stopped = true
+    refresh?.cancel()
   }
 }
 
@@ -164,7 +241,7 @@ export function createFakeRuntime(ctx: TemplateContext) {
   })
   const channelView = (channel: FakeChannel) => {
     const update = async (name: string, value: unknown, patch: Partial<FakeChannel>) => {
-      operation(state, name, [channel.id, value], () => {
+      await scheduledOperation(state, name, [channel.id, value], () => {
         permission('ManageChannels', channel.id)
         Object.assign(channel, patch)
         if (channel.id === state.channelId) {
@@ -224,7 +301,7 @@ export function createFakeRuntime(ctx: TemplateContext) {
         await update('channel.parent', value, { parentId: value })
       },
       clone: async () => {
-        const clone = operation(state, 'channel.clone', [channel.id], () => {
+        const clone = await scheduledOperation(state, 'channel.clone', [channel.id], () => {
           permission('ManageChannels', channel.id)
           requireChannelCapacity()
           const clone = { ...structuredClone(channel), id: allocateId() }
@@ -235,25 +312,30 @@ export function createFakeRuntime(ctx: TemplateContext) {
       },
       permissionOverwrites: {
         edit: async (id: string, overwrite: FakeChannel['overwrites'][string]) => {
-          operation(state, 'channel.permissions', [channel.id, id, overwrite], () => {
-            permission('ManageRoles', channel.id)
-            if (
-              state.world &&
-              !state.roles.some((role) => role.id === id) &&
-              !state.members.some((member) => member.id === id)
-            )
-              throw new Error('Overwrite target not found in the current guild')
-            channel.overwrites[id] = { ...channel.overwrites[id] }
-            for (const [key, value] of Object.entries(overwrite)) {
-              if (value === null) delete channel.overwrites[id][key]
-              else channel.overwrites[id][key] = value
+          await scheduledOperation(
+            state,
+            'channel.permissions',
+            [channel.id, id, overwrite],
+            () => {
+              permission('ManageRoles', channel.id)
+              if (
+                state.world &&
+                !state.roles.some((role) => role.id === id) &&
+                !state.members.some((member) => member.id === id)
+              )
+                throw new Error('Overwrite target not found in the current guild')
+              channel.overwrites[id] = { ...channel.overwrites[id] }
+              for (const [key, value] of Object.entries(overwrite)) {
+                if (value === null) delete channel.overwrites[id][key]
+                else channel.overwrites[id][key] = value
+              }
             }
-          })
+          )
         }
       },
       messages: {
         delete: async (id: string) => {
-          operation(state, 'message.delete', [channel.id, id], () => {
+          await scheduledOperation(state, 'message.delete', [channel.id, id], () => {
             const message = state.messages.find(
               (item) =>
                 String(item.id) === id &&
@@ -289,7 +371,7 @@ export function createFakeRuntime(ctx: TemplateContext) {
       }
     })(),
     delete: async () =>
-      operation(state, 'role.delete', [role.id], () => {
+      scheduledOperation(state, 'role.delete', [role.id], () => {
         permission('ManageRoles')
         assertEditableRole(state, role.id)
         state.roles = state.roles.filter((item) => item.id !== role.id)
@@ -332,14 +414,14 @@ export function createFakeRuntime(ctx: TemplateContext) {
         return roles().filter((role) => role.id === state.guildId || member.roles.includes(role.id))
       },
       add: async (ids: string[]) =>
-        operation(state, 'member.roles.add', [member.id, ids], () => {
+        scheduledOperation(state, 'member.roles.add', [member.id, ids], () => {
           permission('ManageRoles')
           if (state.world) assertManageable(state, member)
           for (const id of ids) assertEditableRole(state, id)
           member.roles = [...new Set([...member.roles, ...ids])]
         }),
       remove: async (ids: string[]) =>
-        operation(state, 'member.roles.remove', [member.id, ids], () => {
+        scheduledOperation(state, 'member.roles.remove', [member.id, ids], () => {
           permission('ManageRoles')
           if (state.world) assertManageable(state, member)
           for (const id of ids) assertEditableRole(state, id)
@@ -398,7 +480,7 @@ export function createFakeRuntime(ctx: TemplateContext) {
         parent?: string
         permissionOverwrites?: { id: string; allow?: bigint[]; deny?: bigint[] }[]
       }) => {
-        const created = operation(
+        const created = await scheduledOperation(
           state,
           'channel.create',
           [
@@ -444,7 +526,7 @@ export function createFakeRuntime(ctx: TemplateContext) {
         return channelView(created)
       },
       delete: async (id: string) =>
-        operation(state, 'channel.delete', [id], () => {
+        scheduledOperation(state, 'channel.delete', [id], () => {
           permission('ManageChannels', id)
           const index = channels.findIndex(
             (item) => item.id === id && item.guildId === state.guildId
@@ -470,7 +552,7 @@ export function createFakeRuntime(ctx: TemplateContext) {
         hoist?: boolean
         mentionable?: boolean
       }) => {
-        const role = operation(state, 'role.create', [data], () => {
+        const role = await scheduledOperation(state, 'role.create', [data], () => {
           permission('ManageRoles')
           if (state.roles.length >= 50) throw new IncompleteSimulationError('Role limit exceeded')
           const role = { id: allocateId(), ...(state.world ? { position: 1 } : {}), ...data }
@@ -587,6 +669,8 @@ export function createFakeRuntime(ctx: TemplateContext) {
   const services: RuntimeServices = {
     maxOutput: 32768,
     now: () => state.clockMs,
+    timezone: 'UTC',
+    formatDate: (timestamp) => new Date(timestamp).toISOString(),
     random: () => seededRandom(state),
     commandCount: () => state.commandCount ?? 0,
     mutualGuildCount: (_ctx, target) =>
@@ -633,7 +717,7 @@ export function createFakeRuntime(ctx: TemplateContext) {
         markIncomplete(state, reason)
         throw new IncompleteSimulationError(reason)
       }
-      return operation(state, 'ai.chat', [prompt], () =>
+      return scheduledOperation(state, 'ai.chat', [prompt], () =>
         mock ? (mock.error ?? mock.response ?? '') : state.ai.error || state.ai.response
       )
     },

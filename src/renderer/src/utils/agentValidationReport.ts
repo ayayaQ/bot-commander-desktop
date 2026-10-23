@@ -121,6 +121,7 @@ function effectViews(effects: AgentValidationEffects): ValidationEffectView[] {
     { label: 'Variable changes', values: effects.variableChanges },
     { label: 'Cooldown changes', values: effects.cooldownChanges },
     { label: 'Operations', values: effects.operations ?? [] },
+    { label: 'Virtual timing', values: effects.timing ? [effects.timing] : [] },
     { label: 'Channel changes', values: effects.channelChanges ?? [] },
     { label: 'Role changes', values: effects.roleChanges ?? [] },
     ...(effects.worldChanges ? [{ label: 'World changes', values: effects.worldChanges }] : [])

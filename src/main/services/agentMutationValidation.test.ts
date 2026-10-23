@@ -184,6 +184,31 @@ describe('exact unsaved candidate validation binding', () => {
     }
   )
 
+  it('invalidates passing evidence when operation latency changes', async () => {
+    const fixtures = suite()
+    fixtures.cases[0].state.timing = { operations: { 'message.send': { latencyMs: 10 } } }
+    const prepared = draft(fixtures)
+    validate.mockImplementation((input) => runAgentValidation(input))
+    const result = await validateAgentMutation(prepared)
+    expect(result.canCommit).toBe(true)
+    fixtures.cases[0].state.timing.operations!['message.send'].latencyMs = 20
+    expect(() => assertAgentValidationBinding(prepared, result.binding, result.report)).toThrow(
+      'stale'
+    )
+  })
+
+  it('cannot authorize a save after a virtual scheduling budget is exhausted', async () => {
+    const fixtures = suite()
+    fixtures.cases[0].state.timing = {
+      operations: { 'message.send': { latencyMs: 10 } },
+      limits: { maxTimeMs: 1 }
+    }
+    validate.mockImplementation((input) => runAgentValidation(input))
+    const result = await validateAgentMutation(draft(fixtures))
+    expect(result.report.outcome).toBe('not_run')
+    expect(result.canCommit).toBe(false)
+  })
+
   it('binds edit evidence to the exact read revision', async () => {
     const prepared = draft()
     prepared.name = 'edit_command'

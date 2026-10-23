@@ -1,7 +1,8 @@
+import { withScheduler } from './scheduling'
 import { prepareWorldEvent, commitWorld, assertManageable } from './world'
 import { deliverInteractionDM } from '../runtime/errors'
 import { incompleteReasons, recordFailure } from './failures'
-import { operation, requireBotPermission } from './runtimeContext'
+import { scheduledOperation, requireBotPermission } from './runtimeContext'
 import { runInteractionActions } from '../runtime/actions'
 import { PLAYGROUND_OPTION_NAME } from './optionName'
 import type {
@@ -10,7 +11,7 @@ import type {
   BCFDInteractionCommand,
   BCFDSlashCommandOption
 } from '../../main/types/types'
-import { addMessage, buildFakeEmbed, hasPermission, toggleRole, validateState } from './engine'
+import { sendMessage, buildFakeEmbed, hasPermission, toggleRole, validateState } from './engine'
 import { evaluateTemplate } from './template'
 import type { TemplateContext } from './template'
 import type { ScriptSandboxFactory } from './script'
@@ -173,22 +174,26 @@ async function executeAction(
   const sender = state.members.find((member) => member.id === senderId)!
   // Production interaction contexts have no messageEvent/mentionedMember.
   const render = async (text: string) => await evaluateTemplate(text, ctx)
+  if (action.deferReply)
+    await scheduledOperation(state, 'interaction.defer', [!!action.ephemeral], () => {})
   if (!isButton) {
     if (action.deleteX) {
       if (!hasPermission(sender, 'manageMessages', state))
         throw new PlaygroundExecutionError('Manage Messages permission required', 'blocked')
       const count = Math.min(Math.max(Number(action.deleteNum) || 0, 1), 100)
-      if (state.world) requireBotPermission(state, 'ManageMessages', state.channelId)
-      state.messages
-        .filter(
-          (message) =>
-            message.kind !== 'dm' &&
-            !message.deleted &&
-            !message.ephemeral &&
-            (!state.world || message.channelId === state.channelId)
-        )
-        .slice(-count)
-        .forEach((message) => (message.deleted = true))
+      await scheduledOperation(state, 'message.purge', [count], () => {
+        if (state.world) requireBotPermission(state, 'ManageMessages', state.channelId)
+        state.messages
+          .filter(
+            (message) =>
+              message.kind !== 'dm' &&
+              !message.deleted &&
+              !message.ephemeral &&
+              (!state.world || message.channelId === state.channelId)
+          )
+          .slice(-count)
+          .forEach((message) => (message.deleted = true))
+      })
       trace.push(`Deleted up to ${count} fake channel messages`)
     }
     if (action.isKick || action.isBan || action.isVoiceMute) {
@@ -209,7 +214,7 @@ async function executeAction(
         if (!enabled) continue
         if (!hasPermission(sender, permission, state, target.voiceChannelId))
           throw new PlaygroundExecutionError(`${permission} permission required`, 'blocked')
-        operation(state, `member.${key}`, [target.id], () => {
+        await scheduledOperation(state, `member.${key}`, [target.id], () => {
           requireBotPermission(
             state,
             { kicked: 'KickMembers', banned: 'BanMembers', muted: 'MuteMembers' }[key],
@@ -235,7 +240,7 @@ async function executeAction(
         : undefined
       if (!response && !embed) response = '\u200B'
       const buttons = await renderButtons(action.buttons, ctx)
-      addMessage(state, {
+      await sendMessage(state, {
         kind: 'bot',
         author: 'Playground Bot',
         content: response,
@@ -245,16 +250,14 @@ async function executeAction(
         recipient: action.ephemeral ? sender.id : undefined,
         deferred: !!action.deferReply
       })
-      trace.push(
-        action.deferReply ? 'Deferred reply then edit (timing not modeled)' : 'Interaction reply'
-      )
+      trace.push(action.deferReply ? 'Deferred reply then edit' : 'Interaction reply')
     },
     dm: async () => {
       if (action.sendPrivateMessage && action.privateMessage) {
         const content = await render(action.privateMessage)
         await deliverInteractionDM(
           () =>
-            addMessage(state, {
+            sendMessage(state, {
               kind: 'dm',
               author: 'Playground Bot',
               recipient: sender.id,
@@ -269,7 +272,7 @@ async function executeAction(
         const embed = await buildFakeEmbed(action.privateEmbed, ctx)
         await deliverInteractionDM(
           () =>
-            addMessage(state, {
+            sendMessage(state, {
               kind: 'dm',
               author: 'Playground Bot',
               recipient: sender.id,
@@ -282,7 +285,7 @@ async function executeAction(
     },
     role: async () => {
       if (action.isRoleAssigner && action.roleToAssign) {
-        toggleRole(state, sender, await render(action.roleToAssign))
+        await toggleRole(state, sender, await render(action.roleToAssign))
         trace.push(`Toggled role on invoking member ${sender.name}`)
       }
     }
@@ -324,120 +327,123 @@ export async function runInteraction(
   let resource: PlaygroundResourceResult | undefined
   let scope: ReturnType<typeof executionContext> | undefined
   try {
-    let command: BCFDInteractionCommand, action: BCFDInteractionAction
-    let options: Record<string, string | number | boolean> | undefined
-    if (request.kind === 'slash') {
-      const selected = request.interactions.find(
-        (interaction) => interaction.id === request.commandId
-      )
-      if (!selected)
-        throw new PlaygroundExecutionError('Saved slash command not found', 'unmatched')
-      command = selected
-      resource = resources[request.interactions.indexOf(command)]
-      resource.matched = true
-      action = command.rootAction
-      options = validateOptions(command.options, request.options ?? {}, draft)
-      trace.push(
-        `Invoked saved /${command.commandName}; publication status is not required for offline simulation`
-      )
-    } else {
-      const message = original.messages.find(
-        (item) =>
-          item.id === request.messageId &&
-          !item.deleted &&
-          (!original.world || item.channelId === original.channelId)
-      )
-      if (
-        !message ||
-        ((message.kind === 'dm' || message.ephemeral) && message.recipient !== sender.id)
-      )
-        throw new PlaygroundExecutionError(
-          'Button message is unavailable to this fake sender',
-          'blocked'
+    return await withScheduler(draft, async () => {
+      let command: BCFDInteractionCommand, action: BCFDInteractionAction
+      let options: Record<string, string | number | boolean> | undefined
+      if (request.kind === 'slash') {
+        const selected = request.interactions.find(
+          (interaction) => interaction.id === request.commandId
         )
-      const visible = message.buttons?.find((button) => button.customId === request.customId)
-      if (!visible || visible.disabled || visible.style === 5)
-        throw new PlaygroundExecutionError('Button is disabled, inert, or unavailable', 'blocked')
-      const found = findButton(request.interactions, request.customId ?? '')
-      if (!found) throw new PlaygroundExecutionError('This button is no longer active', 'unmatched')
-      command = found.command
-      resource = resources[request.interactions.indexOf(command)]
-      resource.matched = true
-      action = found.button.action
-      // No slash option snapshot: contextForInteractionEvent deliberately omits options on buttons.
-      options = undefined
-      trace.push(
-        `Clicked ${request.customId}; slash options are unavailable on production button events`
-      )
-    }
-    scope = executionContext(
-      {
-        state: draft,
-        sender: draft.members.find((member) => member.id === request.senderId)!,
-        content: '',
-        wrapEvalInIIFE: request.wrapEvalInIIFE,
-        trigger: '',
-        options,
-        command,
-        trace,
-        diagnostics
-      },
-      factory
-    )
-    if (request.kind === 'slash' && (command.cooldown ?? 0) > 0 && command.cooldownType) {
-      const remaining = remainingCooldown(draft, command, request.senderId)
-      if (remaining > 0) {
-        addMessage(draft, {
-          kind: 'bot',
-          author: 'Playground Bot',
-          ephemeral: true,
-          recipient: sender.id,
-          content: command.cooldownMessage
-            ? await evaluateTemplate(command.cooldownMessage, scope.context)
-            : `This command is on cooldown. Try again in ${remaining}s.`
-        })
+        if (!selected)
+          throw new PlaygroundExecutionError('Saved slash command not found', 'unmatched')
+        command = selected
+        resource = resources[request.interactions.indexOf(command)]
+        resource.matched = true
+        action = command.rootAction
+        options = validateOptions(command.options, request.options ?? {}, draft)
         trace.push(
-          `Blocked: ${command.cooldownType.toLowerCase()} cooldown; ${remaining}s remaining`
+          `Invoked saved /${command.commandName}; publication status is not required for offline simulation`
         )
-        scope.commit()
-        resource.outcome = 'blocked'
-        resource.reason = `Cooldown; ${remaining}s remaining`
-        return {
-          state: commitWorld(draft),
+      } else {
+        const message = original.messages.find(
+          (item) =>
+            item.id === request.messageId &&
+            !item.deleted &&
+            (!original.world || item.channelId === original.channelId)
+        )
+        if (
+          !message ||
+          ((message.kind === 'dm' || message.ephemeral) && message.recipient !== sender.id)
+        )
+          throw new PlaygroundExecutionError(
+            'Button message is unavailable to this fake sender',
+            'blocked'
+          )
+        const visible = message.buttons?.find((button) => button.customId === request.customId)
+        if (!visible || visible.disabled || visible.style === 5)
+          throw new PlaygroundExecutionError('Button is disabled, inert, or unavailable', 'blocked')
+        const found = findButton(request.interactions, request.customId ?? '')
+        if (!found)
+          throw new PlaygroundExecutionError('This button is no longer active', 'unmatched')
+        command = found.command
+        resource = resources[request.interactions.indexOf(command)]
+        resource.matched = true
+        action = found.button.action
+        // No slash option snapshot: contextForInteractionEvent deliberately omits options on buttons.
+        options = undefined
+        trace.push(
+          `Clicked ${request.customId}; slash options are unavailable on production button events`
+        )
+      }
+      scope = executionContext(
+        {
+          state: draft,
+          sender: draft.members.find((member) => member.id === request.senderId)!,
+          content: '',
+          wrapEvalInIIFE: request.wrapEvalInIIFE,
+          trigger: '',
+          options,
+          command,
           trace,
-          errors,
-          diagnostics,
-          warnings,
-          incomplete: incompleteReasons(draft),
-          resources
+          diagnostics
+        },
+        factory
+      )
+      if (request.kind === 'slash' && (command.cooldown ?? 0) > 0 && command.cooldownType) {
+        const remaining = remainingCooldown(draft, command, request.senderId)
+        if (remaining > 0) {
+          await sendMessage(draft, {
+            kind: 'bot',
+            author: 'Playground Bot',
+            ephemeral: true,
+            recipient: sender.id,
+            content: command.cooldownMessage
+              ? await evaluateTemplate(command.cooldownMessage, scope.context)
+              : `This command is on cooldown. Try again in ${remaining}s.`
+          })
+          trace.push(
+            `Blocked: ${command.cooldownType.toLowerCase()} cooldown; ${remaining}s remaining`
+          )
+          scope.commit()
+          resource.outcome = 'blocked'
+          resource.reason = `Cooldown; ${remaining}s remaining`
+          return {
+            state: commitWorld(draft),
+            trace,
+            errors,
+            diagnostics,
+            warnings,
+            incomplete: incompleteReasons(draft),
+            resources
+          }
         }
       }
-    }
-    await executeAction(
-      draft,
-      command,
-      action,
-      request.senderId,
-      options,
-      request.kind === 'button',
-      trace,
-      scope.context,
-      warnings
-    )
-    if (request.kind === 'slash') recordCooldown(draft, command, request.senderId)
-    scope.commit()
-    resource.outcome = 'executed'
-    resource.executed = true
-    resource.reason = undefined
-    return {
-      state: commitWorld(draft),
-      trace,
-      errors,
-      diagnostics,
-      warnings,
-      incomplete: incompleteReasons(draft),
-      resources
-    }
+      await executeAction(
+        draft,
+        command,
+        action,
+        request.senderId,
+        options,
+        request.kind === 'button',
+        trace,
+        scope.context,
+        warnings
+      )
+      if (request.kind === 'slash') recordCooldown(draft, command, request.senderId)
+      scope.commit()
+      resource.outcome = 'executed'
+      resource.executed = true
+      resource.reason = undefined
+      return {
+        state: commitWorld(draft),
+        trace,
+        errors,
+        diagnostics,
+        warnings,
+        incomplete: incompleteReasons(draft),
+        resources
+      }
+    })
   } catch (error) {
     recordFailure(draft, error)
     // A denied button can still target an existing candidate; coverage is derived

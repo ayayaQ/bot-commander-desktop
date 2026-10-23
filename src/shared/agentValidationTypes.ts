@@ -58,6 +58,11 @@ export type AgentValidationEffects = {
   variableChanges: AgentValidationChange[]
   cooldownChanges: AgentValidationChange[]
   operations?: import('./playground/types').PlaygroundOperation[]
+  timing?: {
+    startedAt: number
+    completedAt: number
+    pendingOperations: import('./playground/types').PlaygroundOperation[]
+  }
   channelChanges?: AgentValidationChange[]
   roleChanges?: AgentValidationChange[]
   worldChanges?: AgentValidationChange[]

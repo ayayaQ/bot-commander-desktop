@@ -502,7 +502,7 @@ describe('agent validation report presentation', () => {
     const value = report()
     const effects = agentValidationReportView(value, binding(value), candidate).cases[0].steps[0]
       .effects
-    expect(effects).toHaveLength(9)
+    expect(effects).toHaveLength(10)
     expect(
       effects.every(
         (effect) =>

@@ -1,3 +1,4 @@
+import { UTC_DATE_SETUP } from './utcDate'
 import { ScriptExecutionError, type ScriptExecutionErrorDetails } from '../runtime/scriptError'
 import { STATE_CHECKPOINT_FACTORY, type StateCheckpoint } from '../runtime/stateCheckpoint'
 import { IncompleteSimulationError } from '../runtime/errors'
@@ -353,12 +354,15 @@ class OfflineScriptSandbox implements ScriptSandbox {
           this.context.evalCode(
             `(() => {
           const NativeDate = Date, construct = Reflect.construct;
+          ${UTC_DATE_SETUP}
           let now = 0, seed = 1;
           function SimulatedDate(...args) {
             if (!new.target) return new NativeDate(now).toString();
+            if (args.length > 1) args = [nativeUTC(...args)];
+            else if (typeof args[0] === 'string') args = [parseUTC(args[0])];
             return construct(NativeDate, args.length ? args : [now], new.target);
           }
-          SimulatedDate.parse = NativeDate.parse;
+          SimulatedDate.parse = parseUTC;
           SimulatedDate.UTC = NativeDate.UTC;
           Object.defineProperty(NativeDate.prototype, "constructor", { value: SimulatedDate, writable: true, configurable: true });
           SimulatedDate.prototype = NativeDate.prototype;

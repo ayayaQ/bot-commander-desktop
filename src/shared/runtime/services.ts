@@ -3,6 +3,8 @@ import type { BCFDContext } from './types'
 /** Explicit host capabilities. The evaluator never loads services or credentials. */
 export interface RuntimeServices {
   maxOutput?: number
+  timezone?: 'UTC'
+  formatDate?(timestamp: number): string
   now(): number
   random(): number
   commandCount(): number

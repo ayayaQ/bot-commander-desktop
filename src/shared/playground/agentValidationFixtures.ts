@@ -210,6 +210,7 @@ export function validateAgentValidationState(value: unknown): PlaygroundState {
       'variables',
       'cooldowns',
       'clockMs',
+      'timing',
       'ai',
       'guildId',
       'guildName',

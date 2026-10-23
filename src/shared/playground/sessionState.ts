@@ -1,5 +1,6 @@
 import { PLAYGROUND_LIMITS } from './types'
 import type { PlaygroundState } from './types'
+import { validateTiming } from './scheduling'
 
 /** Validate JSON data without invoking accessors or silently dropping values. */
 export function validateBotState(value: unknown): asserts value is Record<string, unknown> {
@@ -49,6 +50,7 @@ export function validateBotState(value: unknown): asserts value is Record<string
 }
 
 export function validateSessionState(state: PlaygroundState): void {
+  validateTiming(state)
   validateBotState(state.botState)
   validateBotState(state.variables)
   if (Object.hasOwn(state.variables, 'botState'))
