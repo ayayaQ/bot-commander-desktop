@@ -28,6 +28,9 @@ export type FakeRole = {
   position?: number
   managed?: boolean
   editable?: boolean
+  hoist?: boolean
+  mentionable?: boolean
+  permissions?: string[]
 }
 export type FakeChannel = {
   deleted?: boolean
@@ -40,9 +43,22 @@ export type FakeChannel = {
   parentId: string | null
   position: number
   slowmode: number
-  overwrites: Record<string, { ViewChannel?: boolean; SendMessages?: boolean }>
+  overwrites: Record<string, Record<string, boolean>>
+  /** DM channels have no guild; guildId is the empty string. */
+  recipientId?: string
 }
+export type PlaygroundWorld = {
+  users: { id: string; name: string; bot?: boolean; createdTimestamp?: number }[]
+  guilds: { id: string; name: string; ownerId: string }[]
+  memberships: (Omit<FakeMember, 'name' | 'bot' | 'createdTimestamp'> & { guildId: string })[]
+  roles: (FakeRole & { guildId: string })[]
+  channels: FakeChannel[]
+}
+export type PlaygroundEventContext = { guildId: string | null; channelId: string }
+/** Numbers are accepted only by the legacy v2 simulator. Normalized worlds use strings. */
+export type PlaygroundMessageId = string | number
 export type PlaygroundOperation = {
+  context?: PlaygroundEventContext
   index: number
   truncated?: boolean
   name: string
@@ -51,12 +67,14 @@ export type PlaygroundOperation = {
   error?: string
 }
 export type PlaygroundMessage = {
-  id: number
+  id: PlaygroundMessageId
+  authorId?: string
+  guildId?: string | null
   author: string
   content: string
   kind: 'user' | 'bot' | 'dm'
   recipient?: string
-  replyTo?: number
+  replyTo?: PlaygroundMessageId
   embed?: BCFDEmbedMessageTemplate
   deleted?: boolean
   ephemeral?: boolean
@@ -66,6 +84,8 @@ export type PlaygroundMessage = {
   reactions?: string[]
 }
 export type PlaygroundState = {
+  /** Canonical v3 entities. The legacy fields below are the active context projection. */
+  world?: PlaygroundWorld
   /** Local JSON state only. No saved/live bot state is read or written. */
   botState: Record<string, unknown>
   variables: Record<string, unknown>
@@ -128,7 +148,8 @@ export class PlaygroundExecutionError extends Error {
 }
 export type PlaygroundMessageRequest = {
   kind?: import('../runtime/dispatch').CommandEvent
-  messageId?: number
+  messageId?: PlaygroundMessageId
+  context?: PlaygroundEventContext
   state: PlaygroundState
   commands: BCFDCommand[]
   senderId: string
@@ -143,7 +164,8 @@ export type PlaygroundInteractionRequest = {
   senderId: string
   commandId?: string
   options?: Record<string, string | number | boolean>
-  messageId?: number
+  messageId?: PlaygroundMessageId
+  context?: PlaygroundEventContext
   customId?: string
   /** Defaults to wrapped eval for ordinary Playground callers. */
   wrapEvalInIIFE?: boolean

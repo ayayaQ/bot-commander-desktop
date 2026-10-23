@@ -17,7 +17,8 @@ export type AgentValidationStep = {
   content?: string
   options?: Record<string, string | number | boolean>
   customId?: string
-  messageId?: number
+  messageId?: string | number
+  context?: import('./playground/types').PlaygroundEventContext
   advanceClockMs?: number
   assertions: AgentValidationAssertion[]
 }
@@ -27,7 +28,7 @@ export type AgentValidationCase = {
   steps: AgentValidationStep[]
 }
 export type AgentValidationSuite = {
-  version?: 2
+  version?: 2 | 3
   resources?: { commands: BCFDCommand[]; interactions: BCFDInteractionCommand[] }
   cases: AgentValidationCase[]
 }
@@ -51,7 +52,7 @@ export type AgentValidationChange = {
 export type AgentValidationEffects = {
   /** Bot/DM messages emitted by this step; the incoming user message is excluded. */
   messages: PlaygroundMessage[]
-  deletedMessageIds: number[]
+  deletedMessageIds: (string | number)[]
   memberChanges: AgentValidationChange[]
   botStateChanges: AgentValidationChange[]
   variableChanges: AgentValidationChange[]
@@ -59,6 +60,7 @@ export type AgentValidationEffects = {
   operations?: import('./playground/types').PlaygroundOperation[]
   channelChanges?: AgentValidationChange[]
   roleChanges?: AgentValidationChange[]
+  worldChanges?: AgentValidationChange[]
 }
 export type AgentValidationAssertionResult = {
   path: string
@@ -133,6 +135,7 @@ export const AGENT_VALIDATION_LIMITATIONS = [
   'External responses require explicit mocks in strict validation; real provider behavior is not tested',
   'Only explicitly supplied startup JavaScript is initialized in the isolated case VM',
   'Earlier simulated effects remain visible after failures; network scheduling is synthetic',
+  'Normalized worlds model role/overwrite permissions and hierarchy; threads, timeouts, intents and registration are not simulated',
   'Only supplied bounded cases and assertions are tested; delivery and publication are not guaranteed'
 ] as const
 

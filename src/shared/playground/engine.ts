@@ -1,3 +1,15 @@
+import {
+  prepareWorldEvent,
+  commitWorld,
+  allocateEntityId,
+  dmChannel,
+  effectivePermissions,
+  LEGACY_PERMISSIONS,
+  assertManageable,
+  assertEditableRole,
+  PLAYGROUND_BOT_ID
+} from './world'
+import { validateNormalizedWorld } from './normalizedWorldValidation'
 import { incompleteReasons, recordFailure, IncompleteSimulationError } from './failures'
 import { runTraditionalActions } from '../runtime/actions'
 import { matchesCommand, type CommandEvent } from '../runtime/dispatch'
@@ -22,6 +34,11 @@ import type {
 } from './types'
 
 export function validateState(state: PlaygroundState): void {
+  if (state?.world) {
+    validateNormalizedWorld(state)
+    validateSessionState(state)
+    return
+  }
   if (
     !state ||
     !/^\d{1,20}$/.test(state.guildId) ||
@@ -53,8 +70,25 @@ export function addMessage(
   message: Omit<PlaygroundMessage, 'id'>
 ): PlaygroundMessage {
   const append = () => {
+    if (state.world && message.kind !== 'dm') {
+      const channel = state.channels?.find(
+        (channel) => channel.id === (message.channelId ?? state.channelId)
+      )
+      if (!channel || channel.guildId !== state.guildId)
+        throw new Error('Message channel not found in the current context')
+      if ([4, 15, 16].includes(channel.type))
+        throw new Error('Channel does not accept ordinary messages')
+      if (
+        message.replyTo !== undefined &&
+        !state.messages.some(
+          (target) =>
+            target.id === message.replyTo && target.channelId === channel.id && !target.deleted
+        )
+      )
+        throw new Error('Reply target not found in the destination channel')
+    }
     if (message.kind === 'bot') {
-      requireBotPermission(state, 'SendMessages')
+      requireBotPermission(state, 'SendMessages', message.channelId ?? state.channelId)
       if (
         state.channels?.find((channel) => channel.id === (message.channelId ?? state.channelId))
           ?.deleted
@@ -63,11 +97,24 @@ export function addMessage(
     }
     if (state.messages.length >= PLAYGROUND_LIMITS.messages)
       throw new IncompleteSimulationError('Message limit reached; reset the playground')
-    const result = { ...message, id: state.nextId++ }
+    const nextId = state.nextId
+    const channel =
+      state.world && message.kind === 'dm' ? dmChannel(state, message.recipient!) : undefined
+    const result = {
+      ...message,
+      ...(state.world
+        ? {
+            authorId: message.authorId ?? PLAYGROUND_BOT_ID,
+            guildId: channel ? null : state.guildId || null,
+            channelId: channel?.id ?? message.channelId ?? state.channelId
+          }
+        : {}),
+      id: state.world ? allocateEntityId(state) : state.nextId++
+    }
     state.messages.push(result)
     if (JSON.stringify(state).length > PLAYGROUND_LIMITS.requestBytes - 65_536) {
       state.messages.pop()
-      state.nextId--
+      state.nextId = nextId
       throw new IncompleteSimulationError('Transcript size limit reached; reset the playground')
     }
     return result
@@ -77,7 +124,18 @@ export function addMessage(
     : operation(state, message.kind === 'dm' ? 'message.dm' : 'message.send', [message], append)
 }
 
-export function hasPermission(member: FakeMember, permission: FakePermission): boolean {
+export function hasPermission(
+  member: FakeMember,
+  permission: FakePermission,
+  state?: PlaygroundState,
+  channelId?: string
+): boolean {
+  if (state?.world)
+    return effectivePermissions(
+      state,
+      member.id,
+      ['manageMessages', 'mute'].includes(permission) ? (channelId ?? state.channelId) : undefined
+    ).has(LEGACY_PERMISSIONS[permission])
   return member.permissions.includes('admin') || member.permissions.includes(permission)
 }
 
@@ -98,6 +156,10 @@ export function toggleRole(state: PlaygroundState, sender: FakeMember, roleId: s
     requireBotPermission(state, 'ManageRoles')
     const role = state.roles.find((item) => item.id === roleId)
     if (!role) throw new Error(`Unknown fake role: ${roleId}`)
+    if (state.world) {
+      assertEditableRole(state, roleId)
+      assertManageable(state, sender)
+    }
     if (role.managed || role.editable === false || sender.manageable === false)
       throw new Error('Role or member is not manageable')
     sender.roles = sender.roles.includes(roleId)
@@ -111,7 +173,7 @@ async function executeCommand(
   command: BCFDCommand,
   senderId: string,
   content: string,
-  inputId: number,
+  inputId: string | number,
   trace: string[],
   ctx: TemplateContext,
   event: CommandEvent
@@ -150,7 +212,11 @@ async function executeCommand(
     trace.push('Blocked: missing required fake role')
     return { outcome: 'blocked', reason: 'Missing required fake role' }
   }
-  if (!memberEvent && command.isAdmin && (event === 'dm' || !hasPermission(sender, 'admin'))) {
+  if (
+    !memberEvent &&
+    command.isAdmin &&
+    (event === 'dm' || !hasPermission(sender, 'admin', state))
+  ) {
     trace.push('Blocked: administrator required')
     return { outcome: 'blocked', reason: 'Administrator required' }
   }
@@ -178,6 +244,18 @@ async function executeCommand(
       return { outcome: 'blocked', reason: `Cooldown; ${remaining}s remaining` }
     }
   }
+  if (
+    state.world &&
+    command.specificChannel?.trim() &&
+    !fakeChannels(state).some(
+      (channel) =>
+        !channel.deleted &&
+        channel.guildId === state.guildId &&
+        (channel.id === command.specificChannel ||
+          channel.name.toLowerCase() === command.specificChannel.replace(/^#/, '').toLowerCase())
+    )
+  )
+    throw new Error('Destination channel not found in the current guild')
   const destination = command.specificChannel?.trim()
     ? (fakeChannels(state).find(
         (channel) =>
@@ -194,14 +272,17 @@ async function executeCommand(
   ) => {
     if (!enabled || content.split(' ')[0] !== command.command || content.split(' ').length !== 2)
       return true
-    if (!hasPermission(sender, permission)) return false
+    if (!hasPermission(sender, permission, state, mentioned?.voiceChannelId)) return false
+    if (state.world && !mentioned)
+      throw new Error('Moderation target not found in the current guild')
     if (mentioned)
       operation(state, `member.${key}`, [mentioned.id], () => {
         requireBotPermission(
           state,
-          { kicked: 'KickMembers', banned: 'BanMembers', muted: 'MuteMembers' }[key]
+          { kicked: 'KickMembers', banned: 'BanMembers', muted: 'MuteMembers' }[key],
+          key === 'muted' ? (mentioned.voiceChannelId ?? state.channelId) : undefined
         )
-        if (mentioned.manageable === false) throw new Error('Member is not manageable')
+        assertManageable(state, mentioned)
         mentioned[key] = true
       })
     return true
@@ -212,17 +293,21 @@ async function executeCommand(
       {
         purge: async () => {
           if (command.deleteNum > 0) {
-            if (!hasPermission(sender, 'manageMessages')) {
+            if (!hasPermission(sender, 'manageMessages', state)) {
               trace.push('Blocked: Manage Messages required')
               return false
             }
             if (!Number.isInteger(command.deleteNum) || command.deleteNum > 100)
               throw new Error('Deletion count must be from 1 to 100')
             operation(state, 'message.purge', [command.deleteNum], () => {
-              requireBotPermission(state, 'ManageMessages')
+              requireBotPermission(state, 'ManageMessages', state.channelId)
               state.messages
                 .filter(
-                  (message) => message.kind !== 'dm' && !message.deleted && !message.ephemeral
+                  (message) =>
+                    message.kind !== 'dm' &&
+                    !message.deleted &&
+                    !message.ephemeral &&
+                    (!state.world || message.channelId === state.channelId)
                 )
                 .slice(-command.deleteNum)
                 .forEach((message) => (message.deleted = true))
@@ -234,7 +319,10 @@ async function executeCommand(
         deleteIf: async () => {
           if (command.deleteIfStrings?.split('|').some((text) => text && content.includes(text))) {
             const input = state.messages.find((message) => message.id === inputId)
-            if (input) input.deleted = true
+            if (input) {
+              if (state.world) requireBotPermission(state, 'ManageMessages', state.channelId)
+              input.deleted = true
+            }
           }
         },
         message: async () => {
@@ -288,6 +376,10 @@ async function executeCommand(
         reaction: async () => {
           if (command.reaction?.trim()) {
             operation(state, 'message.react', [inputId, command.reaction], () => {
+              if (state.world) {
+                requireBotPermission(state, 'ReadMessageHistory', state.channelId)
+                requireBotPermission(state, 'AddReactions', state.channelId)
+              }
               const target = state.messages.find((item) => item.id === inputId)
               if (!target || target.deleted) throw new Error('Reaction message is unavailable')
               target.reactions = [...new Set([...(target.reactions ?? []), command.reaction])]
@@ -300,7 +392,10 @@ async function executeCommand(
         deleteAfter: () => {
           if (command.deleteAfter) {
             const input = state.messages.find((item) => item.id === inputId)
-            if (input) input.deleted = true
+            if (input) {
+              if (state.world) requireBotPermission(state, 'ManageMessages', state.channelId)
+              input.deleted = true
+            }
           }
         },
         cooldown: () => recordCooldown(state, command, senderId)
@@ -336,6 +431,15 @@ export async function runMessage(
   factory?: ScriptSandboxFactory
 ): Promise<PlaygroundResult> {
   validateState(request.state)
+  request = {
+    ...request,
+    state: prepareWorldEvent(
+      request.state,
+      request.context,
+      request.kind ?? 'message',
+      request.senderId
+    )
+  }
   if (!Array.isArray(request.commands) || request.commands.length > PLAYGROUND_LIMITS.commands)
     throw new Error('Saved-command limit exceeded')
   if (typeof request.content !== 'string' || request.content.length > PLAYGROUND_LIMITS.input)
@@ -355,10 +459,16 @@ export async function runMessage(
   const input = memberEvent
     ? { id: 0 }
     : request.kind === 'reaction'
-      ? state.messages.find((item) => item.id === request.messageId)
+      ? state.messages.find(
+          (item) =>
+            item.id === request.messageId &&
+            !item.deleted &&
+            (!state.world || item.channelId === state.channelId)
+        )
       : addMessage(state, {
           kind: 'user',
           author: sender.name,
+          ...(state.world ? { authorId: sender.id } : {}),
           content: request.content,
           channelId: state.channelId
         })
@@ -398,7 +508,12 @@ export async function runMessage(
         event: request.kind,
         content:
           request.kind === 'reaction'
-            ? (state.messages.find((item) => item.id === request.messageId)?.content ?? '')
+            ? (state.messages.find(
+                (item) =>
+                  item.id === request.messageId &&
+                  !item.deleted &&
+                  (!state.world || item.channelId === state.channelId)
+              )?.content ?? '')
             : memberEvent
               ? ''
               : request.content,
@@ -425,7 +540,7 @@ export async function runMessage(
       resource.outcome = execution.outcome
       resource.executed = execution.outcome === 'executed'
       resource.reason = execution.reason
-      state = draft
+      state = commitWorld(draft)
       trace.push(...commandTrace)
     } catch (error) {
       recordFailure(draft, error)
@@ -435,7 +550,7 @@ export async function runMessage(
       errors.push(
         `${command.command}: ${error instanceof Error ? error.message : 'Execution failed'}`
       )
-      state = draft
+      state = commitWorld(draft)
       trace.push(...commandTrace, `Failed: ${command.command}; earlier effects retained`)
     } finally {
       const reasons = incompleteReasons(draft)

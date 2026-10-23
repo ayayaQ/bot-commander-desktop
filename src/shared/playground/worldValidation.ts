@@ -1,3 +1,4 @@
+import { WORLD_PERMISSIONS } from './world'
 import type { PlaygroundState } from './types'
 
 /** Validate optional v2 fixture fields after the ordinary bounded JSON copy. */
@@ -59,7 +60,12 @@ export function validateWorldExtensions(state: PlaygroundState): void {
     for (const channel of state.channels) {
       if (channel.deleted !== undefined)
         assert(typeof channel.deleted === 'boolean', 'channel.deleted')
-      assert(id(channel.id) && id(channel.guildId) && text(channel.name, 100), 'channel identity')
+      assert(
+        id(channel.id) &&
+          (id(channel.guildId) || (state.world && channel.type === 1 && channel.guildId === '')) &&
+          text(channel.name, 100),
+        'channel identity'
+      )
       assert(
         [0, 1, 2, 4, 5, 10, 11, 12, 13, 15, 16].includes(channel.type) &&
           text(channel.topic) &&
@@ -83,7 +89,10 @@ export function validateWorldExtensions(state: PlaygroundState): void {
             values &&
             Object.entries(values).every(
               ([key, value]) =>
-                ['ViewChannel', 'SendMessages'].includes(key) && typeof value === 'boolean'
+                (state.world
+                  ? [...WORLD_PERMISSIONS].filter((name) => name !== 'Administrator')
+                  : ['ViewChannel', 'SendMessages']
+                ).includes(key as (typeof WORLD_PERMISSIONS)[number]) && typeof value === 'boolean'
             ),
           'channel overwrite'
         )
@@ -99,7 +108,7 @@ export function validateWorldExtensions(state: PlaygroundState): void {
       assert(id(member.voiceChannelId), 'member.voiceChannelId')
   }
   for (const role of state.roles) {
-    for (const key of ['managed', 'editable'])
+    for (const key of ['managed', 'editable', 'hoist', 'mentionable'])
       if (role[key] !== undefined) assert(typeof role[key] === 'boolean', `role.${key}`)
     if (role.color !== undefined)
       assert(integer(role.color) && role.color <= 0xffffff, 'role.color')

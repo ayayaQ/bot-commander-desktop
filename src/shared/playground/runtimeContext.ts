@@ -1,3 +1,10 @@
+import {
+  allocateEntityId,
+  effectivePermissions,
+  assertManageable,
+  assertEditableRole,
+  PLAYGROUND_BOT_ID
+} from './world'
 import { IncompleteSimulationError, markIncomplete, recordFailure } from './failures'
 import { parsePresence } from '../runtime/presence'
 import type { BCFDContext } from '../runtime/types'
@@ -31,6 +38,7 @@ class EntityMap<T extends { id: string }> extends Map<string, T> {
 }
 
 export function fakeChannels(state: PlaygroundState): FakeChannel[] {
+  if (state.world) return state.channels ?? []
   state.channels ??= []
   let channel = state.channels.find((item) => item.id === state.channelId)
   if (!channel) {
@@ -65,6 +73,9 @@ export function operation<T>(
   state.operations ??= []
   if (state.operations.length >= 1000) throw incompleteLimit(state, 'Operation limit exceeded')
   const entry = {
+    ...(state.world
+      ? { context: { guildId: state.guildId || null, channelId: state.channelId } }
+      : {}),
     index: state.operations.length,
     name,
     args: JSON.parse(JSON.stringify(args))
@@ -84,7 +95,7 @@ export function operation<T>(
     const value = run()
     entry.result = value === undefined ? null : JSON.parse(JSON.stringify(value))
     if (name === 'message.send' || name === 'message.dm')
-      entry.result = { id: (value as { id: number }).id }
+      entry.result = { id: (value as { id: string | number }).id }
     if (JSON.stringify(entry.result).length > 4096) {
       entry.result = '[Operation result omitted: log size limit]'
       entry.truncated = true
@@ -104,7 +115,21 @@ export function seededRandom(state: PlaygroundState): number {
   return value / 4294967296
 }
 
-export function requireBotPermission(state: PlaygroundState, name: string): void {
+export function requireBotPermission(
+  state: PlaygroundState,
+  name: string,
+  channelId?: string
+): void {
+  if (state.world) {
+    if (!state.guildId) {
+      if (['ViewChannel', 'SendMessages', 'ReadMessageHistory', 'AddReactions'].includes(name))
+        return
+      throw new Error(`Missing bot ${name} permission in DM context`)
+    }
+    if (!effectivePermissions(state, PLAYGROUND_BOT_ID, channelId).has(name))
+      throw new Error(`Missing bot ${name} permission`)
+    return
+  }
   if (
     state.botPermissions &&
     !state.botPermissions.includes('Administrator') &&
@@ -116,8 +141,15 @@ export function requireBotPermission(state: PlaygroundState, name: string): void
 export function createFakeRuntime(ctx: TemplateContext) {
   const state = ctx.state
   const channels = fakeChannels(state)
-  const permission = (name: string) => requireBotPermission(state, name)
-  const allocateId = () => String(800000000000000000n + BigInt(state.nextId++))
+  const permission = (name: string, channelId?: string) =>
+    requireBotPermission(state, name, channelId)
+  const allocateId = () => allocateEntityId(state)
+  const requireChannelCapacity = () => {
+    const otherChannels =
+      state.world?.channels.filter((item) => item.guildId !== state.guildId).length ?? 0
+    if (otherChannels + channels.length >= 100)
+      throw new IncompleteSimulationError('Channel limit exceeded')
+  }
   const user = (member: FakeMember) => ({
     id: member.id,
     displayName: member.name,
@@ -133,7 +165,7 @@ export function createFakeRuntime(ctx: TemplateContext) {
   const channelView = (channel: FakeChannel) => {
     const update = async (name: string, value: unknown, patch: Partial<FakeChannel>) => {
       operation(state, name, [channel.id, value], () => {
-        permission('ManageChannels')
+        permission('ManageChannels', channel.id)
         Object.assign(channel, patch)
         if (channel.id === state.channelId) {
           state.channelName = channel.name
@@ -178,13 +210,23 @@ export function createFakeRuntime(ctx: TemplateContext) {
         update('channel.slowmode', value, { slowmode: value }),
       setPosition: (value: number) => update('channel.position', value, { position: value }),
       setParent: async (value: string | null) => {
-        if (value && !channels.some((item) => item.id === value && item.type === 4))
+        if (
+          value &&
+          !channels.some(
+            (item) =>
+              item.id === value &&
+              item.type === 4 &&
+              !item.deleted &&
+              item.guildId === state.guildId
+          )
+        )
           throw new Error('Category not found')
         await update('channel.parent', value, { parentId: value })
       },
       clone: async () => {
         const clone = operation(state, 'channel.clone', [channel.id], () => {
-          permission('ManageChannels')
+          permission('ManageChannels', channel.id)
+          requireChannelCapacity()
           const clone = { ...structuredClone(channel), id: allocateId() }
           channels.push(clone)
           return clone
@@ -194,7 +236,13 @@ export function createFakeRuntime(ctx: TemplateContext) {
       permissionOverwrites: {
         edit: async (id: string, overwrite: FakeChannel['overwrites'][string]) => {
           operation(state, 'channel.permissions', [channel.id, id, overwrite], () => {
-            permission('ManageRoles')
+            permission('ManageRoles', channel.id)
+            if (
+              state.world &&
+              !state.roles.some((role) => role.id === id) &&
+              !state.members.some((member) => member.id === id)
+            )
+              throw new Error('Overwrite target not found in the current guild')
             channel.overwrites[id] = { ...channel.overwrites[id] }
             for (const [key, value] of Object.entries(overwrite)) {
               if (value === null) delete channel.overwrites[id][key]
@@ -212,9 +260,13 @@ export function createFakeRuntime(ctx: TemplateContext) {
                 (item.channelId ?? state.channelId) === channel.id &&
                 !item.deleted &&
                 !item.ephemeral &&
-                item.kind !== 'dm'
+                (state.world || item.kind !== 'dm')
             )
             if (!message) throw new Error(DELETE_MESSAGE_ERRORS.missingMessage)
+            if (state.world) {
+              permission('ViewChannel', channel.id)
+              if (message.authorId !== PLAYGROUND_BOT_ID) permission('ManageMessages', channel.id)
+            }
             message.deleted = true
           })
         }
@@ -228,13 +280,22 @@ export function createFakeRuntime(ctx: TemplateContext) {
     color: role.color ?? 0,
     rawPosition: role.position ?? 0,
     managed: role.managed ?? false,
-    editable: role.editable !== false,
+    editable: (() => {
+      try {
+        assertEditableRole(state, role.id)
+        return true
+      } catch {
+        return false
+      }
+    })(),
     delete: async () =>
       operation(state, 'role.delete', [role.id], () => {
         permission('ManageRoles')
+        assertEditableRole(state, role.id)
         state.roles = state.roles.filter((item) => item.id !== role.id)
         for (const member of state.members)
           member.roles = member.roles.filter((id) => id !== role.id)
+        for (const channel of channels) delete channel.overwrites[role.id]
       })
   })
   const roles = () =>
@@ -253,8 +314,19 @@ export function createFakeRuntime(ctx: TemplateContext) {
     joinedTimestamp: member.joinedTimestamp ?? 0,
     premiumSinceTimestamp: null,
     displayHexColor: '#000000',
-    manageable: member.manageable !== false,
-    guild: { ownerId: state.members[0]?.id },
+    manageable: (() => {
+      try {
+        assertManageable(state, member)
+        return true
+      } catch {
+        return false
+      }
+    })(),
+    guild: {
+      ownerId:
+        state.world?.guilds.find((item) => item.id === state.guildId)?.ownerId ??
+        state.members[0]?.id
+    },
     roles: {
       get cache() {
         return roles().filter((role) => role.id === state.guildId || member.roles.includes(role.id))
@@ -262,11 +334,15 @@ export function createFakeRuntime(ctx: TemplateContext) {
       add: async (ids: string[]) =>
         operation(state, 'member.roles.add', [member.id, ids], () => {
           permission('ManageRoles')
+          if (state.world) assertManageable(state, member)
+          for (const id of ids) assertEditableRole(state, id)
           member.roles = [...new Set([...member.roles, ...ids])]
         }),
       remove: async (ids: string[]) =>
         operation(state, 'member.roles.remove', [member.id, ids], () => {
           permission('ManageRoles')
+          if (state.world) assertManageable(state, member)
+          for (const id of ids) assertEditableRole(state, id)
           member.roles = member.roles.filter((id) => !ids.includes(id))
         })
     }
@@ -286,7 +362,9 @@ export function createFakeRuntime(ctx: TemplateContext) {
   const guild = {
     id: state.guildId,
     name: state.guildName,
-    ownerId: state.members[0]?.id,
+    ownerId:
+      state.world?.guilds.find((item) => item.id === state.guildId)?.ownerId ??
+      state.members[0]?.id,
     get memberCount() {
       return state.members.filter((item) => !item.kicked && !item.banned).length
     },
@@ -298,7 +376,8 @@ export function createFakeRuntime(ctx: TemplateContext) {
     iconURL: () => '',
     bannerURL: () => '',
     splashURL: () => '',
-    fetchOwner: async () => memberView(state.members[0]),
+    fetchOwner: async () =>
+      memberView(state.members.find((member) => member.id === guild.ownerId)!),
     channels: {
       get cache() {
         return new EntityMap(
@@ -308,7 +387,9 @@ export function createFakeRuntime(ctx: TemplateContext) {
         )
       },
       fetch: async (id: string) => {
-        const channel = channels.find((item) => !item.deleted && item.id === id)
+        const channel = channels.find(
+          (item) => !item.deleted && item.id === id && item.guildId === state.guildId
+        )
         return channel ? channelView(channel) : null
       },
       create: async (data: {
@@ -330,9 +411,17 @@ export function createFakeRuntime(ctx: TemplateContext) {
           ],
           () => {
             permission('ManageChannels')
-            if (channels.length >= 100)
-              throw new IncompleteSimulationError('Channel limit exceeded')
-            if (data.parent && !channels.some((item) => item.id === data.parent && item.type === 4))
+            requireChannelCapacity()
+            if (
+              data.parent &&
+              !channels.some(
+                (item) =>
+                  item.id === data.parent &&
+                  item.type === 4 &&
+                  !item.deleted &&
+                  item.guildId === state.guildId
+              )
+            )
               throw new Error('Category not found')
             const channel: FakeChannel = {
               id: allocateId(),
@@ -356,10 +445,17 @@ export function createFakeRuntime(ctx: TemplateContext) {
       },
       delete: async (id: string) =>
         operation(state, 'channel.delete', [id], () => {
-          permission('ManageChannels')
-          const index = channels.findIndex((item) => item.id === id)
+          permission('ManageChannels', id)
+          const index = channels.findIndex(
+            (item) => item.id === id && item.guildId === state.guildId
+          )
           if (index < 0) throw new Error('Channel not found')
-          if (id === state.channelId) channels[index].deleted = true
+          if (state.world) {
+            for (const child of channels) if (child.parentId === id) child.parentId = null
+            for (const member of state.members)
+              if (member.voiceChannelId === id) delete member.voiceChannelId
+          }
+          if (state.world || id === state.channelId) channels[index].deleted = true
           else channels.splice(index, 1)
         })
     },
@@ -368,11 +464,16 @@ export function createFakeRuntime(ctx: TemplateContext) {
         return roles()
       },
       everyone: { id: state.guildId },
-      create: async (data: { name: string; color: number }) => {
+      create: async (data: {
+        name: string
+        color: number
+        hoist?: boolean
+        mentionable?: boolean
+      }) => {
         const role = operation(state, 'role.create', [data], () => {
           permission('ManageRoles')
           if (state.roles.length >= 50) throw new IncompleteSimulationError('Role limit exceeded')
-          const role = { id: allocateId(), ...data }
+          const role = { id: allocateId(), ...(state.world ? { position: 1 } : {}), ...data }
           state.roles.push(role)
           return role
         })
@@ -388,9 +489,11 @@ export function createFakeRuntime(ctx: TemplateContext) {
       me: {
         permissions: {
           has: () =>
-            !state.botPermissions ||
-            state.botPermissions.includes('Administrator') ||
-            state.botPermissions.includes('ManageRoles')
+            state.world
+              ? effectivePermissions(state, PLAYGROUND_BOT_ID).has('ManageRoles')
+              : !state.botPermissions ||
+                state.botPermissions.includes('Administrator') ||
+                state.botPermissions.includes('ManageRoles')
         }
       },
       fetch: async (id: string) => {
@@ -403,8 +506,26 @@ export function createFakeRuntime(ctx: TemplateContext) {
   const client = {
     user: bot,
     ws: { ping: 0 },
-    guilds: { cache: new EntityMap([guild]) },
-    users: { cache: new EntityMap(state.members.map(user)) },
+    guilds: {
+      cache: new EntityMap(
+        state.world
+          ? state.world.guilds.filter((item) =>
+              state.world!.memberships.some(
+                (member) =>
+                  member.guildId === item.id &&
+                  member.id === PLAYGROUND_BOT_ID &&
+                  !member.kicked &&
+                  !member.banned
+              )
+            )
+          : [guild]
+      )
+    },
+    users: {
+      cache: new EntityMap(
+        (state.world?.users ?? state.members).map((item) => user(item as FakeMember))
+      )
+    },
     channels: {
       get cache() {
         return guild.channels.cache
@@ -431,9 +552,12 @@ export function createFakeRuntime(ctx: TemplateContext) {
   // The SDK-shaped views are constructed only here; neither data nor workers contain SDK objects.
   const context = {
     user: user(ctx.sender),
-    member: ctx.event === 'dm' || ctx.event === 'memberBan' ? undefined : memberView(ctx.sender),
+    member:
+      ctx.event === 'dm' || !state.guildId || ctx.event === 'memberBan'
+        ? undefined
+        : memberView(ctx.sender),
     client,
-    guild: ctx.event === 'dm' ? undefined : guild,
+    guild: ctx.event === 'dm' || !state.guildId ? undefined : guild,
     textChannel: channels.find((item) => item.id === state.channelId && !item.deleted)
       ? channelView(channels.find((item) => item.id === state.channelId)!)
       : undefined,
@@ -466,7 +590,23 @@ export function createFakeRuntime(ctx: TemplateContext) {
     random: () => seededRandom(state),
     commandCount: () => state.commandCount ?? 0,
     mutualGuildCount: (_ctx, target) =>
-      target && state.members.some((item) => item.id === target.id) ? '1' : '0',
+      state.world
+        ? String(
+            state.world.guilds.filter((guild) =>
+              [target?.id, PLAYGROUND_BOT_ID].every((id) =>
+                state.world!.memberships.some(
+                  (member) =>
+                    member.guildId === guild.id &&
+                    member.id === id &&
+                    !member.kicked &&
+                    !member.banned
+                )
+              )
+            ).length
+          )
+        : target && state.members.some((item) => item.id === target.id)
+          ? '1'
+          : '0',
     cooldownRemaining: (_id, level) =>
       ctx.command ? remainingCooldown(state, ctx.command, ctx.sender.id, level) : 0,
     setStatus: (_ctx, args) => {

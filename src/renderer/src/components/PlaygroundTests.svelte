@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { commitWorld, dmChannel } from '../../../shared/playground/world'
   import { onDestroy, onMount } from 'svelte'
   import type { BCFDCommand, BCFDInteractionCommand } from '../../../main/types/types'
   import type { PlaygroundState } from '../../../shared/playground/types'
@@ -89,8 +90,18 @@
     const kinds = ['message', 'dm', 'memberJoin', 'memberLeave', 'memberBan', 'reaction'] as const
     const kind =
       selected.kind === 'interaction' ? 'slash' : kinds[(selected.value as BCFDCommand).type]
+    const state = structuredClone($state.snapshot(world))
+    if (state.world) commitWorld(state)
+    const senderId = state.members.find(
+      (member) => !member.bot && !member.kicked && !member.banned
+    )?.id
+    if (!senderId) {
+      error = 'Choose a world with an available fake sender'
+      return
+    }
+    const dm = kind === 'dm' && state.world ? dmChannel(state, senderId) : undefined
     const suite: AgentValidationSuite = {
-      version: 2,
+      version: state.world ? 3 : 2,
       ...(includeOthers
         ? {
             resources: {
@@ -102,13 +113,23 @@
       cases: [
         {
           name: 'Expected response',
-          state: $state.snapshot(world),
+          state,
           steps: [
             {
               kind,
-              senderId: world.members[0].id,
+              senderId,
+              ...(state.world
+                ? {
+                    context: {
+                      guildId: dm ? null : state.guildId || null,
+                      channelId: dm?.id ?? state.channelId
+                    }
+                  }
+                : {}),
               ...(kind === 'slash' ? { options: {} } : { content: input }),
-              ...(kind === 'reaction' ? { messageId: world.messages.at(-1)?.id ?? 1 } : {}),
+              ...(kind === 'reaction'
+                ? { messageId: world.messages.at(-1)?.id ?? (state.world ? '1' : 1) }
+                : {}),
               assertions: [
                 { path: '/outcome', equals: 'executed' },
                 { path: '/effects/messages/0/content', equals: expected }

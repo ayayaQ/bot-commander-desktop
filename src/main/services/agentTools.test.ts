@@ -147,6 +147,68 @@ describe('agent resource tools', () => {
     expect(mocks.restartJsEngine).not.toHaveBeenCalled()
   })
 
+  it('exposes and runs a version 3 normalized fixture through the agent tool contract', async () => {
+    const tools = await import('./agentTools')
+    const fixture = (await tools.executeReadTool('read_validation_fixture', {})) as {
+      version: number
+      state: import('../../shared/playground/types').PlaygroundState
+      exampleContext: import('../../shared/playground/types').PlaygroundEventContext
+    }
+    expect(fixture.version).toBe(3)
+    expect(fixture.state.world!.guilds).toHaveLength(1)
+    const schema = tools.agentToolDefinitions.find(
+      (tool) => tool.function.name === 'run_playground'
+    )!.function.parameters as {
+      properties: {
+        validation: {
+          properties: {
+            version: { enum: number[] }
+            cases: {
+              items: { properties: { steps: { items: { properties: Record<string, unknown> } } } }
+            }
+          }
+        }
+      }
+    }
+    expect(schema.properties.validation.properties.version.enum).toContain(3)
+    expect(
+      schema.properties.validation.properties.cases.items.properties.steps.items.properties.context
+    ).toBeDefined()
+    const result = (await tools.executeReadTool('run_playground', {
+      kind: 'command',
+      candidate: {
+        id: 'v3',
+        command: '!ping',
+        commandDescription: 'Ping',
+        channelMessage: 'Pong!'
+      },
+      validation: {
+        version: 3,
+        cases: [
+          {
+            name: 'normalized',
+            state: fixture.state,
+            steps: [
+              {
+                kind: 'message',
+                senderId: fixture.state.members[0].id,
+                context: fixture.exampleContext,
+                content: '!ping',
+                assertions: [
+                  { path: '/outcome', equals: 'executed' },
+                  { path: '/effects/messages/0/content', equals: 'Pong!' }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    })) as import('../../shared/agentValidationTypes').AgentValidationReport
+    expect(result.outcome).toBe('passed')
+    expect(typeof result.cases[0].steps[0].effects.messages[0].id).toBe('string')
+    expect(mocks.saveCommands).not.toHaveBeenCalled()
+  })
+
   beforeEach(() => {
     mocks.state.commands = { bcfdCommands: [], bcfdSlashCommands: [] }
     mocks.state.interactions = []
