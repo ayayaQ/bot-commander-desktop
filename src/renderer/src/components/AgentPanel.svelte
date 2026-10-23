@@ -8,10 +8,10 @@
   import AgentValidationReport from './AgentValidationReport.svelte'
   import AgentRunSummary from './AgentRunSummary.svelte'
   import AgentToolPresentation from './AgentToolPresentation.svelte'
+  import AgentToolCard from './AgentToolCard.svelte'
   import { agentToolPresentationInput } from '../utils/agentToolPresentation'
   import AgentSkillsPanel from './AgentSkillsPanel.svelte'
   import { renderMarkdown } from '../utils/markdown'
-  import { agentToolLabel } from '../utils/agentToolLabel'
   import {
     agentProtocol,
     type AiModelInfo,
@@ -705,24 +705,7 @@
                     $activeAgentSession.id,
                     message.id
                   )}
-                  <div class="border border-base-300 rounded-md overflow-hidden">
-                    <div class="h-10 px-3 bg-base-200 flex items-center gap-2">
-                      <span class="material-symbols-outlined text-base">build</span>
-                      <code
-                        class="text-sm font-semibold min-w-0 truncate"
-                        title={agentToolLabel(call)}>{agentToolLabel(call)}</code
-                      >
-                      <span
-                        class="badge badge-sm ml-auto shrink-0 {call.status === 'error'
-                          ? 'badge-error'
-                          : call.status === 'waiting_approval'
-                            ? 'badge-warning'
-                            : 'badge-ghost'}"
-                        >{call.status === 'reviewing'
-                          ? 'Reviewing change'
-                          : call.status.replace('_', ' ')}</span
-                      >
-                    </div>
+                  <AgentToolCard {call}>
                     {#if call.decision}
                       <div class="p-3 border-t border-base-300 text-xs space-y-1">
                         <div>
@@ -803,7 +786,7 @@
                       encoded={presentation.encoded}
                       fallback={presentation.fallback}
                     />
-                  </div>
+                  </AgentToolCard>
                 {/each}
               {/if}
             {/each}
@@ -833,15 +816,17 @@
             {#if $activeAgentSession.error}
               <div class="alert alert-error text-sm">{$activeAgentSession.error}</div>
             {/if}
-            {#if $activeAgentSession.lastRunMetrics}
-              <AgentRunSummary metrics={$activeAgentSession.lastRunMetrics} />
-            {/if}
           </div>
         {/if}
       </div>
 
       <footer class="p-4 border-t border-base-300 bg-base-100 shrink-0">
         <div class="max-w-4xl mx-auto space-y-3">
+          {#if $activeAgentSession.lastRunMetrics}
+            {#key $activeAgentSession.id}
+              <AgentRunSummary metrics={$activeAgentSession.lastRunMetrics} />
+            {/key}
+          {/if}
           {#if $activeAgentSession.autoReviewMigrationRequired}
             <div class="alert alert-info text-sm">
               Auto review needs a current acknowledgment or local audit recovery. This session is in
