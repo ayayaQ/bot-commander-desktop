@@ -108,6 +108,15 @@ function effects(before: PlaygroundState, after: PlaygroundState): AgentValidati
     variableChanges: changes(before.variables, after.variables, '/variables'),
     cooldownChanges: changes(before.cooldowns, after.cooldowns, '/cooldowns'),
     operations: (after.operations ?? []).slice(before.operations?.length ?? 0),
+    timing: {
+      startedAt: before.clockMs,
+      completedAt: after.clockMs,
+      pendingOperations: (after.operations ?? [])
+        .slice(before.operations?.length ?? 0)
+        .filter((operation) =>
+          ['scheduled', 'started', 'cancelled'].includes(operation.status ?? '')
+        )
+    },
     channelChanges: changes(before.channels ?? [], after.channels ?? [], '/channels'),
     roleChanges: changes(before.roles, after.roles, '/roles'),
     ...(after.world ? { worldChanges: changes(before.world, after.world, '/world', true) } : {})

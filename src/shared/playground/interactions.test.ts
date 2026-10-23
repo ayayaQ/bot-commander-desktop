@@ -298,7 +298,7 @@ describe('saved interaction playground', () => {
         .slice(1)
         .every((message) => message.kind === 'dm' && message.recipient === input.senderId)
     ).toBe(true)
-    expect(result.trace).toContain('Deferred reply then edit (timing not modeled)')
+    expect(result.trace).toContain('Deferred reply then edit')
   })
 
   it.each(['isKick', 'isBan', 'isVoiceMute'] as const)(

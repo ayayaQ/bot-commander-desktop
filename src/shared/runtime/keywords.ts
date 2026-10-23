@@ -167,6 +167,13 @@ function parseRoleColor(value: string): number | null {
 
 export function createFunctionRegistry(host: RuntimeServices): FunctionRegistry {
   const registry = new Map<string, BCFDFunction>()
+  const formatDate = (timestamp: number) =>
+    host.formatDate?.(timestamp) ?? new Date(timestamp).toLocaleString()
+
+  const datePart = (part: 'Date' | 'Month' | 'FullYear' | 'Hours' | 'Minutes' | 'Seconds') => {
+    const date = new Date(host.now())
+    return date[host.timezone === 'UTC' ? `getUTC${part}` : `get${part}`]()
+  }
 
   // --------------------------------------------------------------------------
   // User Context Functions
@@ -185,7 +192,7 @@ export function createFunctionRegistry(host: RuntimeServices): FunctionRegistry 
   registry.set('isBot', (_args, ctx) => ctx.user?.bot.toString() ?? '')
   registry.set('globalName', (_args, ctx) => ctx.user?.globalName ?? '')
   registry.set('timeCreated', (_args, ctx) =>
-    ctx.user ? new Date(ctx.user.createdTimestamp).toLocaleString() : ''
+    ctx.user ? formatDate(ctx.user.createdTimestamp) : ''
   )
   registry.set('timeCreatedDiscord', (_args, ctx) =>
     discordTimestampFromMillis(ctx.user?.createdTimestamp)
@@ -208,7 +215,7 @@ export function createFunctionRegistry(host: RuntimeServices): FunctionRegistry 
     ctx.member ? (ctx.member.joinedTimestamp != null).toString() : ''
   )
   registry.set('memberTimeJoined', (_args, ctx) =>
-    ctx.member?.joinedTimestamp != null ? new Date(ctx.member.joinedTimestamp).toLocaleString() : ''
+    ctx.member?.joinedTimestamp != null ? formatDate(ctx.member.joinedTimestamp) : ''
   )
   registry.set('memberTimeJoinedDiscord', (_args, ctx) =>
     discordTimestampFromMillis(ctx.member?.joinedTimestamp)
@@ -220,7 +227,7 @@ export function createFunctionRegistry(host: RuntimeServices): FunctionRegistry 
   registry.set('memberEffectiveTag', (_args, ctx) => ctx.member?.user.tag ?? '')
   registry.set('memberEffectiveID', (_args, ctx) => ctx.member?.user.id ?? '')
   registry.set('memberEffectiveTimeCreated', (_args, ctx) =>
-    ctx.member ? new Date(ctx.member.user.createdTimestamp).toLocaleString() : ''
+    ctx.member ? formatDate(ctx.member.user.createdTimestamp) : ''
   )
   registry.set('memberEffectiveTimeCreatedDiscord', (_args, ctx) =>
     discordTimestampFromMillis(ctx.member?.user.createdTimestamp)
@@ -230,9 +237,7 @@ export function createFunctionRegistry(host: RuntimeServices): FunctionRegistry 
     (_args, ctx) => ctx.member?.user.defaultAvatarURL ?? ''
   )
   registry.set('memberTimeBoosted', (_args, ctx) =>
-    ctx.member?.premiumSinceTimestamp != null
-      ? new Date(ctx.member.premiumSinceTimestamp).toLocaleString()
-      : ''
+    ctx.member?.premiumSinceTimestamp != null ? formatDate(ctx.member.premiumSinceTimestamp) : ''
   )
   registry.set('memberTimeBoostedDiscord', (_args, ctx) =>
     discordTimestampFromMillis(ctx.member?.premiumSinceTimestamp)
@@ -269,7 +274,7 @@ export function createFunctionRegistry(host: RuntimeServices): FunctionRegistry 
   registry.set('botNamePlain', (_args, ctx) => ctx.client?.user?.displayName ?? '')
   registry.set('botID', (_args, ctx) => ctx.client?.user?.id ?? '')
   registry.set('botTimeCreated', (_args, ctx) =>
-    new Date(ctx.client?.user?.createdTimestamp ?? 0).toLocaleString()
+    formatDate(ctx.client?.user?.createdTimestamp ?? 0)
   )
   registry.set('botTimeCreatedDiscord', (_args, ctx) =>
     discordTimestampFromMillis(ctx.client?.user?.createdTimestamp)
@@ -286,9 +291,7 @@ export function createFunctionRegistry(host: RuntimeServices): FunctionRegistry 
   registry.set('serverBanner', (_args, ctx) => ctx.guild?.bannerURL({}) ?? '')
   registry.set('serverDescription', (_args, ctx) => ctx.guild?.description ?? '')
   registry.set('serverSplash', (_args, ctx) => ctx.guild?.splashURL({}) ?? '')
-  registry.set('serverCreateTime', (_args, ctx) =>
-    new Date(ctx.guild?.createdTimestamp ?? 0).toLocaleString()
-  )
+  registry.set('serverCreateTime', (_args, ctx) => formatDate(ctx.guild?.createdTimestamp ?? 0))
   registry.set('serverCreateTimeDiscord', (_args, ctx) =>
     discordTimestampFromMillis(ctx.guild?.createdTimestamp)
   )
@@ -317,7 +320,7 @@ export function createFunctionRegistry(host: RuntimeServices): FunctionRegistry 
   registry.set('channel', (_args, ctx) => ctx.textChannel?.name ?? '')
   registry.set('channelID', (_args, ctx) => ctx.textChannel?.id ?? '')
   registry.set('channelCreateDate', (_args, ctx) =>
-    new Date(ctx.textChannel?.createdTimestamp ?? 0).toLocaleString()
+    formatDate(ctx.textChannel?.createdTimestamp ?? 0)
   )
   registry.set('channelCreateDateDiscord', (_args, ctx) =>
     discordTimestampFromMillis(ctx.textChannel?.createdTimestamp)
@@ -817,7 +820,7 @@ export function createFunctionRegistry(host: RuntimeServices): FunctionRegistry 
     (_args, ctx) => ctx.mentionedUser?.avatarURL({}) ?? ctx.mentionedUser?.defaultAvatarURL ?? ''
   )
   registry.set('mentionedTimeCreated', (_args, ctx) =>
-    new Date(ctx.mentionedUser?.createdTimestamp ?? 0).toLocaleString()
+    formatDate(ctx.mentionedUser?.createdTimestamp ?? 0)
   )
   registry.set('mentionedTimeCreatedDiscord', (_args, ctx) =>
     discordTimestampFromMillis(ctx.mentionedUser?.createdTimestamp)
@@ -847,7 +850,7 @@ export function createFunctionRegistry(host: RuntimeServices): FunctionRegistry 
   )
   registry.set('mentionedMemberTimeJoined', (_args, ctx) =>
     ctx.mentionedMember?.joinedTimestamp != null
-      ? new Date(ctx.mentionedMember.joinedTimestamp).toLocaleString()
+      ? formatDate(ctx.mentionedMember.joinedTimestamp)
       : ''
   )
   registry.set('mentionedMemberTimeJoinedDiscord', (_args, ctx) =>
@@ -861,7 +864,7 @@ export function createFunctionRegistry(host: RuntimeServices): FunctionRegistry 
   registry.set('mentionedMemberEffectiveTag', (_args, ctx) => ctx.mentionedMember?.user.tag ?? '')
   registry.set('mentionedMemberEffectiveID', (_args, ctx) => ctx.mentionedMember?.user.id ?? '')
   registry.set('mentionedMemberEffectiveTimeCreated', (_args, ctx) =>
-    ctx.mentionedMember ? new Date(ctx.mentionedMember.user.createdTimestamp).toLocaleString() : ''
+    ctx.mentionedMember ? formatDate(ctx.mentionedMember.user.createdTimestamp) : ''
   )
   registry.set('mentionedMemberEffectiveTimeCreatedDiscord', (_args, ctx) =>
     discordTimestampFromMillis(ctx.mentionedMember?.user.createdTimestamp)
@@ -872,7 +875,7 @@ export function createFunctionRegistry(host: RuntimeServices): FunctionRegistry 
   )
   registry.set('mentionedMemberTimeBoosted', (_args, ctx) =>
     ctx.mentionedMember?.premiumSinceTimestamp != null
-      ? new Date(ctx.mentionedMember.premiumSinceTimestamp).toLocaleString()
+      ? formatDate(ctx.mentionedMember.premiumSinceTimestamp)
       : ''
   )
   registry.set('mentionedMemberTimeBoostedDiscord', (_args, ctx) =>
@@ -899,11 +902,11 @@ export function createFunctionRegistry(host: RuntimeServices): FunctionRegistry 
   registry.set('randomBoolean', () => (host.random() > 0.5).toString())
   registry.set('commandCount', () => host.commandCount().toString())
   registry.set('deleteMessage', (args, ctx) => host.deleteMessage(args, ctx))
-  registry.set('date', () => new Date(host.now()).toLocaleString())
+  registry.set('date', () => formatDate(host.now()))
   registry.set('dateDiscord', () => discordTimestampFromMillis(host.now()))
-  registry.set('day', () => new Date(host.now()).getDate().toString())
-  registry.set('month', () => (new Date(host.now()).getMonth() + 1).toString())
-  registry.set('year', () => new Date(host.now()).getFullYear().toString())
+  registry.set('day', () => datePart('Date').toString())
+  registry.set('month', () => (datePart('Month') + 1).toString())
+  registry.set('year', () => datePart('FullYear').toString())
   registry.set('getTimestamp', (args) => {
     const unit = args[0]?.trim().toLowerCase() || 's'
     const now = host.now()
@@ -913,19 +916,19 @@ export function createFunctionRegistry(host: RuntimeServices): FunctionRegistry 
     return '[BCFD Error: getTimestamp unit must be s, ms, or ns]'
   })
   const hour: BCFDFunction = () => {
-    const h = new Date(host.now()).getHours()
+    const h = datePart('Hours')
     return (h < 10 ? '0' : '') + h.toString()
   }
   registry.set('hour', hour)
   registry.set('hours', hour) // Legacy desktop alias
   const minute: BCFDFunction = () => {
-    const m = new Date(host.now()).getMinutes()
+    const m = datePart('Minutes')
     return (m < 10 ? '0' : '') + m.toString()
   }
   registry.set('minute', minute)
   registry.set('minutes', minute) // Legacy desktop alias
   const second: BCFDFunction = () => {
-    const s = new Date(host.now()).getSeconds()
+    const s = datePart('Seconds')
     return (s < 10 ? '0' : '') + s.toString()
   }
   registry.set('second', second)

@@ -60,6 +60,13 @@ export type PlaygroundMessageId = string | number
 export type PlaygroundOperation = {
   context?: PlaygroundEventContext
   index: number
+  scheduledAt?: number
+  startedAt?: number
+  completedAt?: number
+  failedAt?: number
+  cancelledAt?: number
+  dueAt?: number
+  status?: 'scheduled' | 'started' | 'completed' | 'failed' | 'cancelled'
   truncated?: boolean
   name: string
   args: unknown[]
@@ -91,6 +98,7 @@ export type PlaygroundState = {
   variables: Record<string, unknown>
   cooldowns: Record<string, number>
   clockMs: number
+  timing?: import('./scheduling').TimingConfiguration
   ai: { response: string; error: string }
   guildId: string
   guildName: string

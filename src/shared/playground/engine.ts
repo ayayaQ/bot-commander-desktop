@@ -10,10 +10,16 @@ import {
   PLAYGROUND_BOT_ID
 } from './world'
 import { validateNormalizedWorld } from './normalizedWorldValidation'
+import { withScheduler } from './scheduling'
 import { incompleteReasons, recordFailure, IncompleteSimulationError } from './failures'
 import { runTraditionalActions } from '../runtime/actions'
 import { matchesCommand, type CommandEvent } from '../runtime/dispatch'
-import { fakeChannels, operation, requireBotPermission } from './runtimeContext'
+import {
+  fakeChannels,
+  scheduledOperation,
+  requireBotPermission,
+  startTyping
+} from './runtimeContext'
 import type { BCFDCommand, BCFDEmbedMessageTemplate } from '../../main/types/types'
 import { commandCapabilities } from '../commandCapabilities'
 import { evaluateTemplate } from './template'
@@ -119,9 +125,19 @@ export function addMessage(
     }
     return result
   }
-  return message.kind === 'user'
-    ? append()
-    : operation(state, message.kind === 'dm' ? 'message.dm' : 'message.send', [message], append)
+  return append()
+}
+
+export function sendMessage(
+  state: PlaygroundState,
+  message: Omit<PlaygroundMessage, 'id'>
+): Promise<PlaygroundMessage> {
+  return scheduledOperation(
+    state,
+    message.kind === 'dm' ? 'message.dm' : 'message.send',
+    [message],
+    () => addMessage(state, message)
+  )
 }
 
 export function hasPermission(
@@ -151,8 +167,12 @@ export async function buildFakeEmbed(
   return result
 }
 
-export function toggleRole(state: PlaygroundState, sender: FakeMember, roleId: string): void {
-  operation(state, 'member.roles.toggle', [sender.id, roleId], () => {
+export async function toggleRole(
+  state: PlaygroundState,
+  sender: FakeMember,
+  roleId: string
+): Promise<void> {
+  await scheduledOperation(state, 'member.roles.toggle', [sender.id, roleId], () => {
     requireBotPermission(state, 'ManageRoles')
     const role = state.roles.find((item) => item.id === roleId)
     if (!role) throw new Error(`Unknown fake role: ${roleId}`)
@@ -232,7 +252,7 @@ async function executeCommand(
     const remaining = remainingCooldown(state, command, senderId)
     if (remaining > 0) {
       if (command.cooldownMessage || !command.ignoreErrorMessage)
-        addMessage(state, {
+        await sendMessage(state, {
           kind: 'bot',
           author: 'Playground Bot',
           replyTo: inputId,
@@ -265,7 +285,15 @@ async function executeCommand(
     : state.channelId
   const pending: Promise<unknown>[] = []
   const failures: string[] = []
-  const moderate = (
+  const observe = (task: Promise<unknown>) => {
+    pending.push(
+      task.catch((error) => {
+        recordFailure(state, error)
+        failures.push(error instanceof Error ? error.message : String(error))
+      })
+    )
+  }
+  const moderate = async (
     enabled: boolean,
     permission: FakePermission,
     key: 'kicked' | 'banned' | 'muted'
@@ -276,15 +304,17 @@ async function executeCommand(
     if (state.world && !mentioned)
       throw new Error('Moderation target not found in the current guild')
     if (mentioned)
-      operation(state, `member.${key}`, [mentioned.id], () => {
-        requireBotPermission(
-          state,
-          { kicked: 'KickMembers', banned: 'BanMembers', muted: 'MuteMembers' }[key],
-          key === 'muted' ? (mentioned.voiceChannelId ?? state.channelId) : undefined
-        )
-        assertManageable(state, mentioned)
-        mentioned[key] = true
-      })
+      observe(
+        scheduledOperation(state, `member.${key}`, [mentioned.id], () => {
+          requireBotPermission(
+            state,
+            { kicked: 'KickMembers', banned: 'BanMembers', muted: 'MuteMembers' }[key],
+            key === 'muted' ? (mentioned.voiceChannelId ?? state.channelId) : undefined
+          )
+          assertManageable(state, mentioned)
+          mentioned[key] = true
+        })
+      )
     return true
   }
   let dispatched: Awaited<ReturnType<typeof runTraditionalActions>>
@@ -299,7 +329,7 @@ async function executeCommand(
             }
             if (!Number.isInteger(command.deleteNum) || command.deleteNum > 100)
               throw new Error('Deletion count must be from 1 to 100')
-            operation(state, 'message.purge', [command.deleteNum], () => {
+            await scheduledOperation(state, 'message.purge', [command.deleteNum], () => {
               requireBotPermission(state, 'ManageMessages', state.channelId)
               state.messages
                 .filter(
@@ -319,25 +349,37 @@ async function executeCommand(
         deleteIf: async () => {
           if (command.deleteIfStrings?.split('|').some((text) => text && content.includes(text))) {
             const input = state.messages.find((message) => message.id === inputId)
-            if (input) {
-              if (state.world) requireBotPermission(state, 'ManageMessages', state.channelId)
-              input.deleted = true
-            }
+            if (input)
+              await scheduledOperation(
+                state,
+                'message.delete',
+                [state.channelId, String(input.id)],
+                () => {
+                  if (state.world) requireBotPermission(state, 'ManageMessages', state.channelId)
+                  input.deleted = true
+                }
+              )
           }
         },
         message: async () => {
-          if (commandCapabilities.sendsChannelMessage(command))
-            addMessage(state, {
-              kind: 'bot',
-              author: 'Playground Bot',
-              channelId: destination,
-              content: await render(command.channelMessage),
-              replyTo: command.channelMessageAsReply ? inputId : undefined
-            })
+          if (commandCapabilities.sendsChannelMessage(command)) {
+            const stopTyping = startTyping(state, destination, !!command.channelMessageTyping)
+            try {
+              await sendMessage(state, {
+                kind: 'bot',
+                author: 'Playground Bot',
+                channelId: destination,
+                content: await render(command.channelMessage),
+                replyTo: command.channelMessageAsReply ? inputId : undefined
+              })
+            } finally {
+              stopTyping()
+            }
+          }
         },
         dm: async () => {
           if (commandCapabilities.sendsPrivateMessage(command))
-            addMessage(state, {
+            await sendMessage(state, {
               kind: 'dm',
               author: 'Playground Bot',
               channelId: destination,
@@ -346,19 +388,25 @@ async function executeCommand(
             })
         },
         embed: async () => {
-          if (commandCapabilities.sendsChannelEmbed(command))
-            addMessage(state, {
-              kind: 'bot',
-              author: 'Playground Bot',
-              channelId: destination,
-              content: '',
-              embed: await buildFakeEmbed(command.channelEmbed, ctx),
-              replyTo: command.channelEmbedAsReply ? inputId : undefined
-            })
+          if (commandCapabilities.sendsChannelEmbed(command)) {
+            const stopTyping = startTyping(state, destination, !!command.channelEmbedTyping)
+            try {
+              await sendMessage(state, {
+                kind: 'bot',
+                author: 'Playground Bot',
+                channelId: destination,
+                content: '',
+                embed: await buildFakeEmbed(command.channelEmbed, ctx),
+                replyTo: command.channelEmbedAsReply ? inputId : undefined
+              })
+            } finally {
+              stopTyping()
+            }
+          }
         },
         dmEmbed: async () => {
           if (commandCapabilities.sendsPrivateEmbed(command))
-            addMessage(state, {
+            await sendMessage(state, {
               kind: 'dm',
               author: 'Playground Bot',
               channelId: destination,
@@ -369,13 +417,13 @@ async function executeCommand(
         },
         role: async () => {
           if (commandCapabilities.assignsRole(command)) {
-            toggleRole(state, sender, await render(command.roleToAssign))
+            await toggleRole(state, sender, await render(command.roleToAssign))
             trace.push(`Toggled role on invoking member ${sender.name}`)
           }
         },
         reaction: async () => {
           if (command.reaction?.trim()) {
-            operation(state, 'message.react', [inputId, command.reaction], () => {
+            await scheduledOperation(state, 'message.react', [inputId, command.reaction], () => {
               if (state.world) {
                 requireBotPermission(state, 'ReadMessageHistory', state.channelId)
                 requireBotPermission(state, 'AddReactions', state.channelId)
@@ -389,25 +437,24 @@ async function executeCommand(
         kick: () => moderate(command.isKick, 'kick', 'kicked'),
         ban: () => moderate(command.isBan, 'ban', 'banned'),
         mute: () => moderate(command.isVoiceMute, 'mute', 'muted'),
-        deleteAfter: () => {
+        deleteAfter: async () => {
           if (command.deleteAfter) {
             const input = state.messages.find((item) => item.id === inputId)
-            if (input) {
-              if (state.world) requireBotPermission(state, 'ManageMessages', state.channelId)
-              input.deleted = true
-            }
+            if (input)
+              await scheduledOperation(
+                state,
+                'message.delete',
+                [state.channelId, String(input.id)],
+                () => {
+                  if (state.world) requireBotPermission(state, 'ManageMessages', state.channelId)
+                  input.deleted = true
+                }
+              )
           }
         },
         cooldown: () => recordCooldown(state, command, senderId)
       },
-      (task) => {
-        pending.push(
-          task.catch((error) => {
-            recordFailure(state, error)
-            failures.push(error instanceof Error ? error.message : String(error))
-          })
-        )
-      },
+      observe,
       event
     )
   } finally {
@@ -526,15 +573,17 @@ export async function runMessage(
       factory
     )
     try {
-      const execution = await executeCommand(
-        draft,
-        command,
-        request.senderId,
-        request.content,
-        input.id,
-        commandTrace,
-        scope.context,
-        request.kind ?? 'message'
+      const execution = await withScheduler(draft, () =>
+        executeCommand(
+          draft,
+          command,
+          request.senderId,
+          request.content,
+          input.id,
+          commandTrace,
+          scope.context,
+          request.kind ?? 'message'
+        )
       )
       scope.commit()
       resource.outcome = execution.outcome

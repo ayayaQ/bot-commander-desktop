@@ -218,9 +218,10 @@ response templates instead of sending them literally, supplies reaction user/mem
 and awaits async bare keywords. These corrections share the same evaluator and dispatch helpers
 in production and simulation.
 
-This is an offline behavioral test, not a guarantee of Discord delivery. Network concurrency,
-latency, gateway event cascades and intent/registration availability are
-not fully reproduced. Permission fixtures and injected failures exercise local failure paths;
+This is an offline behavioral test, not a guarantee of Discord delivery. Timing is synthetic and
+fixture-controlled; actual network concurrency, gateway event cascades, and intent/registration
+availability are not fully reproduced. Permission fixtures and injected failures exercise local
+failure paths;
 they cannot prove a live bot has access. The synthetic dispatcher waits for detached tasks to
 settle before reporting; live delivery completion order depends on the network. Injected adapter
 failures describe fixture behavior, not Discord's full error catalogue. Playground uses stricter
@@ -232,8 +233,95 @@ the session. The captured native InternalError family is conservatively incomple
 explicitly constructed instances; changing its display name does not change that classification. Global objects outside `botState` are retained in the VM but are not a complete JSON
 snapshot of all JavaScript bindings.
 Version 3 uses decimal string IDs for all Discord entities, including transcript messages.
-A world can contain multiple guilds; each event selects one guild/channel and membership. Clock control
-covers elapsed time and Date.now; host timezone-dependent formatting is not configurable.
+A world can contain multiple guilds; each event selects one guild/channel and membership. Clock
+control covers elapsed time, operation scheduling and Date.now. Offline date formatting
+and local calendar access use fixed UTC, as described below.
+
+## Deterministic virtual scheduling (runtime 3.1)
+
+Use `state.timing` in the validation suite JSON editor to configure local operation timing. This
+configuration is included in the fixture hash and the exact **Open in Playground** replay.
+Changing timing or budgets invalidates previous save evidence. Version 2 and 3 fixtures without
+`timing` keep zero-duration operations and existing promise ordering. Runtime 3.1 invalidates old
+reports because date formatting and operation evidence have changed.
+
+```json
+{
+  "timing": {
+    "operations": {
+      "message.send": { "latencyMs": 100 },
+      "message.dm": { "delayMs": 5, "latencyMs": 10, "failure": "DM closed" },
+      "message.delete": { "latencyMs": 50 }
+    },
+    "limits": { "maxPending": 1000, "maxSteps": 5000, "maxWork": 5000, "maxTimeMs": 86400000 }
+  }
+}
+```
+
+Each operation name has one policy, applied to every invocation. `delayMs` is time from scheduling
+to start; `latencyMs` is time from start to completion or failure. Both default to zero. Effects
+and permission/entity checks occur at completion. `failure` overrides `state.failures[name]` and
+rejects at the same completion time; the effect is not applied. The policy does not implement
+partial server-side success followed by a transport error. Unknown operation names/fields,
+negative/fractional times and values over the hard limits are rejected. `read_validation_fixture`
+exposes supported operation names and bounds through its `capabilities.timing` field.
+
+With `timing` present (even `{}`), asynchronous operations enter the queue, including zero-duration
+ones. Tasks run in ascending due-time order with insertion order breaking ties. Promise
+continuations settle before the next task is selected, so newly scheduled earlier work takes
+precedence over later timestamps. A MessageChannel turn flushes these continuations without
+wall-clock sleeps; real time is used only by existing worker/script safety deadlines. Fixture
+latency never causes a real delay.
+
+Traditional actions preserve the shared production dispatch: purge is awaited; sends, reactions,
+role actions and input deletion are detached. Traditional moderation permission decisions are
+awaited but their deliveries are detached, matching the live wrappers. A slow channel send can
+therefore complete after a fast DM. Slash/button deferral, moderation, response and role delivery
+are awaited; a failed interaction DM remains a warning and later actions continue. Earlier effects
+remain visible after a later failure. Cache reads and synchronous presence changes remain
+instantaneous; they do not accept latency configuration.
+
+Typing starts before text/embed rendering, refreshes every 8000 virtual milliseconds, and stops
+refreshing when delivery settles. In-flight typing calls settle normally; ordinary typing delivery
+failures are ignored, matching production, but budget failures make the run incomplete.
+`interaction.defer` completes before interaction rendering/moderation. Final replies retain
+`message.send` as their operation name. Input `deleteAfter` means deletion launched after dispatch,
+not a built-in number of seconds; its latency/delay comes from `message.delete`. Explicit
+`$deleteMessage` calls use that same operation policy. Guest JavaScript timers, Discord interaction
+expiry and gateway event cascades are not modeled by this version.
+
+Each command/interaction drains its detached work before returning. Multiple matching commands
+run serially. Each fixture step starts from the previous completed state, adds `advanceClockMs`,
+and then dispatches its event. Successful steps have no pending queue to carry across steps.
+The reusable queue also supports explicit `advanceTo(time)`, which runs due callbacks in order.
+No closures or promises are serialized into fixtures. Queue reset/disposal rejects pending tasks;
+worker cancellation/reset terminates the worker and discards its queue and stale result.
+
+Operation evidence contains `scheduledAt`, `startedAt`, `dueAt`, `completedAt` or `failedAt`, and
+`status`. `dueAt` describes the next scheduled phase while pending, and final delivery time after
+start. Cancelled entries contain `cancelledAt`; their callbacks are discarded. Reports include
+`effects.timing` with start/end virtual clock values and `pendingOperations`, the required work
+that could not complete (including cancelled entries). The report UI displays these details.
+Budget exhaustion, untracked required work, cancellation and truncated evidence are incomplete,
+never valid expected command errors and never authorization to save.
+
+Bounds apply to each command/interaction queue and can be lowered in a fixture: 1000 pending tasks,
+5000 executed callbacks, 5000 total admitted tasks, and 24 hours of virtual elapsed time. Delayed
+start and delivery are separate callbacks; typing refreshes count too. Existing operation-log,
+fixture, transcript, report, script and worker limits also apply. Timing traces describe simulated
+local delivery only; they do not predict actual Discord latency, access, rate limits or delivery.
+
+### Fixed UTC dates
+
+Offline `$date` and entity date keywords return ISO 8601 UTC strings. Calendar keywords (`$day`,
+`$month`, `$year`, `$hour`, `$minute`, `$second` and aliases) read UTC. Production keeps its existing
+host formatting. In the offline QuickJS VM, local Date constructors/getters/setters use UTC and
+`getTimezoneOffset()` is zero for valid dates. Locale formatting is deliberately fixed: full dates
+use ISO strings, date-only formatting uses `YYYY-MM-DD`, and time-only formatting uses the ISO time
+with `Z`; locale/options arguments do not change these representations. `Date()`/`toString()` use
+UTC strings. Date parsing accepts ISO dates/times (timezone-less ISO means UTC), explicit offsets,
+and UTC/GMT strings; ambiguous non-ISO local strings return an invalid date. Use explicit ISO
+inputs for portable fixtures. This fixed representation avoids host timezone and locale drift.
 
 ## Isolation and bounds
 
