@@ -174,6 +174,23 @@ export function decodeAgentSessions(raw: string): AgentSessionsData {
     ) {
       throw new Error('Agent session store contains an invalid session record')
     }
+    if (
+      session.pendingInputs !== undefined &&
+      (!Array.isArray(session.pendingInputs) ||
+        session.pendingInputs.length > 32 ||
+        session.pendingInputs.some(
+          (entry) =>
+            !record(entry) ||
+            typeof entry.id !== 'string' ||
+            !entry.id ||
+            typeof entry.content !== 'string' ||
+            !entry.content.trim() ||
+            entry.content.length > 64 * 1024
+        ) ||
+        new Set(session.pendingInputs.map((entry) => entry.id)).size !==
+          session.pendingInputs.length)
+    )
+      throw new Error('Agent session store contains invalid pending inputs')
     ids.add(session.id)
   }
   return value as unknown as AgentSessionsData

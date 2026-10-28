@@ -413,7 +413,15 @@ describe('desktop agent service shared-provider integration', () => {
       await service.runAgentSession(session.id, 'Calculate', settings)
       await done
       expect(createRegistry).toHaveBeenCalledWith(
-        ['read_bot_state', 'search_documentation', 'read_command', 'lint_js', 'edit_command'],
+        [
+          'read_bot_state',
+          'search_documentation',
+          'read_command',
+          'lint_js',
+          'edit_command',
+          'web_search',
+          'fetch_url'
+        ],
         expect.objectContaining({
           catalog: expect.any(Object),
           authorizeRead: expect.any(Function)
@@ -1712,6 +1720,470 @@ describe('desktop agent service shared-provider integration', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(mocks.commitMutation).not.toHaveBeenCalled()
     expect((await service.loadAgentSessions()).sessions[0].status).toBe('cancelled')
+  })
+
+  describe('steering', () => {
+    it('restores pending occurrences and an unacknowledged draft after a rejected startup checkpoint', async () => {
+      mocks.responsesCreate
+        .mockImplementationOnce(() => new Promise(() => {}))
+        .mockResolvedValueOnce({ output_text: 'Resumed once', output: [] })
+      const service = await import('./agentService')
+      const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+      const session = await service.createAgentSession(settings)
+      const { runId } = await service.runAgentSession(session.id, 'First', settings)
+      await vi.waitFor(() => expect(mocks.responsesCreate).toHaveBeenCalledTimes(1))
+      await service.steerAgentSession(session.id, runId, 'Repeated', 'queue', settings)
+      await service.steerAgentSession(session.id, runId, 'Repeated', 'queue', settings)
+      service.cancelAgentRun(session.id)
+      await service.drainAgentRuns()
+      const before = (await service.loadAgentSessions()).sessions[0]
+      mocks.writeFile.mockRejectedValueOnce(new Error('fixture startup checkpoint failed'))
+      await expect(service.runAgentSession(session.id, 'Continue', settings)).rejects.toThrow(
+        'fixture startup checkpoint failed'
+      )
+      const failed = (await service.loadAgentSessions()).sessions[0]
+      expect(failed.pendingInputs).toEqual(before.pendingInputs)
+      expect(failed.history).toEqual(before.history)
+      expect(failed.messages).toEqual(before.messages)
+      expect(failed.status).toBe('error')
+      expect(failed.activeRunId).toBeUndefined()
+      expect(mocks.responsesCreate).toHaveBeenCalledTimes(1)
+      await service.runAgentSession(session.id, 'Continue', settings)
+      await service.drainAgentRuns()
+      const retried = (await service.loadAgentSessions()).sessions[0]
+      expect(retried.pendingInputs).toEqual([])
+      expect(
+        retried.messages.filter((entry) => entry.role === 'user').map((entry) => entry.content)
+      ).toEqual(['First', 'Repeated', 'Repeated', 'Continue'])
+      expect(mocks.responsesCreate).toHaveBeenCalledTimes(2)
+    })
+
+    it('does not admit a first draft or change its title when startup persistence rejects', async () => {
+      const service = await import('./agentService')
+      const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+      const session = await service.createAgentSession(settings, 'Keep this title')
+      const events = [] as Parameters<
+        NonNullable<Parameters<typeof service.setAgentEventSink>[0]>
+      >[0][]
+      service.setAgentEventSink((event) => events.push(event))
+      let failed = false
+      mocks.writeFile.mockImplementation(async (path) => {
+        if (!failed && path.endsWith('agent-sessions.json.tmp')) {
+          failed = true
+          throw new Error('fixture startup checkpoint failed')
+        }
+      })
+      try {
+        await expect(
+          service.runAgentSession(session.id, 'Retry this draft', settings)
+        ).rejects.toThrow('fixture startup checkpoint failed')
+      } finally {
+        mocks.writeFile.mockReset()
+      }
+      const stored = (await service.loadAgentSessions()).sessions[0]
+      expect(stored.title).toBe('Keep this title')
+      expect(stored.history).toEqual([])
+      expect(stored.messages).toEqual([])
+      expect(events.some((event) => event.type === 'message')).toBe(false)
+      expect(events.at(-1)?.session).toMatchObject({
+        status: 'error',
+        history: [],
+        messages: [],
+        title: 'Keep this title'
+      })
+      expect(mocks.responsesCreate).not.toHaveBeenCalled()
+    })
+
+    it('waits for every tool in a batch before admitting queued guidance', async () => {
+      mocks.responsesCreate
+        .mockResolvedValueOnce({
+          output: [
+            {
+              type: 'function_call',
+              call_id: 'first_read',
+              name: 'read_bot_state',
+              arguments: '{}'
+            },
+            { type: 'function_call', call_id: 'last_read', name: 'read_bot_state', arguments: '{}' }
+          ]
+        })
+        .mockResolvedValueOnce({ output_text: 'Followed guidance', output: [] })
+      let finishLast!: (value: string) => void
+      mocks.executeReadTool.mockResolvedValueOnce('first result').mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishLast = resolve
+          })
+      )
+      const service = await import('./agentService')
+      const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+      const session = await service.createAgentSession(settings)
+      const { runId } = await service.runAgentSession(session.id, 'Inspect', settings)
+      await vi.waitFor(() => expect(finishLast).toBeTypeOf('function'))
+      await service.steerAgentSession(session.id, runId, 'After both results', 'queue', settings)
+      const waiting = (await service.loadAgentSessions()).sessions[0]
+      expect(waiting.pendingInputs).toHaveLength(1)
+      expect(waiting.history!.filter((entry) => entry.kind === 'tool_result')).toHaveLength(1)
+      expect(waiting.messages.some((entry) => entry.content === 'After both results')).toBe(false)
+      expect(mocks.responsesCreate).toHaveBeenCalledTimes(1)
+      finishLast('last result')
+      await service.drainAgentRuns()
+      const stored = (await service.loadAgentSessions()).sessions[0]
+      expect(stored.history!.map((entry) => entry.kind)).toEqual([
+        'message',
+        'assistant',
+        'tool_result',
+        'tool_result',
+        'message',
+        'assistant'
+      ])
+      expect(stored.pendingInputs).toEqual([])
+      expect(mocks.executeReadTool).toHaveBeenCalledTimes(2)
+    })
+
+    it('steers repeated queued input FIFO at a complete tool boundary without replay', async () => {
+      let release!: (value: unknown) => void
+      mocks.responsesCreate
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              release = resolve
+            })
+        )
+        .mockResolvedValueOnce({ output_text: 'Revised answer', output: [] })
+      mocks.executeReadTool.mockResolvedValue('read once')
+      const service = await import('./agentService')
+      const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+      const session = await service.createAgentSession(settings)
+      const { runId } = await service.runAgentSession(session.id, 'First', settings)
+      await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+      await service.steerAgentSession(session.id, runId, 'Again', 'queue', settings)
+      await service.steerAgentSession(session.id, runId, 'Again', 'queue', settings)
+      expect((await service.loadAgentSessions()).sessions[0].pendingInputs).toHaveLength(2)
+      release({
+        output: [
+          { type: 'function_call', call_id: 'queued_read', name: 'read_bot_state', arguments: '{}' }
+        ]
+      })
+      await service.drainAgentRuns()
+      const stored = (await service.loadAgentSessions()).sessions[0]
+      expect(stored.status).toBe('completed')
+      expect(stored.pendingInputs).toEqual([])
+      expect(stored.history!.map((entry) => entry.kind)).toEqual([
+        'message',
+        'assistant',
+        'tool_result',
+        'message',
+        'message',
+        'assistant'
+      ])
+      expect(
+        stored.messages.filter((entry) => entry.role === 'user').map((entry) => entry.content)
+      ).toEqual(['First', 'Again', 'Again'])
+      expect(mocks.executeReadTool).toHaveBeenCalledTimes(1)
+      expect(mocks.responsesCreate).toHaveBeenCalledTimes(2)
+    })
+
+    it('reconciles the admitted prefix after an acceptance checkpoint fails without losing repeated input', async () => {
+      let release!: (value: unknown) => void
+      mocks.responsesCreate.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve
+          })
+      )
+      const service = await import('./agentService')
+      const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+      const session = await service.createAgentSession(settings)
+      const { runId } = await service.runAgentSession(session.id, 'First', settings)
+      await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+      await service.steerAgentSession(session.id, runId, 'Repeated input', 'queue', settings)
+      await service.steerAgentSession(session.id, runId, 'Repeated input', 'queue', settings)
+      let failed = false
+      mocks.writeFile.mockImplementation(async (path, raw) => {
+        if (
+          !failed &&
+          path.endsWith('agent-sessions.json.tmp') &&
+          JSON.parse(raw).sessions[0].history.some(
+            (entry) => entry.kind === 'message' && entry.content === 'Repeated input'
+          )
+        ) {
+          failed = true
+          throw new Error('fixture acceptance checkpoint failed')
+        }
+      })
+      try {
+        release({ output_text: 'Initial answer', output: [] })
+        await service.drainAgentRuns()
+        const stored = (await service.loadAgentSessions()).sessions[0]
+        expect(failed).toBe(true)
+        expect(stored.status).toBe('error')
+        expect(
+          stored.history!.filter(
+            (entry) => entry.kind === 'message' && entry.content === 'Repeated input'
+          )
+        ).toHaveLength(1)
+        expect(stored.pendingInputs?.map((entry) => entry.content)).toEqual(['Repeated input'])
+        expect(mocks.responsesCreate).toHaveBeenCalledTimes(1)
+      } finally {
+        mocks.writeFile.mockReset()
+      }
+    })
+
+    it('does not restart when Stop follows an interrupt whose checkpoint is still pending', async () => {
+      mocks.responsesCreate.mockImplementation(() => new Promise(() => {}))
+      const service = await import('./agentService')
+      const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+      const session = await service.createAgentSession(settings)
+      const { runId } = await service.runAgentSession(session.id, 'First', settings)
+      await vi.waitFor(() => expect(mocks.responsesCreate).toHaveBeenCalledTimes(1))
+      let release!: () => void
+      mocks.writeFile.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve
+          })
+      )
+      const interrupt = service.steerAgentSession(
+        session.id,
+        runId,
+        'Pending direction',
+        'interrupt',
+        settings
+      )
+      await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+      service.cancelAgentRun(session.id)
+      release()
+      await interrupt
+      await service.drainAgentRuns()
+      expect(mocks.responsesCreate).toHaveBeenCalledTimes(1)
+      const stored = (await service.loadAgentSessions()).sessions[0]
+      expect(stored.status).toBe('cancelled')
+      expect(stored.pendingInputs?.map((entry) => entry.content)).toEqual(['Pending direction'])
+    })
+
+    it('honors Stop during interrupt replacement setup before a new controller exists', async () => {
+      mocks.responsesCreate.mockImplementation(() => new Promise(() => {}))
+      const service = await import('./agentService')
+      const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+      const session = await service.createAgentSession(settings)
+      const { runId } = await service.runAgentSession(session.id, 'First', settings)
+      await vi.waitFor(() => expect(mocks.responsesCreate).toHaveBeenCalledTimes(1))
+      const { agentSkillStore } = await import('./agentSkillService')
+      const snapshot = await agentSkillStore.snapshot()
+      let release!: () => void
+      const spy = vi.spyOn(agentSkillStore, 'snapshot').mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = () => resolve(snapshot)
+          })
+      )
+      try {
+        const interrupt = service.steerAgentSession(
+          session.id,
+          runId,
+          'Pending direction',
+          'interrupt',
+          settings
+        )
+        await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+        expect(service.cancelAgentRun(session.id)).toBe(true)
+        release()
+        await interrupt
+        await service.drainAgentRuns()
+        expect(mocks.responsesCreate).toHaveBeenCalledTimes(1)
+        const stored = (await service.loadAgentSessions()).sessions[0]
+        expect(stored.pendingInputs?.map((entry) => entry.content)).toEqual(['Pending direction'])
+      } finally {
+        spy.mockRestore()
+      }
+    })
+
+    it('does not publish queued input when its checkpoint is rejected', async () => {
+      mocks.responsesCreate.mockImplementation(() => new Promise(() => {}))
+      const service = await import('./agentService')
+      const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+      const session = await service.createAgentSession(settings)
+      const { runId } = await service.runAgentSession(session.id, 'First', settings)
+      await vi.waitFor(() => expect(mocks.responsesCreate).toHaveBeenCalledTimes(1))
+      mocks.writeFile.mockRejectedValueOnce(new Error('fixture checkpoint failed'))
+      await expect(
+        service.steerAgentSession(session.id, runId, 'Retry draft', 'queue', settings)
+      ).rejects.toThrow('fixture checkpoint failed')
+      expect((await service.loadAgentSessions()).sessions[0].pendingInputs || []).toEqual([])
+      service.cancelAgentRun(session.id)
+      await service.drainAgentRuns()
+      const persisted = JSON.parse(sessionCheckpointWrites().at(-1)![1]).sessions[0]
+      expect(persisted.pendingInputs || []).toEqual([])
+    })
+
+    it.each(['account', 'mode', 'delete'] as const)(
+      'does not restart after a %s change during controller-free interrupt setup',
+      async (change) => {
+        mocks.responsesCreate.mockImplementation(() => new Promise(() => {}))
+        const service = await import('./agentService')
+        const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+        const session = await service.createAgentSession(settings)
+        const { runId } = await service.runAgentSession(session.id, 'First', settings)
+        await vi.waitFor(() => expect(mocks.responsesCreate).toHaveBeenCalledTimes(1))
+        const { agentSkillStore } = await import('./agentSkillService')
+        const snapshot = await agentSkillStore.snapshot()
+        let release!: () => void
+        const spy = vi.spyOn(agentSkillStore, 'snapshot').mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              release = () => resolve(snapshot)
+            })
+        )
+        try {
+          const interrupt = service.steerAgentSession(
+            session.id,
+            runId,
+            'Keep this direction',
+            'interrupt',
+            settings
+          )
+          await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+          if (change === 'account') {
+            const settingsService = await import('./settingsService')
+            settingsService.setSettings({
+              ...settingsService.getSettings(),
+              openaiApiKey: 'new-key'
+            })
+          } else if (change === 'mode') {
+            await service.updateAgentSession(session.id, { mode: 'planning' }, 'openai')
+          } else {
+            await service.deleteAgentSession(session.id)
+          }
+          release()
+          await interrupt
+          await service.drainAgentRuns()
+          expect(mocks.responsesCreate).toHaveBeenCalledTimes(1)
+          const stored = (await service.loadAgentSessions()).sessions.find(
+            (entry) => entry.id === session.id
+          )
+          if (change === 'delete') expect(stored).toBeUndefined()
+          else {
+            expect(stored).toBeDefined()
+            expect(stored!.pendingInputs?.map((entry) => entry.content)).toEqual([
+              'Keep this direction'
+            ])
+          }
+        } finally {
+          spy.mockRestore()
+        }
+      }
+    )
+
+    it('queues guidance without approving a waiting mutation and revokes the old approval on interrupt', async () => {
+      mocks.responsesCreate
+        .mockResolvedValueOnce({
+          output: [
+            {
+              type: 'function_call',
+              call_id: 'held_edit',
+              name: 'edit_command',
+              arguments: mutationArguments()
+            }
+          ]
+        })
+        .mockResolvedValueOnce({ output_text: 'New direction', output: [] })
+      const service = await import('./agentService')
+      const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+      const session = await service.createAgentSession(settings)
+      let approval: { id: string; approvalId?: string } | undefined
+      service.setAgentEventSink((event) => {
+        if (event.type === 'approval') approval = event.toolCall
+      })
+      const { runId } = await service.runAgentSession(session.id, 'Edit', settings)
+      await vi.waitFor(() => expect(approval).toBeDefined())
+      await service.steerAgentSession(
+        session.id,
+        runId,
+        'Please use a different approach',
+        'queue',
+        settings
+      )
+      expect(mocks.commitMutation).not.toHaveBeenCalled()
+      expect(mocks.responsesCreate).toHaveBeenCalledTimes(1)
+      await service.steerAgentSession(
+        session.id,
+        runId,
+        'Stop editing and explain',
+        'interrupt',
+        settings
+      )
+      await service.drainAgentRuns()
+      expect(
+        await service.resolveAgentApproval(session.id, approval!.id, true, approval!.approvalId)
+      ).toBe(false)
+      expect(mocks.commitMutation).not.toHaveBeenCalled()
+      const stored = (await service.loadAgentSessions()).sessions[0]
+      expect(stored.pendingInputs).toEqual([])
+      expect(
+        stored.messages.filter((entry) => entry.role === 'user').map((entry) => entry.content)
+      ).toEqual(['Edit', 'Please use a different approach', 'Stop editing and explain'])
+    })
+
+    it('keeps unadmitted queue after Stop and prepends it once to the next request', async () => {
+      mocks.responsesCreate
+        .mockImplementationOnce(() => new Promise(() => {}))
+        .mockResolvedValueOnce({ output_text: 'Resumed', output: [] })
+      const service = await import('./agentService')
+      const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+      const session = await service.createAgentSession(settings)
+      const { runId } = await service.runAgentSession(session.id, 'First', settings)
+      await vi.waitFor(() => expect(mocks.responsesCreate).toHaveBeenCalledTimes(1))
+      await service.steerAgentSession(session.id, runId, 'Queued', 'queue', settings)
+      service.cancelAgentRun(session.id)
+      await service.drainAgentRuns()
+      expect((await service.loadAgentSessions()).sessions[0].pendingInputs).toHaveLength(1)
+      await service.runAgentSession(session.id, 'Continue', settings)
+      await service.drainAgentRuns()
+      const stored = (await service.loadAgentSessions()).sessions[0]
+      expect(stored.pendingInputs).toEqual([])
+      expect(
+        stored.messages.filter((entry) => entry.role === 'user').map((entry) => entry.content)
+      ).toEqual(['First', 'Queued', 'Continue'])
+    })
+
+    it('interrupts one session and waits for cancellation before restarting queued input', async () => {
+      let late!: (value: unknown) => void
+      mocks.responsesCreate
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              late = resolve
+            })
+        )
+        .mockResolvedValueOnce({ output_text: 'New direction', output: [] })
+      const service = await import('./agentService')
+      const settings = { aiProvider: 'openai' as const, openaiApiKey: 'test' }
+      const session = await service.createAgentSession(settings)
+      const { runId } = await service.runAgentSession(session.id, 'First', settings)
+      await vi.waitFor(() => expect(late).toBeTypeOf('function'))
+      await expect(
+        service.steerAgentSession(session.id, 'stale-run', 'Wrong', 'queue', settings)
+      ).rejects.toThrow('changed')
+      const next = await service.steerAgentSession(
+        session.id,
+        runId,
+        'New direction',
+        'interrupt',
+        settings
+      )
+      expect(next.runId).not.toBe(runId)
+      await service.drainAgentRuns()
+      late({ output_text: 'Stale answer', output: [] })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      const stored = (await service.loadAgentSessions()).sessions[0]
+      expect(stored.status).toBe('completed')
+      expect(stored.pendingInputs).toEqual([])
+      expect(
+        stored.messages.filter((entry) => entry.role === 'user').map((entry) => entry.content)
+      ).toEqual(['First', 'New direction'])
+      expect(JSON.stringify(stored)).not.toContain('Stale answer')
+    })
   })
 
   it('ignores a late provider result after cancellation and allows a fresh run', async () => {

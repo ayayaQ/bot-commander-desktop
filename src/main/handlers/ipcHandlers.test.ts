@@ -10,6 +10,7 @@ import type {
 const mocks = vi.hoisted(() => ({
   handle: vi.fn(),
   runAgent: vi.fn(),
+  steerAgent: vi.fn(),
   compactAgent: vi.fn(),
   cancelAgent: vi.fn(),
   activeAgent: vi.fn(),
@@ -100,6 +101,7 @@ vi.mock('./commandRepoHandlers', () => ({ addCommandRepoHandlers: vi.fn() }))
 vi.mock('../services/agentService', () => ({
   setAgentEventSink: vi.fn(),
   runAgentSession: mocks.runAgent,
+  steerAgentSession: mocks.steerAgent,
   compactAgentSession: mocks.compactAgent,
   cancelAgentRun: mocks.cancelAgent,
   setActiveAgentSession: mocks.activeAgent,
@@ -586,6 +588,28 @@ describe('owned agent run IPC routing', () => {
     expect(mocks.compactAgent).toHaveBeenCalledExactlyOnceWith('selected-session', current)
     expect(mocks.runAgent).not.toHaveBeenCalled()
   })
+
+  it.each(['queue', 'interrupt'])(
+    'routes %s steering with the captured run and only current host settings',
+    async (mode) => {
+      const current = { aiProvider: 'openai', openaiApiKey: 'offline-fixture-only' }
+      mocks.settings.mockReturnValue(current)
+      mocks.steerAgent.mockResolvedValue({ runId: 'owned-run' })
+      const routes = await handlers()
+      expect(
+        await routes.get('agent:steer')!({}, 'selected-session', 'captured-run', 'Direction', mode)
+      ).toEqual({ runId: 'owned-run' })
+      expect(mocks.steerAgent).toHaveBeenCalledExactlyOnceWith(
+        'selected-session',
+        'captured-run',
+        'Direction',
+        mode,
+        current
+      )
+      expect(mocks.approveAgent).not.toHaveBeenCalled()
+      expect(mocks.cancelAgent).not.toHaveBeenCalled()
+    }
+  )
 
   it('keeps session switching distinct from cancellation and preserves the exact human approval identity', async () => {
     const routes = await handlers()

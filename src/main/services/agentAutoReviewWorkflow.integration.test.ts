@@ -25,7 +25,8 @@ vi.mock('electron', () => ({
 }))
 // Only conversational generation and encryption are substituted. The installed
 // decision factories, controller, ledger, memory/resources, locks and writer are real.
-vi.mock('./agentProviderAdapter', () => ({
+vi.mock('./agentProviderAdapter', async (original) => ({
+  ...(await original<typeof import('./agentProviderAdapter')>()),
   createAgentProvider: () => ({ generate: mocks.generate }),
   getAgentModelCapabilities: () => ({ tools: 'supported' }),
   executeAgentProviderTurn: vi.fn()

@@ -109,6 +109,8 @@ export interface AgentSession {
   history?: HistoryMessage[]
   createdAt: string
   updatedAt: string
+  /** FIFO user input not yet admitted to canonical history. */
+  pendingInputs?: { id: string; content: string }[]
   activeRunId?: string
   planReady: boolean
   tokenCount: number

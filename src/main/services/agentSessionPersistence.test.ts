@@ -18,6 +18,35 @@ const session = {
 }
 
 describe('agent session persistence validation', () => {
+  it('preserves separate FIFO occurrences of pending input across restart', () => {
+    const pendingInputs = [
+      { id: 'one', content: 'again' },
+      { id: 'two', content: 'again' }
+    ]
+    const restored = decodeAgentSessions(
+      JSON.stringify({ sessions: [{ ...session, pendingInputs }] })
+    )
+    expect(restored.sessions[0].pendingInputs).toEqual(pendingInputs)
+  })
+
+  it('rejects duplicate pending input identities', () => {
+    expect(() =>
+      decodeAgentSessions(
+        JSON.stringify({
+          sessions: [
+            {
+              ...session,
+              pendingInputs: [
+                { id: 'one', content: 'again' },
+                { id: 'one', content: 'again' }
+              ]
+            }
+          ]
+        })
+      )
+    ).toThrow('invalid pending inputs')
+  })
+
   it.each(['none', 'disabled', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])(
     'preserves saved %s without changing its meaning or rewriting unknown model IDs',
     (reasoningEffort) => {

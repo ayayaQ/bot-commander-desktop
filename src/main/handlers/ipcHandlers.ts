@@ -74,6 +74,7 @@ import {
   resolveAgentApproval,
   resolveAgentPlan,
   runAgentSession,
+  steerAgentSession,
   setActiveAgentSession,
   setAgentEventSink,
   updateAgentSession,
@@ -705,6 +706,11 @@ export function addIPCHandlers() {
   })
   ipcMain.handle('agent:send', async (_, sessionId: string, content: string) =>
     runAgentSession(sessionId, content, getSettings())
+  )
+  ipcMain.handle(
+    'agent:steer',
+    (_, sessionId: string, runId: string, content: string, mode: 'queue' | 'interrupt') =>
+      steerAgentSession(sessionId, runId, content, mode, getSettings())
   )
   ipcMain.handle(
     'agent:resolve-plan',
