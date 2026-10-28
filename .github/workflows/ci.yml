@@ -41,6 +41,9 @@ jobs:
       - name: Run ordinary MCP client and affected integration checks
         run: npm run test:mcp
 
+      - name: Check queued and interrupt agent steering
+        run: npm run test:steering
+
       - name: Check shared tool presentation adapter
         run: npm test -- src/renderer/src/utils/agentToolPresentation.test.ts
 

@@ -211,8 +211,29 @@ let data: AgentSessionsData = {
 }
 let loaded = false
 let loading: Promise<AgentSessionsData> | undefined
-const controllers = new Map<string, { runId: string; scope: ExtensionScope }>()
+const controllers = new Map<
+  string,
+  {
+    runId: string
+    scope: ExtensionScope
+    done: Promise<void>
+    inputReady: boolean
+    interrupting: boolean
+    restartCancelled: boolean
+  }
+>()
 const runCompletions = new Set<Promise<void>>()
+const restartIntents = new Map<string, { cancelled: boolean }>()
+const runSettingsChanged = (
+  next: ReturnType<typeof getSettings>,
+  previous: ReturnType<typeof getSettings>
+): boolean =>
+  next.aiProvider !== previous.aiProvider ||
+  next.openaiApiKey !== previous.openaiApiKey ||
+  next.openrouterApiKey !== previous.openrouterApiKey ||
+  next.deepseekApiKey !== previous.deepseekApiKey ||
+  next.agentWebAccountRevision !== previous.agentWebAccountRevision ||
+  next.agentDecisionAccountRevision !== previous.agentDecisionAccountRevision
 const approvals = new Map<string, PendingApproval>()
 const deletedSessionIds = new Set<string>()
 const deletingSessionIds = new Set<string>()
@@ -957,12 +978,14 @@ export const formatAgentMemoryContext = formatMemoryContext
 
 function addMessage(
   session: AgentSession,
-  message: Omit<AgentMessage, 'id' | 'timestamp'>
+  message: Omit<AgentMessage, 'id' | 'timestamp'>,
+  publish = true
 ): AgentMessage {
   const stored: AgentMessage = { id: id('message'), timestamp: now(), ...message }
   session.messages.push(stored)
   session.updatedAt = stored.timestamp
-  emit(session, { type: 'message', runId: session.activeRunId, message: clone(stored) })
+  if (publish)
+    emit(session, { type: 'message', runId: session.activeRunId, message: clone(stored) })
   return stored
 }
 
@@ -1787,6 +1810,99 @@ export function runAgentSession(
   )
 }
 
+/** Queue input for the current run, or cancel and fully drain it before starting again. */
+export function steerAgentSession(
+  sessionId: string,
+  expectedRunId: string,
+  content: string,
+  mode: 'queue' | 'interrupt',
+  settings: AiRuntimeSettings
+): Promise<{ runId: string }> {
+  return withAgentPersistenceOperation(async () => {
+    await loadAgentSessions()
+    persistence.assertWritable()
+    const session = getSessionOrThrow(sessionId)
+    const controller = controllers.get(sessionId)
+    if (
+      !controller ||
+      controller.runId !== expectedRunId ||
+      controller.scope.state !== 'open' ||
+      !controller.inputReady ||
+      controller.interrupting ||
+      session.context?.state === 'compacting' ||
+      deletingSessionIds.has(sessionId) ||
+      isAgentPersistencePaused()
+    )
+      throw new Error('The running request changed; your message has not been queued')
+    if (mode !== 'queue' && mode !== 'interrupt') throw new Error('Invalid steering mode')
+    if (typeof content !== 'string' || !content.trim()) throw new Error('Message cannot be empty')
+    if ((session.pendingInputs?.length || 0) >= 32 || content.length > 64 * 1024)
+      throw new Error(
+        'Pending input limit reached; keep this message and try after the queue drains'
+      )
+    const input = { id: id('input'), content: content.trim() }
+    const intent = mode === 'interrupt' ? { cancelled: false } : undefined
+    if (intent) {
+      controller.interrupting = true
+      restartIntents.set(sessionId, intent)
+    }
+    // This spans cancellation cleanup and replacement setup, including the interval
+    // without a controller-owned settings listener. Never restart with stale credentials.
+    const unsubscribeRestart = intent
+      ? onSettingsChanged((next, previous) => {
+          if (runSettingsChanged(next, previous)) cancelAgentRun(sessionId)
+        })
+      : () => {}
+    try {
+      await queueSessionWrite(async () => {
+        persistence.assertWritable()
+        if (controllers.get(sessionId) !== controller || controller.scope.state !== 'open')
+          throw new Error('The running request changed; your message has not been queued')
+        if (deletingSessionIds.has(sessionId) || deletedSessionIds.has(sessionId))
+          throw new Error('Agent session is being deleted')
+        const snapshot = persistentSnapshot()
+        const target = snapshot.sessions.find((entry) => entry.id === sessionId)
+        if (!target) throw new Error('Agent session not found')
+        if ((target.pendingInputs?.length || 0) >= 32)
+          throw new Error('Pending input limit reached')
+        target.pendingInputs = [...(target.pendingInputs || []), input]
+        // Do not expose input to another save or to core until this append is committed.
+        await persistence.save(snapshot)
+        session.pendingInputs = [...(session.pendingInputs || []), input]
+      })
+    } catch (error) {
+      controller.interrupting = false
+      unsubscribeRestart()
+      if (intent && restartIntents.get(sessionId) === intent) restartIntents.delete(sessionId)
+      throw error
+    }
+    emitSession(session, controller.runId)
+    if (mode === 'queue') return { runId: controller.runId }
+    // Keep acknowledged input durable if cancellation, deletion, shutdown, or restart fails.
+    void controller.scope.dispose().catch(() => undefined)
+    await controller.done
+    if (controller.restartCancelled || intent!.cancelled || controllers.has(sessionId)) {
+      unsubscribeRestart()
+      if (restartIntents.get(sessionId) === intent) restartIntents.delete(sessionId)
+      return { runId: controller.runId }
+    }
+    // The queue itself is authoritative after acknowledgement. A failed restart must not
+    // make the renderer re-submit the same input, which remains visible in pendingInputs.
+    try {
+      return await startAgentSession(sessionId, '', settings, undefined, false, true, intent)
+    } catch (error) {
+      if (!intent!.cancelled && !controllers.has(sessionId)) {
+        session.error = `Queued input was preserved, but restart failed: ${errorDetail(error)}`
+        emitSession(session, controller.runId)
+      }
+      return { runId: controller.runId }
+    } finally {
+      unsubscribeRestart()
+      if (restartIntents.get(sessionId) === intent) restartIntents.delete(sessionId)
+    }
+  })
+}
+
 export function compactAgentSession(
   sessionId: string,
   settings: AiRuntimeSettings
@@ -1798,7 +1914,8 @@ export function compactAgentSession(
 
 /** Stop active providers/approvals, then let their admitted final checkpoints drain. */
 export function stopAgentRuns(): void {
-  for (const sessionId of controllers.keys()) cancelAgentRun(sessionId)
+  for (const sessionId of new Set([...controllers.keys(), ...restartIntents.keys()]))
+    cancelAgentRun(sessionId)
 }
 
 /** Await run owners, including their terminal checkpoints and admitted cleanup drains. */
@@ -1816,17 +1933,27 @@ async function startAgentSession(
   userContent: string,
   settings: AiRuntimeSettings,
   acceptedPlan?: { text: string; binding: string },
-  compactOnly = false
+  compactOnly = false,
+  queuedOnly = false,
+  restartIntent?: { cancelled: boolean }
 ): Promise<{ runId: string }> {
   await loadAgentSessions()
+  // A previously acknowledged steering append must publish before a new run captures inputs.
+  await sessionWriteChain.catch(() => undefined)
   persistence.assertWritable()
   const session = getSessionOrThrow(sessionId)
   if (deletingSessionIds.has(sessionId)) throw new Error('Agent session is being deleted')
+  if (restartIntent?.cancelled) throw new Error('Restart cancelled')
+  if (!restartIntent && !controllers.has(sessionId)) {
+    const priorIntent = restartIntents.get(sessionId)
+    if (priorIntent) priorIntent.cancelled = true
+  }
   const historyError = historyRecoveryErrors.get(session)
   if (historyError) throw new Error(historyError)
   if (controllers.has(sessionId))
     throw new Error('This agent session already has a running request')
-  if (!compactOnly && !userContent.trim()) throw new Error('Message cannot be empty')
+  if (!compactOnly && !userContent.trim() && !(queuedOnly && session.pendingInputs?.length))
+    throw new Error('Message cannot be empty')
   // App policy remains here; a standalone vivi OpenRouter provider needs only its own key.
   const configError = validateAiConfiguration(settings)
   if (configError) throw new Error(configError)
@@ -1840,6 +1967,7 @@ async function startAgentSession(
   if (deletingSessionIds.has(sessionId) || deletedSessionIds.has(sessionId))
     throw new Error('Agent session is being deleted')
   if (isAgentPersistencePaused()) throw new Error('The app is shutting down; agent runs are paused')
+  if (restartIntent?.cancelled) throw new Error('Restart cancelled')
   const runId = id('run')
   // This owner controls the run's cancellation, subscriptions and admitted durable work.
   // MCP connections/processes remain app-owned and are never closed by this scope.
@@ -1852,6 +1980,7 @@ async function startAgentSession(
     )
     await conversationRecords.restore(session)
     // Setup can yield; a concurrent run, session deletion or shutdown must win admission.
+    if (restartIntent?.cancelled) throw new Error('Restart cancelled')
     if (controllers.has(sessionId))
       throw new Error('This agent session already has a running request')
     if (deletingSessionIds.has(sessionId) || deletedSessionIds.has(sessionId))
@@ -1892,7 +2021,18 @@ async function startAgentSession(
   }
   const mode = session.mode
   const priorStatus = session.status
-  const controller = { runId, scope: owner }
+  let finishRun!: () => void
+  const done = new Promise<void>((resolve) => {
+    finishRun = resolve
+  })
+  const controller = {
+    runId,
+    scope: owner,
+    done,
+    inputReady: false,
+    interrupting: false,
+    restartCancelled: false
+  }
   const signal = owner.signal
   owner.defer(() => drainRunOperations(context))
   owner.defer(() => context.extensionScope.dispose())
@@ -1906,20 +2046,22 @@ async function startAgentSession(
   })
   const unsubscribe = onSettingsChanged((next, previous) => {
     if (owner.state !== 'open' || controllers.get(sessionId) !== controller) return
-    if (
-      next.aiProvider !== previous.aiProvider ||
-      next.openaiApiKey !== previous.openaiApiKey ||
-      next.openrouterApiKey !== previous.openrouterApiKey ||
-      next.deepseekApiKey !== previous.deepseekApiKey ||
-      next.agentWebAccountRevision !== previous.agentWebAccountRevision ||
-      next.agentDecisionAccountRevision !== previous.agentDecisionAccountRevision
-    )
-      cancelAgentRun(sessionId)
+    if (runSettingsChanged(next, previous)) cancelAgentRun(sessionId)
   })
   owner.defer(() => {
     unsubscribe()
   })
   controllers.set(sessionId, controller)
+  const priorInputState = !compactOnly
+    ? clone({
+        title: session.title,
+        updatedAt: session.updatedAt,
+        history: session.history,
+        messages: session.messages,
+        pendingInputs: session.pendingInputs,
+        planReady: session.planReady
+      })
+    : undefined
   session.activeRunId = runId
   if (!compactOnly) session.status = 'running'
   if (compactOnly)
@@ -1939,13 +2081,30 @@ async function startAgentSession(
     checkpointRunMetrics(session, context)
     if (session.messages.length === 0) session.title = userContent.trim().slice(0, 48)
     session.history ??= []
-    session.history.push({ kind: 'message', role: 'user', content: userContent.trim() })
-    addMessage(session, { role: 'user', content: userContent.trim() })
+    if (session.pendingInputs?.length) context.acceptedPlan = undefined
+    const inputs = [
+      ...(session.pendingInputs || []),
+      ...(userContent.trim() ? [{ id: context.userRequest.id, content: userContent.trim() }] : [])
+    ]
+    for (const input of inputs) {
+      session.history.push({ kind: 'message', role: 'user', content: input.content })
+      addMessage(session, { role: 'user', content: input.content }, false)
+      context.userRequest = { id: input.id, text: input.content }
+    }
+    const admittedIds = new Set(inputs.map((input) => input.id))
+    session.pendingInputs = (session.pendingInputs || []).filter(
+      (input) => !admittedIds.has(input.id)
+    )
   }
+  let initialCheckpointCommitted = false
   try {
     await save()
+    initialCheckpointCommitted = true
     if (!compactOnly) await trackRunOperation(context, conversationRecords.start(session, runId))
   } catch (error) {
+    // No provider entered and the initial checkpoint rejected before commit. Keep the
+    // acknowledged queue pending and let the renderer retry its unacknowledged draft.
+    if (priorInputState && !initialCheckpointCommitted) Object.assign(session, priorInputState)
     session.status = 'error'
     session.activeRunId = undefined
     session.error = errorDetail(error)
@@ -1961,15 +2120,28 @@ async function startAgentSession(
       throw new AggregateError([error, cleanupError], 'Agent startup and cleanup failed')
     } finally {
       if (controllers.get(sessionId) === controller) controllers.delete(sessionId)
+      finishRun()
     }
+    emitSession(session, runId)
     throw error
   }
+  controller.inputReady = !compactOnly
   emitSession(session, runId)
 
   const completion = withAgentPersistenceOperation(async () => {
     let terminal: 'done' | 'error' = 'done'
     let acceptedResult: AgentResult | undefined
     let inputHistoryLength = 0
+    let offered: { entries: NonNullable<AgentSession['pendingInputs']>; offset: number } | undefined
+    const acceptInput = (index: number) => {
+      const input = offered?.entries[index]
+      if (!input || !session.pendingInputs?.some((entry) => entry.id === input.id)) return
+      session.pendingInputs = session.pendingInputs.filter((entry) => entry.id !== input.id)
+      addMessage(session, { role: 'user', content: input.content })
+      context.userRequest = { id: input.id, text: input.content }
+      context.acceptedPlan = undefined
+    }
+    let acceptedInputs = 0
     try {
       const memoryContext = formatAgentMemoryContext((await loadAgentMemories()).memories)
       const runModel = { model: session.model, reasoningEffort: session.reasoningEffort }
@@ -2125,6 +2297,20 @@ async function startAgentSession(
           tools: providerTools,
           signal,
           maxRounds: MAX_TOOL_ROUNDS,
+          getSteeringMessages: () => {
+            assertActiveRun(session, runId, signal)
+            if (controller.interrupting) return []
+            offered = {
+              entries: [...(session.pendingInputs || [])],
+              offset: session.history!.length
+            }
+            acceptedInputs = 0
+            return offered.entries.map((entry) => ({
+              kind: 'message' as const,
+              role: 'user' as const,
+              content: entry.content
+            }))
+          },
           executeTool: async (call, { signal }) => {
             const { toolCall, content } = await runTool(session, runId, mode, call, context, signal)
             return {
@@ -2139,6 +2325,12 @@ async function startAgentSession(
               context,
               (async () => {
                 assertActiveRun(session, runId, signal)
+                if (update.type === 'user_message_accepted') {
+                  acceptInput(acceptedInputs++)
+                  session.history!.push(clone(update.message))
+                  await save()
+                  emitSession(session, runId)
+                }
                 await conversationRecords.accepted(session, runId, update)
                 // An admitted shadow write drains through cancellation; it never keeps execution alive.
                 assertActiveRun(session, runId, signal)
@@ -2235,6 +2427,20 @@ async function startAgentSession(
             )
         })
         acceptedResult = result
+        // Core admission precedes callbacks. Reconcile an exact positional prefix even
+        // when cancellation or a failed checkpoint prevents the callback from running.
+        if (offered && result.error?.code !== 'invalid_input') {
+          for (let index = 0; index < offered.entries.length; index++) {
+            const message = result.history[offered.offset + index]
+            if (
+              message?.kind !== 'message' ||
+              message.role !== 'user' ||
+              message.content !== offered.entries[index].content
+            )
+              break
+            acceptInput(index)
+          }
+        }
         await drainRunOperations(context)
         // Cancellation/error may close unexecuted calls without emitting further events.
         if (result.error?.code !== 'invalid_input') session.history = result.history
@@ -2334,6 +2540,7 @@ async function startAgentSession(
         })
       }
       if (controllers.get(sessionId) === controller) controllers.delete(sessionId)
+      finishRun()
     }
     emit(
       session,
@@ -2450,8 +2657,11 @@ export async function resolveAgentApproval(
 }
 
 export function cancelAgentRun(sessionId: string): boolean {
+  const intent = restartIntents.get(sessionId)
+  if (intent) intent.cancelled = true
   const controller = controllers.get(sessionId)
-  if (!controller) return false
+  if (!controller) return !!intent
+  controller.restartCancelled = true
   // dispose seals/aborts synchronously. The run completion awaits its strict cleanup promise.
   void controller.scope.dispose().catch(() => undefined)
   return true

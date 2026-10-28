@@ -13,7 +13,13 @@ vi.mock('@ayayaq/vivi', async (original) => ({
 }))
 vi.mock('./agentProviderAdapter', async (original) => ({
   ...(await original<typeof import('./agentProviderAdapter')>()),
-  createAgentProvider: vi.fn()
+  // Context measurement now validates the provider shape before mocked runAgent entry.
+  // Generation remains strictly offline and must still go through the explicit fixture.
+  createAgentProvider: vi.fn(() => ({
+    generate: () => {
+      throw new Error('Unexpected provider generation outside runAgent fixture')
+    }
+  }))
 }))
 vi.mock('./agentTools', () => ({
   agentToolTargetLabel: vi.fn(),
@@ -80,6 +86,57 @@ afterEach(async () => {
 })
 
 describe('recoverable agent service wiring', () => {
+  it('restores acknowledged steering input from disk and admits repeated occurrences once', async () => {
+    const entered = deferred()
+    mocks.runAgent.mockImplementationOnce(async ({ signal, messages }) => {
+      entered.resolve()
+      await new Promise<void>((resolve) =>
+        signal.addEventListener('abort', () => resolve(), { once: true })
+      )
+      return {
+        status: 'cancelled',
+        history: messages,
+        rounds: 0,
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+      }
+    })
+    let agents = await import('./agentService')
+    const existing = await agents.createAgentSession(settings)
+    const { runId } = await agents.runAgentSession(existing.id, 'First request', settings)
+    await entered.promise
+    await agents.steerAgentSession(existing.id, runId, 'Repeated', 'queue', settings)
+    await agents.steerAgentSession(existing.id, runId, 'Repeated', 'queue', settings)
+    agents.cancelAgentRun(existing.id)
+    await agents.drainAgentRuns()
+    const path = join(mocks.directory, 'agent-sessions.json')
+    const saved = JSON.parse(await fs.readFile(path, 'utf8')).sessions[0]
+    expect(saved.pendingInputs.map((input) => input.content)).toEqual(['Repeated', 'Repeated'])
+    expect(new Set(saved.pendingInputs.map((input) => input.id)).size).toBe(2)
+    vi.resetModules()
+    agents = await import('./agentService')
+    expect((await agents.loadAgentSessions()).sessions[0].pendingInputs).toEqual(
+      saved.pendingInputs
+    )
+    mocks.runAgent.mockImplementationOnce(async ({ messages }) => ({
+      status: 'completed',
+      content: 'Resumed',
+      history: [...messages, { kind: 'assistant', content: 'Resumed', toolCalls: [] }],
+      rounds: 1,
+      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
+    }))
+    await agents.runAgentSession(existing.id, 'Continue', settings)
+    await agents.drainAgentRuns()
+    const final = JSON.parse(await fs.readFile(path, 'utf8')).sessions[0]
+    expect(final.pendingInputs).toEqual([])
+    expect(
+      final.history.filter((entry) => entry.kind === 'message').map((entry) => entry.content)
+    ).toEqual(['First request', 'Repeated', 'Repeated', 'Continue'])
+    expect(
+      final.messages.filter((entry) => entry.role === 'user').map((entry) => entry.content)
+    ).toEqual(['First request', 'Repeated', 'Repeated', 'Continue'])
+    expect(mocks.runAgent).toHaveBeenCalledTimes(2)
+  })
+
   it('retains loaded memories after an initial checkpoint failure and retries on a later edit', async () => {
     const memoryPath = join(mocks.directory, 'agent-memories.json')
     const original = JSON.stringify({ memories: [memory()] })

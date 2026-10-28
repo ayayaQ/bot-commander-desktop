@@ -92,6 +92,7 @@ const validInvokeChannels = [
   'agent:inspect-auto-review-audit',
   'agent:set-active',
   'agent:send',
+  'agent:steer',
   'agent:resolve-plan',
   'agent:approve',
   'agent:cancel',

@@ -15,6 +15,7 @@
     "svelte-check": "svelte-check --tsconfig ./tsconfig.json",
     "typecheck": "npm run typecheck:node && npm run svelte-check",
     "test": "vitest run",
+    "test:steering": "vitest run src/main/services/agentService.test.ts -t steering && vitest run src/main/services/agentPersistence.integration.test.ts src/main/services/agentSessionPersistence.test.ts src/main/handlers/ipcHandlers.test.ts src/preload/index.test.ts src/renderer/src/stores/agentComposer.test.ts",
     "test:mcp": "node scripts/test-agent-mcp.mjs",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
@@ -26,7 +27,7 @@
     "build:linux": "npm run build && electron-builder --linux"
   },
   "dependencies": {
-    "@ayayaq/vivi": "0.15.0",
+    "@ayayaq/vivi": "0.16.0",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@jitl/quickjs-wasmfile-release-sync": "0.32.0",

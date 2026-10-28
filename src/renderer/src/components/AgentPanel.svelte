@@ -27,6 +27,12 @@
     modelCapabilitySnapshotMatches
   } from '../utils/aiModelCapabilities'
   import { settingsStore } from '../stores/settings'
+  import {
+    agentDrafts,
+    canSubmitAgentDraft,
+    setAgentDraft,
+    submitAgentDraft
+  } from '../stores/agentComposer'
   import type {
     AgentMode,
     AgentPlanDecision,
@@ -45,7 +51,6 @@
     resolveAgentApproval,
     resolveAgentPlan,
     selectAgentSession,
-    sendAgentMessage,
     updateAgentSession,
     enrollAgentAutoReview,
     inspectAgentAutoReviewAudit
@@ -77,7 +82,11 @@
     }
   }
 
-  let input = $state('')
+  const draft = $derived($agentDrafts[$activeAgentSession?.id || ''])
+  const input = $derived(draft?.content || '')
+  const steering = $derived(
+    $activeAgentSession?.status === 'running' || $activeAgentSession?.status === 'waiting_approval'
+  )
   let inputElement: HTMLTextAreaElement = $state()
   let messagesElement: HTMLDivElement = $state()
   let models: AiModelInfo[] = $state([])
@@ -222,6 +231,12 @@
       $activeAgentSession.mode === 'planning' &&
       $activeAgentSession.status === 'completed'
   )
+  const composerBlocked = $derived(
+    !$activeAgentSession ||
+      !canSubmitAgentDraft($activeAgentSession) ||
+      resolvingPlan ||
+      enrollmentBusy
+  )
   const elapsedTime = $derived.by(() => {
     if ($activeAgentSession?.status !== 'running') return '0:00'
     const startedAt = [...$activeAgentSession.messages]
@@ -351,18 +366,18 @@
     void updateAgentSession($activeAgentSession.id, { reasoningEffort: value })
   }
 
-  async function submit() {
-    if (!input.trim() || running || awaitingPlanDecision || resolvingPlan || !$activeAgentSession)
-      return
-    const content = input.trim()
-    input = ''
-    await sendAgentMessage(content)
-    await tick()
-    scrollToBottom()
+  async function submit(mode: 'queue' | 'interrupt' = 'queue') {
+    const session = $activeAgentSession
+    if (composerBlocked || !session) return
+    const sent = await submitAgentDraft(session, mode)
+    if (sent && $activeAgentSession?.id === session.id) {
+      await tick()
+      scrollToBottom()
+    }
   }
 
   function handleKeydown(event: KeyboardEvent) {
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
       event.preventDefault()
       void submit()
     }
@@ -978,20 +993,65 @@
           {#if planActionError && planActionErrorSessionId === $activeAgentSession.id}
             <div class="alert alert-error text-sm">{planActionError}</div>
           {/if}
-          <div class="flex items-center gap-2">
+          {#if $activeAgentSession.pendingInputs?.length}
+            <div class="rounded-md border border-base-300 bg-base-200 p-3 text-sm">
+              <div class="font-semibold">
+                Pending messages ({$activeAgentSession.pendingInputs.length})
+              </div>
+              <ol class="list-decimal pl-5 max-h-40 overflow-y-auto">
+                {#each $activeAgentSession.pendingInputs as pending (pending.id)}
+                  <li class="whitespace-pre-wrap break-words">{pending.content}</li>
+                {/each}
+              </ol>
+              <p class="mt-2 text-xs opacity-70">
+                Queued messages are delivered at a safe boundary. If the run ends first, they stay
+                pending for the next run.
+              </p>
+            </div>
+          {/if}
+          {#if draft?.error}
+            <div class="alert alert-error text-sm" role="alert">{draft.error}</div>
+          {/if}
+          {#if steering}
+            <p class="text-xs opacity-70">
+              Queue waits for a safe boundary. Interrupt and send requests cancellation, waits for
+              cleanup, then delivers pending messages. Stop cancels without starting another run.
+              Cancellation does not undo completed actions.
+            </p>
+          {/if}
+          <div class="flex flex-wrap items-center gap-2">
             <textarea
               class="agent-input textarea textarea-bordered grow min-h-12 max-h-36 resize-none overflow-y-auto"
               rows="1"
               bind:this={inputElement}
-              bind:value={input}
+              value={input}
+              oninput={(event) => {
+                if ($activeAgentSession)
+                  setAgentDraft($activeAgentSession.id, event.currentTarget.value)
+              }}
               onkeydown={handleKeydown}
-              placeholder={awaitingPlanDecision
-                ? 'Choose how to proceed with the completed plan...'
-                : $activeAgentSession.mode === 'planning'
-                  ? 'Describe what you want planned...'
-                  : 'Ask the agent...'}
-              disabled={running || awaitingPlanDecision || resolvingPlan || enrollmentBusy}
-            ></textarea>
+              placeholder={steering
+                ? 'Add guidance while the agent works...'
+                : awaitingPlanDecision
+                  ? 'Choose how to proceed with the completed plan...'
+                  : $activeAgentSession.mode === 'planning'
+                    ? 'Describe what you want planned...'
+                    : 'Ask the agent...'}
+              disabled={awaitingPlanDecision || resolvingPlan || enrollmentBusy}
+              aria-label="Message the agent"></textarea>
+            {#if steering}
+              <button
+                class="btn btn-primary"
+                onclick={() => submit('queue')}
+                disabled={!input.trim() || composerBlocked || draft?.submitting}>Queue</button
+              >
+              <button
+                class="btn btn-outline"
+                onclick={() => submit('interrupt')}
+                disabled={!input.trim() || composerBlocked || draft?.submitting}
+                >Interrupt and send</button
+              >
+            {/if}
             {#if running}
               <button
                 class="btn btn-square btn-error"
@@ -1004,8 +1064,8 @@
             {:else}
               <button
                 class="btn btn-square btn-primary"
-                onclick={submit}
-                disabled={!input.trim() || awaitingPlanDecision || resolvingPlan || enrollmentBusy}
+                onclick={() => submit()}
+                disabled={!input.trim() || composerBlocked || draft?.submitting}
                 title="Send"
                 aria-label="Send"
               >

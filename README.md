@@ -265,6 +265,21 @@ $ npm run build:mac
 $ npm run build:linux
 ```
 
+## Steering an active agent
+
+While the agent is working, type additional guidance and choose **Queue** to deliver it after
+all tool results in the current batch have settled. **Interrupt and send** cancels the current
+run, waits for its cleanup and checkpoints, then starts with the pending messages. Neither
+option approves a pending tool action or changes Manual/Auto/Planning permissions. Pending inputs
+remain separate from conversation history until admitted. Cancellation
+does not undo tool actions that already completed.
+
+**Stop** cancels without starting another run, including an interrupt-and-send that is still
+waiting for cleanup. Changing the session mode, model or account also cancels that restart.
+Messages not yet admitted remain visible in the session's pending queue
+and are included before your next request. They survive application restart. Drafts remain in
+the composer after a failed submission and when switching sessions during the current app session.
+
 ## App-wide Agent Skills
 
 The Agent panel's Skills control lists standard SKILL.md folders, the bundled read-only
