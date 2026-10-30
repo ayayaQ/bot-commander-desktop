@@ -68,13 +68,6 @@ describe('provider settings and enrollment controls', () => {
     expect(settings).toContain('Could not confirm the key update. Reload settings before retrying.')
   })
 
-  it('requires a separate unchecked web acknowledgment in the existing Auto dialog', () => {
-    expect(panel).toContain('let webEnrollmentAcknowledged = $state(false)')
-    expect(panel).toContain("{#if $settingsStore.webProvider === 'deepseek'}")
-    expect(panel).toContain('bind:checked={webEnrollmentAcknowledged}')
-    expect(panel).toContain('{AGENT_WEB_DISCLOSURE}')
-    expect(panel).toContain('...(webEnrollmentAcknowledged')
-    expect(panel).toContain('policyRevision: AGENT_WEB_POLICY_REVISION')
-    expect(panel).not.toContain('webEnrollmentAcknowledged = true')
-  })
+  // Auto activation and the separate web toggle are covered with real UI interactions in
+  // scripts/test-agent-presentation-ui.mjs instead of checking dialog implementation strings.
 })

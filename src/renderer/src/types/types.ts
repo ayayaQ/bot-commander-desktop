@@ -225,6 +225,7 @@ export type AppSettings = {
   useCustomApi: boolean
   useLegacyInterpreter: boolean // Historical persisted key: true enables global eval scope
   agentNotificationsEnabled: boolean
+  agentSessionsWidth?: number
 }
 
 export type BotStatus = {

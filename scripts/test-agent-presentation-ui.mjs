@@ -6,6 +6,7 @@ import { createServer } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { spawn } from 'node:child_process'
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
+import { realpathSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
@@ -86,7 +87,10 @@ if (process.argv.includes('--validate-expressions')) {
   process.exit(0)
 }
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..').replaceAll('\\', '/')
+// Match Vite's canonical file paths, including directory casing on Windows.
+const root = realpathSync
+  .native(resolve(dirname(fileURLToPath(import.meta.url)), '..'))
+  .replaceAll('\\', '/')
 const fixtureDir = await mkdtemp(join(root, '.agent-presentation-ui-'))
 let vite
 let chromium
@@ -129,10 +133,14 @@ try {
     join(fixtureDir, 'main.js'),
     `
 import { mount, unmount } from 'svelte'
+import { get } from 'svelte/store'
+import { loadSettings, settingsStore } from '/@fs/${root}/src/renderer/src/stores/settings.ts'
 import Panel from '/@fs/${root}/src/renderer/src/components/AgentPanel.svelte'
 import Tool from '/@fs/${root}/src/renderer/src/components/AgentToolPresentation.svelte'
 import { toolPresentationCorpus, presentationFixture } from '/@fs/${root}/src/renderer/src/utils/fixtures/toolPresentationCorpus.ts'
 import { agentSessions, destroyAgentListeners } from '/@fs/${root}/src/renderer/src/stores/agent.ts'
+import { AUTO_REVIEW_POLICY_REVISION } from '/@fs/${root}/src/shared/agentAutoReview.ts'
+import { normalizeModelCapabilities } from '@ayayaq/vivi/providers/models'
 import '/@fs/${root}/src/renderer/app.css'
 const clone = (value) => structuredClone(value)
 const mcp = { runId: 'offline-run', serverId: 'offline-server', operationDigest: 'offline-digest', catalogKind: 'tools', remoteKey: 'offline-key', outcome: 'pending', requestSent: false, disclosure: 'Exact offline action: change ordinary fixture. Host approval only.' }
@@ -141,15 +149,50 @@ let session = { id: 'offline-session', title: 'Offline agent fixture', model: 'f
 session.lastRunMetrics = { runId: 'offline-run', status: 'completed', startedAt: call.createdAt, finishedAt: '2026-10-10T00:00:42.000Z', providerRounds: 3, inputTokens: 1200, outputTokens: 340, totalTokens: 1540, cachedInputTokens: 200, documentationCalls: 2, uniqueDocumentationCalls: 1, duplicateDocumentationCalls: 1, documentationResultChars: 640, usageReconciled: true, tools: [{ id: call.id, name: call.name, status: 'completed' }] }
 const listeners = new Map()
 const calls = []
+let auditRows = []
+let enrollmentFailure = false
+let enrollmentDelay = 0
+let enrollmentInFlight = false
+let capabilitySnapshot
+let savedSettings = JSON.parse(sessionStorage.getItem('fixture-settings') || 'null') || { ...get(settingsStore), theme: 'dark' }
 const data = () => ({ sessions: [clone(session)], activeSessionId: session.id, modelDefaultsByProvider: {} })
 window.electron = { ipcRenderer: {
   on(channel, listener) { const group = listeners.get(channel) || new Set(); group.add(listener); listeners.set(channel, group) },
   removeListener(channel, listener) { listeners.get(channel)?.delete(listener) },
   invoke(channel, ...args) { calls.push({ channel, args: clone(args) });
+    if (channel === 'get-settings') return Promise.resolve(clone(savedSettings))
+    if (channel === 'save-settings') {
+      savedSettings = clone(args[0])
+      sessionStorage.setItem('fixture-settings', JSON.stringify(savedSettings))
+      return Promise.resolve(clone(savedSettings))
+    }
     if (channel === 'agent:list') return Promise.resolve(data())
+    if (channel === 'agent:update') {
+      session = { ...session, ...clone(args[1]) }
+      return Promise.resolve(clone(session))
+    }
+    if (channel === 'agent:inspect-auto-review-audit') return Promise.resolve({ id: 'offline-inspection', policyRevision: AUTO_REVIEW_POLICY_REVISION, provider: 'openai', accountRevision: savedSettings.agentDecisionAccountRevision, inspectedAt: call.createdAt, canAcknowledge: true, rows: clone(auditRows) })
+    if (channel === 'agent:enroll-auto-review') {
+      if (enrollmentFailure) return Promise.reject(new Error('Offline enrollment save failed'))
+      const enrollment = args[1]
+      enrollmentInFlight = true
+      return new Promise(resolve => setTimeout(() => {
+        session = { ...session, ...(enrollment.activate ? { mode: 'auto', planReady: false } : {}), autoReviewEnrollment: { policyRevision: enrollment.policyRevision, provider: enrollment.provider, accountRevision: enrollment.accountRevision, acknowledgedAt: call.createdAt, ...(enrollment.web ? { web: clone(enrollment.web) } : {}) } }
+        enrollmentInFlight = false
+        resolve(clone(session))
+      }, enrollmentDelay))
+    }
+    if (channel === 'agent:resolve-plan') {
+      session = { ...session, mode: args[1], planReady: false }
+      agentSessions.set(data())
+      return Promise.resolve(clone(session))
+    }
     if (channel === 'fetch-ai-models') return Promise.resolve([])
     if (channel === 'skills:list') return Promise.resolve({ skills: [], diagnostics: [], externalRoots: [], ownedRoot: '/offline/skills', saveSupport: { available: false, reason: 'Offline display-only fixture' } })
-    if (channel === 'get-ai-model-capabilities') return Promise.resolve({})
+    if (channel === 'get-ai-model-capabilities') {
+      const result = capabilitySnapshot ? clone(capabilitySnapshot) : {}
+      return new Promise(resolve => setTimeout(() => resolve(result), capabilitySnapshot ? 150 : 0))
+    }
     if (channel === 'agent:approve') return Promise.resolve(false)
     if (channel === 'agent:set-active') return Promise.resolve()
     throw new Error('Unexpected fixture IPC: ' + channel)
@@ -160,6 +203,22 @@ window.__fixture = {
   calls,
   corpus: clone(toolPresentationCorpus),
   snapshot: () => data(),
+  pendingEnrollment: () => enrollmentInFlight,
+  async configureAutoReview(options = {}) {
+    auditRows = options.auditRows || []
+    enrollmentFailure = options.failEnrollment || false
+    enrollmentDelay = options.enrollmentDelay || 0
+    savedSettings = { ...savedSettings, aiProvider: options.noReviewer ? 'deepseek' : 'openai', agentReviewerProvider: undefined, agentDecisionAccountRevision: 'offline-account', webProvider: options.web ? 'deepseek' : 'disabled', agentWebAccountRevision: 'offline-web-account' }
+    await loadSettings()
+    session = { ...session, mode: options.plan ? 'planning' : 'manual', status: 'completed', planReady: !!options.plan, autoReviewEnrollment: undefined, autoReviewMigrationRequired: false }
+    agentSessions.set(data())
+  },
+  failEnrollment(value) { enrollmentFailure = value },
+  setCapabilityModel(model = 'gpt-5.1') {
+    capabilitySnapshot = { capabilities: normalizeModelCapabilities({ apiVersion: 1, provider: 'openai', protocol: 'responses', model: { id: model } }) }
+    session = { ...session, model, reasoningEffort: 'high' }
+    agentSessions.set(data())
+  },
   setMetrics(patch) {
     session = { ...session, lastRunMetrics: { ...session.lastRunMetrics, ...clone(patch) } }
     agentSessions.set(data())
@@ -179,6 +238,7 @@ window.__fixture = {
 }
 let instance
 let navigation = Promise.resolve()
+await loadSettings()
 function render() {
   navigation = navigation.then(async () => {
     if (instance) { await unmount(instance); instance = undefined }
@@ -731,6 +791,229 @@ render()
   assert.match(await visible(), /Tools: Unavailable/)
   flows.push(
     'Completed tools collapse to only their header; one expansion reveals metadata, warnings, arguments and results. The fixed composer summary shows outcome, elapsed time, tokens and tools, and opens a modal that closes with Escape and restores focus.'
+  )
+  phase = 'agent sessions resizing and persistence'
+  const sidebarWidth = () =>
+    evaluate('return document.getElementById("agent-sessions").getBoundingClientRect().width')
+  const handleLocation = await evaluate(
+    'const box = document.querySelector(".sessions-resize-handle").getBoundingClientRect(); return { x: box.x + box.width / 2, y: box.y + box.height / 2 }'
+  )
+  assert.equal(await sidebarWidth(), 208)
+  await command('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    button: 'left',
+    clickCount: 1,
+    ...handleLocation
+  })
+  await command('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    button: 'left',
+    buttons: 1,
+    x: handleLocation.x + 120,
+    y: handleLocation.y
+  })
+  await wait('document.getElementById("agent-sessions").clientWidth === 328')
+  assert.equal(await count('save-settings'), 0)
+  await command('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    button: 'left',
+    clickCount: 1,
+    x: handleLocation.x + 120,
+    y: handleLocation.y
+  })
+  await wait(
+    'window.__fixture.calls.some(call => call.channel === "save-settings" && call.args[0].agentSessionsWidth === 328)'
+  )
+  // Keyboard resizing uses the focused separator, including the minimum and maximum shortcuts.
+  for (const [key, code, expected] of [
+    ['ArrowLeft', 37, 318],
+    ['Home', 36, 200],
+    ['End', 35, 480]
+  ]) {
+    await command('Input.dispatchKeyEvent', { type: 'keyDown', key, windowsVirtualKeyCode: code })
+    await command('Input.dispatchKeyEvent', { type: 'keyUp', key, windowsVirtualKeyCode: code })
+    await wait(`document.getElementById("agent-sessions").clientWidth === ${expected}`)
+  }
+  await evaluate(
+    'document.querySelector(".sessions-resize-handle").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))'
+  )
+  await wait('document.getElementById("agent-sessions").clientWidth === 208')
+  // Resize again and verify the chosen width survives both panel remount and renderer reload.
+  await command('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    button: 'left',
+    clickCount: 1,
+    ...handleLocation
+  })
+  await command('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    button: 'left',
+    buttons: 1,
+    x: handleLocation.x + 120,
+    y: handleLocation.y
+  })
+  await command('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    button: 'left',
+    clickCount: 1,
+    x: handleLocation.x + 120,
+    y: handleLocation.y
+  })
+  await wait('document.getElementById("agent-sessions").clientWidth === 328')
+  await route('#other')
+  await route('#panel')
+  assert.equal(await sidebarWidth(), 328)
+  await evaluate('window.__fixtureReloadMarker = true')
+  await command('Page.reload')
+  await wait(
+    '!window.__fixtureReloadMarker && document.getElementById("agent-sessions")?.clientWidth === 328'
+  )
+  await command('Emulation.setDeviceMetricsOverride', {
+    width: 640,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false
+  })
+  await wait('document.getElementById("agent-sessions").clientWidth === 280')
+  await command('Emulation.setDeviceMetricsOverride', {
+    width: 1400,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false
+  })
+  await wait('document.getElementById("agent-sessions").clientWidth === 328')
+  flows.push(
+    'Agent sessions resize by dragging and keyboard, save on release, reset on double-click, restore after navigation/reload, and adapt to a smaller window without overwriting the preferred width'
+  )
+  await screenshot('agent-sessions-resized')
+  phase = 'direct Auto review activation'
+  await evaluate('await window.__fixture.configureAutoReview({ web: true })')
+  await click('Auto review')
+  await wait('window.__fixture.snapshot().sessions[0].mode === "auto"')
+  assert.equal(await count('agent:enroll-auto-review'), 1)
+  assert.equal((await visible()).includes('I consent to'), false)
+  assert.equal((await visible()).includes('Acknowledge and enable'), false)
+  assert.equal((await visible()).includes('Recover Auto review'), false)
+  assert.equal(
+    await evaluate('return window.__fixture.snapshot().sessions[0].autoReviewEnrollment.web'),
+    undefined
+  )
+  // Web approval stays separately selectable and survives switching back into Auto review.
+  await evaluate('document.querySelector("input[type=checkbox]").click()')
+  await wait('!!window.__fixture.snapshot().sessions[0].autoReviewEnrollment.web')
+  await click('Manual')
+  await wait('window.__fixture.snapshot().sessions[0].mode === "manual"')
+  await click('Auto review')
+  await wait('window.__fixture.snapshot().sessions[0].mode === "auto"')
+  assert.equal(
+    await evaluate('return document.querySelector("input[type=checkbox]").checked'),
+    true
+  )
+  // A failed change must leave the checkbox consistent with the saved session.
+  await evaluate(
+    'window.__fixture.failEnrollment(true); document.querySelector("input[type=checkbox]").click()'
+  )
+  await wait('document.body.innerText.includes("Offline enrollment save failed")')
+  assert.equal(
+    await evaluate('return document.querySelector("input[type=checkbox]").checked'),
+    true
+  )
+  await evaluate(
+    'window.__fixture.failEnrollment(false); document.querySelector("input[type=checkbox]").click()'
+  )
+  await wait('!window.__fixture.snapshot().sessions[0].autoReviewEnrollment.web')
+
+  await evaluate('await window.__fixture.configureAutoReview({ plan: true })')
+  await click('Implement with Auto review')
+  await wait('window.__fixture.calls.some(call => call.channel === "agent:resolve-plan")')
+  const planCalls = await evaluate(
+    'return window.__fixture.calls.filter(call => ["agent:enroll-auto-review", "agent:resolve-plan"].includes(call.channel)).slice(-2)'
+  )
+  assert.equal(planCalls[0].channel, 'agent:enroll-auto-review')
+  assert.equal(planCalls[0].args[1].activate, false)
+  assert.deepEqual(planCalls[1].args, ['offline-session', 'auto', 'assistant-2'])
+
+  const enrollmentsBeforeRecovery = await count('agent:enroll-auto-review')
+  await evaluate(
+    'await window.__fixture.configureAutoReview({ auditRows: [{ id: "unknown-change", tool: "save_memory", targetType: "memory", targetId: "offline-memory", outcome: "unknown", currentResourceRevision: "resource-1", currentTargetRevision: "target-1", candidateRevision: "candidate-1" }] })'
+  )
+  await click('Auto review')
+  await wait('document.body.innerText.includes("Recover Auto review")')
+  assert.equal(await count('agent:enroll-auto-review'), enrollmentsBeforeRecovery)
+  assert.equal(
+    await evaluate(
+      'return [...document.querySelectorAll("button")].find(button => button.textContent.trim() === "Recover and enable").disabled'
+    ),
+    true
+  )
+  await evaluate('document.querySelector("input[type=checkbox]").click()')
+  await click('Recover and enable')
+  await wait('window.__fixture.snapshot().sessions[0].mode === "auto"')
+  assert.equal(
+    await evaluate(
+      'return window.__fixture.calls.filter(call => call.channel === "agent:enroll-auto-review").at(-1).args[1].recoveryInspectionId'
+    ),
+    'offline-inspection'
+  )
+
+  const enrollmentsBeforeFailure = await count('agent:enroll-auto-review')
+  await evaluate('await window.__fixture.configureAutoReview({ noReviewer: true })')
+  await click('Auto review')
+  await wait('document.body.innerText.includes("Choose OpenAI or OpenRouter")')
+  assert.equal(await count('agent:enroll-auto-review'), enrollmentsBeforeFailure)
+  assert.equal(await evaluate('return window.__fixture.snapshot().sessions[0].mode'), 'manual')
+  flows.push(
+    'Auto review and plan implementation activate on one click; optional web authority remains separate, failed changes keep saved UI state, unknown audit outcomes require recovery, and missing reviewers keep Manual active'
+  )
+  phase = 'stable model controls during mode switches'
+  await evaluate(
+    'await window.__fixture.configureAutoReview({ enrollmentDelay: 600 }); window.__fixture.setCapabilityModel()'
+  )
+  await wait(
+    'document.querySelector("select[aria-label]")?.value === "high" && !document.getElementById("agent-reasoning-error")'
+  )
+  const capabilitiesBeforeSwitch = await count('get-ai-model-capabilities')
+  await evaluate(
+    'const input = document.querySelector(".agent-input"); input.value = "Keep this draft"; input.dispatchEvent(new Event("input", { bubbles: true }))'
+  )
+  const fieldStyles = () =>
+    evaluate(
+      'const canvas = document.createElement("canvas"); canvas.width = canvas.height = 1; const context = canvas.getContext("2d"); const rgba = color => { context.clearRect(0, 0, 1, 1); context.fillStyle = color; context.fillRect(0, 0, 1, 1); return [...context.getImageData(0, 0, 1, 1).data] }; return [...document.querySelectorAll("header .w-56 > button, header select, .agent-input, button[aria-label=Send]")].map(field => { const style = getComputedStyle(field); return { disabled: field.disabled, color: rgba(style.color), background: rgba(style.backgroundColor), opacity: style.opacity, border: rgba(style.borderColor) } })'
+    )
+  await evaluate('await new Promise(done => setTimeout(done, 250))')
+  const beforeSwitchStyles = await fieldStyles()
+  await evaluate(
+    'window.__capabilityGlitches = []; window.__capabilityObserver = new MutationObserver(() => { if (document.querySelector("select[aria-label]")?.value !== "high" || document.getElementById("agent-reasoning-error")) window.__capabilityGlitches.push("Reasoning controls reset") }); window.__capabilityObserver.observe(document.querySelector("section > header"), { childList: true, subtree: true, attributes: true })'
+  )
+  await click('Auto review')
+  await wait('window.__fixture.pendingEnrollment()')
+  assert.deepEqual(await fieldStyles(), beforeSwitchStyles)
+  const enrollmentsWhilePending = await count('agent:enroll-auto-review')
+  await click('Auto review')
+  await click('arrow_upward')
+  await command('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 20, y: 10 })
+  assert.equal(await count('agent:enroll-auto-review'), enrollmentsWhilePending)
+  assert.equal(await count('agent:send'), 0)
+  await wait(
+    'window.__fixture.snapshot().sessions[0].mode === "auto" && !document.querySelector("section > header").inert'
+  )
+  await evaluate('await new Promise(done => setTimeout(done, 250))')
+  assert.deepEqual(await fieldStyles(), beforeSwitchStyles)
+  assert.equal(
+    await evaluate('return document.querySelector(".agent-input").value'),
+    'Keep this draft'
+  )
+  assert.equal(await count('get-ai-model-capabilities'), capabilitiesBeforeSwitch)
+  assert.deepEqual(await evaluate('return window.__capabilityGlitches'), [])
+  await evaluate(
+    'window.__capabilityObserver.disconnect(); window.__fixture.setCapabilityModel("gpt-5")'
+  )
+  await wait(
+    'document.querySelector("select[aria-label]")?.value === "high" && !document.getElementById("agent-reasoning-error")'
+  )
+  assert.equal(await count('get-ai-model-capabilities'), capabilitiesBeforeSwitch + 1)
+  flows.push(
+    'A delayed Auto switch keeps field colors and enabled appearance stable, preserves the draft, prevents duplicate enrollment and sending during the switch, and avoids capability refetches; selecting a different model still refreshes capabilities'
   )
   assert.deepEqual(browserErrors, [])
   const report = {

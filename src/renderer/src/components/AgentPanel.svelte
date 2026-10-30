@@ -21,12 +21,11 @@
     currentSelectedCapabilities,
     reasoningChoices,
     reasoningConfigurationError,
-    reasoningCapabilityLabel,
     ModelCatalogRequestGate,
     catalogSettingsMatch,
     modelCapabilitySnapshotMatches
   } from '../utils/aiModelCapabilities'
-  import { settingsStore } from '../stores/settings'
+  import { patchSettings, settingsDraftStore, settingsStore } from '../stores/settings'
   import {
     agentDrafts,
     canSubmitAgentDraft,
@@ -56,13 +55,63 @@
     inspectAgentAutoReviewAudit
   } from '../stores/agent'
   import {
-    AUTO_REVIEW_DISCLOSURE,
     AUTO_REVIEW_POLICY_REVISION,
     autoReviewReasonLabel
   } from '../../../shared/agentAutoReview'
   import type { AgentDecisionAuditInspection } from '../../../shared/agentAutoReview'
   import { AGENT_WEB_DISCLOSURE, AGENT_WEB_POLICY_REVISION } from '../../../shared/agentWeb'
   import { selectedReviewer } from '../../../shared/providerSelection'
+
+  const defaultSessionsWidth = 208
+  const minSessionsWidth = 200
+  let panelWidth = $state(0)
+  let dragWidth = $state<number | null>(null)
+  let resizeStart: { pointerId: number; x: number; width: number } | undefined
+  const maxSessionsWidth = $derived(Math.min(480, Math.max(minSessionsWidth, panelWidth - 360)))
+  const savedSessionsWidth = $derived(
+    Number.isFinite($settingsDraftStore.agentSessionsWidth)
+      ? $settingsDraftStore.agentSessionsWidth
+      : defaultSessionsWidth
+  )
+  const sessionsWidth = $derived(clampSessionsWidth(dragWidth ?? savedSessionsWidth))
+
+  function clampSessionsWidth(width: number) {
+    return Math.round(Math.min(maxSessionsWidth, Math.max(minSessionsWidth, width)))
+  }
+
+  function startSessionsResize(event: PointerEvent) {
+    if (event.button !== 0 || resizeStart) return
+    event.preventDefault()
+    const handle = event.currentTarget as HTMLElement
+    handle.focus()
+    handle.setPointerCapture(event.pointerId)
+    resizeStart = { pointerId: event.pointerId, x: event.clientX, width: sessionsWidth }
+    dragWidth = sessionsWidth
+  }
+
+  function moveSessionsResize(event: PointerEvent) {
+    if (resizeStart?.pointerId !== event.pointerId) return
+    dragWidth = clampSessionsWidth(resizeStart.width + event.clientX - resizeStart.x)
+  }
+
+  function finishSessionsResize(event: PointerEvent) {
+    if (resizeStart?.pointerId !== event.pointerId) return
+    const width = sessionsWidth
+    resizeStart = undefined
+    void patchSettings({ agentSessionsWidth: width })
+    dragWidth = null
+  }
+
+  function resizeSessionsWithKeyboard(event: KeyboardEvent) {
+    let width: number
+    if (event.key === 'ArrowLeft') width = sessionsWidth - (event.shiftKey ? 40 : 10)
+    else if (event.key === 'ArrowRight') width = sessionsWidth + (event.shiftKey ? 40 : 10)
+    else if (event.key === 'Home') width = minSessionsWidth
+    else if (event.key === 'End') width = maxSessionsWidth
+    else return
+    event.preventDefault()
+    void patchSettings({ agentSessionsWidth: clampSessionsWidth(width) })
+  }
 
   let compactError = $state('')
   let compactBusy = $state(false)
@@ -104,20 +153,26 @@
   let resolvingPlan = $state(false)
   let planActionError = $state('')
   let planActionErrorSessionId = $state('')
-  let enrollmentIntent = $state<{
+  type AutoReviewIntent = {
     sessionId: string
     forPlan: boolean
     planId?: string
     provider: 'openai' | 'openrouter'
     accountRevision?: string
     webAccountRevision?: string
-  } | null>(null)
-  let enrollmentAcknowledged = $state(false)
-  let webEnrollmentAcknowledged = $state(false)
+  }
+  let enrollmentIntent = $state<AutoReviewIntent | null>(null)
   let enrollmentBusy = $state(false)
   let enrollmentError = $state('')
   let auditInspection = $state<AgentDecisionAuditInspection | undefined>()
   let auditAcknowledged = $state(false)
+  const automaticWebEnabled = $derived(
+    $settingsStore.webProvider === 'deepseek' &&
+      $activeAgentSession?.autoReviewEnrollment?.web?.policyRevision ===
+        AGENT_WEB_POLICY_REVISION &&
+      $activeAgentSession.autoReviewEnrollment.web.accountRevision ===
+        $settingsStore.agentWebAccountRevision
+  )
   $effect(() => {
     if (
       enrollmentIntent &&
@@ -131,8 +186,6 @@
             : undefined))
     ) {
       enrollmentIntent = null
-      enrollmentAcknowledged = false
-      webEnrollmentAcknowledged = false
     }
   })
 
@@ -146,11 +199,22 @@
       currentTime
     )
   )
+  let capabilityRequestInputs:
+    { model: string; settings: AppSettings; models: AiModelInfo[] } | undefined
   $effect(() => {
     const model = $activeAgentSession?.model
     const settings = $settingsStore
-    // Refetch the pure selected snapshot after a host catalog refresh updates cache metadata.
-    models
+    // Session mode changes and unchanged settings reloads do not invalidate model facts.
+    // A new catalog still refreshes the selected snapshot and its expiry metadata.
+    const catalog = models
+    if (
+      capabilityRequestInputs &&
+      capabilityRequestInputs.model === model &&
+      capabilityRequestInputs.models === catalog &&
+      catalogSettingsMatch(capabilityRequestInputs.settings, settings)
+    )
+      return
+    capabilityRequestInputs = { model, settings, models: catalog }
     if (model) void refreshSelectedCapabilities(model, settings)
     else {
       selectedGate.invalidate()
@@ -231,12 +295,10 @@
       $activeAgentSession.mode === 'planning' &&
       $activeAgentSession.status === 'completed'
   )
-  const composerBlocked = $derived(
-    !$activeAgentSession ||
-      !canSubmitAgentDraft($activeAgentSession) ||
-      resolvingPlan ||
-      enrollmentBusy
+  const composerUnavailable = $derived(
+    !$activeAgentSession || !canSubmitAgentDraft($activeAgentSession) || resolvingPlan
   )
+  const composerBlocked = $derived(composerUnavailable || enrollmentBusy)
   const elapsedTime = $derived.by(() => {
     if ($activeAgentSession?.status !== 'running') return '0:00'
     const startedAt = [...$activeAgentSession.messages]
@@ -405,17 +467,18 @@
   }
 
   async function setMode(mode: AgentMode) {
-    if (!$activeAgentSession) return
+    if (!$activeAgentSession || running || enrollmentBusy) return
     if (mode === 'auto') {
-      beginEnrollment(false)
+      await beginEnrollment(false)
       return
     }
     enrollmentIntent = null
+    enrollmentError = ''
     await updateAgentSession($activeAgentSession.id, { mode })
   }
 
-  function beginEnrollment(forPlan: boolean) {
-    if (!$activeAgentSession || running) return
+  async function beginEnrollment(forPlan: boolean) {
+    if (!$activeAgentSession || running || enrollmentBusy) return
     const provider = selectedReviewer($settingsStore)
     if (!provider) {
       enrollmentError = 'Choose OpenAI or OpenRouter as the Auto reviewer in Settings first.'
@@ -424,7 +487,7 @@
     const plan = [...$activeAgentSession.messages]
       .reverse()
       .find((message) => message.role === 'assistant')
-    enrollmentIntent = {
+    const intent: AutoReviewIntent = {
       sessionId: $activeAgentSession.id,
       forPlan,
       ...(forPlan && plan ? { planId: plan.id } : {}),
@@ -435,11 +498,90 @@
           ? $settingsStore.agentWebAccountRevision
           : undefined
     }
-    enrollmentAcknowledged = false
-    webEnrollmentAcknowledged = false
+    enrollmentIntent = null
     enrollmentError = ''
     auditInspection = undefined
     auditAcknowledged = false
+    enrollmentBusy = true
+    try {
+      const inspected = await inspectAgentAutoReviewAudit(intent.sessionId)
+      if ($activeAgentSession?.id !== intent.sessionId) return
+      validateAuditInspection(inspected, intent)
+      if (inspected.rows.length) {
+        enrollmentIntent = intent
+        auditInspection = inspected
+        return
+      }
+      await activateAutoReview(intent)
+    } catch (error) {
+      enrollmentError = error instanceof Error ? error.message : 'Could not enable Auto review'
+    } finally {
+      enrollmentBusy = false
+    }
+  }
+
+  function validateAuditInspection(
+    inspected: AgentDecisionAuditInspection,
+    intent: AutoReviewIntent
+  ) {
+    if (
+      inspected.provider !== intent.provider ||
+      inspected.accountRevision !== intent.accountRevision ||
+      inspected.policyRevision !== AUTO_REVIEW_POLICY_REVISION ||
+      selectedReviewer($settingsStore) !== intent.provider ||
+      $settingsStore.agentDecisionAccountRevision !== intent.accountRevision
+    )
+      throw new Error('Selected review account changed; select Auto review again')
+  }
+
+  async function activateAutoReview(intent: AutoReviewIntent, recoveryInspectionId?: string) {
+    const web = $activeAgentSession?.autoReviewEnrollment?.web
+    await enrollAgentAutoReview(
+      intent.sessionId,
+      {
+        provider: intent.provider,
+        accountRevision: intent.accountRevision,
+        ...(web?.policyRevision === AGENT_WEB_POLICY_REVISION &&
+        web.accountRevision === intent.webAccountRevision
+          ? { web }
+          : {}),
+        ...(recoveryInspectionId ? { recoveryInspectionId } : {})
+      },
+      !intent.forPlan
+    )
+    enrollmentIntent = null
+    if ($activeAgentSession?.id !== intent.sessionId) return
+    if (intent.forPlan) await handlePlanDecision('auto', intent.planId)
+  }
+
+  async function updateAutomaticWeb(event: Event) {
+    if (!$activeAgentSession || running || enrollmentBusy) return
+    const provider = selectedReviewer($settingsStore)
+    if (!provider) return
+    const checkbox = event.currentTarget as HTMLInputElement
+    const enabled = checkbox.checked
+    enrollmentBusy = true
+    enrollmentError = ''
+    try {
+      await enrollAgentAutoReview($activeAgentSession.id, {
+        provider,
+        accountRevision: $settingsStore.agentDecisionAccountRevision,
+        ...(enabled
+          ? {
+              web: {
+                policyRevision: AGENT_WEB_POLICY_REVISION,
+                accountRevision: $settingsStore.agentWebAccountRevision
+              }
+            }
+          : {})
+      })
+    } catch (error) {
+      enrollmentError =
+        error instanceof Error ? error.message : 'Could not update automatic web requests'
+    } finally {
+      enrollmentBusy = false
+      checkbox.checked = automaticWebEnabled
+    }
   }
 
   async function inspectAudit() {
@@ -451,12 +593,7 @@
     try {
       const inspected = await inspectAgentAutoReviewAudit(intent.sessionId)
       if (enrollmentIntent !== intent || $activeAgentSession?.id !== intent.sessionId) return
-      if (
-        inspected.provider !== intent.provider ||
-        inspected.accountRevision !== intent.accountRevision ||
-        inspected.policyRevision !== AUTO_REVIEW_POLICY_REVISION
-      )
-        throw new Error('Selected review account changed; reopen Auto review')
+      validateAuditInspection(inspected, intent)
       auditInspection = inspected
     } catch (error) {
       enrollmentError = error instanceof Error ? error.message : 'Audit inspection failed'
@@ -469,7 +606,6 @@
     const intent = enrollmentIntent
     if (
       !intent ||
-      !enrollmentAcknowledged ||
       (auditInspection?.rows.length && (!auditInspection.canAcknowledge || !auditAcknowledged)) ||
       enrollmentBusy ||
       intent.sessionId !== $activeAgentSession?.id
@@ -477,28 +613,10 @@
       return
     enrollmentBusy = true
     try {
-      await enrollAgentAutoReview(
-        intent.sessionId,
-        {
-          provider: intent.provider,
-          accountRevision: intent.accountRevision,
-          ...(webEnrollmentAcknowledged
-            ? {
-                web: {
-                  policyRevision: AGENT_WEB_POLICY_REVISION,
-                  accountRevision: intent.webAccountRevision
-                }
-              }
-            : {}),
-          ...(auditInspection?.rows.length && auditAcknowledged
-            ? { recoveryInspectionId: auditInspection.id }
-            : {})
-        },
-        !intent.forPlan
+      await activateAutoReview(
+        intent,
+        auditInspection?.rows.length && auditAcknowledged ? auditInspection.id : undefined
       )
-      enrollmentIntent = null
-      if ($activeAgentSession?.id !== intent.sessionId) return
-      if (intent.forPlan) await handlePlanDecision('auto', intent.planId)
     } catch (error) {
       enrollmentError = error instanceof Error ? error.message : 'Auto review enrollment failed'
     } finally {
@@ -509,7 +627,7 @@
   async function handlePlanDecision(decision: AgentPlanDecision, acceptedPlanId?: string) {
     if (!$activeAgentSession || !awaitingPlanDecision || resolvingPlan) return
     if (decision === 'auto' && acceptedPlanId === undefined) {
-      beginEnrollment(true)
+      await beginEnrollment(true)
       return
     }
     const sessionId = $activeAgentSession.id
@@ -544,8 +662,16 @@
   }
 </script>
 
-<div class="flex h-full min-h-0 bg-base-100">
-  <aside class="w-52 shrink-0 border-r border-base-300 bg-base-200 flex flex-col min-h-0">
+<div
+  class="flex h-full min-h-0 bg-base-100"
+  class:resizing-sessions={dragWidth !== null}
+  bind:clientWidth={panelWidth}
+>
+  <aside
+    id="agent-sessions"
+    class="shrink-0 bg-base-200 flex flex-col min-h-0 min-w-0"
+    style:width={`${sessionsWidth}px`}
+  >
     <div class="h-14 px-3 border-b border-base-300 flex items-center justify-between">
       <h2 class="font-semibold text-sm">Agent sessions</h2>
       <span class="tooltip tooltip-bottom" data-tip="New session">
@@ -588,11 +714,35 @@
     </div>
     <AgentSkillsPanel />
   </aside>
+  <!-- A focusable separator is an interactive window splitter with keyboard resizing. -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+  <div
+    class="sessions-resize-handle shrink-0 bg-base-300 hover:bg-primary focus-visible:bg-primary focus-visible:outline-none"
+    class:active={dragWidth !== null}
+    role="separator"
+    tabindex="0"
+    aria-label="Resize agent sessions"
+    aria-orientation="vertical"
+    aria-controls="agent-sessions"
+    aria-valuemin={minSessionsWidth}
+    aria-valuemax={maxSessionsWidth}
+    aria-valuenow={sessionsWidth}
+    title="Drag to resize agent sessions. Use arrow keys to resize, or double-click to reset."
+    onpointerdown={startSessionsResize}
+    onpointermove={moveSessionsResize}
+    onpointerup={finishSessionsResize}
+    onpointercancel={finishSessionsResize}
+    onlostpointercapture={finishSessionsResize}
+    onkeydown={resizeSessionsWithKeyboard}
+    ondblclick={() => patchSettings({ agentSessionsWidth: defaultSessionsWidth })}
+  ></div>
 
   {#if $activeAgentSession}
     <section class="grow min-w-0 flex flex-col min-h-0">
       <header
         class="min-h-14 px-4 py-2 border-b border-base-300 flex flex-wrap items-center gap-3 shrink-0"
+        inert={enrollmentBusy}
+        aria-busy={enrollmentBusy}
       >
         <div class="join shrink-0" aria-label="Agent execution mode">
           {#each [['manual', 'Manual'], ['auto', 'Auto review'], ['planning', 'Planning']] as option}
@@ -601,7 +751,7 @@
                 ? 'btn-primary'
                 : 'btn-ghost'}"
               onclick={() => setMode(option[0] as AgentMode)}
-              disabled={running || resolvingPlan || enrollmentBusy}>{option[1]}</button
+              disabled={running || resolvingPlan}>{option[1]}</button
             >
           {/each}
         </div>
@@ -615,23 +765,36 @@
             isLoading={loadingModels}
             onRefresh={refreshModels}
             onChange={(model) => updateAgentSession($activeAgentSession!.id, { model })}
-            disabled={running || resolvingPlan || enrollmentBusy}
+            disabled={running || resolvingPlan}
           />
-        </div>
-        <select
-          class="select select-bordered select-sm w-28"
-          value={$activeAgentSession.reasoningEffort}
-          disabled={running || resolvingPlan || enrollmentBusy}
-          onchange={updateReasoningChoice}
-          aria-label="Reasoning effort"
-        >
-          {#if reasoningError}
-            <option value={$activeAgentSession.reasoningEffort}>Saved choice (unavailable)</option>
+          {#if selectedCapabilityError}
+            <p class="mt-1 text-xs text-warning" role="status">{selectedCapabilityError}</p>
           {/if}
-          {#each choices as choice}
-            <option value={choice.value}>{choice.label}</option>
-          {/each}
-        </select>
+        </div>
+        <div class="w-28">
+          <select
+            class="select select-bordered select-sm w-full"
+            value={$activeAgentSession.reasoningEffort}
+            disabled={running || resolvingPlan}
+            onchange={updateReasoningChoice}
+            aria-label="Reasoning effort"
+            aria-invalid={reasoningError ? true : undefined}
+            aria-describedby={reasoningError ? 'agent-reasoning-error' : undefined}
+          >
+            {#if reasoningError}
+              <option value={$activeAgentSession.reasoningEffort}>Saved choice (unavailable)</option
+              >
+            {/if}
+            {#each choices as choice}
+              <option value={choice.value}>{choice.label}</option>
+            {/each}
+          </select>
+          {#if reasoningError}
+            <p id="agent-reasoning-error" class="mt-1 text-xs text-warning" role="status">
+              {reasoningError}
+            </p>
+          {/if}
+        </div>
         <div class="ml-auto shrink-0 flex items-center gap-2 text-xs tabular-nums">
           <span
             class="opacity-60"
@@ -654,7 +817,6 @@
             disabled={running ||
               compactBusy ||
               resolvingPlan ||
-              enrollmentBusy ||
               !$activeAgentSession.history?.length}
             title="Summarize older context while retaining the original conversation. Uses the selected model and may incur provider charges."
             >Compact</button
@@ -668,19 +830,6 @@
       {#if $activeAgentSession.context?.message && $activeAgentSession.context.provider === ($settingsStore.aiProvider || 'openai') && $activeAgentSession.context.model === $activeAgentSession.model}
         <p class="px-4 py-1 text-xs" role="status">{$activeAgentSession.context.message}</p>
       {/if}
-      <div class="px-4 py-2 text-xs border-b border-base-300" aria-live="polite">
-        {reasoningCapabilityLabel(capabilities)} · Tools {capabilities?.tools || 'unknown'}
-        {#if !models.some((model) => model.id === $activeAgentSession.model)}
-          · Catalog membership and account access unverified{/if}
-        {#if !capabilities || capabilities.chat === 'unknown'}
-          · Text conversation capability unknown{/if}
-        {#if capabilities?.stream === 'unsupported'}
-          · Streaming unavailable; using non-stream transport{/if}
-        {#if selectedCapabilityError}<div class="text-warning mt-1">
-            {selectedCapabilityError}
-          </div>{/if}
-        {#if reasoningError}<div class="text-warning mt-1">{reasoningError}</div>{/if}
-      </div>
       <div class="grow overflow-y-auto px-5 py-4" bind:this={messagesElement}>
         {#if $activeAgentSession.messages.length === 0}
           <div class="h-full flex items-center justify-center text-base-content/50">
@@ -844,20 +993,25 @@
           {/if}
           {#if $activeAgentSession.autoReviewMigrationRequired}
             <div class="alert alert-info text-sm">
-              Auto review needs a current acknowledgment or local audit recovery. This session is in
-              Manual. Choose Auto review to inspect current audit revisions and acknowledge its
-              scope.
+              This session is in Manual. Select Auto review to enable it with the current account
+              and check whether any interrupted changes need recovery.
             </div>
           {/if}
-          {#if $activeAgentSession.mode === 'auto'}
-            <div class="text-xs opacity-70">
-              Auto review uses {selectedReviewer($settingsStore) === 'openai'
-                ? 'OpenAI gpt-6-luna'
-                : selectedReviewer($settingsStore) === 'openrouter'
-                  ? 'OpenRouter / TypeSafe typesafe/jev-1.13'
-                  : 'an unavailable reviewer'} for eligible changes. Saved commands change the live bot.
-              Excluded changes still require manual approval.
-            </div>
+          {#if $activeAgentSession.mode === 'auto' && $settingsStore.webProvider === 'deepseek'}
+            <label
+              class="flex gap-2 items-center text-xs"
+              title={AGENT_WEB_DISCLOSURE}
+              inert={enrollmentBusy}
+            >
+              <input
+                type="checkbox"
+                class="checkbox checkbox-sm"
+                checked={automaticWebEnabled}
+                onchange={updateAutomaticWeb}
+                disabled={running || !$settingsStore.agentWebAccountRevision}
+              />
+              Allow automatic DeepSeek web requests (may incur charges)
+            </label>
           {/if}
           {#if enrollmentError && !enrollmentIntent}
             <div class="text-error text-sm" role="alert">{enrollmentError}</div>
@@ -865,38 +1019,9 @@
           {#if enrollmentIntent}
             <div
               class="border border-base-300 rounded-md p-3 space-y-3"
-              aria-label="Auto review enrollment"
+              aria-label="Auto review recovery"
             >
-              <div class="text-sm font-semibold">
-                {enrollmentIntent.forPlan
-                  ? 'Implement this plan with Auto review'
-                  : 'Enable Auto review'}
-              </div>
-              <p class="text-sm">{AUTO_REVIEW_DISCLOSURE}</p>
-              <div class="text-xs">
-                Policy {AUTO_REVIEW_POLICY_REVISION}. Selected provider: {enrollmentIntent.provider}
-              </div>
-              <label class="flex gap-2 items-start text-sm"
-                ><input
-                  type="checkbox"
-                  class="checkbox checkbox-sm"
-                  bind:checked={enrollmentAcknowledged}
-                  disabled={enrollmentBusy}
-                />I consent to the disclosed data sharing and bounded review flow for this session</label
-              >
-              {#if $settingsStore.webProvider === 'deepseek'}
-                <div class="border-t border-base-300 pt-3 space-y-2">
-                  <p class="text-xs">{AGENT_WEB_DISCLOSURE}</p>
-                  <label class="flex gap-2 items-start text-sm"
-                    ><input
-                      type="checkbox"
-                      class="checkbox checkbox-sm"
-                      bind:checked={webEnrollmentAcknowledged}
-                      disabled={enrollmentBusy || !enrollmentIntent.webAccountRevision}
-                    />Also allow the disclosed paid DeepSeek web requests for this session</label
-                  >
-                </div>
-              {/if}
+              <div class="text-sm font-semibold">Recover Auto review</div>
               {#if enrollmentError}<div class="text-error text-sm">{enrollmentError}</div>{/if}
               <button
                 class="btn btn-sm btn-outline"
@@ -950,20 +1075,17 @@
                   disabled={enrollmentBusy}
                   onclick={() => {
                     enrollmentIntent = null
-                    enrollmentAcknowledged = false
-                    webEnrollmentAcknowledged = false
                   }}>Cancel</button
                 >
                 <button
                   class="btn btn-sm btn-primary"
-                  disabled={!enrollmentAcknowledged ||
-                    enrollmentBusy ||
+                  disabled={enrollmentBusy ||
                     (!!auditInspection?.rows.length &&
                       (!auditInspection.canAcknowledge || !auditAcknowledged))}
                   onclick={confirmEnrollment}
                   >{enrollmentIntent.forPlan
-                    ? 'Acknowledge and implement'
-                    : 'Acknowledge and enable'}</button
+                    ? 'Recover and implement'
+                    : 'Recover and enable'}</button
                 >
               </div>
             </div>
@@ -1037,19 +1159,20 @@
                   : $activeAgentSession.mode === 'planning'
                     ? 'Describe what you want planned...'
                     : 'Ask the agent...'}
-              disabled={awaitingPlanDecision || resolvingPlan || enrollmentBusy}
+              disabled={awaitingPlanDecision || resolvingPlan}
               aria-label="Message the agent"></textarea>
             {#if steering}
               <button
                 class="btn btn-primary"
                 onclick={() => submit('queue')}
-                disabled={!input.trim() || composerBlocked || draft?.submitting}>Queue</button
+                disabled={!input.trim() || composerUnavailable || draft?.submitting}
+                inert={enrollmentBusy}>Queue</button
               >
               <button
                 class="btn btn-outline"
                 onclick={() => submit('interrupt')}
-                disabled={!input.trim() || composerBlocked || draft?.submitting}
-                >Interrupt and send</button
+                disabled={!input.trim() || composerUnavailable || draft?.submitting}
+                inert={enrollmentBusy}>Interrupt and send</button
               >
             {/if}
             {#if running}
@@ -1065,7 +1188,8 @@
               <button
                 class="btn btn-square btn-primary"
                 onclick={() => submit()}
-                disabled={!input.trim() || composerBlocked || draft?.submitting}
+                disabled={!input.trim() || composerUnavailable || draft?.submitting}
+                inert={enrollmentBusy}
                 title="Send"
                 aria-label="Send"
               >
@@ -1080,6 +1204,32 @@
 </div>
 
 <style>
+  .sessions-resize-handle {
+    position: relative;
+    width: 1px;
+    cursor: col-resize;
+    touch-action: none;
+  }
+
+  .sessions-resize-handle::after {
+    content: '';
+    position: absolute;
+    inset: 0 -4px;
+    z-index: 10;
+  }
+
+  .sessions-resize-handle.active {
+    background: var(--color-primary);
+  }
+
+  .resizing-sessions {
+    user-select: none;
+  }
+
+  .resizing-sessions :global(*) {
+    cursor: col-resize !important;
+  }
+
   .agent-input {
     field-sizing: content;
   }
