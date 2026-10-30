@@ -188,9 +188,10 @@ app.whenReady().then(async () => {
     }
   })
   setAtomicWriteNoticeHandler(({ level, message }) => {
-    rendererConsole[level](message)
-    // Unsupported directory sync is an expected platform limitation; keep it in the logs.
-    if (level === 'error') dialog.showErrorBox('Save durability could not be confirmed', message)
+    // Expected platform limitations are already logged by the persistence service.
+    if (level !== 'error') return
+    rendererConsole.error(message)
+    dialog.showErrorBox('Save durability could not be confirmed', message)
   })
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')

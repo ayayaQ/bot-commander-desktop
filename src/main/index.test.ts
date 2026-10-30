@@ -180,7 +180,7 @@ it('opens a normal shell without a recovery dialog after a valid backup loads', 
   expect(await runtime.readBotState()).toEqual({ recovered: true })
 })
 
-it('logs unsupported save durability once per directory without showing a dialog', async () => {
+it('keeps unsupported save durability in developer logs without showing users a warning', async () => {
   await import('./index')
   await vi.waitFor(() => expect(mocks.addIPCHandlers).toHaveBeenCalledOnce())
   const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
@@ -195,8 +195,8 @@ it('logs unsupported save durability once per directory without showing a dialog
     )
     expect(warning).toHaveBeenCalledOnce()
     expect(warning).toHaveBeenCalledWith(message)
-    expect(mocks.consoleWarning).toHaveBeenCalledOnce()
-    expect(mocks.consoleWarning).toHaveBeenCalledWith(message)
+    expect(mocks.consoleWarning).not.toHaveBeenCalled()
+    expect(mocks.consoleError).not.toHaveBeenCalled()
     expect(mocks.warningDialog).not.toHaveBeenCalled()
     expect(mocks.dialog).not.toHaveBeenCalled()
   } finally {
