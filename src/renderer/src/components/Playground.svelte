@@ -6,11 +6,7 @@
     dmChannel
   } from '../../../shared/playground/world'
   import { onMount, tick } from 'svelte'
-  import {
-    addPlaygroundMember,
-    commandEventDraft,
-    playgroundFeedback
-  } from '../utils/playgroundControls'
+  import { addPlaygroundMember, commandEventDraft } from '../utils/playgroundControls'
   import { get } from 'svelte/store'
   import { settingsStore } from '../stores/settings'
   import { playgroundReplay } from '../stores/playgroundReplay'
@@ -192,7 +188,7 @@
         ...(result.incomplete ?? []).map((reason) => `Incomplete simulation: ${reason}`)
       ]
       errors = result.errors
-      notices = playgroundFeedback(result)
+      notices = result.feedback ?? []
       content = ''
       if (
         !world.members.some(

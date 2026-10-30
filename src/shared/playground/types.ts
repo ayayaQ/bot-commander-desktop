@@ -146,6 +146,8 @@ export type PlaygroundResult = {
   incomplete?: string[]
   /** Nonfatal adapter delivery failures. */
   warnings?: string[]
+  /** Interactive UI notices computed before the worker strips candidate coverage. */
+  feedback?: string[]
   /** Explicit engine coverage. Optional only for older UI fixtures; validation fails closed without it. */
   resources?: PlaygroundResourceResult[]
 }
