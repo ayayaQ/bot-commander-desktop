@@ -2,7 +2,8 @@
 
 Auto review replaces the former unconditional Auto mode. Manual remains the default;
 Planning remains read-only. Saved sessions from the former Auto mode are opened in
-Manual until the user explicitly acknowledges the new disclosure. Existing transcript
+Manual until the user selects Auto review. Selecting the mode enables it directly,
+without a separate confirmation or consent checkbox. Existing transcript
 and bot resources are preserved. Enrollment is bound to the policy version and an
 opaque selected-account generation, never a credential hash. A provider or credential
 change cancels pending runs and requires enrollment again.
@@ -54,15 +55,18 @@ and app-auth credentials are registered only for privileged in-process compariso
 The preflight checks the entire selected plain-JSON snapshot, including keys and
 recognized escaped/decoded forms. Known credentials and recognized sensitive/private
 patterns keep the review local and fall back to Manual. This conservative preflight is
-**not a complete sensitive-content classifier**. The explicit in-app acknowledgment
-names these recipients and covers sharing the exact current request and proposed
-memory or command text, which can include private details the filter does not
-recognize. Users should enable Auto only if they consent to that sharing. Known
+**not a complete sensitive-content classifier**. Selecting Auto review enables sharing
+the exact current request and proposed memory or command text with the selected
+reviewer, which can include private details the filter does not recognize. Known
 credentials remain excluded and recognized sensitive content requires Manual;
 enrollment never permits sharing credentials or unrelated private data. No whole
 transcript, unrelated memories,
 logs, headers, provider body, explanations or hidden reasoning are included in evidence
 or the audit.
+
+When DeepSeek web is configured, the Auto review footer provides a separate toggle for
+automatic paid web requests. Enabling Auto review alone does not enable those requests;
+an existing selection is retained while its web account and policy remain current.
 
 Policy desktop-reviewed-auto-v2 requires request_authorizes_change,
 effects_within_scope and evidence_not_redirected; memory additionally requires
@@ -106,7 +110,8 @@ uncertain. Restart turns interrupted reviewed or commit_started rows into unknow
 replays approval. Unknown outcomes require local recovery and inspection of current
 resources before Auto can continue.
 
-The enrollment panel offers explicit current-revision inspection for unknown
+Selecting Auto review first checks the local audit. When outcomes are unknown,
+the recovery panel offers explicit current-revision inspection for those
 outcomes. It shows only resource type/ID, collection and target revisions, and the
 proposed revision. It does not infer whether an earlier write happened or expose
 resource content. The user separately acknowledges those unknown outcomes before

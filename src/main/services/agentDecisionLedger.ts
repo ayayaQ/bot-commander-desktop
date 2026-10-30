@@ -394,6 +394,7 @@ export function createDecisionLedger(persistence: LedgerPersistence) {
       id: randomUUID(),
       ...captured,
       inspectedAt: new Date().toISOString(),
+      recoveryRequired: true,
       canAcknowledge: true,
       rows: []
     }
@@ -430,6 +431,13 @@ export function createDecisionLedger(persistence: LedgerPersistence) {
       current.policyRevision !== captured.policyRevision
     )
       throw new Error('Audit account or policy changed during inspection')
+    // Unknown history remains inspectable after reconciliation. Only outcomes without
+    // a current account/policy acknowledgment (or an in-flight commit) need recovery.
+    // This is not availability authority: enrollment still rechecks storage/durability.
+    inspection.recoveryRequired = data.rows.some(
+      (row) =>
+        row.state === 'commit_started' || (row.state === 'unknown' && !acknowledged(row, captured))
+    )
     if (inspections.size >= 16) inspections.delete(inspections.keys().next().value!)
     inspections.set(inspection.id, structuredClone(inspection))
     return inspection
