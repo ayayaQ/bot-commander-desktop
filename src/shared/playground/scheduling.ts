@@ -1,6 +1,7 @@
 import { markIncomplete, recordFailure } from './failures'
 import { SCHEDULER_LIMITS, VirtualScheduler, type SchedulerLimits } from './scheduler'
 import type { PlaygroundState } from './types'
+import { cascadeSignal } from './cascades'
 
 export type OperationTiming = { delayMs?: number; latencyMs?: number; failure?: string }
 export type TimingConfiguration = {
@@ -110,7 +111,7 @@ export async function withScheduler<T>(
   )
   schedulers.set(state, scheduler)
   try {
-    return await scheduler.run(execute)
+    return await scheduler.run(execute, cascadeSignal(state))
   } catch (error) {
     recordFailure(state, error)
     throw error

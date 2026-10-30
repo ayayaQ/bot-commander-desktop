@@ -58,6 +58,8 @@ export type PlaygroundEventContext = { guildId: string | null; channelId: string
 /** Numbers are accepted only by the legacy v2 simulator. Normalized worlds use strings. */
 export type PlaygroundMessageId = string | number
 export type PlaygroundOperation = {
+  id?: string
+  eventId?: string
   context?: PlaygroundEventContext
   index: number
   scheduledAt?: number
@@ -91,6 +93,8 @@ export type PlaygroundMessage = {
   reactions?: string[]
 }
 export type PlaygroundState = {
+  events?: PlaygroundGatewayEvent[]
+  cascades?: { maxEvents?: number; maxDepth?: number; maxWork?: number }
   /** Canonical v3 entities. The legacy fields below are the active context projection. */
   world?: PlaygroundWorld
   /** Local JSON state only. No saved/live bot state is read or written. */
@@ -123,6 +127,7 @@ export type PlaygroundState = {
 export type PlaygroundExecutionOutcome =
   'executed' | 'blocked' | 'error' | 'unmatched' | 'unsupported' | 'not_run'
 export type PlaygroundResourceResult = {
+  eventId?: string
   resourceId: string
   kind: 'command' | 'interaction'
   matched: boolean
@@ -164,11 +169,15 @@ export type PlaygroundMessageRequest = {
   content: string
   /** Defaults to wrapped eval for ordinary Playground callers. */
   wrapEvalInIIFE?: boolean
+  /** Host-only cancellation. Workers cancel by terminating their entire execution. */
+  signal?: AbortSignal
 }
 export type PlaygroundInteractionRequest = {
   kind: 'slash' | 'button'
   state: PlaygroundState
   interactions: BCFDInteractionCommand[]
+  /** Explicit selected traditional snapshots available to downstream gateway events. */
+  commands?: BCFDCommand[]
   senderId: string
   commandId?: string
   options?: Record<string, string | number | boolean>
@@ -177,6 +186,23 @@ export type PlaygroundInteractionRequest = {
   customId?: string
   /** Defaults to wrapped eval for ordinary Playground callers. */
   wrapEvalInIIFE?: boolean
+  signal?: AbortSignal
+}
+export type PlaygroundGatewayEvent = {
+  id: string
+  kind: import('../runtime/dispatch').CommandEvent | 'slash' | 'button'
+  senderId: string
+  context: PlaygroundEventContext
+  content: string
+  messageId?: PlaygroundMessageId
+  parentEventId?: string
+  parentOperationId?: string
+  depth: number
+  scheduledAt: number
+  dispatchedAt?: number
+  status: 'queued' | 'dispatched' | 'ignored' | 'cancelled'
+  reason?: string
+  resources?: PlaygroundResourceResult[]
 }
 export type PlaygroundRequest = PlaygroundMessageRequest | PlaygroundInteractionRequest
 export const PLAYGROUND_LIMITS = {

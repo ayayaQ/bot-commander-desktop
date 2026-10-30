@@ -288,7 +288,7 @@ failures are ignored, matching production, but budget failures make the run inco
 `message.send` as their operation name. Input `deleteAfter` means deletion launched after dispatch,
 not a built-in number of seconds; its latency/delay comes from `message.delete`. Explicit
 `$deleteMessage` calls use that same operation policy. Guest JavaScript timers, Discord interaction
-expiry and gateway event cascades are not modeled by this version.
+expiry is not modeled. Supported gateway event cascades are described below.
 
 Each command/interaction drains its detached work before returning. Multiple matching commands
 run serially. Each fixture step starts from the previous completed state, adds `advanceClockMs`,
@@ -310,6 +310,60 @@ Bounds apply to each command/interaction queue and can be lowered in a fixture: 
 start and delivery are separate callbacks; typing refreshes count too. Existing operation-log,
 fixture, transcript, report, script and worker limits also apply. Timing traces describe simulated
 local delivery only; they do not predict actual Discord latency, access, rate limits or delivery.
+
+### Gateway event cascades
+
+Successful adapter completions synthesize only gateway events observed by the live application:
+
+| Successful effect                               | Synthetic event(s)                               |
+| ----------------------------------------------- | ------------------------------------------------ |
+| `member.kicked` on a present member             | `memberLeave`                                    |
+| `member.banned` on a previously unbanned member | `memberBan`, then `memberLeave` if still present |
+| `message.send` (non-ephemeral)                  | `message`                                        |
+| `message.dm`                                    | `dm`                                             |
+| `message.react` adding a new bot reaction       | `reaction`                                       |
+
+Member roles, voice mute, channel/role edits, message deletion, typing and interaction deferral
+have no command gateway handlers in the live app and emit no synthetic command events.
+Ephemeral interaction replies emit no gateway message. Failed operations emit no success events.
+Repeated ban/removal transitions and an already-present bot reaction emit no duplicate event.
+The model emits each supported transition once, without simulating Discord retries or guarantees.
+
+Notifications enter the virtual scheduler at successful completion time. After the current input
+event and its matching commands drain, downstream handlers run serially in notification completion
+and insertion order, against the latest committed world. A handler's notifications join the end of
+that queue. `scheduledAt` records effect completion, and `dispatchedAt` records handler delivery;
+the latter can be later when earlier work is still draining. A ban/removal retains the fixture
+member snapshot for the member-event template context. Guild/channel/message/user IDs stay scoped
+to the originating effect. Generated messages reuse the existing transcript message, rather than
+creating a second incoming message. All bot-origin events (including this bot's sends and reactions)
+are recorded as ignored and execute no commands, matching the live handlers. No external user
+response, button click, or slash invocation is invented.
+
+Only explicitly supplied command snapshots handle downstream events. Interactive slash/button
+requests also carry the selected traditional commands. Validation uses `suite.resources` plus the
+exact candidate. A traditional candidate can be validated downstream of a fixture message or slash
+step; for a slash step targeting a fixture interaction, supply `step.commandId`. Coverage counts
+that exact resource ID and kind across the causal chain. An unrelated successful handler cannot
+count as candidate execution, and an unexpected downstream error fails validation even if the
+candidate itself succeeded. Earlier successful effects survive later handler failures.
+
+`state.events` and report `effects.events` expose IDs, parent event/operation IDs, depth, context,
+sender, message target, virtual timing, ignored/cancelled status and matching resource outcomes.
+Operations expose `id` and `eventId`; following those references explains which event caused each
+effect. The Playground's Causal events view and validation report previews display this evidence.
+Runtime version `3.2.0` binds the new semantics into validation/replay evidence.
+
+`state.cascades` can lower the hard limits: `maxEvents: 200` (including the injected event),
+`maxDepth: 16`, and `maxWork: 1000` (handler, operation and event admission work). These budgets
+span the entire input event and downstream chain, in addition to existing per-handler scheduler,
+script, operation-log and transcript limits. Event history is bounded to 1000 entries per session;
+reset clears it. Budget exhaustion or undeliverable required events cancels the remaining cascade,
+retains successful effects and reports an explicit incomplete outcome that cannot authorize a save.
+Direct host callers can provide an AbortSignal; worker cancellation, disposal and reset discard
+all pending notifications and reject stale results. Tests include a host-driven causal loop to
+exercise all three budgets, even though bot filtering and transition deduplication prevent the
+ordinary supported effects from producing such a loop.
 
 ### Fixed UTC dates
 
