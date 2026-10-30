@@ -27,6 +27,7 @@
   let loginError = $state('')
   let savingSpamProtection = $state(false)
   let spamSettingsError = $state(false)
+  let setupDialog: HTMLDialogElement = $state()
 
   async function toggleSpamProtection(event: Event) {
     // Keep the control on its saved value until persistence succeeds.
@@ -120,8 +121,21 @@
 </script>
 
 <div class="flex flex-col items-center justify-center bg-base-200 p-4 min-h-full">
-  <div class="card w-96 bg-base-100 shadow-xl">
-    <div class="card-body items-center text-center">
+  <div class="card w-96 max-w-full bg-base-100 shadow-xl">
+    {#if !$connectionStore.connected}
+      <div class="flex justify-end px-3 pt-3">
+        <button
+          type="button"
+          class="btn btn-ghost btn-circle btn-sm text-base-content/60"
+          aria-label={$t('discord-bot-setup')}
+          aria-haspopup="dialog"
+          onclick={() => setupDialog.showModal()}
+        >
+          <span class="material-symbols-outlined" aria-hidden="true">help</span>
+        </button>
+      </div>
+    {/if}
+    <div class="card-body items-center text-center" class:pt-0={!$connectionStore.connected}>
       {#if currentStep !== 'COMPLETE'}
         <OnboardingStepper
           {currentStep}
@@ -137,7 +151,7 @@
           </div>
         </div>
       {:else}
-        <div class="avatar placeholder mb-14">
+        <div class="avatar placeholder mb-6">
           <div
             class="bg-neutral text-neutral-content w-24 rounded-full flex items-center justify-center"
           >
@@ -180,14 +194,6 @@
         />
       {/if}
       {#if !$connectionStore.connected}
-        <div class="rounded-lg bg-base-200 p-3 text-left text-sm w-full">
-          <p class="font-semibold">{$t('discord-bot-setup')}</p>
-          <p class="mt-1">{$t('discord-privileged-intents-setup')}</p>
-          <p class="mt-2">{$t('discord-ban-events-setup')}</p>
-          <button class="btn btn-link btn-sm px-0" onclick={openDiscordDeveloperPortal}>
-            {$t('onboarding-open-portal')}
-          </button>
-        </div>
         <button
           class="btn btn-primary w-full"
           onclick={handleLogin}
@@ -206,18 +212,40 @@
         >
       {/if}
       <div class="w-full rounded-box bg-base-200 p-3 text-left">
-        <label class="flex items-center justify-between gap-3">
-          <span class="font-medium">{$t('spam-protection')}</span>
-          <input
-            type="checkbox"
-            class="toggle toggle-primary"
-            checked={$settingsStore.spamProtectionEnabled === true}
-            disabled={savingSpamProtection ||
-              (!$settingsStore.spamProtectionEnabled && !$settingsStore.openrouterApiKey?.trim())}
-            onchange={toggleSpamProtection}
-          />
-        </label>
-        <p class="text-xs opacity-70 mt-2">{$t('spam-protection-help')}</p>
+        <div class="tooltip tooltip-top w-full">
+          <div
+            id="spam-protection-help"
+            role="tooltip"
+            class="tooltip-content w-72 max-w-[calc(100vw-4rem)] p-3 text-left text-xs leading-relaxed"
+          >
+            {$t('spam-protection-help')}
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-1">
+              <label for="spam-protection-enabled" class="font-medium">
+                {$t('spam-protection')}
+              </label>
+              <button
+                type="button"
+                class="btn btn-ghost btn-circle btn-xs text-base-content/60"
+                aria-label={$t('spam-protection')}
+                aria-describedby="spam-protection-help"
+              >
+                <span class="material-symbols-outlined text-base" aria-hidden="true">info</span>
+              </button>
+            </div>
+            <input
+              id="spam-protection-enabled"
+              type="checkbox"
+              class="toggle toggle-primary"
+              aria-describedby="spam-protection-help"
+              checked={$settingsStore.spamProtectionEnabled === true}
+              disabled={savingSpamProtection ||
+                (!$settingsStore.spamProtectionEnabled && !$settingsStore.openrouterApiKey?.trim())}
+              onchange={toggleSpamProtection}
+            />
+          </div>
+        </div>
         {#if !$settingsStore.openrouterApiKey?.trim()}
           <p class="text-xs mt-2">{$t('spam-protection-key-required')}</p>
           <button class="btn btn-link btn-xs px-0" onclick={() => onSelectTab?.('settings')}
@@ -242,6 +270,32 @@
     </div>
   </div>
 </div>
+
+<dialog class="modal" bind:this={setupDialog} aria-labelledby="discord-setup-title">
+  <div class="modal-box max-w-lg">
+    <div class="flex items-center justify-between gap-4 mb-4">
+      <h2 id="discord-setup-title" class="text-lg font-semibold">{$t('discord-bot-setup')}</h2>
+      <form method="dialog">
+        <button class="btn btn-ghost btn-sm btn-circle" aria-label={$t('close')}>
+          <span class="material-symbols-outlined" aria-hidden="true">close</span>
+        </button>
+      </form>
+    </div>
+    <div class="space-y-4 text-sm leading-relaxed">
+      <p>{$t('discord-privileged-intents-setup')}</p>
+      <p>{$t('discord-ban-events-setup')}</p>
+    </div>
+    <div class="modal-action">
+      <button class="btn btn-primary" onclick={openDiscordDeveloperPortal}>
+        {$t('onboarding-open-portal')}
+        <span class="material-symbols-outlined text-base" aria-hidden="true">open_in_new</span>
+      </button>
+    </div>
+  </div>
+  <form method="dialog" class="modal-backdrop">
+    <button aria-label={$t('close')}>{$t('close')}</button>
+  </form>
+</dialog>
 
 {#if loginError}
   <div class="toast toast-end toast-bottom z-50 max-w-full">
