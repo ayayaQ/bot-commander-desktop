@@ -6,6 +6,7 @@ import { runMessage } from '../../../shared/playground/engine'
 import { PLAYGROUND_LIMITS } from '../../../shared/playground/types'
 import type { PlaygroundRequest } from '../../../shared/playground/types'
 import { loadScriptSandboxFactory } from '../../../shared/playground/script'
+import { playgroundFeedback } from './playgroundControls'
 
 // Disposable offline worker. JavaScript executes only in the locally bundled QuickJS VM.
 let busy = false
@@ -37,8 +38,9 @@ self.onmessage = async (
       'content' in request
         ? await runMessage(request, factory)
         : await runInteraction(request, factory)
-    // Candidate-validation workers consume structured coverage. Preserve this
-    // existing UI worker's transcript budget and response shape.
+    // Keep the small UI notices while omitting full candidate-validation coverage.
+    // The complete response, including feedback, still uses the existing byte limit.
+    result.feedback = playgroundFeedback(result)
     delete result.resources
     if (JSON.stringify(result).length > PLAYGROUND_LIMITS.requestBytes)
       throw new Error('Playground result is too large; reset the playground')
