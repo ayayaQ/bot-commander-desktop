@@ -8,13 +8,17 @@ allowlist. `read_validation_fixture` exposes the capability manifest derived fro
 
 ## Interactive testing
 
-Open Playground, select the saved command/interaction snapshots to include, and choose a fake
-sender. Supported events are message, DM, member join, member leave, member ban, reaction,
+Open Playground to start chatting in the simulated server. Saved commands are enabled automatically.
+Choose a sender, type a trigger, or use the optional saved-command picker to prepare an event.
+**Saved Commands** offers search, **Try it** actions and per-session enable/disable controls.
+The member list supports mentions, adding a member by name (IDs are generated), and a member
+options menu for roles and permissions. Supported events are message, DM, member join, member leave, member ban, reaction,
 slash invocation and button click. Reactions target an existing fake transcript message. Member
 events do not create incoming chat messages. Buttons resolve against selected snapshots in order.
 Snapshots are read-only; executing a command never invokes Discord or saves a resource.
 
-The session controls expose fake identities, roles and permissions, channel/server context,
+**Settings** provides quick clock advances and a simulated AI response. **Advanced settings**
+retains agent replay/validation, run diagnostics, fake identities, roles and permissions, channel/server context,
 bot state, a controllable clock, a random seed, startup JavaScript and AI responses. The complete
 world JSON editor also exposes normalized users, guilds, memberships, roles with permissions and
 positions, channels with overwrites, exact prompt mocks and
