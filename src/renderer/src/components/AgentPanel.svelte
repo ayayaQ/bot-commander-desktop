@@ -507,7 +507,7 @@
       const inspected = await inspectAgentAutoReviewAudit(intent.sessionId)
       if ($activeAgentSession?.id !== intent.sessionId) return
       validateAuditInspection(inspected, intent)
-      if (inspected.rows.length) {
+      if (inspected.recoveryRequired !== false) {
         enrollmentIntent = intent
         auditInspection = inspected
         return

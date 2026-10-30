@@ -17,6 +17,8 @@ export interface AgentDecisionAuditInspection {
   provider: ReviewerProvider
   accountRevision: string
   inspectedAt: string
+  /** Host-derived recovery state; enrollment still checks audit storage and durability. */
+  recoveryRequired: boolean
   canAcknowledge: boolean
   reasonCode?: string
   rows: Array<{

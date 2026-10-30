@@ -150,6 +150,7 @@ session.lastRunMetrics = { runId: 'offline-run', status: 'completed', startedAt:
 const listeners = new Map()
 const calls = []
 let auditRows = []
+let auditRecoveryRequired = false
 let enrollmentFailure = false
 let enrollmentDelay = 0
 let enrollmentInFlight = false
@@ -171,12 +172,13 @@ window.electron = { ipcRenderer: {
       session = { ...session, ...clone(args[1]) }
       return Promise.resolve(clone(session))
     }
-    if (channel === 'agent:inspect-auto-review-audit') return Promise.resolve({ id: 'offline-inspection', policyRevision: AUTO_REVIEW_POLICY_REVISION, provider: 'openai', accountRevision: savedSettings.agentDecisionAccountRevision, inspectedAt: call.createdAt, canAcknowledge: true, rows: clone(auditRows) })
+    if (channel === 'agent:inspect-auto-review-audit') return Promise.resolve({ id: 'offline-inspection', policyRevision: AUTO_REVIEW_POLICY_REVISION, provider: 'openai', accountRevision: savedSettings.agentDecisionAccountRevision, inspectedAt: call.createdAt, recoveryRequired: auditRecoveryRequired, canAcknowledge: true, rows: clone(auditRows) })
     if (channel === 'agent:enroll-auto-review') {
       if (enrollmentFailure) return Promise.reject(new Error('Offline enrollment save failed'))
       const enrollment = args[1]
       enrollmentInFlight = true
       return new Promise(resolve => setTimeout(() => {
+        if (enrollment.recoveryInspectionId) auditRecoveryRequired = false
         session = { ...session, ...(enrollment.activate ? { mode: 'auto', planReady: false } : {}), autoReviewEnrollment: { policyRevision: enrollment.policyRevision, provider: enrollment.provider, accountRevision: enrollment.accountRevision, acknowledgedAt: call.createdAt, ...(enrollment.web ? { web: clone(enrollment.web) } : {}) } }
         enrollmentInFlight = false
         resolve(clone(session))
@@ -206,6 +208,7 @@ window.__fixture = {
   pendingEnrollment: () => enrollmentInFlight,
   async configureAutoReview(options = {}) {
     auditRows = options.auditRows || []
+    auditRecoveryRequired = options.recoveryRequired ?? (auditRows.length > 0)
     enrollmentFailure = options.failEnrollment || false
     enrollmentDelay = options.enrollmentDelay || 0
     savedSettings = { ...savedSettings, aiProvider: options.noReviewer ? 'deepseek' : 'openai', agentReviewerProvider: undefined, agentDecisionAccountRevision: 'offline-account', webProvider: options.web ? 'deepseek' : 'disabled', agentWebAccountRevision: 'offline-web-account' }
@@ -954,6 +957,18 @@ render()
       'return window.__fixture.calls.filter(call => call.channel === "agent:enroll-auto-review").at(-1).args[1].recoveryInspectionId'
     ),
     'offline-inspection'
+  )
+  // Reconciled rows stay in history, but do not require another recovery acknowledgment.
+  await click('Manual')
+  await wait('window.__fixture.snapshot().sessions[0].mode === "manual"')
+  await click('Auto review')
+  await wait('window.__fixture.snapshot().sessions[0].mode === "auto"')
+  assert.equal((await visible()).includes('Recover Auto review'), false)
+  assert.equal(
+    await evaluate(
+      'return window.__fixture.calls.filter(call => call.channel === "agent:enroll-auto-review").at(-1).args[1].recoveryInspectionId'
+    ),
+    undefined
   )
 
   const enrollmentsBeforeFailure = await count('agent:enroll-auto-review')
