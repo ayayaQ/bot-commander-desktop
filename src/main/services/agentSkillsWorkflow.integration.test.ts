@@ -113,7 +113,8 @@ describe('desktop skills host workflow with installed vivi', () => {
   }
   it('prepares the owned folder for manual imports without changing existing contents', async () => {
     const root = await skills.ensureAgentSkillsFolder()
-    expect(root).toBe(join(mocks.home, 'agent-skills'))
+    // Windows temp paths can use an 8.3 alias; the folder service returns its canonical path.
+    expect(root).toBe(await fs.realpath(join(mocks.home, 'agent-skills')))
     expect((await fs.stat(root)).isDirectory()).toBe(true)
     const path = await seed()
     expect(await skills.ensureAgentSkillsFolder()).toBe(root)

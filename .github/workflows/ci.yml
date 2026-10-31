@@ -44,6 +44,9 @@ jobs:
       - name: Check queued and interrupt agent steering
         run: npm run test:steering
 
+      - name: Check ordinary skill saves and host approval
+        run: npm test -- src/main/services/agentSkillStore.test.ts src/main/services/agentSkillsWorkflow.integration.test.ts src/main/services/agentSkillSaveSupport.test.ts
+
       - name: Check shared tool presentation adapter
         run: npm test -- src/renderer/src/utils/agentToolPresentation.test.ts
 
@@ -106,8 +109,8 @@ jobs:
           cache-dependency-path: package-lock.json
       - name: Install locked dependencies
         run: npm ci --no-audit --no-fund
-      # Ordinary read-only files only; no legacy assessment files or writer fixtures.
-      - name: Read-only skill workflow and production capability
+      # Ordinary product fixtures only; historical restricted assessment files remain excluded.
+      - name: Skill approval workflow and production capability
         run: npm test -- src/main/services/agentSkillsWorkflow.integration.test.ts src/main/services/agentSkillSaveSupport.test.ts
       - name: Portable skill discovery, resources, and Windows aliases
         run: npm test -- src/main/services/agentSkillStore.test.ts --testNamePattern "always includes|supports canonical Unicode|reads existing standard|keeps scripts inert|reports size|excludes duplicate|bounds resource bytes|rechecks registered fixture|accepts ordinary Windows case"
