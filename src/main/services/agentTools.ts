@@ -3,6 +3,9 @@ import { commandEvents } from '../../shared/runtime/dispatch'
 import { playgroundCapabilities } from '../../shared/runtime/capabilities'
 import { validateAgentMutation, assertAgentValidationBinding } from './agentMutationValidation'
 import crypto from 'node:crypto'
+import { SKILL_LIMITS } from '@ayayaq/vivi/extensions/skills'
+import { agentSkillStore } from './agentSkillService'
+import type { PreparedSkillSave } from './agentSkillStore'
 import { readHostStatus } from './hostReadinessService'
 import type { BCFDCommand, BCFDInteractionAction, BCFDInteractionCommand } from '../types/types'
 import type { AgentLintDiagnostic, AgentMemory, AgentPatchOperation } from '../../shared/agentTypes'
@@ -47,6 +50,7 @@ export interface PreparedMutation {
   before: unknown
   after: unknown
   target: { type: string; id?: string }
+  skillSave?: PreparedSkillSave
 }
 
 export async function initializeMutationReviewResource(prepared: PreparedMutation): Promise<void> {
@@ -54,6 +58,7 @@ export async function initializeMutationReviewResource(prepared: PreparedMutatio
 }
 
 export function currentMutationReviewRevision(prepared: PreparedMutation): string {
+  if (prepared.target.type === 'skill') return agentSkillStore.reviewRevision(prepared.target.id!)
   if (prepared.target.type === 'command') return resourceRevision(getCommands())
   if (prepared.target.type === 'memory') {
     const current = getAgentMemoryReviewRevision()
@@ -69,9 +74,19 @@ export function currentMutationRuntimeReviewRevision(prepared: PreparedMutation)
 
 /** Recovery inspection returns identity/revisions only, never resource content. */
 export async function readDecisionAuditResourceMetadata(
-  targetType: 'command' | 'memory' | 'web',
+  targetType: 'command' | 'memory' | 'skill' | 'web',
   targetId: string
 ): Promise<{ resourceRevision: string; targetRevision: string | null }> {
+  if (targetType === 'skill') {
+    const snapshot = await agentSkillStore.snapshot()
+    const document = snapshot.catalog.document(targetId)
+    return {
+      resourceRevision: agentSkillStore.reviewRevision(targetId),
+      targetRevision: document
+        ? resourceRevision({ id: targetId, content: document.content })
+        : null
+    }
+  }
   if (targetType === 'web')
     return {
       resourceRevision: resourceRevision({ account: getSettings().agentWebAccountRevision }),
@@ -462,6 +477,22 @@ export const agentToolDefinitions: ToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'save_skill',
+      description:
+        'Create or replace one SKILL.md in the app-owned skill folder through host approval. Read skill-creator first. Supply the complete standard document, null expectedRevision for creation, or the listed SHA-256 revision for replacement. Imported and built-in skills are read-only. Changes apply next turn.',
+      parameters: objectSchema(
+        {
+          name: { type: 'string', maxLength: 64 },
+          content: { type: 'string', maxLength: SKILL_LIMITS.maximumDocumentBytes },
+          expectedRevision: { type: ['string', 'null'], pattern: '^[a-f0-9]{64}$' }
+        },
+        ['name', 'content', 'expectedRevision']
+      )
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'delete_memory',
       description: 'Delete a persistent memory. Use the ID and revision returned by list_memories.',
       parameters: objectSchema(
@@ -508,7 +539,7 @@ export const agentToolDefinitions: ToolDefinition[] = [
 ]
 
 // Local host readiness and offline draft fixtures belong only to the app's agent.
-export const agentOnlyToolNames = new Set(['read_host_status'])
+export const agentOnlyToolNames = new Set(['read_host_status', 'save_skill'])
 
 export const mcpAgentToolDefinitions: ToolDefinition[] = agentToolDefinitions.filter(
   (tool) => !agentOnlyToolNames.has(tool.function.name)
@@ -524,6 +555,7 @@ export const mutationToolNames = new Set([
   'edit_developer_prompt',
   'create_memory',
   'edit_memory',
+  'save_skill',
   'delete_memory'
 ])
 
@@ -560,6 +592,7 @@ export function agentToolTargetLabel(
   name: string,
   args: Record<string, unknown>
 ): string | undefined {
+  if (name === 'save_skill') return meaningfulText(args.name)
   if (name === 'create_command') return commandTargetLabel(args.command)
   if (name === 'create_interaction') return interactionTargetLabel(args.interaction)
   if (name === 'create_memory' || name === 'edit_memory') {
@@ -970,6 +1003,17 @@ export async function prepareMutation(
   name: string,
   args: Record<string, any>
 ): Promise<PreparedMutation> {
+  if (name === 'save_skill') {
+    const { save, before, after } = await agentSkillStore.prepareSave(args)
+    return {
+      name,
+      arguments: args,
+      before,
+      after,
+      target: { type: 'skill', id: save.name },
+      skillSave: save
+    }
+  }
   if (name === 'create_command') {
     const input = args.command || {}
     const candidate = {
@@ -1254,6 +1298,30 @@ export async function commitMutation(
   }
   // Approval/retry objects may be reused by callers while this mutation waits its turn.
   prepared = structuredClone(prepared)
+  if (prepared.name === 'save_skill') {
+    if (
+      !prepared.skillSave ||
+      prepared.skillSave.name !== prepared.target.id ||
+      JSON.stringify(prepared.after) !==
+        JSON.stringify({
+          id: prepared.skillSave.name,
+          content: prepared.skillSave.content
+        })
+    )
+      throw new Error('Skill save does not match the approved draft')
+    await agentSkillStore.commitSave(prepared.skillSave, {
+      signal,
+      beforeCommit: () => beforeCommit?.(prepared)
+    })
+    emitResourceChanged('skills', source, prepared.after, prepared.target.id)
+    return {
+      success: true,
+      saved: true,
+      target: prepared.target,
+      revision: revision(prepared.after),
+      available: 'next_turn'
+    }
+  }
   const kind = mutationResourceKind(prepared)
   return withResourceMutationLock(kind, async () => {
     // A cancellation while queued must not start a fresh mutation after lock admission.

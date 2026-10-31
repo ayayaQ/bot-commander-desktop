@@ -177,7 +177,7 @@ describe('ordinary offline decision ledger regression coverage', () => {
     const uncertain: AgentDecisionLedgerRow = { ...ordinaryRow(1000), state: 'unknown' }
     const completed = nearByteBudget([uncertain])
     const f = fixture([...completed, uncertain])
-    const read = vi.fn(async (_type: 'command' | 'memory' | 'web', _id: string) => ({
+    const read = vi.fn(async (_type: 'command' | 'memory' | 'skill' | 'web', _id: string) => ({
       resourceRevision: 'd'.repeat(16),
       targetRevision: null
     }))
@@ -314,7 +314,7 @@ describe('ordinary offline decision ledger regression coverage', () => {
         state: outcome
       }))
       const f = fixture([...settled, interrupted])
-      const read = vi.fn(async (_type: 'command' | 'memory' | 'web', _id: string) => ({
+      const read = vi.fn(async (_type: 'command' | 'memory' | 'skill' | 'web', _id: string) => ({
         resourceRevision: 'd'.repeat(16),
         targetRevision: null
       }))
@@ -460,7 +460,7 @@ describe('ordinary offline decision ledger regression coverage', () => {
   it('keeps interrupted review inspectable when its recovery checkpoint fails', async () => {
     const interrupted = ordinaryRow(1000)
     const f = fixture([interrupted])
-    const read = vi.fn(async (_type: 'command' | 'memory' | 'web', _id: string) => ({
+    const read = vi.fn(async (_type: 'command' | 'memory' | 'skill' | 'web', _id: string) => ({
       resourceRevision: 'd'.repeat(16),
       targetRevision: null
     }))

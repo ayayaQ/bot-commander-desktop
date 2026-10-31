@@ -1,7 +1,7 @@
 import type { ReviewerProvider } from './providerSelection'
 import type { AgentWebEnrollment } from './agentWeb'
 
-export const AUTO_REVIEW_POLICY_REVISION = 'desktop-reviewed-auto-v2'
+export const AUTO_REVIEW_POLICY_REVISION = 'desktop-reviewed-auto-v3'
 
 export interface AgentAutoReviewEnrollment {
   policyRevision: string
@@ -24,7 +24,7 @@ export interface AgentDecisionAuditInspection {
   rows: Array<{
     id: string
     tool: string
-    targetType?: 'command' | 'memory' | 'web'
+    targetType?: 'command' | 'memory' | 'skill' | 'web'
     targetId?: string
     outcome: 'unknown'
     candidateRevision?: string
@@ -56,10 +56,10 @@ export interface AgentDecisionDisplay {
 }
 
 export const AUTO_REVIEW_DISCLOSURE =
-  'Auto review can approve create/edit app-wide persistent memories and fully validated response-only message commands ' +
+  'Auto review can approve create/edit app-wide persistent memories, instruction-only skills and fully validated response-only message commands ' +
   'for your current request. Command saves change the live bot configuration. ' +
   'Deletes, moderation, roles, scripts, settings, interactions and bot state still need manual review. ' +
-  'Your exact request, proposed memory or command text, action and minimal validation evidence go to the selected account: ' +
+  'Your exact request, proposed memory, SKILL.md or command text, action and minimal validation evidence go to the selected account: ' +
   'OpenAI gpt-6-luna, or OpenRouter and TypeSafe typesafe/jev-1.13. ' +
   'This can include private details in your request or proposed text. Known credentials are excluded, ' +
   'and recognized sensitive content stays local for manual review. The filter cannot identify every private detail; ' +

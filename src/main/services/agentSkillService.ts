@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import fs from 'node:fs/promises'
 import { isAbsolute, join, resolve } from 'node:path'
 import { createAgentPersistence } from './agentPersistence'
 import { withAgentPersistenceOperation } from './agentPersistenceLifecycle'
@@ -54,6 +55,17 @@ export const agentSkillStore = createAgentSkillStore({
   }
 })
 export const loadAgentSkills = async () => (await agentSkillStore.snapshot()).status
+
+export function ensureAgentSkillsFolder(): Promise<string> {
+  return withAgentPersistenceOperation(async () => {
+    const state = await checkedSkillDirectory(app.getPath('userData'))
+    const root = join(state.path, 'agent-skills')
+    await fs.mkdir(root).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'EEXIST') throw error
+    })
+    return (await checkedSkillDirectory(root)).path
+  })
+}
 
 let configurationChain: Promise<unknown> = Promise.resolve()
 export function configureAgentSkillFolder(path: string, add: boolean) {

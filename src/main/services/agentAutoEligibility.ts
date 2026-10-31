@@ -487,6 +487,15 @@ export function checkAutoEligibility(
   prepared: PreparedMutation,
   validation?: AgentValidationReport
 ): AutoEligibility {
+  if (prepared.target.type === 'skill' && prepared.name === 'save_skill') {
+    const save = prepared.skillSave
+    return save &&
+      save.name !== 'skill-creator' &&
+      save.name === prepared.target.id &&
+      JSON.stringify(prepared.after) === JSON.stringify({ id: save.name, content: save.content })
+      ? allow('eligible_skill')
+      : deny('invalid_candidate')
+  }
   if (
     prepared.target.type === 'memory' &&
     (prepared.name === 'create_memory' || prepared.name === 'edit_memory')

@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   approveAgent: vi.fn(),
   listSkills: vi.fn(),
   skillFolder: vi.fn(),
+  ensureSkillsFolder: vi.fn(),
+  openPath: vi.fn(),
   chooseSkillFolder: vi.fn(),
   on: vi.fn(),
   copyMcpToken: vi.fn(),
@@ -59,6 +61,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../services/agentSkillService', () => ({
   loadAgentSkills: mocks.listSkills,
+  ensureAgentSkillsFolder: mocks.ensureSkillsFolder,
   configureAgentSkillFolder: mocks.skillFolder
 }))
 
@@ -66,6 +69,7 @@ vi.mock('../services/agentSkillService', () => ({
 vi.mock('electron', () => ({
   clipboard: { writeText: mocks.writeText },
   dialog: { showOpenDialog: mocks.chooseSkillFolder },
+  shell: { openPath: mocks.openPath },
   BrowserWindow: { getAllWindows: () => [{ webContents: { send: mocks.send } }] }
 }))
 vi.mock('./ipcSecurity', () => ({
@@ -349,14 +353,14 @@ describe('persistent memory IPC compatibility', () => {
   })
 })
 
-describe('explicit read-only skills folder IPC', () => {
+describe('skills folder IPC', () => {
   beforeEach(() => vi.clearAllMocks())
   async function handler(channel: string) {
     const { addIPCHandlers } = await import('./ipcHandlers')
     addIPCHandlers()
     return mocks.handle.mock.calls.find(([name]) => name === channel)![1]
   }
-  it('lists skills and adds only the folder returned by the user dialog', async () => {
+  it('opens only the app-owned folder, ignoring renderer-supplied paths', async () => {
     const status = {
       ownedRoot: '/app/agent-skills',
       externalRoots: [],
@@ -365,19 +369,31 @@ describe('explicit read-only skills folder IPC', () => {
     }
     mocks.listSkills.mockResolvedValue(status)
     expect(await (await handler('skills:list'))({})).toEqual(status)
-    mocks.chooseSkillFolder.mockResolvedValue({ canceled: false, filePaths: ['/selected/skills'] })
+    mocks.ensureSkillsFolder.mockResolvedValue('/app/agent-skills')
+    mocks.openPath.mockResolvedValue('')
     mocks.skillFolder.mockResolvedValue(status)
-    expect(await (await handler('skills:choose-root'))({}, '/ignored/model/path')).toEqual(status)
-    expect(mocks.skillFolder).toHaveBeenCalledWith('/selected/skills', true)
+    expect(await (await handler('skills:open-folder'))({}, '/ignored/model/path')).toEqual(status)
+    expect(mocks.ensureSkillsFolder).toHaveBeenCalledExactlyOnceWith()
+    expect(mocks.openPath).toHaveBeenCalledExactlyOnceWith('/app/agent-skills')
+    expect(mocks.chooseSkillFolder).not.toHaveBeenCalled()
+    expect(mocks.skillFolder).not.toHaveBeenCalled()
     await (
       await handler('skills:remove-root')
     )({}, '/selected/skills')
     expect(mocks.skillFolder).toHaveBeenLastCalledWith('/selected/skills', false)
   })
-  it('does not change configuration after dialog cancellation', async () => {
-    mocks.chooseSkillFolder.mockResolvedValue({ canceled: true, filePaths: [] })
-    expect(await (await handler('skills:choose-root'))({})).toBeNull()
-    expect(mocks.skillFolder).not.toHaveBeenCalled()
+  it('reports a file-manager launch failure', async () => {
+    mocks.ensureSkillsFolder.mockResolvedValue('/app/agent-skills')
+    mocks.openPath.mockResolvedValue('Could not open skills folder')
+    await expect((await handler('skills:open-folder'))({})).rejects.toThrow(
+      'Could not open skills folder'
+    )
+    expect(mocks.listSkills).not.toHaveBeenCalled()
+  })
+  it('does not open an unsafe or unavailable directory', async () => {
+    mocks.ensureSkillsFolder.mockRejectedValue(new Error('Unsafe skill folder'))
+    await expect((await handler('skills:open-folder'))({})).rejects.toThrow('Unsafe skill folder')
+    expect(mocks.openPath).not.toHaveBeenCalled()
   })
 })
 

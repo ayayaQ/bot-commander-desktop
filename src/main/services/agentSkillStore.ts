@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import { constants } from 'node:fs'
+import fsSync from 'node:fs'
 import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import {
   createSkillCatalog,
@@ -7,10 +8,14 @@ import {
   skillCreatorSource,
   SKILL_LIMITS,
   validateSkillResourcePath,
+  validateSkillName,
   type SkillCatalog,
   type SkillReadRequest,
   type SkillSource
 } from '@ayayaq/vivi/extensions/skills'
+import { atomicWrite } from './atomicPersistence'
+import { withAgentPersistenceOperation } from './agentPersistenceLifecycle'
+import { withResourceMutationLock, resourceRevision } from './resourceChangeService'
 import { getAgentSkillSaveSupport } from './agentSkillSaveSupport'
 import type { AgentSkillDiagnostic, AgentSkillsStatus } from '../../shared/agentSkillTypes'
 
@@ -34,6 +39,14 @@ const isMissing = (error: unknown) => (error as NodeJS.ErrnoException).code === 
 const detail = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
 type Identity = { dev: number; ino: number; path: string }
+export interface PreparedSkillSave {
+  name: string
+  content: string
+  expectedRevision: string | null
+  parent: Identity
+  collection: Identity | null
+  directory: Identity | null
+}
 interface Binding {
   collection: string
   root: string
@@ -74,6 +87,18 @@ async function assertDirectory(path: string, expected: Identity): Promise<void> 
   const actual = await checkedSkillDirectory(path)
   if (actual.dev !== expected.dev || actual.ino !== expected.ino)
     throw new Error('Skill folder changed; refresh the skills catalog')
+}
+
+function assertDirectorySync(path: string, expected?: Identity): void {
+  let ancestor = parse(path).root
+  for (const part of path.slice(ancestor.length).split(/[\\/]/u).filter(Boolean)) {
+    ancestor = join(ancestor, part)
+    const stat = fsSync.lstatSync(ancestor)
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('Unsafe skill folder')
+  }
+  const stat = fsSync.lstatSync(path)
+  if (expected && (stat.dev !== expected.dev || stat.ino !== expected.ino))
+    throw new Error('Skill folder changed before saving')
 }
 
 /** Bound bytes before reading, use one file handle, and reject changed file/root evidence. */
@@ -145,6 +170,16 @@ export function createAgentSkillStore(options: {
   assertContent?: (content: string) => void
 }): {
   snapshot: () => Promise<AgentSkillSnapshot>
+  prepareSave: (args: Record<string, unknown>) => Promise<{
+    save: PreparedSkillSave
+    before: { id: string; content: string } | null
+    after: { id: string; content: string }
+  }>
+  commitSave: (
+    save: PreparedSkillSave,
+    context?: { signal?: AbortSignal; beforeCommit?: () => void }
+  ) => Promise<void>
+  reviewRevision: (name: string) => string
 } {
   async function snapshot(): Promise<AgentSkillSnapshot> {
     const ownedRoot = options.ownedRoot()
@@ -223,7 +258,7 @@ export function createAgentSkillStore(options: {
               binding,
               source: {
                 content,
-                readOnly: true,
+                readOnly,
                 readResource: async (request, { signal }) => {
                   signal.throwIfAborted()
                   if (!(await authorized(binding)))
@@ -301,5 +336,222 @@ export function createAgentSkillStore(options: {
     return true
   }
 
-  return { snapshot }
+  async function optionalDirectory(path: string): Promise<Identity | null> {
+    try {
+      return await checkedSkillDirectory(path)
+    } catch (error) {
+      if (isMissing(error)) return null
+      throw error
+    }
+  }
+
+  async function prepareSave(args: Record<string, unknown>) {
+    if (
+      Object.keys(args).length !== 3 ||
+      !['name', 'content', 'expectedRevision'].every((key) => Object.hasOwn(args, key))
+    )
+      throw new Error('Supply only name, content and expectedRevision for a skill save')
+    validateSkillName(args.name)
+    const name = args.name.trim().normalize('NFKC')
+    validateSkillResourcePath(`${name}/SKILL.md`)
+    if (name === 'skill-creator' || protectedComponent.test(name))
+      throw new Error('This skill name is reserved or protected')
+    if (
+      args.expectedRevision !== null &&
+      (typeof args.expectedRevision !== 'string' || !/^[a-f0-9]{64}$/u.test(args.expectedRevision))
+    )
+      throw new Error('expectedRevision must be null or a listed SHA-256 revision')
+    if (typeof args.content !== 'string') throw new Error('Skill content must be text')
+    const document = parseSkillDocument(args.content, name)
+    if (
+      document.warnings.some((warning) =>
+        /"(?:disable-model-invocation|user-invocable|context|agent)"/u.test(warning)
+      )
+    )
+      throw new Error('Host-specific invocation semantics are unsupported')
+    options.assertContent?.(args.content)
+    const ownedRoot = options.ownedRoot()
+    const parent = await checkedSkillDirectory(dirname(ownedRoot))
+    const collection = await optionalDirectory(ownedRoot)
+    const directory = collection ? await optionalDirectory(join(ownedRoot, name)) : null
+    const catalog = await snapshot()
+    const existing = catalog.catalog.document(name)
+    if (catalog.status.skills.find((skill) => skill.name === name)?.readOnly)
+      throw new Error('Built-in or read-only skills cannot be replaced')
+    // Excluded/duplicate/invalid folders must not be silently overwritten or shadowed.
+    if (directory && !existing)
+      throw new Error('Existing skill folder is unavailable; refresh skills')
+    for (const external of await options.externalRoots()) {
+      const direct = basename(external) === name ? external : join(external, name)
+      if (
+        await fs.lstat(direct).catch((error) => {
+          if (!isMissing(error)) throw error
+          return null
+        })
+      )
+        throw new Error('A read-only skill folder already uses this name')
+    }
+    if (args.expectedRevision !== (existing?.revision ?? null))
+      throw new Error('Skill revision is stale; read the current catalog before saving')
+    if (!existing && catalog.status.skills.length >= SKILL_LIMITS.maximumSkills)
+      throw new Error('Skill limit reached')
+    return {
+      save: {
+        name,
+        content: args.content,
+        expectedRevision: args.expectedRevision as string | null,
+        parent,
+        collection,
+        directory
+      },
+      before: existing ? { id: name, content: existing.content } : null,
+      after: { id: name, content: args.content }
+    }
+  }
+
+  // Used both by the reviewer binding and by the final synchronous atomic commit gate.
+  function reviewRevision(name: string): string {
+    validateSkillName(name)
+    validateSkillResourcePath(`${name}/SKILL.md`)
+    const path = join(options.ownedRoot(), name, 'SKILL.md')
+    try {
+      assertDirectorySync(dirname(path))
+      const stat = fsSync.lstatSync(path)
+      if (
+        stat.isSymbolicLink() ||
+        !stat.isFile() ||
+        stat.nlink !== 1 ||
+        stat.size > SKILL_LIMITS.maximumDocumentBytes
+      )
+        throw new Error('Unsafe skill file')
+      const file = fsSync.openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0))
+      try {
+        const opened = fsSync.fstatSync(file)
+        if (
+          !opened.isFile() ||
+          opened.nlink !== 1 ||
+          opened.dev !== stat.dev ||
+          opened.ino !== stat.ino ||
+          opened.size > SKILL_LIMITS.maximumDocumentBytes
+        )
+          throw new Error('Skill file changed while opening')
+        const buffer = Buffer.alloc(SKILL_LIMITS.maximumDocumentBytes + 1)
+        let length = 0
+        while (length < buffer.length) {
+          const bytes = fsSync.readSync(file, buffer, length, buffer.length - length, length)
+          if (!bytes) break
+          length += bytes
+        }
+        const after = fsSync.fstatSync(file)
+        const named = fsSync.lstatSync(path)
+        if (
+          length > SKILL_LIMITS.maximumDocumentBytes ||
+          after.size !== length ||
+          after.mtimeMs !== opened.mtimeMs ||
+          after.ctimeMs !== opened.ctimeMs ||
+          named.isSymbolicLink() ||
+          named.nlink !== 1 ||
+          named.dev !== opened.dev ||
+          named.ino !== opened.ino
+        )
+          throw new Error('Skill file changed while reading')
+        return resourceRevision({
+          name,
+          revision: parseSkillDocument(decoder.decode(buffer.subarray(0, length)), name).revision
+        })
+      } finally {
+        fsSync.closeSync(file)
+      }
+    } catch (error) {
+      if (!isMissing(error)) throw error
+      return resourceRevision({ name, revision: null })
+    }
+  }
+
+  function commitSave(
+    input: PreparedSkillSave,
+    context: { signal?: AbortSignal; beforeCommit?: () => void } = {}
+  ): Promise<void> {
+    const save = structuredClone(input)
+    return withAgentPersistenceOperation(() =>
+      withResourceMutationLock('skills', async () => {
+        context.signal?.throwIfAborted()
+        const current = await prepareSave({
+          name: save.name,
+          content: save.content,
+          expectedRevision: save.expectedRevision
+        })
+        for (const key of ['parent', 'collection', 'directory'] as const) {
+          const before = save[key],
+            after = current.save[key]
+          if (
+            !!before !== !!after ||
+            (before && (before.dev !== after!.dev || before.ino !== after!.ino))
+          )
+            throw new Error('Skill folder changed; propose a fresh save')
+        }
+        const ownedRoot = options.ownedRoot()
+        if (!current.save.collection) await fs.mkdir(ownedRoot)
+        const collection = await checkedSkillDirectory(ownedRoot)
+        const root = join(ownedRoot, save.name)
+        if (!current.save.directory) await fs.mkdir(root)
+        const directory = await checkedSkillDirectory(root)
+        const expected = resourceRevision({ name: save.name, revision: save.expectedRevision })
+        // Validate every ancestor synchronously immediately before rename, including on Windows.
+        const gate = () => {
+          context.signal?.throwIfAborted()
+          assertDirectorySync(dirname(ownedRoot), save.parent)
+          assertDirectorySync(ownedRoot, collection)
+          assertDirectorySync(root, directory)
+          if (reviewRevision(save.name) !== expected)
+            throw new Error('Skill revision changed before saving')
+          options.assertContent?.(save.content)
+          context.beforeCommit?.()
+        }
+        try {
+          gate()
+          const backup = join(root, 'SKILL.md.bak')
+          const stat = await fs.lstat(backup).catch((error) => {
+            if (!isMissing(error)) throw error
+            return null
+          })
+          if (
+            stat &&
+            (stat.isSymbolicLink() ||
+              !stat.isFile() ||
+              stat.nlink !== 1 ||
+              stat.size > SKILL_LIMITS.maximumDocumentBytes)
+          )
+            throw new Error('Unsafe skill backup')
+          await atomicWrite(join(root, 'SKILL.md'), save.content, {
+            validate: (content) => {
+              parseSkillDocument(content, save.name)
+            },
+            beforeCommit: gate
+          })
+        } catch (error) {
+          // Only remove empty directories created by this failed attempt, never user content.
+          if (!save.directory) {
+            try {
+              assertDirectorySync(root, directory)
+              await fs.rmdir(root)
+            } catch {
+              /* kept */
+            }
+          }
+          if (!save.collection) {
+            try {
+              assertDirectorySync(ownedRoot, collection)
+              await fs.rmdir(ownedRoot)
+            } catch {
+              /* kept */
+            }
+          }
+          throw error
+        }
+      })
+    )
+  }
+
+  return { snapshot, prepareSave, commitSave, reviewRevision }
 }

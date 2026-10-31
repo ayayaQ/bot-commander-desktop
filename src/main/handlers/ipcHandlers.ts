@@ -58,7 +58,11 @@ import {
   getAiProvider,
   getSelectedModelCapabilities
 } from '../services/aiProviderService'
-import { configureAgentSkillFolder, loadAgentSkills } from '../services/agentSkillService'
+import {
+  configureAgentSkillFolder,
+  ensureAgentSkillsFolder,
+  loadAgentSkills
+} from '../services/agentSkillService'
 import { agentProtocol, type SelectedModelCapabilityRequest } from '../../shared/aiModelTypes'
 import { getBotStatus, setBotStatus } from '../services/statusService'
 import { getStatsInstance } from '../utils/stats'
@@ -407,14 +411,11 @@ export function addIPCHandlers() {
   ipcMain.handle('mcp:clear-activity', () => clearMcpActivity())
 
   ipcMain.handle('skills:list', () => loadAgentSkills())
-  ipcMain.handle('skills:choose-root', async () => {
-    const selection = await dialog.showOpenDialog({
-      title: 'Add a read-only Agent Skills folder',
-      properties: ['openDirectory'],
-      buttonLabel: 'Add read-only folder'
-    })
-    if (selection.canceled || selection.filePaths.length !== 1) return null
-    return configureAgentSkillFolder(selection.filePaths[0], true)
+  ipcMain.handle('skills:open-folder', async () => {
+    const path = await ensureAgentSkillsFolder()
+    const error = await shell.openPath(path)
+    if (error) throw new Error(error)
+    return loadAgentSkills()
   })
   ipcMain.handle('skills:remove-root', (_, path: string) => configureAgentSkillFolder(path, false))
 
