@@ -8,7 +8,7 @@ import type {
 } from '@ayayaq/vivi'
 import { createDeepSeekProvider } from '@ayayaq/vivi/providers/deepseek'
 import { createOpenAIProvider } from '@ayayaq/vivi/providers/openai'
-import { createOpenRouterProvider } from '@ayayaq/vivi/providers/openrouter'
+import { createOpenRouterProvider, ProviderRequestError } from '@ayayaq/vivi/providers/openrouter'
 import type { ModelCapabilities } from '@ayayaq/vivi/providers/models'
 import type { AgentSession } from '../../shared/agentTypes'
 import { agentProtocol } from '../../shared/aiModelTypes'
@@ -20,6 +20,8 @@ import {
 import type { AiRuntimeSettings } from './aiProviderService'
 import { getAiProvider, getProviderApiKey } from './aiProviderService'
 import { immutableModelCapabilities, modelCapabilityCatalog } from './modelCapabilityService'
+import { createOpenRouterReasoningReplay } from './agentProviderHistory'
+import { readOpenRouterDiagnostic } from './agentProviderError'
 
 type SessionModel = Pick<AgentSession, 'model' | 'reasoningEffort'>
 const AGENT_REQUEST_TIMEOUT_MS = 10 * 60_000
@@ -123,35 +125,64 @@ export function createAgentProvider(
         : createOpenAIProvider({ ...common, apiKey, ...(fetch ? { fetch } : {}) })
   const transport = createTransport()
   const fetchImpl = globalThis.fetch
+  const reasoningReplay =
+    provider === 'openrouter' ? createOpenRouterReasoningReplay(session.model) : undefined
+  const projectInput = (input: {
+    messages: readonly HistoryMessage[]
+    tools: readonly ToolDefinition[]
+  }) => {
+    const supported = { ...input, tools: capabilities.tools === 'supported' ? input.tools : [] }
+    return reasoningReplay?.project(supported) ?? supported
+  }
   return {
     ...(transport.estimateContext
       ? {
           estimateContext: (input, estimateOptions) =>
-            transport.estimateContext!(
-              { ...input, tools: capabilities.tools === 'supported' ? input.tools : [] },
-              estimateOptions
-            )
+            transport.estimateContext!(projectInput(input), estimateOptions)
         }
       : {}),
-    generate: (input, signal, generateOptions) => {
+    generate: async (input, signal, generateOptions) => {
+      let diagnostic: string | undefined
       const selected =
-        generateOptions?.purpose === 'context-summary' && options.onSummaryDispatch
-          ? createTransport((request, init) => {
-              // Body validation and cancellation preflight have finished. This callback is sync,
+        provider === 'openrouter' ||
+        (generateOptions?.purpose === 'context-summary' && options.onSummaryDispatch)
+          ? createTransport(async (request, init) => {
+              // Body validation and cancellation preflight have finished. Notify synchronously
               // immediately before the actual fetch invocation; estimates never reach it.
               signal.throwIfAborted()
-              options.onSummaryDispatch!()
-              return fetchImpl(request, init)
+              if (generateOptions?.purpose === 'context-summary') options.onSummaryDispatch?.()
+              const response = await fetchImpl(request, init)
+              if (provider === 'openrouter' && !response.ok) {
+                diagnostic = await readOpenRouterDiagnostic(
+                  response,
+                  [
+                    apiKey,
+                    settings.openaiApiKey,
+                    settings.deepseekApiKey ?? '',
+                    settings.deepseekWebApiKey ?? ''
+                  ],
+                  init?.signal
+                )
+              }
+              return response
             })
           : transport
-      return selected.generate(
-        {
-          ...input,
-          tools: capabilities.tools === 'supported' ? input.tools : []
-        },
-        signal,
-        generateOptions
-      )
+      const projected = projectInput(input)
+      try {
+        const result = await selected.generate(projected, signal, generateOptions)
+        reasoningReplay?.accept(projected, result)
+        return result
+      } catch (error) {
+        if (diagnostic && error instanceof ProviderRequestError && error.code === 'http') {
+          throw new ProviderRequestError(
+            error.provider,
+            error.code,
+            `${error.message}: ${diagnostic}`,
+            error.status
+          )
+        }
+        throw error
+      }
     }
   }
 }
