@@ -958,7 +958,682 @@ onSettingsChanged((next, previous) => {
   }
   if (loaded)
     void save().catch(() => {
-      reportAgentPersistenceN…6684 tokens truncated…ittedCall.status = 'completed'
+      reportAgentPersistenceNotice({
+        level: 'error',
+        message:
+          'Auto review account changed. Manual mode is active; its checkpoint could not be saved.'
+      })
+    })
+})
+
+export async function setActiveAgentSession(sessionId: string | null): Promise<void> {
+  await editSessions((next) => {
+    if (sessionId !== null && !next.sessions.some((session) => session.id === sessionId))
+      throw new Error('Agent session not found')
+    next.activeSessionId = sessionId
+  })
+}
+
+export const formatAgentMemoryContext = formatMemoryContext
+
+function addMessage(
+  session: AgentSession,
+  message: Omit<AgentMessage, 'id' | 'timestamp'>,
+  publish = true
+): AgentMessage {
+  const stored: AgentMessage = { id: id('message'), timestamp: now(), ...message }
+  session.messages.push(stored)
+  session.updatedAt = stored.timestamp
+  if (publish)
+    emit(session, { type: 'message', runId: session.activeRunId, message: clone(stored) })
+  return stored
+}
+
+function stringifyResult(result: unknown): string {
+  return stringifyAgentToolResult(result)
+}
+
+function boundToolContent(content: string): string {
+  if (content.length <= MAX_AGENT_TOOL_RESULT_CHARS) return content
+  const preview = (length: number): string =>
+    JSON.stringify({ truncated: true, preview: content.slice(0, length) })
+  const candidate = preview(Math.floor((MAX_AGENT_TOOL_RESULT_CHARS - 100) / 2))
+  // Raw extension text may contain control characters that need six JSON characters each.
+  return candidate.length <= MAX_AGENT_TOOL_RESULT_CHARS
+    ? candidate
+    : preview(Math.floor((MAX_AGENT_TOOL_RESULT_CHARS - 100) / 6))
+}
+
+export function parseProposedPlan(content: string): { content: string; planReady: boolean } {
+  const match = content.trim().match(/^<proposed_plan>\s*([\s\S]*?)\s*<\/proposed_plan>$/)
+  const plan = match?.[1]?.trim()
+  return plan && !plan.includes('<proposed_plan>') && !plan.includes('</proposed_plan>')
+    ? { content: plan, planReady: true }
+    : { content, planReady: false }
+}
+
+async function awaitApproval(
+  session: AgentSession,
+  runId: string,
+  call: AgentToolCall,
+  prepared: PreparedMutation | McpPreparedOperation,
+  context: AgentRunContext
+): Promise<boolean> {
+  // Registration is itself owned: a prior await may have yielded to cancellation.
+  assertActiveRun(session, runId, context.owner.signal)
+  let resolveApproval!: (approved: boolean) => void
+  const approval = new Promise<boolean>((resolve) => {
+    resolveApproval = resolve
+  })
+  call.approvalId = crypto.randomUUID()
+  approvals.set(call.approvalId, {
+    sessionId: session.id,
+    runId,
+    toolCallId: call.id,
+    prepared,
+    approvalId: call.approvalId,
+    resolve: resolveApproval
+  })
+  session.status = 'waiting_approval'
+  call.status = 'waiting_approval'
+  if ('before' in prepared) {
+    call.before = prepared.before
+    call.after = prepared.after
+  }
+  context.metrics = recordAgentRunTool(context.metrics, call)
+  checkpointRunMetrics(session, context)
+  emit(session, {
+    type: 'approval',
+    runId,
+    toolCall: clone(call),
+    session: clone(session)
+  })
+  emitSession(session, runId)
+  await save()
+  return approval
+}
+
+function isActiveRun(session: AgentSession, runId: string, signal: AbortSignal): boolean {
+  return (
+    !signal.aborted &&
+    session.activeRunId === runId &&
+    controllers.get(session.id)?.runId === runId &&
+    controllers.get(session.id)?.scope.state === 'open' &&
+    !deletedSessionIds.has(session.id)
+  )
+}
+
+function assertActiveRun(session: AgentSession, runId: string, signal: AbortSignal): void {
+  if (!isActiveRun(session, runId, signal)) throw new Error('Agent execution cancelled')
+}
+
+async function acknowledgeMcpOutcomes(session: AgentSession, runId: string): Promise<void> {
+  if (deletedSessionIds.has(session.id)) {
+    reportAgentPersistenceNotice({
+      level: 'warning',
+      message:
+        'MCP outcome evidence is retained for a deleted session; no request will be replayed.'
+    })
+    return
+  }
+  try {
+    await mcpOutcomes.acknowledge({ sessionId: session.id, runId }, session)
+  } catch {
+    reportAgentPersistenceNotice({
+      level: 'warning',
+      message:
+        'MCP outcome evidence is retained because its history acknowledgement could not be confirmed.'
+    })
+  }
+}
+
+function trackRunOperation<T>(context: AgentRunContext, operation: Promise<T>): Promise<T> {
+  context.durableOperations.add(operation)
+  void operation.then(
+    () => context.durableOperations.delete(operation),
+    () => context.durableOperations.delete(operation)
+  )
+  return operation
+}
+
+async function drainRunOperations(context: AgentRunContext): Promise<void> {
+  while (context.durableOperations.size) await Promise.allSettled([...context.durableOperations])
+  await drainMcpReviews(context)
+  await agentWebOutcomes.drain()
+}
+
+async function drainMcpReviews(context: AgentRunContext): Promise<void> {
+  while (context.mcpOperations.size) await Promise.allSettled([...context.mcpOperations])
+  await mcpOutcomes.drain()
+}
+
+async function trackMcpReview(
+  session: AgentSession,
+  runId: string,
+  operation: McpPreparedOperation,
+  context: AgentRunContext,
+  signal: AbortSignal
+): Promise<ToolResult> {
+  const task = executeMcpReview(session, runId, operation, context, signal)
+  context.mcpOperations.add(task)
+  try {
+    return await task
+  } finally {
+    context.mcpOperations.delete(task)
+  }
+}
+
+async function executeMcpReview(
+  session: AgentSession,
+  runId: string,
+  operation: McpPreparedOperation,
+  context: AgentRunContext,
+  signal: AbortSignal
+): Promise<ToolResult> {
+  const call = context.mcpCalls.get(operation.call.id)
+  if (
+    !call ||
+    call.name !== operation.call.name ||
+    mcpDigest(call.arguments) !== mcpDigest(operation.call.arguments)
+  )
+    throw new Error('MCP request has no matching active host tool call')
+  const scope = { sessionId: session.id, runId }
+  call.mcp = {
+    runId,
+    operationDigest: operation.binding.operationDigest as string,
+    serverId: operation.serverId,
+    catalogKind: operation.catalogKind,
+    remoteKey: operation.remoteKey,
+    ...(operation.resourceUri !== undefined ? { resourceUri: operation.resourceUri } : {}),
+    disclosure: agentMcpService.operationDisclosure(operation),
+    outcome: 'pending'
+  }
+  call.targetLabel = `${operation.serverId}: ${operation.resourceUri ?? operation.remoteKey}`
+  const privacyRevision = agentDecisionPrivacyRevision()
+  let invocationStarted = false
+  const notSent = async (denied = false): Promise<ToolResult> => {
+    const failure = mcpFailure(
+      denied ? 'mcp_rejected' : 'mcp_not_attempted',
+      denied ? 'The user rejected this external request' : 'The external request was not attempted'
+    )
+    const result = {
+      ...failure,
+      content: JSON.stringify({
+        ...JSON.parse(failure.content),
+        requestSent: false,
+        unknownOutcome: false,
+        doNotRetry: false,
+        ...(denied ? { denied: true } : {})
+      })
+    }
+    call.mcp!.outcome = 'not-sent'
+    call.mcp!.requestSent = false
+    call.result = JSON.parse(result.content)
+    try {
+      await mcpOutcomes.settle(scope, operation, {
+        result,
+        outcome: 'not-sent',
+        requestSent: false,
+        unknownOutcome: false,
+        doNotRetry: false
+      })
+    } catch {
+      call.mcp!.checkpointUnconfirmed = true
+    }
+    return result
+  }
+  try {
+    assertActiveRun(session, runId, signal)
+    if (session.mode === 'planning') return await notSent()
+    await mcpOutcomes.load()
+    assertActiveRun(session, runId, signal)
+    mcpOutcomes.assertWritable()
+    agentMcpService.assertAllowed(operation)
+    const approved = await awaitApproval(session, runId, call, operation, context)
+    assertActiveRun(session, runId, signal)
+    if (!approved) {
+      call.status = 'rejected'
+      return await notSent(true)
+    }
+    call.status = 'approved'
+    session.status = 'running'
+    await save()
+    const assertCurrent = () => {
+      assertActiveRun(session, runId, signal)
+      if (session.mode === 'planning' || privacyRevision !== agentDecisionPrivacyRevision())
+        throw new Error('MCP approval context changed; fresh review is required')
+      agentMcpService.assertAllowed(operation)
+    }
+    assertCurrent()
+    invocationStarted = true
+    const outcome = await agentMcpService.invoke(operation, signal, assertCurrent, {
+      beforeSend: () => mcpOutcomes.intent(scope, operation),
+      settle: (outcome) => mcpOutcomes.settle(scope, operation, outcome)
+    })
+    call.mcp!.outcome = outcome.outcome
+    call.mcp!.requestSent = outcome.requestSent
+    if (outcome.checkpointUnconfirmed) call.mcp!.checkpointUnconfirmed = true
+    call.result = JSON.parse(outcome.result.content)
+    return outcome.result
+  } catch {
+    if (!invocationStarted) return await notSent()
+    // A host failure after entering invocation is not evidence of non-delivery.
+    const result = mcpFailure(
+      'mcp_unknown_outcome',
+      'External outcome could not be confirmed; inspect the external resource before another attempt',
+      true
+    )
+    call.mcp!.outcome = 'unknown'
+    delete call.mcp!.requestSent
+    call.result = JSON.parse(result.content)
+    try {
+      await mcpOutcomes.settle(scope, operation, {
+        result,
+        outcome: 'unknown',
+        unknownOutcome: true,
+        doNotRetry: true
+      })
+    } catch {
+      call.mcp!.checkpointUnconfirmed = true
+    }
+    return result
+  }
+}
+
+async function runTool(
+  session: AgentSession,
+  runId: string,
+  mode: AgentMode,
+  providerCall: ToolCall,
+  context: AgentRunContext,
+  signal: AbortSignal
+): Promise<{ toolCall: AgentToolCall; content: string }> {
+  const targetLabel = agentToolTargetLabel(providerCall.name, providerCall.arguments)
+  const call: AgentToolCall = {
+    id: providerCall.id || id('tool'),
+    name: providerCall.name,
+    arguments: clone(providerCall.arguments),
+    ...(targetLabel ? { targetLabel } : {}),
+    status: 'running',
+    createdAt: now()
+  }
+  if (context.mcpTools.has(call.name)) context.mcpCalls.set(call.id, call)
+  context.metrics = recordAgentRunTool(context.metrics, call)
+  checkpointRunMetrics(session, context)
+  const message = addMessage(session, {
+    role: 'tool',
+    content: providerCall.name,
+    toolCalls: [call]
+  })
+  emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
+  let finishResourceEffect: (() => void) | undefined
+  const admitResourceEffect = (): void => {
+    if (finishResourceEffect) return
+    trackRunOperation(
+      context,
+      new Promise<void>((resolve) => {
+        finishResourceEffect = resolve
+      })
+    )
+  }
+  let reviewed: AgentAutoReviewResult | undefined
+  let webReviewSettled = false
+  let resourceCommitted = false
+  let committedResult: unknown
+  try {
+    assertActiveRun(session, runId, signal)
+    // Durably record the attempt before execution; a crashed tool has an unknown outcome.
+    await trackRunOperation(context, save())
+    assertActiveRun(session, runId, signal)
+    let result: unknown
+    let extensionContent: string | undefined
+    if (WEB_TOOL_NAMES.has(call.name)) {
+      if (mode === 'planning')
+        throw new Error(
+          'Web retrieval is disabled in Plan mode; use local evidence or leave Plan before a separately approved web request.'
+        )
+      if (context.webRequests >= 5)
+        throw new Error(
+          'The five-request web run limit is reached; review results before another request.'
+        )
+      const settings = getSettings()
+      const prepared = prepareAgentWeb(call.name, call.arguments, settings)
+      const privacyRevision = agentDecisionPrivacyRevision()
+      const assertWebCurrent = () => {
+        assertActiveRun(session, runId, signal)
+        if (
+          session.mode === 'planning' ||
+          privacyRevision !== agentDecisionPrivacyRevision() ||
+          prepareAgentWeb(call.name, call.arguments, getSettings()).operationDigest !==
+            prepared.operationDigest
+        )
+          throw new Error(
+            'Web request, account or privacy context changed; approve a fresh exact request.'
+          )
+      }
+      call.before = null
+      call.after = prepared.after
+      await agentWebOutcomes.load()
+      assertWebCurrent()
+      agentWebOutcomes.assertWritable()
+      if (agentWebOutcomes.uncertain(prepared.operationDigest))
+        call.after = {
+          ...(prepared.after as object),
+          previousOutcome:
+            'An identical request has an unknown outcome and may already have been billed. Approving sends one new request.'
+        }
+      if (mode === 'auto' && !agentWebOutcomes.uncertain(prepared.operationDigest)) {
+        call.status = 'reviewing'
+        emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
+        reviewed = await reviewAgentMutation({
+          prepared,
+          enrollment: session.autoReviewEnrollment,
+          context: context.autoReview,
+          signal,
+          account: decisionAccount,
+          assertActive: assertWebCurrent,
+          snapshot: () =>
+            autoReviewSnapshot({
+              sessionId: session.id,
+              runId,
+              callId: call.id,
+              userRequestId: context.userRequest.id,
+              userRequest: context.userRequest.text,
+              prepared,
+              enrollment: session.autoReviewEnrollment!,
+              acceptedPlan: context.acceptedPlan,
+              resourceRevisions: {
+                account: decisionAccount().revision,
+                provider: decisionAccount().provider,
+                webAccount: getSettings().agentWebAccountRevision || 'unconfigured',
+                mode: session.mode,
+                enrollment: decisionBinding(session.autoReviewEnrollment || null),
+                privacy: agentDecisionPrivacyRevision(),
+                agentModel: session.model,
+                agentReasoning: session.reasoningEffort
+              }
+            })
+        })
+        call.decision = reviewed.display
+        assertWebCurrent()
+        if (reviewed.automatic) await reviewed.beginCommit()
+      }
+      let approved = !!reviewed?.automatic
+      if (!approved)
+        approved = await awaitApproval(
+          session,
+          runId,
+          call,
+          { ...prepared, after: call.after },
+          context
+        )
+      assertWebCurrent()
+      if (!approved) {
+        call.status = 'rejected'
+        result = {
+          source: 'web_provider',
+          provider: 'deepseek',
+          untrusted: true,
+          success: false,
+          denied: true,
+          requestState: 'not_started',
+          doNotRetry: false
+        }
+        await reviewed?.settle('denied', undefined, 'human_rejected')
+        webReviewSettled = true
+      } else {
+        call.status = 'approved'
+        session.status = 'running'
+        await trackRunOperation(context, save())
+        assertWebCurrent()
+        context.webRequests++
+        const output = await executeAgentWeb({
+          prepared,
+          sessionId: session.id,
+          runId,
+          callId: call.id,
+          apiKey: webKey(getSettings()),
+          signal,
+          assertCurrent: () => {
+            assertWebCurrent()
+            if (reviewed?.automatic) reviewed.assertCurrent(prepared)
+          },
+          checkpoint: async (evidence) => {
+            // The independent audit settles even after cancellation; never mutate a retired run.
+            if (
+              session.activeRunId !== runId ||
+              controllers.get(session.id)?.runId !== runId ||
+              deletedSessionIds.has(session.id)
+            )
+              return
+            call.web = clone(evidence)
+            await trackRunOperation(context, save())
+          }
+        })
+        result = output.result
+        if (
+          session.activeRunId === runId &&
+          controllers.get(session.id)?.runId === runId &&
+          !deletedSessionIds.has(session.id)
+        )
+          call.web = clone(output.evidence)
+        if (!output.result.success) call.status = 'error'
+        await reviewed?.settle(
+          output.evidence.outcome === 'unknown'
+            ? 'unknown'
+            : output.evidence.outcome === 'confirmed'
+              ? 'committed'
+              : signal.aborted
+                ? 'cancelled'
+                : 'failed',
+          undefined,
+          reviewed.automatic ? undefined : 'human_once'
+        )
+        webReviewSettled = true
+        extensionContent = JSON.stringify(result)
+      }
+    } else if (mutationToolNames.has(call.name)) {
+      if (mode === 'planning') throw new Error('Mutation tools are disabled in planning mode')
+      const prepared = clone(await prepareMutation(call.name, call.arguments))
+      assertActiveRun(session, runId, signal)
+      call.before = prepared.before
+      call.after = prepared.after
+      let validationFailed = false
+      if (isValidatedResourceMutation(prepared)) {
+        call.diagnostics = clipAgentLintDiagnostics(await lintPreparedMutation(prepared))
+        assertActiveRun(session, runId, signal)
+        const candidate = prepared.after as { command?: string; commandName?: string }
+        const failureKey = `${prepared.target.type}:${
+          prepared.before === null
+            ? (candidate.command ?? candidate.commandName ?? '')
+            : prepared.target.id
+        }`
+        const failures = context.validationFailures.get(failureKey) ?? 0
+        if (failures >= MAX_DRAFT_VALIDATION_FAILURES)
+          throw new Error(
+            'Draft validation repair limit reached after three failures; explain the remaining issue'
+          )
+        const validation = await validateAgentMutation(prepared, signal)
+        call.validation = validation.report
+        call.validationBinding = validation.binding
+        assertActiveRun(session, runId, signal)
+        assertAgentValidationBinding(prepared, validation.binding, validation.report)
+        if (!validation.canCommit) {
+          context.validationFailures.set(failureKey, failures + 1)
+          validationFailed = true
+          call.status = 'error'
+          result = {
+            success: false,
+            saved: false,
+            validation: validation.report,
+            diagnostics: call.diagnostics,
+            attemptsRemaining: MAX_DRAFT_VALIDATION_FAILURES - failures - 1,
+            message:
+              'Draft validation did not pass; inspect the report and repair before proposing this change'
+          }
+        }
+      }
+      if (!validationFailed) {
+        if (mode === 'auto') {
+          await initializeMutationReviewResource(prepared)
+          assertActiveRun(session, runId, signal)
+          call.status = 'reviewing'
+          emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
+          reviewed = await reviewAgentMutation({
+            prepared,
+            validation: call.validation,
+            enrollment: session.autoReviewEnrollment,
+            context: context.autoReview,
+            signal,
+            assertActive: () => assertActiveRun(session, runId, signal),
+            account: decisionAccount,
+            snapshot: () =>
+              autoReviewSnapshot({
+                sessionId: session.id,
+                runId,
+                callId: call.id,
+                userRequestId: context.userRequest.id,
+                userRequest: context.userRequest.text,
+                prepared,
+                enrollment: session.autoReviewEnrollment!,
+                validation: call.validation,
+                acceptedPlan: context.acceptedPlan,
+                resourceRevisions: {
+                  resource: currentMutationReviewRevision(prepared),
+                  account: decisionAccount().revision,
+                  provider: decisionAccount().provider,
+                  mode: session.mode,
+                  enrollment: decisionBinding(session.autoReviewEnrollment ?? null),
+                  runtimeWrapEval: !getSettings().useLegacyInterpreter,
+                  hostRuntime: currentMutationRuntimeReviewRevision(prepared),
+                  settingsGeneration: getAgentDecisionSettingsGeneration(),
+                  agentModel: session.model,
+                  agentReasoning: session.reasoningEffort,
+                  effectPolicy: AUTO_ELIGIBILITY_EFFECT_VERSION,
+                  toolset: 'desktop-agent-builtins-v1',
+                  privacy: agentDecisionPrivacyRevision()
+                }
+              })
+          })
+          assertActiveRun(session, runId, signal)
+          call.decision = reviewed.display
+          if (reviewed.automatic) await reviewed.beginCommit()
+        }
+        const beforeCommit = (snapshot: PreparedMutation) => {
+          assertActiveRun(session, runId, signal)
+          if (call.validation && call.validationBinding)
+            assertAgentValidationBinding(snapshot, call.validationBinding, call.validation)
+          if (reviewed?.automatic) {
+            if (!checkAutoEligibility(snapshot, call.validation).eligible)
+              throw new Error('This change is no longer eligible for Auto review')
+            reviewed.assertCurrent(snapshot)
+          }
+        }
+        if (mode === 'manual' || !reviewed?.automatic) {
+          const approved = await awaitApproval(session, runId, call, prepared, context)
+          assertActiveRun(session, runId, signal)
+          if (!approved) {
+            call.status = 'rejected'
+            result = { success: false, denied: true, message: 'The user rejected this mutation' }
+            await reviewed?.settle('denied', undefined, 'human_rejected')
+          } else {
+            assertActiveRun(session, runId, signal)
+            call.status = 'approved'
+            session.status = 'running'
+            context.metrics = recordAgentRunTool(context.metrics, call)
+            checkpointRunMetrics(session, context)
+            await trackRunOperation(context, save())
+            assertActiveRun(session, runId, signal)
+            emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
+            assertActiveRun(session, runId, signal)
+            if (call.validation && call.validationBinding)
+              assertAgentValidationBinding(prepared, call.validationBinding, call.validation)
+            admitResourceEffect()
+            result = await commitMutation(prepared, 'agent', signal, beforeCommit)
+            resourceCommitted = true
+            committedResult = result
+            await reviewed?.settle(
+              'committed',
+              (result as { revision?: string })?.revision,
+              'human_once'
+            )
+          }
+        } else {
+          assertActiveRun(session, runId, signal)
+          if (call.validation && call.validationBinding)
+            assertAgentValidationBinding(prepared, call.validationBinding, call.validation)
+          admitResourceEffect()
+          result = await commitMutation(prepared, 'agent', signal, beforeCommit)
+          resourceCommitted = true
+          committedResult = result
+          await reviewed!.settle('committed', (result as { revision?: string })?.revision)
+        }
+        if (call.validation && result && typeof result === 'object')
+          result = { ...result, diagnostics: call.diagnostics, validation: call.validation }
+      }
+    } else if (context.extensions.has(call.name)) {
+      const output = await context.extensions.executeTool(providerCall, { signal })
+      if (context.mcpTools.has(call.name)) {
+        if (Buffer.byteLength(output.content) > 64 * 1024)
+          throw new Error('MCP tool result exceeds its host bound')
+        extensionContent = output.content
+      } else if (call.name === 'read_skill' || call.name === 'list_skills') {
+        if (output.content.length > MAX_SKILL_TOOL_RESULT_CHARS)
+          throw new Error('Skill tool result exceeds its host bound')
+        extensionContent = output.content
+      } else extensionContent = boundToolContent(output.content)
+      try {
+        result = JSON.parse(extensionContent)
+      } catch {
+        result = extensionContent
+      }
+      if (output.isError && call.status !== 'rejected') {
+        call.status = 'error'
+        const error =
+          result && typeof result === 'object'
+            ? (result as { error?: { message?: unknown } }).error
+            : undefined
+        call.error = typeof error?.message === 'string' ? error.message : extensionContent
+      }
+    } else {
+      result = isDocumentationTool(call.name)
+        ? await executeDocumentationCall(
+            context.documentationPolicy,
+            context.metrics,
+            call.id,
+            call.name,
+            call.arguments,
+            () => executeReadTool(call.name, call.arguments)
+          )
+        : await executeReadTool(call.name, call.arguments)
+    }
+    if (
+      !context.mcpTools.has(call.name) &&
+      call.name !== 'read_skill' &&
+      call.name !== 'list_skills' &&
+      !WEB_TOOL_NAMES.has(call.name)
+    )
+      result = boundAgentToolResult(result)
+    assertActiveRun(session, runId, signal)
+    if (call.status !== 'rejected' && call.status !== 'error') call.status = 'completed'
+    call.result = result
+    message.content = extensionContent ?? stringifyResult(result)
+    if (!signal.aborted) session.status = 'running'
+    context.metrics = recordAgentRunTool(context.metrics, call)
+    checkpointRunMetrics(session, context)
+    emit(session, { type: 'tool', runId, toolCall: clone(call), session: clone(session) })
+    await trackRunOperation(context, save())
+    return { toolCall: call, content: message.content }
+  } catch (error) {
+    const detail = errorDetail(error)
+    if (resourceCommitted) {
+      const knownResult = boundAgentToolResult(committedResult ?? call.result ?? { success: true })
+      const ownsRun =
+        session.activeRunId === runId &&
+        controllers.get(session.id)?.runId === runId &&
+        !deletedSessionIds.has(session.id)
+      const committedCall = ownsRun ? call : clone(call)
+      committedCall.status = 'completed'
       committedCall.result = knownResult
       committedCall.error = signal.aborted
         ? undefined
