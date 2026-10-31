@@ -241,7 +241,28 @@ test('discovery must advertise a safe registration endpoint and compatible issue
     })
 })
 
-test('returned registration is rejected unless exact native public metadata is preserved', async () => {
+test('registration accepts omitted OIDC metadata and normalized display names', async () => {
+  for (const change of [
+    { application_type: undefined },
+    { client_name: undefined },
+    { client_name: 'Provider normalized display name' },
+    { application_type: undefined, client_name: undefined }
+  ]) {
+    const { registration, calls } = fixture({
+      response: (body) => ({ ...body, client_id: 'fixture-public-client', ...change })
+    })
+    try {
+      const client = await registration.beginRegistration(await registration.prepareRegistration())
+      assert.equal(client.id, 'fixture-public-client')
+      assert.equal(Object.hasOwn(client, 'client_name'), false)
+      assert.equal(calls.filter((call) => call.method === 'POST').length, 1)
+    } finally {
+      await registration.cancelRegistration()
+    }
+  }
+})
+
+test('returned registration preserves exact public client authority', async () => {
   const variants = [
     { client_id: '' },
     { client_id: 'x'.repeat(1025) },
@@ -254,9 +275,7 @@ test('returned registration is rejected unless exact native public metadata is p
     { grant_types: ['authorization_code', 'refresh_token'] },
     { response_types: ['token'] },
     { application_type: 'web' },
-    { application_type: undefined },
-    { client_name: undefined },
-    { client_name: 'changed client' },
+    { client_name: 123 },
     { scope: undefined },
     { scope: 'read write' },
     { scope: 'write' },

@@ -32,6 +32,8 @@ interface SendTicket {
   used: boolean
 }
 export interface McpHttpTransportOptions {
+  /** Recheck the approved connection after SDK async setup and before each startup request. */
+  readonly beforeConnectRequest?: () => Promise<void>
   /** Trusted session-only credential read. Never refreshes or starts an auth flow. */
   readonly token?: () => string | undefined
   readonly fetch?: FetchLike
@@ -152,6 +154,8 @@ export class McpHttpTransport implements Transport {
     init?: Parameters<FetchLike>[1]
   ): Promise<Response> {
     this.controller.signal.throwIfAborted()
+    await this.options.beforeConnectRequest?.()
+    this.controller.signal.throwIfAborted()
     const target = typeof input === 'string' ? input : input.href
     if (target !== this.launch.server.endpoint)
       throw new Error('MCP HTTP destination differs from the configured endpoint')
@@ -216,7 +220,13 @@ export class McpHttpTransport implements Transport {
       await this.cancelResponse(response)
       throw new Error('MCP HTTP session header is invalid or exceeds its bounds')
     }
-    if (this.launch.server.protocol === '2026-07-28' && response.headers.has('mcp-session-id')) {
+    // Auto negotiates on this connection. Failed modern probes cannot establish
+    // a legacy session; successful modern responses must never carry one.
+    if (
+      response.ok &&
+      headers.get('mcp-protocol-version') === '2026-07-28' &&
+      response.headers.has('mcp-session-id')
+    ) {
       await this.cancelResponse(response)
       throw new Error('Modern MCP HTTP does not support transport sessions')
     }

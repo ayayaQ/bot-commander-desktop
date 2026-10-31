@@ -111,7 +111,7 @@ if (process.argv.includes('--validate-expressions')) {
   process.exit(0)
 }
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..').replaceAll('\\', '/')
 const fixtureDir = await mkdtemp(join(root, '.agent-mcp-ui-'))
 let vite
 let chromium
@@ -129,6 +129,7 @@ try {
     `
 import { mount, unmount } from 'svelte'
 import Card from '/@fs/${root}/src/renderer/src/components/AgentMcpSettingsCard.svelte'
+import ExternalCard from '/@fs/${root}/src/renderer/src/components/McpSettingsCard.svelte'
 import Outcome from '/@fs/${root}/src/renderer/src/components/AgentMcpOutcome.svelte'
 import '/@fs/${root}/src/renderer/app.css'
 const clone = (value) => structuredClone(value)
@@ -145,6 +146,8 @@ const category = (state) => ({ state, count: 1, available: state === 'ready' ? 1
 const catalog = { generation: 1, tools: category('ready'), resources: { ...category('unsupported'), reason: 'Resources unsupported' }, resourceTemplates: { ...category('stale'), reason: 'Explicit refresh needed' } }
 let status = { revision: 'fixture-1', servers: [{ server, state: 'disabled', cleanupPending: false }], environmentNames: ['HOME', 'TMPDIR'], paused: false }
 const listeners = new Set()
+const externalListeners = new Map()
+let externalStatus = { enabled: false, running: false, accessMode: 'read-only', port: 43721, endpoint: 'http://127.0.0.1:43721/mcp', tokenConfigured: true, secureStorageAvailable: true, activeRequests: 0 }
 const calls = []
 const holds = new Set()
 const pending = new Map()
@@ -243,10 +246,13 @@ window.__fixture = {
   pendingCount: (channel) => (pending.get(channel) || []).length
 }
 window.electron = { ipcRenderer: {
-  on(channel, listener) { if (channel !== 'agent-mcp:status') throw new Error('Unexpected receive channel'); listeners.add(listener) },
-  removeListener(channel, listener) { listeners.delete(listener) },
+  on(channel, listener) { if (channel.startsWith('mcp:')) { externalListeners.set(channel, listener); return } if (channel !== 'agent-mcp:status') throw new Error('Unexpected receive channel'); listeners.add(listener) },
+  removeListener(channel, listener) { externalListeners.delete(channel); listeners.delete(listener) },
   invoke(channel, ...args) {
     calls.push({ channel, args: clone(args) })
+    if (channel === 'mcp:get-status') return Promise.resolve(clone(externalStatus))
+    if (channel === 'mcp:get-activity') return Promise.resolve([])
+    if (channel === 'mcp:update-config') { externalStatus = { ...externalStatus, ...args[0], running: args[0].enabled ?? externalStatus.running }; externalListeners.get('mcp:status')?.(clone(externalStatus)); return Promise.resolve(clone(externalStatus)) }
     if (failures.has(channel)) { const message = failures.get(channel); failures.delete(channel); return Promise.reject(new Error(message)) }
     if (channel === 'agent-mcp:start') emit({ servers: status.servers.map((entry) => ({ ...entry, state: 'connecting' })) })
     const flow = beginOAuth(channel, args)
@@ -265,6 +271,7 @@ function render() {
     if (instance) { await unmount(instance); instance = undefined }
     document.getElementById('app').textContent = ''
     if (location.hash === '#settings') instance = mount(Card, { target: document.getElementById('app') })
+    else if (location.hash === '#external') instance = mount(ExternalCard, { target: document.getElementById('app') })
     else if (location.hash.startsWith('#outcome-')) {
       const props = outcomeFixtures[location.hash.slice('#outcome-'.length)]
       if (!props) throw new Error('Unknown outcome fixture')
@@ -281,7 +288,12 @@ render()
     configFile: false,
     root: fixtureDir,
     plugins: [svelte()],
-    server: { host: '127.0.0.1', port: 0, fs: { allow: [root] } },
+    server: {
+      host: '127.0.0.1',
+      port: 0,
+      fs: { allow: [root] },
+      watch: { ignored: ['**/chromium-profile/**'] }
+    },
     logLevel: 'error'
   })
   await vite.listen()
@@ -298,6 +310,7 @@ render()
   await vite.transformRequest('/@fs/' + root + '/src/renderer/app.css')
   phase = 'Chromium startup'
   const profile = join(fixtureDir, 'chromium-profile')
+  await mkdir(profile, { recursive: true })
   const endpoint = new Promise((yes, no) => {
     let diagnostics = ''
     const timeout = setTimeout(() => no(new Error('Chromium DevTools startup timed out')), 10000)
@@ -322,6 +335,9 @@ render()
         stdio: ['ignore', 'ignore', 'pipe'],
         env: {
           PATH: process.env.PATH,
+          SystemRoot: process.env.SystemRoot,
+          TEMP: profile,
+          TMP: profile,
           HOME: fixtureDir,
           LANG: process.env.LANG || 'C.UTF-8',
           XDG_CONFIG_HOME: join(fixtureDir, 'config'),
@@ -428,19 +444,130 @@ render()
   }
   const fill = async (label, value) =>
     evaluate(
-      `const field = [...document.querySelectorAll('label')].find((item) => item.textContent.trim().startsWith(${JSON.stringify(label)}))?.querySelector('input,textarea,select'); if (!field || field.disabled) throw new Error('Missing or disabled field'); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event(field.tagName === 'SELECT' ? 'change' : 'input', {bubbles:true}))`
+      `const field = [...document.querySelectorAll('label')].find((item) => item.textContent.trim().startsWith(${JSON.stringify(label)}))?.querySelector('input,textarea,select'); if (!field || field.disabled) throw new Error('Missing or disabled field'); for (let detail = field.closest('details'); detail; detail = detail.parentElement?.closest('details')) { if (!detail.open) detail.querySelector('summary').click() } field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event(field.tagName === 'SELECT' ? 'change' : 'input', {bubbles:true}))`
     )
   const count = (channel) =>
     evaluate(
       `return window.__fixture.calls.filter((item) => item.channel === ${JSON.stringify(channel)}).length`
     )
   const reviewOpen = '!!document.querySelector(\'[aria-label="Review exact MCP launch"]\')'
+  const openSection = () =>
+    evaluate(
+      "const trigger = document.querySelector('button[aria-haspopup=dialog]'); trigger.focus(); trigger.click()"
+    )
+  const captureSettings = async (name) => {
+    if (!process.env.MCP_UI_SCREENSHOT) return
+    await wait(
+      "!document.querySelector('dialog[open]') || getComputedStyle(document.querySelector('dialog[open] .modal-box')).opacity === '1'"
+    )
+    const { data } = await command('Page.captureScreenshot', { format: 'png' })
+    await writeFile(
+      resolve(process.env.MCP_UI_SCREENSHOT.replace(/\.png$/, '') + `-${name}.png`),
+      Buffer.from(data, 'base64')
+    )
+  }
+  const checkSmallLayout = async (name) => {
+    await command('Emulation.setDeviceMetricsOverride', {
+      width: 480,
+      height: 640,
+      deviceScaleFactor: 1,
+      mobile: false
+    })
+    await captureSettings(name)
+    assert.deepEqual(
+      await evaluate(
+        "const dialog = document.querySelector('dialog[open]'); const box = dialog.querySelector('.modal-box').getBoundingClientRect(); const body = dialog.querySelector('.overflow-y-auto'); const footer = dialog.querySelector('footer').getBoundingClientRect(); return { fits: box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight, closeVisible: footer.bottom <= innerHeight, scrolls: body.scrollHeight > body.clientHeight, noHorizontalOverflow: body.scrollWidth <= body.clientWidth }"
+      ),
+      { fits: true, closeVisible: true, scrolls: true, noHorizontalOverflow: true }
+    )
+    await command('Emulation.setDeviceMetricsOverride', {
+      width: 1100,
+      height: 1000,
+      deviceScaleFactor: 1,
+      mobile: false
+    })
+  }
   phase = 'actual browser workflow'
+  await command('Page.navigate', { url: `http://127.0.0.1:${port}/#external` })
+  await wait("!!window.__fixture && !!document.querySelector('button[aria-haspopup=dialog]')")
+  assert.equal(await evaluate("return !!document.querySelector('dialog[open]')"), false)
+  assert.equal(
+    await evaluate(
+      "return document.querySelector('button[aria-haspopup=dialog]').getBoundingClientRect().height < 120 && !document.querySelector('dialog input').checkVisibility({ visibilityProperty: true })"
+    ),
+    true
+  )
+  await captureSettings('compact')
+  assert.equal(await count('mcp:update-config'), 0)
+  await openSection()
+  await wait("!!document.querySelector('dialog[open]')")
+  assert.equal(await evaluate("return document.activeElement.closest('dialog') !== null"), true)
+  await evaluate('document.querySelector(\'[aria-label="Enable external agent access"]\').click()')
+  await wait("document.querySelector('dialog').textContent.includes('Running')")
+  await captureSettings('external-dialog')
+  await click('Close')
+  await wait("!document.querySelector('dialog[open]')")
+  await openSection()
+
+  await checkSmallLayout('external-dialog-small')
+  assert.equal(
+    await evaluate(
+      'return document.querySelector(\'[aria-label="Enable external agent access"]\').checked'
+    ),
+    true
+  )
+  await command('Input.dispatchKeyEvent', {
+    type: 'keyDown',
+    key: 'Escape',
+    code: 'Escape',
+    windowsVirtualKeyCode: 27
+  })
+  await command('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: 'Escape',
+    code: 'Escape',
+    windowsVirtualKeyCode: 27
+  })
+  await wait("!document.querySelector('dialog[open]')")
+  assert.equal(
+    await evaluate("return document.activeElement.matches('button[aria-haspopup=dialog]')"),
+    true
+  )
+  flows.push(
+    'External access starts as a compact entry; its dialog preserves controls, closes with Close or Escape, and restores focus'
+  )
+
   await command('Page.navigate', { url: `http://127.0.0.1:${port}/#settings` })
   await wait("!!window.__fixture && document.body.textContent.includes('fixture: disabled')")
   assert.equal(await count('agent-mcp:start'), 0)
   assert.equal(await evaluate('return window.__fixture.listenerCount()'), 1)
   flows.push('Initial mount reads local status only; no startup or discovery')
+  assert.equal(await evaluate("return !!document.querySelector('dialog[open]')"), false)
+  await openSection()
+  assert.deepEqual(
+    await evaluate(
+      "const fields = [...document.querySelectorAll('form label')]; const protocol = fields.find((item) => item.textContent.trim().startsWith('Protocol compatibility')).querySelector('select'); const transport = fields.find((item) => item.textContent.trim().startsWith('Transport')).querySelector('select'); return { transport: transport.value, protocol: protocol.value, advancedOpen: document.querySelector('form details').open, protocolVisible: protocol.checkVisibility({ visibilityProperty: true }) }"
+    ),
+    { transport: 'http', protocol: 'auto', advancedOpen: false, protocolVisible: false }
+  )
+  await checkSmallLayout('agent-dialog-small')
+  flows.push('Both dialogs fit smaller windows with scrollable content and a visible close action')
+
+  await click('Edit')
+  await fill('Label', 'Unsaved dialog draft')
+  await click('Close')
+  await wait("!document.querySelector('dialog[open]')")
+  await openSection()
+  assert.equal(
+    await evaluate(
+      "return [...document.querySelectorAll('label')].find((item) => item.textContent.trim().startsWith('Label')).querySelector('input').value"
+    ),
+    'Unsaved dialog draft'
+  )
+  assert.equal(await count('agent-mcp:start'), 0)
+  flows.push(
+    'Agent server dialog preserves unsaved drafts across close and reopen without starting servers'
+  )
 
   await click('Edit')
   await fill('Label', 'Edited fixture')
@@ -453,6 +580,7 @@ render()
   )
   assert.deepEqual(saved.args, ['--stdio', '<b>exact</b>'])
   assert.deepEqual(saved.environment, ['HOME'])
+  assert.equal(saved.protocol, 'legacy')
   assert.equal(Object.hasOwn(saved, 'environmentValues'), false)
   flows.push('Edit and inert Save preserve exact JSON arguments and names-only environment')
 
@@ -542,6 +670,7 @@ render()
   await wait('window.__fixture.listenerCount() === 0')
   await evaluate('history.back()')
   await wait('window.__fixture.listenerCount() === 1')
+  await openSection()
   flows.push(
     'Start once is duplicate-guarded; navigation cancels in-flight token; Back/Forward never replays startup'
   )
@@ -601,7 +730,6 @@ render()
   await click('Clear')
   await fill('Transport', 'http')
   await fill('Server ID', 'remote')
-  await fill('Label', 'Anonymous HTTP fixture')
   await fill('Endpoint URL', 'http://example.invalid/mcp')
   await click('Save configuration')
   await wait("document.body.textContent.includes('Use HTTPS, or explicitly allow HTTP')")
@@ -610,6 +738,26 @@ render()
   await click('Save configuration')
   await wait("document.body.textContent.includes('cannot contain credentials')")
   await fill('Endpoint URL', 'https://example.invalid/mcp')
+  await click('Save configuration')
+  await wait("document.body.textContent.includes('remote: disabled')")
+  assert.deepEqual(
+    await evaluate(
+      "return window.__fixture.calls.findLast((item) => item.channel === 'agent-mcp:configure').args[0]"
+    ),
+    {
+      transport: 'http',
+      id: 'remote',
+      label: 'remote',
+      endpoint: 'https://example.invalid/mcp',
+      protocol: 'auto',
+      allowLoopbackHttp: false
+    }
+  )
+  assert.equal(await count('agent-mcp:start'), httpStartsBefore)
+  flows.push(
+    'New HTTP servers need only an ID and URL; optional labels and protocol overrides stay in Advanced, with automatic compatibility by default'
+  )
+  await fill('Label', 'Anonymous HTTP fixture')
   await fill('Protocol compatibility', '2026-07-28')
   await click('Save configuration')
   await wait("document.body.textContent.includes('remote: disabled')")
@@ -624,6 +772,13 @@ render()
     protocol: '2026-07-28',
     allowLoopbackHttp: false
   })
+  await click('Edit')
+  assert.equal(await evaluate("return document.querySelector('form details').open"), false)
+  await click('Save configuration')
+  await wait(
+    "window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:configure').at(-1).args[0].protocol === '2026-07-28'"
+  )
+  flows.push('Editing existing stdio or HTTP entries preserves explicit protocol overrides')
   assert.equal(
     await evaluate(
       "return [...document.querySelectorAll('label')].some((item) => /Installed executable|Working directory|Arguments|Optional inherited/.test(item.textContent)) || !!document.querySelector('input[type=password]')"
@@ -699,6 +854,7 @@ render()
     "document.body.textContent.includes('remote: disabled') && window.__fixture.listenerCount() === 1"
   )
   assert.equal(await evaluate(`return ${reviewOpen}`), false)
+  await openSection()
   await click('Edit')
   assert.equal(
     await evaluate(
@@ -1041,6 +1197,20 @@ render()
   await oauthButtonReady('Review sign-in')
   await click('Review sign-in')
   await wait(oauthReviewOpen)
+  const closeCancelsBefore = await count('agent-mcp:oauth-cancel')
+  await click('Close')
+  await wait(
+    `!document.querySelector('dialog[open]') && !(${oauthReviewOpen}) && window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:oauth-cancel').length > ${closeCancelsBefore}`
+  )
+  await openSection()
+  assert.equal(await evaluate(`return ${oauthReviewOpen} || ${reviewOpen}`), false)
+  flows.push(
+    'Closing the server dialog revokes pending OAuth review; reopening does not restore approval'
+  )
+
+  await oauthButtonReady('Review sign-in')
+  await click('Review sign-in')
+  await wait(oauthReviewOpen)
   await evaluate("window.__fixture.hold('agent-mcp:oauth-sign-in')")
   await click('Open browser once')
   await wait("window.__fixture.pendingCount('agent-mcp:oauth-sign-in') === 1")
@@ -1059,6 +1229,7 @@ render()
   await wait('window.__fixture.listenerCount() === 0')
   await evaluate('history.back()')
   await wait('window.__fixture.listenerCount() === 1')
+  await openSection()
   assert.equal(await count('agent-mcp:oauth-sign-in'), navigationOAuthCalls)
   assert.equal(await count('agent-mcp:start'), oauthBefore.connections + 1)
   assert.equal(await evaluate(`return ${oauthReviewOpen} || ${reviewOpen}`), false)
@@ -1204,7 +1375,7 @@ render()
     limitations: [
       'Isolated real Svelte controls/outcome components and app CSS with fake IPC, not the full Electron application',
       'No real MCP executable, HTTP endpoint, provider, Discord, credentials, OAuth or installation',
-      'Linux Chromium only; no native platform dialogs or Windows/macOS UI coverage'
+      'Headless Chromium only; no native platform dialogs'
     ]
   }
   assert.deepEqual(browserErrors, [])

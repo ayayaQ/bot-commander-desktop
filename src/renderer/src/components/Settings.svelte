@@ -630,8 +630,10 @@
 
   <div class="divider"></div>
   <h2 class="text-2xl font-bold mb-4">Agent integrations</h2>
-  <McpSettingsCard />
-  <AgentMcpSettingsCard />
+  <div class="flex flex-col gap-3">
+    <McpSettingsCard />
+    <AgentMcpSettingsCard />
+  </div>
 
   <div class="divider"></div>
   <h2 class="text-2xl font-bold mb-4">AI Provider</h2>

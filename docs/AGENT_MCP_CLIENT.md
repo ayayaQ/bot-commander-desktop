@@ -7,7 +7,10 @@ agents inspect or edit Bot Commander. Its settings and capabilities are unchange
 
 ## Setup and review
 
-1. Add a server ID, label, transport and protocol compatibility. For stdio, use an absolute
+1. For a remote server, enter its ID and HTTPS MCP endpoint. HTTP is the default transport,
+   compatibility is automatic, and the label defaults to the ID. Advanced options contain
+   label/protocol overrides and the explicit loopback HTTP test option. For stdio, choose
+   Installed stdio and use an absolute
    installed executable and working directory plus an argument array. Optional environment
    selections are safe inherited names only. For HTTP, use an HTTPS endpoint with no credentials,
    query or fragment. Unencrypted HTTP requires explicit opt-in and literal `127.0.0.1` or
@@ -39,6 +42,15 @@ the endpoint can observe the client's network address and MCP traffic. Redirects
 HTTP uses the same approval, catalog freshness and unknown-outcome boundaries as stdio.
 
 ## Outcomes and limits
+
+New HTTP entries negotiate compatibility using the pinned SDK on the approved connection:
+modern discovery first, with legacy initialization only for a compatible legacy response.
+This does not retry tools or resource reads, follow redirects, or start sign-in automatically.
+Authentication failures, transport failures and invalid responses stop setup. Existing explicit
+legacy/modern settings are preserved; choose Automatic under Advanced to change an HTTP entry.
+Installed stdio servers retain legacy negotiation by default; their exact modern override
+remains available under Advanced. Automatic probing is HTTP-only: a legacy stdio server may
+exit on a pre-initialization probe, and desktop owns only the explicitly approved process.
 
 Each attempt is bound to the active session/run, exact arguments, approved request,
 configuration, launch, connection and captured catalog. The actual transport send consumes
@@ -84,8 +96,9 @@ The renderer receives only public review disclosures and status through trusted 
 - Alternatively choose **Review registration**. Bounded discovery validates issuer, S256 PKCE,
   public `none` client authentication and an advertised registration endpoint. Review the exact
   endpoint, callback and full native authorization-code public metadata before **Register once**.
-  This approves one DCR POST only. Returned metadata must match exactly; client secrets, expanded
-  scopes/grants and changed callbacks are rejected. Management tokens are discarded
+  This approves one DCR POST only. Returned authority must match exactly; client secrets, expanded
+  scopes/grants and changed callbacks are rejected. Optional OIDC application type may be omitted
+  and display names may be normalized by the issuer. Management tokens are discarded
 - Choose **Review sign-in**, inspect the endpoint, issuer, public client, callback and scopes,
   then **Open browser once**. The owned callback listener starts before the browser opens.
   The browser URL, state, code, verifier and tokens never enter renderer status or saved data
@@ -113,6 +126,34 @@ user-driven acceptance step. Initial testing should stop at handshake/catalog br
 explicit read-only listing, without billable inference or feedback writes.
 
 ## Implementation and verification
+
+### Review of vivi-cli setup history
+
+Reviewed the October 11–15, 2026 changes around the supplied compatibility commit, including
+the earlier desktop OAuth baseline. The useful pieces span several changes rather than just
+the protocol selector:
+
+| Upstream change                                                                                                                                                                                                                    | Desktop application                                                                                                                                                                                                                                                         |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Explicit session OAuth, #49](https://github.com/ayayaQ/vivi-cli/commit/38978a34adf1ae16ea2e61cbe15f9d8b01e1065c)                                                                                                                  | Already forms the desktop callback, registration and session baseline.                                                                                                                                                                                                      |
+| [URL-first setup, #54](https://github.com/ayayaQ/vivi-cli/commit/b89675ad8e35d754bebe61c46e5dd6b61a946d56)                                                                                                                         | Applied the smaller form: default HTTP, ID and URL, optional label defaulting to ID, technical overrides under Advanced. Upstream also discovers issuer/scopes and prepares a public OAuth client during guided sign-in; desktop still requires manual public-client setup. |
+| [Saved sign-in, #55](https://github.com/ayayaQ/vivi-cli/commit/d2bfa1d242b5181958f577768053622b3f5a2bc3)                                                                                                                           | Separate follow-up. Requires Electron secure-storage adaptation, explicit remember/session-only choices, bound credential records and safe refresh/logout behavior. Desktop remains session-only.                                                                           |
+| [Reviewed agent setup, #56](https://github.com/ayayaQ/vivi-cli/commit/e23885ae505e7e8934a9c45f3dbfcdd85030aa7e)                                                                                                                    | Applied the startup request recheck needed for negotiated HTTP fallback. Model-driven setup tools and their configuration/turn ownership are a separate feature.                                                                                                            |
+| [Registration interoperability, #57](https://github.com/ayayaQ/vivi-cli/commit/e2eef7e9f626fed37003ef1c1b65ca2499d80c6e)                                                                                                           | Applied acceptance of omitted optional OIDC metadata and normalized client names. Exact client authority remains checked. Upstream's richer fixed registration/network diagnostics are not part of this change.                                                             |
+| [Automatic compatibility, #59](https://github.com/ayayaQ/vivi-cli/commit/87dbe87b57432eb345eb5c0f74ce58779e32ddc4)                                                                                                                 | Applied HTTP `auto`, SDK connect-time negotiation, preserved explicit overrides, and protocol-aware session-header checks. No dependency upgrade or second connection is needed.                                                                                            |
+| [Separate phase deadlines](https://github.com/ayayaQ/vivi-cli/commit/8fe7c555a6eac2ef66ff0d2e03b4159ccd06cb3b) and [cold Windows startup, #67](https://github.com/ayayaQ/vivi-cli/commit/5a4cdb032fb349106b6274c0f6db51c994deea6b) | Follow-up for local-server reliability: separate native bootstrap, handshake and catalog deadlines. Upstream assigns its Windows helper a 45-second bootstrap budget. Desktop still has an overall startup/category deadline; this patch does not change timeout policy.    |
+
+The next setup improvement is guided **Connect / Sign in** from a URL, with issuer, scopes,
+callback and public-client details discovered in main and shown in a focused review. Moving
+the current manual OAuth fields under another disclosure alone would not provide that flow.
+That adaptation needs discovery/network bounds and cancellable registration/sign-in ownership,
+followed by the saved-credential lifecycle as a separate step.
+
+Automatic compatibility is covered with real SDK/injected HTTP peers for both generations,
+one-shot tools/reads, explicit overrides, session headers, authentication and malformed-response
+failures, and cancellation/configuration/authorization/privacy changes while probing. The
+Chromium fixture covers the compact form, hidden overrides, optional label, inert save and
+preservation of both stdio and HTTP settings when editing.
 
 Published `@ayayaq/vivi@0.13.0` supplies shared catalog/schema, immutable proposal and bounded
 result projection through `@ayayaq/vivi/extensions/mcp`. Electron main owns the official

@@ -783,7 +783,10 @@ export class AgentMcpService {
         inputRequired: { autoFulfill: false },
         enforceStrictCapabilities: true,
         versionNegotiation: {
-          mode: launch.server.protocol === 'legacy' ? 'legacy' : { pin: launch.server.protocol }
+          mode:
+            launch.server.protocol === '2026-07-28'
+              ? { pin: launch.server.protocol }
+              : launch.server.protocol
         }
       }
     )
@@ -792,6 +795,15 @@ export class AgentMcpService {
       : isMcpHttpLaunch(launch)
         ? new McpHttpTransport(launch, {
             ...(this.options.httpFetch ? { fetch: this.options.httpFetch } : {}),
+            beforeConnectRequest: async () => {
+              if (connection.state !== 'connecting') return
+              await this.assertLaunchCurrent(launch, combined)
+              this.assertAuthorization(connection)
+              if (privacyRevision !== this.privacyRevision())
+                throw new Error('MCP privacy changed during connection setup')
+              if ((this.options.now?.() ?? Date.now()) >= expiresAt)
+                throw new Error('MCP launch approval expired during connection setup')
+            },
             token: () => {
               this.assertAuthorization(connection)
               return authorization?.bearerToken

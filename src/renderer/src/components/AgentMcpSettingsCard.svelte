@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import SettingsSectionDialog from './SettingsSectionDialog.svelte'
   import {
     createAgentMcpControls,
     parseAgentMcpDraft,
@@ -7,22 +8,30 @@
     parseAgentMcpOAuthPublicClient,
     type AgentMcpOAuthDraft
   } from '../stores/agentMcp'
-  import type { AgentMcpCatalogKind, AgentMcpServerConfig } from '../../../shared/agentMcpTypes'
+  import type {
+    AgentMcpCatalogKind,
+    AgentMcpHttpServerConfig,
+    AgentMcpServerConfig,
+    AgentMcpStdioServerConfig
+  } from '../../../shared/agentMcpTypes'
 
   const controls = createAgentMcpControls(window.electron.ipcRenderer)
   const kinds: AgentMcpCatalogKind[] = ['tools', 'resources', 'resourceTemplates']
   const labels = { tools: 'Tools', resources: 'Resources', resourceTemplates: 'Resource templates' }
   let editing = $state(false)
   let dirty = $state(false)
+  let advancedOpen = $state(false)
   let id = $state('')
   let label = $state('')
-  let transport = $state<'stdio' | 'http'>('stdio')
+  let transport = $state<'stdio' | 'http'>('http')
   let endpoint = $state('')
   let allowLoopbackHttp = $state(false)
   let executable = $state('')
   let cwd = $state('')
   let args = $state('[]')
-  let protocol = $state<AgentMcpServerConfig['protocol']>('legacy')
+  let httpProtocol = $state<AgentMcpHttpServerConfig['protocol']>('auto')
+  let stdioProtocol = $state<AgentMcpStdioServerConfig['protocol']>('legacy')
+  const protocol = $derived(transport === 'http' ? httpProtocol : stdioProtocol)
   let environment = $state<string[]>([])
   let formError = $state('')
   let oauthDrafts = $state<Record<string, AgentMcpOAuthDraft>>({})
@@ -59,6 +68,7 @@
   function edit(server: AgentMcpServerConfig) {
     controls.configurationChanged()
     editing = true
+    advancedOpen = false
     id = server.id
     label = server.label
     transport = server.transport === 'http' ? 'http' : 'stdio'
@@ -67,7 +77,8 @@
     executable = server.transport === 'http' ? '' : server.executable
     cwd = server.transport === 'http' ? '' : server.cwd
     args = server.transport === 'http' ? '[]' : JSON.stringify(server.args)
-    protocol = server.protocol
+    if (server.transport === 'http') httpProtocol = server.protocol
+    else stdioProtocol = server.protocol
     environment = server.transport === 'http' ? [] : [...server.environment]
     dirty = false
     formError = ''
@@ -75,16 +86,18 @@
   function clear() {
     controls.configurationChanged()
     editing = false
+    advancedOpen = false
     dirty = false
     id = ''
     label = ''
-    transport = 'stdio'
+    transport = 'http'
     endpoint = ''
     allowLoopbackHttp = false
     executable = ''
     cwd = ''
     args = '[]'
-    protocol = 'legacy'
+    httpProtocol = 'auto'
+    stdioProtocol = 'legacy'
     environment = []
     formError = ''
   }
@@ -94,8 +107,23 @@
     try {
       const config = parseAgentMcpDraft(
         transport === 'http'
-          ? { transport, id, label, endpoint, protocol, allowLoopbackHttp }
-          : { id, label, executable, cwd, argsJson: args, protocol, environment },
+          ? {
+              transport,
+              id,
+              label: label || id,
+              endpoint,
+              protocol: httpProtocol,
+              allowLoopbackHttp
+            }
+          : {
+              id,
+              label: label || id,
+              executable,
+              cwd,
+              argsJson: args,
+              protocol: stdioProtocol,
+              environment
+            },
         $controls.status?.environmentNames ?? []
       )
       if (await controls.configure(config)) {
@@ -105,6 +133,12 @@
     } catch (error) {
       formError = error instanceof Error ? error.message : 'Invalid server configuration.'
     }
+  }
+  function changeProtocol(event: Event) {
+    const value = (event.currentTarget as HTMLSelectElement).value
+    if (transport === 'http') httpProtocol = value as AgentMcpHttpServerConfig['protocol']
+    else stdioProtocol = value as AgentMcpStdioServerConfig['protocol']
+    changed()
   }
   function oauthDraft(serverId: string): AgentMcpOAuthDraft {
     return (
@@ -150,29 +184,29 @@
       if (review?.kind === 'registration') oauthDirty[review.serverId] = false
     }
   }
-</script>
 
-<svelte:window
-  onkeydown={(event) => {
+  function cancelPendingReview(event?: Event) {
     if (
-      event.key === 'Escape' &&
-      ($controls.preparation ||
-        $controls.oauthReview ||
-        $controls.oauthServerId ||
-        $controls.busy === 'prepare' ||
-        $controls.busy === 'start')
+      $controls.preparation ||
+      $controls.oauthReview ||
+      $controls.oauthServerId ||
+      $controls.busy === 'prepare' ||
+      $controls.busy === 'start' ||
+      $controls.busy?.startsWith('oauth-')
     ) {
-      event.preventDefault()
+      event?.preventDefault()
       controls.cancel()
     }
-  }}
-/>
+  }
+</script>
 
-<section
-  class="rounded-box border border-base-300 bg-base-200/50 p-4 space-y-4 mt-4"
-  aria-label="Agent MCP servers"
+<SettingsSectionDialog
+  title="Agent MCP servers"
+  description="Connect the built-in agent to trusted MCP servers and manage their connections."
+  icon="dns"
+  oncancel={cancelPendingReview}
+  onclose={() => cancelPendingReview()}
 >
-  <h3 class="text-lg font-semibold">Agent MCP servers</h3>
   <p class="text-sm">
     Connect the built-in agent to a trusted installed stdio server or Streamable HTTP endpoint.
     Saving starts nothing. Each Start needs a fresh review. Every tool call and resource read needs
@@ -313,15 +347,6 @@
           disabled={editBlocked || editing}
         /></label
       >
-      <label class="form-control"
-        >Label<input
-          class="input input-bordered"
-          bind:value={label}
-          oninput={changed}
-          maxlength="80"
-          disabled={editBlocked}
-        /></label
-      >
       {#if transport === 'http'}
         <label class="form-control"
           >Endpoint URL<input
@@ -359,49 +384,78 @@
             disabled={editBlocked}></textarea></label
         >
       {/if}
-      <label class="form-control"
-        >Protocol compatibility<select
-          class="select select-bordered"
-          bind:value={protocol}
-          onchange={changed}
-          disabled={editBlocked}
-          ><option value="legacy">Legacy negotiation</option><option value="2026-07-28"
-            >2026-07-28</option
-          ></select
-        ></label
-      >
     </div>
-    {#if transport === 'http'}
-      <label class="label cursor-pointer justify-start gap-2 text-sm"
-        ><input
-          class="checkbox checkbox-sm"
-          type="checkbox"
-          bind:checked={allowLoopbackHttp}
-          onchange={changed}
-          disabled={editBlocked}
-        />Allow unencrypted HTTP on literal 127.0.0.1 or [::1] for local testing</label
-      >
-      <p class="text-xs opacity-70">
-        No credentials, query strings or fragments in the endpoint. Redirects are refused. Saving
-        neither contacts the endpoint nor discovers metadata.
+    <details class="rounded-box border border-base-300 p-3" bind:open={advancedOpen}>
+      <summary class="cursor-pointer text-sm font-medium">Advanced options</summary>
+      <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+        <label class="form-control"
+          >Label (optional)<input
+            class="input input-bordered"
+            bind:value={label}
+            oninput={changed}
+            maxlength="80"
+            placeholder={id || 'Defaults to the server ID'}
+            disabled={editBlocked}
+          /></label
+        >
+        <label class="form-control"
+          >Protocol compatibility<select
+            class="select select-bordered"
+            value={protocol}
+            onchange={changeProtocol}
+            disabled={editBlocked}
+            >{#if transport === 'http'}<option value="auto">Automatic (recommended)</option
+              >{/if}<option value="legacy">Legacy negotiation</option><option value="2026-07-28"
+              >Require 2026-07-28</option
+            ></select
+          ></label
+        >
+      </div>
+      <p class="mt-2 text-xs opacity-70">
+        {transport === 'http'
+          ? 'Automatic compatibility negotiates a supported protocol when you connect. Use an override only if your server requires one.'
+          : 'Legacy negotiation works with existing stdio servers. Change this only if your server requires the newer protocol.'}
+        Existing overrides are preserved when editing.
       </p>
-    {:else}
-      <fieldset class="space-y-2" disabled={editBlocked}>
-        <legend class="text-sm">Optional inherited safe environment names</legend>
+      {#if transport === 'http'}
+        <label class="label cursor-pointer justify-start gap-2 text-sm"
+          ><input
+            class="checkbox checkbox-sm"
+            type="checkbox"
+            bind:checked={allowLoopbackHttp}
+            onchange={changed}
+            disabled={editBlocked}
+          />Allow unencrypted HTTP on literal 127.0.0.1 or [::1] for local testing</label
+        >
         <p class="text-xs opacity-70">
-          No custom values or credentials can be entered or saved here.
+          No credentials, query strings or fragments in the endpoint. Redirects are refused. Saving
+          neither contacts the endpoint nor discovers metadata.
         </p>
-        {#each $controls.status?.environmentNames ?? [] as name}<label
-            class="label cursor-pointer inline-flex gap-2"
-            ><input
-              class="checkbox checkbox-sm"
-              type="checkbox"
-              value={name}
-              bind:group={environment}
-              onchange={changed}
-            />{name}</label
-          >{/each}
-      </fieldset>
+      {:else}
+        <fieldset class="space-y-2" disabled={editBlocked}>
+          <legend class="text-sm">Optional inherited safe environment names</legend>
+          <p class="text-xs opacity-70">
+            No custom values or credentials can be entered or saved here.
+          </p>
+          {#each $controls.status?.environmentNames ?? [] as name}<label
+              class="label cursor-pointer inline-flex gap-2"
+              ><input
+                class="checkbox checkbox-sm"
+                type="checkbox"
+                value={name}
+                bind:group={environment}
+                onchange={changed}
+              />{name}</label
+            >{/each}
+        </fieldset>
+      {/if}
+    </details>
+    {#if transport === 'http'}
+      <p class="text-xs opacity-70">
+        {httpProtocol === 'auto'
+          ? 'Protocol compatibility is automatic.'
+          : `Saved protocol override: ${httpProtocol}. Change it in Advanced options if needed.`}
+      </p>
     {/if}
     {#if formError}<p class="text-error text-sm" role="alert">{formError}</p>{/if}
     <div class="flex flex-wrap gap-2">
@@ -654,4 +708,4 @@
     Credential input, installation and package/shell runners are unavailable. No automatic reconnect
     or retry. Disconnect and cancellation cannot undo effects.
   </p>
-</section>
+</SettingsSectionDialog>
