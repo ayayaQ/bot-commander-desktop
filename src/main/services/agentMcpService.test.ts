@@ -178,7 +178,7 @@ afterEach(async () => {
   }
 })
 async function fixture(
-  protocol: McpServerConfig['protocol'] = 'legacy',
+  protocol: Exclude<McpServerConfig['protocol'], 'auto'> = 'legacy',
   start = true,
   configureTransport?: (peer: OfflineTransport) => void
 ) {

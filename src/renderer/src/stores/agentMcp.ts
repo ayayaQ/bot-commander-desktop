@@ -150,7 +150,11 @@ export function parseAgentMcpDraft(
     )
   if (!label || label.length > 80 || controls.test(label))
     throw new Error('Enter a label of at most 80 characters without control characters.')
-  if (draft.protocol !== 'legacy' && draft.protocol !== '2026-07-28')
+  if (
+    draft.protocol !== 'legacy' &&
+    draft.protocol !== '2026-07-28' &&
+    !(draft.transport === 'http' && draft.protocol === 'auto')
+  )
     throw new Error('Select a supported protocol.')
   if (draft.transport === 'http') {
     const endpoint = draft.endpoint?.trim() ?? ''
@@ -217,7 +221,7 @@ export function parseAgentMcpDraft(
     executable,
     args: args as string[],
     cwd,
-    protocol: draft.protocol,
+    protocol: draft.protocol as AgentMcpStdioServerConfig['protocol'],
     environment,
     ...(draft.transport === 'stdio' ? { transport: 'stdio' as const } : {})
   }

@@ -56,6 +56,8 @@ interface RecordedRequest {
   signal?: AbortSignal
 }
 interface FixtureOptions {
+  era?: 'legacy' | '2026-07-28'
+  discovery?: (message: JSONRPCMessage) => Response | Promise<Response>
   authorization?: Authorization
   disconnected?: boolean
   templates?: boolean
@@ -103,6 +105,7 @@ async function fixture(
   const requests: RecordedRequest[] = []
   const effects: JSONRPCMessage[] = []
   const server: McpServerConfig = { ...BASE, protocol }
+  const era = options.era ?? (protocol === 'legacy' ? 'legacy' : '2026-07-28')
   let authorization: Authorization = options.authorization ?? { revision: 'anonymous' }
   let privacy = 1
   const httpFetch: FetchLike = async (input, init) => {
@@ -124,7 +127,7 @@ async function fixture(
         message.method === 'tools/call'
           ? { content: [{ type: 'text', text: 'HTTP_CONFIRMED' }] }
           : { contents: [{ uri: message.params?.uri, text: 'HTTP_RESOURCE' }] },
-        protocol
+        era
       )
     }
     if (message.method === 'initialize')
@@ -135,30 +138,46 @@ async function fixture(
           capabilities: { tools: {}, resources: {} },
           serverInfo: { name: 'Owned offline fixture', version: '1' }
         },
-        protocol,
+        era,
         { 'mcp-session-id': 'owned-legacy-session' }
       )
     if (['notifications/initialized', 'notifications/cancelled'].includes(message.method))
       return new Response(null, { status: 202 })
+    if (message.method === 'server/discover' && options.discovery) return options.discovery(message)
+    if (message.method === 'server/discover' && era === 'legacy')
+      return new Response(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'id' in message ? message.id : 0,
+          error: { code: -32000, message: 'Server not initialized' }
+        }),
+        {
+          status: 400,
+          headers: {
+            'content-type': 'application/json',
+            'mcp-session-id': 'unadopted-probe-session'
+          }
+        }
+      )
     if (message.method === 'server/discover')
       return json(
         message,
         { supportedVersions: ['2026-07-28'], capabilities: { tools: {}, resources: {} } },
-        protocol
+        era
       )
     if (message.method === 'tools/list')
-      return json(message, { tools: [{ name: REMOTE_NAME, inputSchema: SCHEMA }] }, protocol)
+      return json(message, { tools: [{ name: REMOTE_NAME, inputSchema: SCHEMA }] }, era)
     if (message.method === 'resources/list' && options.metadataEffect)
       return options.metadataEffect(message)
     if (message.method === 'resources/list')
-      return json(message, { resources: [{ uri: URI, name: 'Owned resource' }] }, protocol)
+      return json(message, { resources: [{ uri: URI, name: 'Owned resource' }] }, era)
     if (message.method === 'resources/templates/list')
       return json(
         message,
         {
           resourceTemplates: options.templates ? [{ uriTemplate: TEMPLATE, name: 'Template' }] : []
         },
-        protocol
+        era
       )
     throw new Error(`Unexpected fixture method ${message.method}`)
   }
@@ -355,6 +374,151 @@ describe('HTTP configuration and launch approval', () => {
         )
       await expect(subject.service.start(launch.token)).rejects.toThrow()
       expect(subject.requests).toEqual([])
+    }
+  )
+})
+
+describe('automatic HTTP compatibility through the real SDK', () => {
+  const methods = (subject: Awaited<ReturnType<typeof fixture>>) =>
+    subject.requests.map(({ message }) => ('method' in message ? message.method : ''))
+
+  it.each(['legacy', '2026-07-28'] as const)(
+    'negotiates %s on the approved endpoint and keeps operations one-shot',
+    async (era) => {
+      const subject = await fixture('auto', {
+        era,
+        authorization: { revision: 'auth-1', bearerToken: TOKEN }
+      })
+      expect(methods(subject)[0]).toBe('server/discover')
+      expect(methods(subject).includes('initialize')).toBe(era === 'legacy')
+      expect((await subject.service.captureCatalogs(signal()))[0].protocolVersion).toBe(
+        era === 'legacy' ? '2025-11-25' : era
+      )
+      for (const kind of ['tools', 'resources'] as const) {
+        const operation = await subject.prepare(kind)
+        expect(subject.effects).toHaveLength(kind === 'tools' ? 0 : 1)
+        expect((await subject.service.invoke(operation, signal(), () => {}, hooks())).outcome).toBe(
+          'confirmed'
+        )
+        await subject.service.invoke(operation, signal(), () => {}, hooks())
+      }
+      expect(subject.effects).toHaveLength(2)
+      expect(methods(subject).filter((method) => method === 'server/discover')).toHaveLength(1)
+      for (const { message, headers } of subject.requests) {
+        expect(headers.get('authorization')).toBe(`Bearer ${TOKEN}`)
+        expect(headers.get('mcp-session-id')).not.toBe('unadopted-probe-session')
+        if ('method' in message && ['tools/call', 'resources/read'].includes(message.method)) {
+          expect(headers.get('mcp-protocol-version')).toBe(era === 'legacy' ? '2025-11-25' : era)
+          expect(headers.get('mcp-session-id')).toBe(
+            era === 'legacy' ? 'owned-legacy-session' : null
+          )
+        }
+      }
+      expect((await subject.store.load()).servers[0].protocol).toBe('auto')
+    }
+  )
+
+  it.each(['auto', 'legacy', '2026-07-28'] as const)(
+    'persists %s without silently migrating a pin',
+    async (protocol) => {
+      const subject = await fixture(protocol, { disconnected: true })
+      expect(subject.requests).toEqual([])
+      expect((await subject.store.load()).servers[0].protocol).toBe(protocol)
+      expect((await subject.service.prepareLaunch('remote')).disclosure).toContain(
+        `Protocol: ${protocol}`
+      )
+    }
+  )
+
+  it.each([401, 403, 500])(
+    'stops at HTTP %s without fallback, sign-in or replay',
+    async (status) => {
+      const subject = await fixture('auto', {
+        disconnected: true,
+        discovery: () => new Response('offline rejection', { status })
+      })
+      expect(
+        (await subject.service.start((await subject.service.prepareLaunch('remote')).token)).started
+      ).toBe(false)
+      expect(methods(subject)).toEqual(['server/discover'])
+      expect(await subject.service.captureCatalogs(signal())).toEqual([])
+    }
+  )
+
+  it.each(['network', 'malformed', 'html', 'modern-session'] as const)(
+    'rejects %s discovery without fallback',
+    async (failure) => {
+      const subject = await fixture('auto', {
+        disconnected: true,
+        discovery: (message) => {
+          if (failure === 'network') throw new TypeError('Offline network failure')
+          if (failure === 'malformed')
+            return new Response('{invalid', { headers: { 'content-type': 'application/json' } })
+          if (failure === 'html')
+            return new Response('<html>Offline</html>', {
+              headers: { 'content-type': 'text/html' }
+            })
+          return json(
+            message,
+            { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } },
+            '2026-07-28',
+            { 'mcp-session-id': 'forbidden-modern-session' }
+          )
+        }
+      })
+      expect(
+        (await subject.service.start((await subject.service.prepareLaunch('remote')).token)).started
+      ).toBe(false)
+      expect(methods(subject)).toEqual(['server/discover'])
+    }
+  )
+
+  it.each(['cancel', 'authorization', 'configuration', 'privacy'] as const)(
+    'blocks fallback after %s changes during the probe',
+    async (change) => {
+      const entered = deferred(),
+        release = deferred()
+      const subject = await fixture('auto', {
+        disconnected: true,
+        discovery: async (message) => {
+          entered.resolve()
+          await release.promise
+          return new Response(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: 'id' in message ? message.id : 0,
+              error: { code: -32000, message: 'Server not initialized' }
+            }),
+            { status: 400, headers: { 'content-type': 'application/json' } }
+          )
+        }
+      })
+      const pending = subject.service.start((await subject.service.prepareLaunch('remote')).token)
+      await entered.promise
+      if (change === 'cancel') subject.service.cancelPendingLaunches()
+      if (change === 'authorization') subject.setAuthorization({ revision: 'auth-2' })
+      if (change === 'configuration')
+        await subject.store.save(
+          [{ ...subject.server, endpoint: 'https://mcp.example.test/changed' }],
+          (await subject.store.load()).revision
+        )
+      if (change === 'privacy') subject.changePrivacy()
+      release.resolve()
+      expect((await pending).started).toBe(false)
+      expect(methods(subject)).toEqual(['server/discover'])
+    }
+  )
+
+  it.each(['legacy', '2026-07-28'] as const)(
+    'keeps the explicit %s override when the peer is legacy',
+    async (protocol) => {
+      const subject = await fixture(protocol, { era: 'legacy', disconnected: true })
+      const result = await subject.service.start(
+        (await subject.service.prepareLaunch('remote')).token
+      )
+      expect(result.started).toBe(protocol === 'legacy')
+      expect(methods(subject).includes('server/discover')).toBe(protocol !== 'legacy')
+      expect(methods(subject).includes('initialize')).toBe(protocol === 'legacy')
     }
   )
 })

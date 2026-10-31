@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import SettingsSectionDialog from './SettingsSectionDialog.svelte'
   import type { McpAccessMode, McpActivityEntry, McpServerStatus } from '../../../shared/mcpTypes'
 
   const emptyStatus: McpServerStatus = {
@@ -132,11 +133,15 @@ default_tools_approval_mode = "writes"`)
 }`)
 </script>
 
-<div class="rounded-box border border-base-300 bg-base-200/50 p-4 space-y-4">
+<SettingsSectionDialog
+  title="External agent access"
+  description="Let Codex, Claude Code, or another local MCP client work with this app."
+  icon="lan"
+>
   <div class="flex flex-wrap items-start justify-between gap-4">
     <div>
       <div class="flex items-center gap-2">
-        <h3 class="text-lg font-semibold">External agent access</h3>
+        <span class="font-semibold">Enable external agent access</span>
         <span class="badge {status.running ? 'badge-success' : status.error ? 'badge-error' : ''}">
           {status.running ? 'Running' : status.error ? 'Error' : 'Stopped'}
         </span>
@@ -297,4 +302,4 @@ default_tools_approval_mode = "writes"`)
       </div>
     {/if}
   </div>
-</div>
+</SettingsSectionDialog>

@@ -452,6 +452,8 @@ describe('agent MCP bounded form and escaped render', () => {
     })
   })
   it('parses a minimal anonymous HTTP draft without carrying hidden stdio or auth fields', () => {
+    expect(parseAgentMcpDraft(httpDraft({ protocol: 'auto' }), []).protocol).toBe('auto')
+    expect(() => parseAgentMcpDraft(draft({ protocol: 'auto' }), ['HOME'])).toThrow('protocol')
     expect(parseAgentMcpDraft(httpDraft(), [])).toEqual(httpConfig)
     expect(
       parseAgentMcpDraft(

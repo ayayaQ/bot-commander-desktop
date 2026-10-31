@@ -61,7 +61,7 @@ interface RecordedMessage {
 
 async function fixture(
   mode: 'normal' | 'exit-on-read' | 'different-uri' = 'normal',
-  protocol: McpServerConfig['protocol'] = 'legacy',
+  protocol: Exclude<McpServerConfig['protocol'], 'auto'> = 'legacy',
   start = true
 ) {
   const directory = await mkdtemp(join(tmpdir(), 'desktop-template-fixture-'))

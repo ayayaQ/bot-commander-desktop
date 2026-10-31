@@ -103,7 +103,7 @@ export function validateMcpServer(
       !/^[a-z][a-z0-9_-]{0,15}$/.test(value.id) ||
       !mcpText(value.label, 80) ||
       typeof value.protocol !== 'string' ||
-      !['legacy', '2026-07-28'].includes(value.protocol)
+      !['auto', 'legacy', '2026-07-28'].includes(value.protocol)
     )
       fail()
     const server: AgentMcpHttpServerConfig = {
@@ -169,7 +169,7 @@ export function validateMcpServer(
     executable: value.executable,
     args: [...value.args],
     cwd: value.cwd,
-    protocol: value.protocol as McpServerConfig['protocol'],
+    protocol: value.protocol as AgentMcpStdioServerConfig['protocol'],
     environment: [...value.environment]
   }
   if (

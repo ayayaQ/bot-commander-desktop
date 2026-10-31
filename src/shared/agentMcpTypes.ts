@@ -18,7 +18,7 @@ export interface AgentMcpHttpServerConfig {
   readonly id: string
   readonly label: string
   readonly endpoint: string
-  readonly protocol: 'legacy' | '2026-07-28'
+  readonly protocol: 'auto' | 'legacy' | '2026-07-28'
   readonly allowLoopbackHttp: boolean
 }
 export type AgentMcpServerConfig = AgentMcpStdioServerConfig | AgentMcpHttpServerConfig

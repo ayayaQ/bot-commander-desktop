@@ -250,8 +250,10 @@ export class McpOAuthRegistration {
         /[\u0000-\u0020\u007f-\u009f]/.test(client.client_id) ||
         client.token_endpoint_auth_method !== 'none' ||
         Object.hasOwn(client, 'client_secret') ||
-        client.application_type !== 'native' ||
-        client.client_name !== plan.clientMetadata.client_name ||
+        // OIDC application_type is optional; display names may be normalized by
+        // the issuer. Neither field changes this exact public client's authority.
+        (client.application_type !== undefined && client.application_type !== 'native') ||
+        (client.client_name !== undefined && typeof client.client_name !== 'string') ||
         !exactly(client.redirect_uris, [plan.redirectUri]) ||
         !exactly(client.grant_types, ['authorization_code']) ||
         !exactly(client.response_types, ['code']) ||
