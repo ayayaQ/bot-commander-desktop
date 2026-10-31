@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { createAgentPersistence } from './agentPersistence'
 import { withAgentPersistenceOperation } from './agentPersistenceLifecycle'
 import { hasUncertainAtomicWrites } from './atomicPersistence'
+import { validateSkillName } from '@ayayaq/vivi/extensions/skills'
 
 export const MAX_DECISION_LEDGER_ROWS = 200
 const MAX_LEDGER_BYTES = 256 * 1024
@@ -20,7 +21,13 @@ export interface AgentDecisionLedgerRow {
   runId: string
   callBinding: string
   tool:
-    'create_command' | 'edit_command' | 'create_memory' | 'edit_memory' | 'web_search' | 'fetch_url'
+    | 'create_command'
+    | 'edit_command'
+    | 'create_memory'
+    | 'edit_memory'
+    | 'save_skill'
+    | 'web_search'
+    | 'fetch_url'
   snapshotBinding: string
   policyRevision: string
   provider?: 'openai' | 'openrouter'
@@ -34,7 +41,7 @@ export interface AgentDecisionLedgerRow {
   createdAt: string
   settledAt?: string
   resultingRevision?: string
-  targetType?: 'command' | 'memory' | 'web'
+  targetType?: 'command' | 'memory' | 'skill' | 'web'
   targetId?: string
   candidateRevision?: string
   reconciliation?: {
@@ -55,7 +62,7 @@ export interface AgentDecisionAuditBinding {
   policyRevision: string
 }
 export type DecisionAuditResourceReader = (
-  targetType: 'command' | 'memory' | 'web',
+  targetType: 'command' | 'memory' | 'skill' | 'web',
   targetId: string
 ) => Promise<{
   resourceRevision: string
@@ -102,6 +109,7 @@ const tools = new Set([
   'edit_command',
   'create_memory',
   'edit_memory',
+  'save_skill',
   'web_search',
   'fetch_url'
 ])
@@ -112,6 +120,15 @@ function text(value: unknown, max = 120): value is string {
     value.length <= max &&
     /^[A-Za-z0-9_.:/-]+$/.test(value)
   )
+}
+
+function skillName(value: unknown): boolean {
+  try {
+    validateSkillName(value)
+    return value === value.trim().normalize('NFKC')
+  } catch {
+    return false
+  }
 }
 
 /** Strict metadata schema makes arbitrary request/response content impossible to journal. */
@@ -157,8 +174,10 @@ export function decodeAgentDecisionLedger(raw: string): LedgerData {
       (row.resultingRevision !== undefined && !/^[a-f0-9]{16}$/.test(row.resultingRevision)) ||
       (row.provider !== undefined && !['openai', 'openrouter'].includes(row.provider)) ||
       (row.model !== undefined && !['gpt-6-luna', 'typesafe/jev-1.13'].includes(row.model)) ||
-      (row.targetType !== undefined && !['command', 'memory', 'web'].includes(row.targetType)) ||
-      (row.targetId !== undefined && !text(row.targetId)) ||
+      (row.targetType !== undefined &&
+        !['command', 'memory', 'skill', 'web'].includes(row.targetType)) ||
+      (row.targetId !== undefined &&
+        !(row.targetType === 'skill' ? skillName(row.targetId) : text(row.targetId))) ||
       (row.candidateRevision !== undefined && !/^[a-f0-9]{16}$/.test(row.candidateRevision))
     )
       throw new Error('Invalid decision audit row')
@@ -205,6 +224,7 @@ export function decodeAgentDecisionLedger(raw: string): LedgerData {
               'effects_within_scope',
               'evidence_not_redirected',
               'durable_memory_intent',
+              'durable_skill_intent',
               'request_authorizes_web',
               'paid_scope_authorized'
             ].includes(check.name) ||

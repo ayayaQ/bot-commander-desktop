@@ -29,7 +29,7 @@ export interface McpActivityEntry {
 }
 
 export type ResourceChangeKind =
-  'commands' | 'interactions' | 'bot-state' | 'startup-js' | 'settings' | 'memories'
+  'commands' | 'interactions' | 'bot-state' | 'startup-js' | 'settings' | 'memories' | 'skills'
 
 export type ResourceChangeSource = 'renderer' | 'agent' | 'mcp' | 'system'
 

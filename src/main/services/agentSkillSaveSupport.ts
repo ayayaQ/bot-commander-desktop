@@ -1,13 +1,13 @@
 export interface AgentSkillSaveSupport {
-  available: false
+  available: boolean
   reason: string
 }
 
-/** This release provides skill reads and creator drafts only, on every platform. */
+/** Saves use the same reviewed mutation flow as other persistent agent edits. */
 export function getAgentSkillSaveSupport(): AgentSkillSaveSupport {
   return {
-    available: false,
+    available: true,
     reason:
-      'Automatic skill saving is disabled on every platform. The creator can draft standard SKILL.md content for manual saving.'
+      'Ask the agent to create or update a skill. Manual mode asks for approval; Auto mode can save after review. Planning mode cannot save. Saved skills apply next turn.'
   }
 }

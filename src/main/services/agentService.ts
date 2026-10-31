@@ -1571,8 +1571,6 @@ async function runTool(
         if (call.validation && result && typeof result === 'object')
           result = { ...result, diagnostics: call.diagnostics, validation: call.validation }
       }
-    } else if (call.name === 'save_skill') {
-      throw new Error('Automatic skill saving is disabled; save creator drafts manually')
     } else if (context.extensions.has(call.name)) {
       const output = await context.extensions.executeTool(providerCall, { signal })
       if (context.mcpTools.has(call.name)) {
@@ -1794,7 +1792,7 @@ function agentContextPrefix(
     {
       kind: 'message',
       role: 'user',
-      content: `${formatSkillCatalogContext(skills.catalog)}\n${capabilities.tools === 'supported' ? 'Tools are available for this model.' : 'This model has no tools: it cannot read skills.'} Desktop host can read bounded UTF-8 skill resources. ${skills.status.saveSupport.reason} No shell, executable skill scripts, binary asset loader, community downloads, dependency installation or skill-supplied tool grants are available. Manually saved file changes apply on a future turn. Current user instructions take priority. Read-only sources cannot be edited.`
+      content: `${formatSkillCatalogContext(skills.catalog)}\n${capabilities.tools === 'supported' ? 'Tools are available for this model.' : 'This model has no tools: it cannot read or save skills.'} Desktop host can read bounded UTF-8 skill resources and save SKILL.md through the save_skill tool. ${skills.status.saveSupport.reason} Read skill-creator before creating or updating a skill. No shell, executable skill scripts, binary asset loader, community downloads, dependency installation or skill-supplied tool grants are available. Saved file changes apply on a future turn. Current user instructions take priority. Read-only sources cannot be edited.`
     }
   ]
 }

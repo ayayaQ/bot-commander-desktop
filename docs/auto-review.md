@@ -10,8 +10,9 @@ change cancels pending runs and requires enrollment again.
 
 ## Bounded profile
 
-Eligible actions are create/edit ordinary durable memory and create/edit fully validated
-response-only message commands. Exact current user intent is reviewed separately from
+Eligible actions are create/edit ordinary durable memory, create/edit instruction-only
+skills in the app-owned folder, and create/edit fully validated response-only message
+commands. Exact current user intent is reviewed separately from
 untrusted arguments and fixtures. A plan supplies scope only after the user selects its
 exact completed message for implementation.
 
@@ -31,8 +32,13 @@ permission-hierarchy guarantee or general untrusted-process containment.
 
 Deletion, interactions, bot state, startup scripts and developer/settings changes keep
 the existing manual or blocked paths. Read-only tools need no extra review. MCP,
-explicit memory-manager actions, extension authorization and disabled skill saving are
+explicit memory-manager actions and extension authorization are
 unchanged by agent enrollment.
+
+Skill saves write one complete SKILL.md after checking its listed revision or nonexistence.
+Imported folders and the bundled creator remain read-only. The full proposed document is
+reviewed for requested durable workflow intent. Skill text never grants tool access or
+approval, and new instructions become available only on a later turn.
 
 The shared `@ayayaq/vivi@0.8.0` prepared-action router consumes immutable metadata
 derived by this existing host validator. Memory records are app-wide local writes;
@@ -56,7 +62,7 @@ The preflight checks the entire selected plain-JSON snapshot, including keys and
 recognized escaped/decoded forms. Known credentials and recognized sensitive/private
 patterns keep the review local and fall back to Manual. This conservative preflight is
 **not a complete sensitive-content classifier**. Selecting Auto review enables sharing
-the exact current request and proposed memory or command text with the selected
+the exact current request and proposed memory, SKILL.md or command text with the selected
 reviewer, which can include private details the filter does not recognize. Known
 credentials remain excluded and recognized sensitive content requires Manual;
 enrollment never permits sharing credentials or unrelated private data. No whole
@@ -68,9 +74,10 @@ When DeepSeek web is configured, the Auto review footer provides a separate togg
 automatic paid web requests. Enabling Auto review alone does not enable those requests;
 an existing selection is retained while its web account and policy remain current.
 
-Policy desktop-reviewed-auto-v2 requires request_authorizes_change,
+Policy desktop-reviewed-auto-v3 requires request_authorizes_change,
 effects_within_scope and evidence_not_redirected; memory additionally requires
-durable_memory_intent. Initial OpenAI allowAt is 0.995, initial OpenRouter allowAt is
+durable_memory_intent, and skills additionally require durable_skill_intent. The expanded
+profile requires fresh enrollment for earlier policy versions. Initial OpenAI allowAt is 0.995, initial OpenRouter allowAt is
 0.999, and denyAt is 0.05 for each named requirement. All requirements must meet their
 own provider's allow threshold. These are **uncalibrated initial heuristics**, not
 accuracy or safety guarantees; equal estimates are not assumed comparable between

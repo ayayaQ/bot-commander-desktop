@@ -55,7 +55,7 @@ const validInvokeChannels = [
   'agent-mcp:oauth-sign-in',
   'agent-mcp:oauth-cancel',
   'skills:list',
-  'skills:choose-root',
+  'skills:open-folder',
   'skills:remove-root',
   'memory:list',
   'memory:create',

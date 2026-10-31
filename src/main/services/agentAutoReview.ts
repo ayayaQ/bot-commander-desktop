@@ -216,7 +216,12 @@ export async function reviewAgentMutation(options: ReviewOptions): Promise<Agent
   options.assertActive()
   try {
     const snapshot = options.snapshot()
-    const policy = desktopDecisionPolicy(account.provider, prepared.target.type === 'memory', web)
+    const policy = desktopDecisionPolicy(
+      account.provider,
+      prepared.target.type === 'memory',
+      web,
+      prepared.target.type === 'skill'
+    )
     if (Buffer.byteLength(JSON.stringify({ snapshot, policy })) > MAX_DECISION_BYTES) {
       display.reasonCode = 'review_input_oversized'
       return finish()
@@ -302,7 +307,7 @@ export async function reviewAgentMutation(options: ReviewOptions): Promise<Agent
       callBinding: decisionBinding(captured.toolCall.id),
       tool: prepared.name as AgentDecisionLedgerRow['tool'],
       snapshotBinding: decisionBinding(captured),
-      targetType: prepared.target.type as 'command' | 'memory' | 'web',
+      targetType: prepared.target.type as 'command' | 'memory' | 'skill' | 'web',
       targetId: prepared.target.id,
       candidateRevision: prepared.after === null ? undefined : resourceRevision(prepared.after),
       state: 'reviewed',
@@ -357,7 +362,7 @@ export function autoReviewSnapshot(input: {
       id: input.userRequestId,
       text: input.userRequest,
       approvedScope: {
-        profile: 'ordinary_memory_and_validated_response_commands',
+        profile: 'ordinary_memory_skills_and_validated_response_commands',
         enrollment: structuredClone(input.enrollment) as unknown as JsonObject,
         ...(input.acceptedPlan ? { acceptedPlan: input.acceptedPlan } : {})
       }
@@ -400,7 +405,9 @@ export function autoReviewSnapshot(input: {
     typeof input.resourceRevisions.resource === 'string' &&
     !!input.resourceRevisions.resource &&
     normalizedAfter?.id === target.id &&
-    (prepared.name === 'create_memory' || prepared.name === 'create_command'
+    (prepared.name === 'create_memory' ||
+    prepared.name === 'create_command' ||
+    (prepared.name === 'save_skill' && prepared.before === null)
       ? normalizedBefore === null
       : normalizedBefore?.id === target.id)
   const complete =
@@ -419,7 +426,12 @@ export function autoReviewSnapshot(input: {
       affectedData: {
         normalizedBefore,
         normalizedAfter,
-        persistence: target.type === 'memory' ? 'app-wide-memory' : 'live-bot-configuration'
+        persistence:
+          target.type === 'skill'
+            ? 'app-wide-instruction-skill'
+            : target.type === 'memory'
+              ? 'app-wide-memory'
+              : 'live-bot-configuration'
       },
       review: complete ? 'model-review' : 'manual'
     })

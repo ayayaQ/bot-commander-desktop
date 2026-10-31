@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createSkillsExtension } from '@ayayaq/vivi/extensions/skills'
+import { createSkillsExtension, parseSkillDocument } from '@ayayaq/vivi/extensions/skills'
 import { createAgentSkillStore } from './agentSkillStore'
 import { drainAgentPersistence, resumeAgentPersistence } from './agentPersistenceLifecycle'
 
@@ -10,7 +10,7 @@ const source = (name: string, body = 'Return three factual bullets.') =>
   `---\nname: ${name}\ndescription: >-\n  Summarize supplied text.\n  Use for a short summary.\nlicense: Apache-2.0\ncompatibility: Requires supplied text only\nmetadata:\n  author: Example\nallowed-tools: read_skill\ncustom-field: retained\n---\n\n${body}\n`
 const signal = () => new AbortController().signal
 
-describe('desktop read-only instruction skill store', () => {
+describe('desktop instruction skill store', () => {
   let home: string
   let roots: string[]
   let store: ReturnType<typeof createAgentSkillStore>
@@ -36,12 +36,166 @@ describe('desktop read-only instruction skill store', () => {
     await fs.writeFile(join(root, 'SKILL.md'), content)
     return root
   }
+  const draft = (
+    name = 'summary',
+    content = source(name),
+    expectedRevision: string | null = null
+  ) => ({
+    name,
+    content,
+    expectedRevision
+  })
+  it('creates and replaces exact source, preserving references and rejecting stale revisions', async () => {
+    const original = await store.prepareSave(draft())
+    const before = await store.snapshot()
+    await store.commitSave(original.save)
+    expect(before.catalog.document('summary')).toBeUndefined()
+    const current = await store.snapshot()
+    const document = current.catalog.document('summary')!
+    expect(document.content).toBe(source('summary'))
+    expect(current.status.skills.find((s) => s.name === 'summary')!.readOnly).toBe(false)
+    const root = join(home, 'state/agent-skills/summary')
+    await fs.mkdir(join(root, 'references'))
+    await fs.writeFile(join(root, 'references/style.md'), 'Keep this reference.')
+    const updated = source('summary', 'Return one sentence.')
+    const replacement = await store.prepareSave(draft('summary', updated, document.revision))
+    await store.commitSave(replacement.save)
+    expect(await fs.readFile(join(root, 'SKILL.md'), 'utf8')).toBe(updated)
+    expect(await fs.readFile(join(root, 'references/style.md'), 'utf8')).toBe(
+      'Keep this reference.'
+    )
+    await expect(store.commitSave(replacement.save)).rejects.toThrow('stale')
+    await expect(store.prepareSave(draft())).rejects.toThrow('stale')
+  })
+  it.each(['skill-creator', '../escape', 'con', 'credentials'])(
+    'rejects protected or unsafe names (%s)',
+    async (name) => {
+      await expect(store.prepareSave(draft(name))).rejects.toThrow()
+      await expect(fs.stat(join(home, 'state/agent-skills'))).rejects.toMatchObject({
+        code: 'ENOENT'
+      })
+    }
+  )
+  it('refuses imported, malformed and unsupported skills without writing', async () => {
+    roots = [join(home, 'external')]
+    const root = await folder(roots[0], 'summary')
+    await expect(
+      store.prepareSave(
+        draft('summary', source('summary'), parseSkillDocument(source('summary')).revision)
+      )
+    ).rejects.toThrow('read-only')
+    expect(await fs.readFile(join(root, 'SKILL.md'), 'utf8')).toBe(source('summary'))
+    await expect(store.prepareSave(draft('other', '# missing frontmatter'))).rejects.toThrow(
+      'frontmatter'
+    )
+    await expect(
+      store.prepareSave(
+        draft('other', source('other').replace('custom-field: retained', 'context: fork'))
+      )
+    ).rejects.toThrow('invocation')
+    await expect(
+      store.prepareSave(draft('other', source('other', 'x'.repeat(66000))))
+    ).rejects.toThrow('byte limit')
+  })
+  it('serializes competing creates and never overwrites a newer skill', async () => {
+    const first = await store.prepareSave(draft())
+    const second = await store.prepareSave(draft('summary', source('summary', 'Another draft.')))
+    const results = await Promise.allSettled([
+      store.commitSave(first.save),
+      store.commitSave(second.save)
+    ])
+    expect(results.map((r) => r.status)).toEqual(['fulfilled', 'rejected'])
+    expect((await store.snapshot()).catalog.document('summary')!.content).toBe(source('summary'))
+  })
+  it('does not overwrite a revision changed after approval, including during atomic staging', async () => {
+    const root = await folder(join(home, 'state/agent-skills'), 'summary')
+    const prepared = await store.prepareSave(
+      draft(
+        'summary',
+        source('summary', 'New draft.'),
+        parseSkillDocument(source('summary')).revision
+      )
+    )
+    const open = fs.open.bind(fs)
+    vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+      if (String(args[0]).endsWith('.tmp'))
+        await fs.writeFile(join(root, 'SKILL.md'), source('summary', 'Changed outside app.'))
+      return open(...args)
+    })
+    await expect(store.commitSave(prepared.save)).rejects.toThrow('revision changed')
+    expect(await fs.readFile(join(root, 'SKILL.md'), 'utf8')).toBe(
+      source('summary', 'Changed outside app.')
+    )
+  })
+  it('rejects symlink destinations and replaced directory identities', async () => {
+    const prepared = await store.prepareSave(draft())
+    const external = join(home, 'outside')
+    await fs.mkdir(external)
+    await fs.symlink(
+      external,
+      join(home, 'state/agent-skills'),
+      process.platform === 'win32' ? 'junction' : 'dir'
+    )
+    await expect(store.commitSave(prepared.save)).rejects.toThrow('without symlinks')
+    expect(await fs.readdir(external)).toEqual([])
+  })
+  it('checks cancellation again at the commit gate, allowing a later retry', async () => {
+    const prepared = await store.prepareSave(draft())
+    const controller = new AbortController()
+    const open = fs.open.bind(fs)
+    const spy = vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+      if (String(args[0]).endsWith('.tmp')) controller.abort(new Error('Cancelled before rename'))
+      return open(...args)
+    })
+    await expect(store.commitSave(prepared.save, { signal: controller.signal })).rejects.toThrow(
+      'Cancelled'
+    )
+    spy.mockRestore()
+    await store.commitSave((await store.prepareSave(draft())).save)
+    expect((await store.snapshot()).catalog.document('summary')).toBeDefined()
+  })
+  it('rechecks the credential policy after staging and leaves the existing skill unchanged', async () => {
+    let blocked = false
+    const guarded = createAgentSkillStore({
+      ownedRoot: () => join(home, 'state/agent-skills'),
+      externalRoots: async () => [],
+      assertContent: () => {
+        if (blocked) throw new Error('Configured credential in skill')
+      }
+    })
+    const root = await folder(join(home, 'state/agent-skills'), 'summary')
+    const prepared = await guarded.prepareSave(
+      draft(
+        'summary',
+        source('summary', 'Replacement.'),
+        parseSkillDocument(source('summary')).revision
+      )
+    )
+    const open = fs.open.bind(fs)
+    vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+      if (String(args[0]).endsWith('.tmp')) blocked = true
+      return open(...args)
+    })
+    await expect(guarded.commitSave(prepared.save)).rejects.toThrow('Configured credential')
+    expect(await fs.readFile(join(root, 'SKILL.md'), 'utf8')).toBe(source('summary'))
+  })
+  it('preserves committed content if cancellation arrives after the primary rename', async () => {
+    const prepared = await store.prepareSave(draft())
+    const controller = new AbortController()
+    const rename = fs.rename.bind(fs)
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      await rename(from, to)
+      if (String(to).endsWith('SKILL.md')) controller.abort()
+    })
+    await store.commitSave(prepared.save, { signal: controller.signal })
+    expect((await store.snapshot()).catalog.document('summary')!.content).toBe(source('summary'))
+  })
   it('always includes the portable read-only creator, without scanning cwd or creating folders', async () => {
     const snapshot = await store.snapshot()
     expect(snapshot.catalog.skills.map((skill) => skill.name)).toEqual(['skill-creator'])
     expect(snapshot.catalog.skills.every((skill) => skill.readOnly)).toBe(true)
-    expect(snapshot.status.saveSupport.available).toBe(false)
-    expect(Object.keys(store)).toEqual(['snapshot'])
+    expect(snapshot.status.saveSupport.available).toBe(true)
+    expect(Object.keys(store)).toEqual(['snapshot', 'prepareSave', 'commitSave', 'reviewRevision'])
     expect(snapshot.status.ownedRoot).toBe(join(home, 'state/agent-skills'))
     await expect(fs.stat(snapshot.status.ownedRoot)).rejects.toMatchObject({ code: 'ENOENT' })
   })
@@ -192,7 +346,11 @@ describe('desktop read-only instruction skill store', () => {
     roots = [join(home, 'external')]
     await fs.mkdir(roots[0])
     const original = await folder(join(home, 'ordinary'), 'summary')
-    await fs.symlink(original, join(roots[0], 'summary'), 'dir')
+    await fs.symlink(
+      original,
+      join(roots[0], 'summary'),
+      process.platform === 'win32' ? 'junction' : 'dir'
+    )
     const snapshot = await store.snapshot()
     expect(snapshot.catalog.document('summary')).toBeUndefined()
     expect(snapshot.status.diagnostics[0].message).toContain('without symlinks')

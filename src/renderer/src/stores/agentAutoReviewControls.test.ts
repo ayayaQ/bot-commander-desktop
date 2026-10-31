@@ -84,8 +84,8 @@ describe('Auto review renderer IPC and interrupted responses', () => {
   })
 
   it('discloses proposed text, private-detail limits and the named recipients under fresh consent', () => {
-    expect(AUTO_REVIEW_POLICY_REVISION).toBe('desktop-reviewed-auto-v2')
-    expect(AUTO_REVIEW_DISCLOSURE).toContain('proposed memory or command text')
+    expect(AUTO_REVIEW_POLICY_REVISION).toBe('desktop-reviewed-auto-v3')
+    expect(AUTO_REVIEW_DISCLOSURE).toContain('proposed memory, SKILL.md or command text')
     expect(AUTO_REVIEW_DISCLOSURE).toContain('OpenAI gpt-6-luna')
     expect(AUTO_REVIEW_DISCLOSURE).toContain('OpenRouter and TypeSafe typesafe/jev-1.13')
     expect(AUTO_REVIEW_DISCLOSURE).toContain('Known credentials are excluded')

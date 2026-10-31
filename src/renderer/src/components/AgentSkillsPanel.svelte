@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import type { AgentSkillsStatus } from '../../../shared/agentSkillTypes'
+  import type { ResourceChangedEvent } from '../../../shared/mcpTypes'
 
   let status: AgentSkillsStatus | undefined = $state()
   let busy = $state(false)
@@ -40,8 +41,13 @@
   }
   onMount(() => {
     void refresh()
+    const handleChange = (payload: unknown) => {
+      if ((payload as ResourceChangedEvent).kind === 'skills') void refresh()
+    }
+    window.electron.ipcRenderer.on('resource:changed', handleChange)
     return () => {
       request++
+      window.electron.ipcRenderer.removeListener('resource:changed', handleChange)
     }
   })
 </script>
@@ -59,27 +65,22 @@
   </button>
   {#if expanded}
     <div class="max-h-80 overflow-y-auto space-y-3 pt-2">
-      <p>App-wide instruction-only skills. File and folder changes apply next turn.</p>
+      <p class="line-clamp-2" title={status?.saveSupport.reason}>
+        Ask the agent or drag skills into the folder. Changes apply next turn.
+      </p>
       {#if status}
-        {#if !status.saveSupport.available}<p class="text-warning">
-            {status.saveSupport.reason}
-          </p>{/if}
-        <div class="break-all opacity-70">Owned folder: {status.ownedRoot}</div>
-        <p>
-          Place standard skill folders here, or add an existing folder read-only. Files stay
-          unchanged. Scripts and binary assets cannot run.
-        </p>
         <div class="flex flex-wrap gap-1">
           <button class="btn btn-xs btn-outline" onclick={refresh} disabled={busy}>Refresh</button>
           <button
             class="btn btn-xs btn-outline"
-            onclick={() => change('skills:choose-root')}
-            disabled={busy}>Add folder</button
+            onclick={() => change('skills:open-folder')}
+            title={status.ownedRoot}
+            disabled={busy}>Open folder</button
           >
         </div>
         {#each status.externalRoots as path (path)}
           <div class="space-y-1">
-            <div class="break-all">Read-only: {path}</div>
+            <div class="truncate" title={path}>Read-only: {path}</div>
             <button
               class="btn btn-xs btn-ghost"
               onclick={() => change('skills:remove-root', path)}
@@ -93,11 +94,14 @@
               {skill.name}
               {skill.readOnly ? '(read-only)' : ''}
             </div>
-            <div class="opacity-70">{skill.description}</div>
+            <div class="opacity-70 line-clamp-2" title={skill.description}>{skill.description}</div>
           </div>
         {/each}
         {#each status.diagnostics as diagnostic}
-          <div class="text-warning break-words">
+          <div
+            class="text-warning break-words line-clamp-2"
+            title={`${diagnostic.source}: ${diagnostic.message}`}
+          >
             <span class="break-all">{diagnostic.source}</span>: {diagnostic.message}
           </div>
         {/each}

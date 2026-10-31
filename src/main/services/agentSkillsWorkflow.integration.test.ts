@@ -16,13 +16,19 @@ type Reply = {
 }
 const mocks = vi.hoisted(() => ({
   home: '',
+  probability: 1,
   provider: vi.fn<(request: Request) => Reply | Promise<Reply>>()
 }))
 vi.mock('electron', () => ({
   app: { getPath: () => mocks.home },
   BrowserWindow: { getAllWindows: () => [] },
   session: {},
-  safeStorage: {}
+  safeStorage: {
+    isEncryptionAvailable: () => true,
+    getSelectedStorageBackend: () => 'fixture-native',
+    encryptString: (value: string) => Buffer.from(value),
+    decryptString: (value: Buffer) => value.toString()
+  }
 }))
 const settings: AiRuntimeSettings = {
   aiProvider: 'openai',
@@ -44,7 +50,7 @@ function deferred<T>() {
   }
 }
 
-describe('desktop read-only skills host workflow with installed vivi', () => {
+describe('desktop skills host workflow with installed vivi', () => {
   let agent: typeof import('./agentService')
   let skills: typeof import('./agentSkillService')
   let terminals: Promise<AgentStreamEvent>[]
@@ -53,10 +59,32 @@ describe('desktop read-only skills host workflow with installed vivi', () => {
     mocks.home = join(await fs.mkdtemp(join(tmpdir(), 'agent-skills-workflow-')), 'state')
     await fs.mkdir(mocks.home)
     mocks.provider.mockReset().mockReturnValue(text())
+    mocks.probability = 1
     terminals = []
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        if (String(url) === 'https://api.openai.com/v1/decisions') {
+          const request = JSON.parse(init!.body as string)
+          return new Response(
+            JSON.stringify({
+              model: 'gpt-6-luna',
+              answers: request.questions.map(({ name }: { name: string }) => ({
+                name,
+                type: 'predicate',
+                probability: mocks.probability
+              })),
+              usage: {
+                input_tokens: 20,
+                output_tokens: 5,
+                total_tokens: 25,
+                input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 },
+                output_tokens_details: { reasoning_tokens: 0 }
+              }
+            }),
+            { headers: { 'Content-Type': 'application/json' } }
+          )
+        }
         if (String(url) !== 'https://api.openai.com/v1/responses')
           throw new Error('Unexpected live transport')
         const request = JSON.parse(init!.body as string) as Request
@@ -83,6 +111,26 @@ describe('desktop read-only skills host workflow with installed vivi', () => {
     await agent.updateAgentSession(result.id, { mode }, 'openai')
     return result
   }
+  it('prepares the owned folder for manual imports without changing existing contents', async () => {
+    const root = await skills.ensureAgentSkillsFolder()
+    // Windows temp paths can use an 8.3 alias; the folder service returns its canonical path.
+    expect(root).toBe(await fs.realpath(join(mocks.home, 'agent-skills')))
+    expect((await fs.stat(root)).isDirectory()).toBe(true)
+    const path = await seed()
+    expect(await skills.ensureAgentSkillsFolder()).toBe(root)
+    expect(await fs.readFile(path, 'utf8')).toBe(source())
+  })
+  it('refuses a linked owned folder when opening the skills directory', async () => {
+    const target = join(mocks.home, '../external')
+    await fs.mkdir(target)
+    await fs.symlink(
+      target,
+      join(mocks.home, 'agent-skills'),
+      process.platform === 'win32' ? 'junction' : 'dir'
+    )
+    await expect(skills.ensureAgentSkillsFolder()).rejects.toThrow('without symlinks')
+    expect(await fs.readdir(target)).toEqual([])
+  })
   async function start(sessionId: string, onEvent?: (event: AgentStreamEvent) => void) {
     const approval = deferred<AgentStreamEvent>()
     const terminal = deferred<AgentStreamEvent>()
@@ -109,6 +157,174 @@ describe('desktop read-only skills host workflow with installed vivi', () => {
     await fs.writeFile(join(root, 'SKILL.md'), content)
     return join(root, 'SKILL.md')
   }
+  const draft = (content = source(), expectedRevision: string | null = null) => ({
+    name: 'concise-summary',
+    content,
+    expectedRevision
+  })
+  async function approve(event: AgentStreamEvent, approved = true) {
+    expect(event.type, JSON.stringify(event)).toBe('approval')
+    const call = event.toolCall!
+    expect(
+      await agent.resolveAgentApproval(event.sessionId, call.id, approved, call.approvalId)
+    ).toBe(true)
+  }
+  it('shows the exact draft in Manual, writes only after approval and activates next turn', async () => {
+    mocks.provider.mockReturnValueOnce(tool('save_skill', draft())).mockReturnValue(text())
+    const created = await session()
+    const run = await start(created.id)
+    const event = await run.approval
+    expect(event.toolCall).toMatchObject({
+      name: 'save_skill',
+      before: null,
+      after: { id: 'concise-summary', content: source() }
+    })
+    const path = join(mocks.home, 'agent-skills', 'concise-summary', 'SKILL.md')
+    await expect(fs.stat(path)).rejects.toMatchObject({ code: 'ENOENT' })
+    await approve(event)
+    expect((await run.terminal).session!.status).toBe('completed')
+    expect(await fs.readFile(path, 'utf8')).toBe(source())
+    expect(
+      (await skills.loadAgentSkills()).skills.find((s) => s.name === 'concise-summary')!.readOnly
+    ).toBe(false)
+    const catalog = mocks.provider.mock.calls[1][0].input!.find((m) =>
+      m.content?.includes('Available instruction-only skills')
+    )!
+    expect(catalog.content).not.toContain('concise-summary')
+    mocks.provider.mockReset().mockReturnValue(text())
+    await (
+      await start(created.id)
+    ).terminal
+    const input = mocks.provider.mock.calls[0][0].input!
+    expect(
+      input.find((m) => m.content?.includes('Available instruction-only skills'))!.content
+    ).toContain('concise-summary')
+  })
+  it.each([false, 'cancel'] as const)(
+    'does not write a rejected or cancelled draft (%s)',
+    async (decision) => {
+      mocks.provider.mockReturnValueOnce(tool('save_skill', draft())).mockReturnValue(text())
+      const created = await session()
+      const run = await start(created.id)
+      const event = await run.approval
+      if (decision === 'cancel') agent.cancelAgentRun(created.id)
+      else await approve(event, false)
+      await run.terminal
+      await expect(fs.stat(join(mocks.home, 'agent-skills'))).rejects.toMatchObject({
+        code: 'ENOENT'
+      })
+    }
+  )
+  it('approves an exact replacement but preserves an edit made while approval is pending', async () => {
+    const path = await seed()
+    const updated = source('Return one factual sentence.')
+    const revision = parseSkillDocument(source()).revision
+    mocks.provider
+      .mockReturnValueOnce(tool('save_skill', draft(updated, revision)))
+      .mockReturnValue(text())
+    const created = await session()
+    let run = await start(created.id)
+    await approve(await run.approval)
+    await run.terminal
+    expect(await fs.readFile(path, 'utf8')).toBe(updated)
+    mocks.provider
+      .mockReset()
+      .mockReturnValueOnce(
+        tool('save_skill', draft(source(), parseSkillDocument(updated).revision), 'second-save')
+      )
+      .mockReturnValue(text())
+    run = await start(created.id)
+    const event = await run.approval
+    const external = source('User edited this file in another editor.')
+    await fs.writeFile(path, external)
+    await approve(event)
+    await run.terminal
+    expect(await fs.readFile(path, 'utf8')).toBe(external)
+    const calls = (await saved(created.id)).messages.flatMap((m) => m.toolCalls || [])
+    expect(calls.filter((c) => c.name === 'save_skill').at(-1)!.status).toBe('error')
+  })
+  it('does not save or ask to approve a hallucinated save call in Planning', async () => {
+    mocks.provider.mockReturnValueOnce(tool('save_skill', draft())).mockReturnValue(text())
+    const created = await session('planning')
+    const run = await start(created.id)
+    await run.terminal
+    expect(run.events.some((e) => e.type === 'approval')).toBe(false)
+    expect(mocks.provider.mock.calls[0][0].tools!.map((t) => t.name)).not.toContain('save_skill')
+    await expect(fs.stat(join(mocks.home, 'agent-skills'))).rejects.toMatchObject({
+      code: 'ENOENT'
+    })
+  })
+  it.each(['create', 'replace'] as const)(
+    'automatically saves an enrolled Auto %s after allow-review and journals the result',
+    async (action) => {
+      const current = await import('./settingsService')
+      const { AUTO_REVIEW_POLICY_REVISION } = await import('../../shared/agentAutoReview')
+      current.setSettings({ ...current.getSettings(), ...settings })
+      const created = await session()
+      await agent.enrollAgentAutoReview(created.id, {
+        policyRevision: AUTO_REVIEW_POLICY_REVISION,
+        provider: 'openai',
+        accountRevision: current.getSettings().agentDecisionAccountRevision!
+      })
+      if (action === 'replace') await seed(source('Original instructions.'))
+      mocks.provider
+        .mockReturnValueOnce(
+          tool(
+            'save_skill',
+            draft(
+              source(),
+              action === 'replace'
+                ? parseSkillDocument(source('Original instructions.')).revision
+                : null
+            )
+          )
+        )
+        .mockReturnValue(text())
+      const run = await start(created.id)
+      const event = await run.approval
+      expect(event.type, JSON.stringify(event.toolCall)).toBe('done')
+      expect((await run.terminal).session!.status).toBe('completed')
+      expect(run.events.some((e) => e.type === 'approval')).toBe(false)
+      expect(
+        await fs.readFile(join(mocks.home, 'agent-skills/concise-summary/SKILL.md'), 'utf8')
+      ).toBe(source())
+      const ledger = JSON.parse(await fs.readFile(join(mocks.home, 'agent-decisions.json'), 'utf8'))
+      expect(ledger.rows).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            tool: 'save_skill',
+            targetType: 'skill',
+            state: 'committed',
+            source: 'automatic'
+          })
+        ])
+      )
+    }
+  )
+  it('falls back to an exact Manual approval when Auto review is uncertain', async () => {
+    const current = await import('./settingsService')
+    const { AUTO_REVIEW_POLICY_REVISION } = await import('../../shared/agentAutoReview')
+    current.setSettings({ ...current.getSettings(), ...settings })
+    const created = await session()
+    await agent.enrollAgentAutoReview(created.id, {
+      policyRevision: AUTO_REVIEW_POLICY_REVISION,
+      provider: 'openai',
+      accountRevision: current.getSettings().agentDecisionAccountRevision!
+    })
+    mocks.probability = 0.5
+    mocks.provider.mockReturnValueOnce(tool('save_skill', draft())).mockReturnValue(text())
+    const run = await start(created.id)
+    const event = await run.approval
+    expect(event.toolCall!.decision).toMatchObject({ source: 'manual', recommendation: 'ask' })
+    await expect(fs.stat(join(mocks.home, 'agent-skills'))).rejects.toMatchObject({
+      code: 'ENOENT'
+    })
+    await approve(event)
+    await run.terminal
+    expect(
+      await fs.readFile(join(mocks.home, 'agent-skills/concise-summary/SKILL.md'), 'utf8')
+    ).toBe(source())
+  })
   it('retains explicitly selected read-only roots after reload and removes their future reads', async () => {
     const root = join(mocks.home, '../existing', 'concise-summary')
     await fs.mkdir(root, { recursive: true })
@@ -178,7 +394,7 @@ describe('desktop read-only skills host workflow with installed vivi', () => {
     expect(first.tools!.map((item) => item.name)).toEqual(
       expect.arrayContaining(['calculate', 'list_skills', 'read_skill'])
     )
-    expect(first.tools!.map((item) => item.name)).not.toContain('save_skill')
+    expect(first.tools!.map((item) => item.name)).toContain('save_skill')
     const catalog = first.input!.find((message) =>
       message.content?.includes('Available instruction-only skills')
     )!
