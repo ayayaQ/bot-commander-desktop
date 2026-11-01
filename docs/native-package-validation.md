@@ -3,7 +3,8 @@
 These CLI helpers support Windows x64 and macOS arm64 on their native hosts. Use a fresh,
 isolated checkout and an exclusive machine lease for install/build/package/probe work. They
 create unpacked test artifacts only. They do not publish, make installers, sign, notarize,
-change Electron fuses, launch the application, or establish visual acceptance.
+change Electron fuses, or establish visual acceptance. The full probe launches only the explicit
+synthetic no-window bootstrap in the actual packaged executable.
 
 ## Windows x64
 
@@ -20,6 +21,7 @@ npm.cmd test -- scripts/native-package-support.test.ts
 npm.cmd run build
 node scripts/package-native.mjs --output "$evidence/package" --report "$evidence/package.json"
 node scripts/verify-native-package.mjs --artifact "$evidence/package/win-unpacked" --report "$evidence/portable.json" --portable-only
+node scripts/verify-native-package.mjs --artifact "$evidence/package/win-unpacked" --report "$evidence/native.json"
 ```
 
 The Windows helper uses the installed electron-builder's `win.signExecutable=false` option.
@@ -39,9 +41,11 @@ node --version
 node -p 'JSON.stringify({platform:process.platform,arch:process.arch})'
 npm ci --no-audit --no-fund
 npm test -- scripts/native-package-support.test.ts
+npm test -- src/main/index.test.ts src/main/nativeStartupRoute.test.ts src/main/nativeStartupDispatch.test.ts src/main/nativePackageProbe.test.ts
 npm run build
 node scripts/package-native.mjs --output "$evidence/package" --report "$evidence/package.json"
 node scripts/verify-native-package.mjs --artifact "$evidence/package/mac-arm64/Bot Commander for Discord.app" --report "$evidence/portable.json" --portable-only
+node scripts/verify-native-package.mjs --artifact "$evidence/package/mac-arm64/Bot Commander for Discord.app" --report "$evidence/native.json"
 ```
 
 The helper sets `mac.identity=null`, `mac.notarize=false`, `forceCodeSigning=false`, and
@@ -73,35 +77,51 @@ inside the archive, and development dependencies must not resolve. It inventorie
 addons; any addon requires a separately assigned load fixture and fails this probe explicitly.
 
 Portable-only mode exits zero only when those assertions pass. Its receipt still marks
-`packagedStartup`, `manualVisual`, and `hostedCI` as `not_run`. Without `--portable-only`, the
-same successful artifact checks produce `status: partial` and exit **2** because native startup
-acceptance is incomplete. Assertion/process failures exit **1**. Temporary synthetic directories
-are removed in `finally`; the package and JSON evidence are retained. No real user profile or
-credential store is read or written. The synthetic home is a probe-tool directory, not evidence
-that production `app.getPath('userData')` was redirected.
+`packagedStartup`, `normalStartup`, `manualVisual`, and `hostedCI` as `not_run`. Without
+`--portable-only`, it additionally launches the **actual hardened packaged executable** with
+`--bcfd-native-probe=<owned control.json>`, without Node-mode, debugging or security overrides.
+It requires bound ready/quit receipts, observed native quit events, matching process ID,
+source/ASAR hashes, a single fake provider call, zero window events, default module absence
+from the module cache, and exit zero within thirty seconds. Only both selected stages passing
+produce exit **0**. Assertion/process failures exit **1**, retaining the failing stage and error.
+Temporary synthetic directories are removed in `finally`; packages and JSON evidence remain.
+Normal startup/persistence, manual visual interaction and hosted CI remain `not_run` in both modes.
 
-## Missing production startup support
+## Opt-in synthetic bootstrap
 
 Do not launch the hardened executable using `ELECTRON_RUN_AS_NODE`; its `runAsNode` fuse is
-disabled. Do not change that fuse or inject a replacement application. `src/main/index.ts`
-currently imports services eagerly, captures `userData` paths during module evaluation, starts
-the application and server, creates windows/tray, and exposes no CLI readiness/quit receipt.
-Testing the worker's clean exit does not test the application persistence shutdown path.
+disabled. Do not change that fuse or inject a replacement application. Following an explicit
+coordinator startup assignment, `src/main/index.ts` now dispatches before profile-dependent
+imports. With no probe flag it dynamically loads `normalStartup.ts`, which retains the original
+startup body byte-for-byte and is emitted at `out/main/normalStartup.js` beside the dispatcher.
+Its existing icon/preload/renderer/worker paths retain the same directory base. The existing
+portable MCP verifier checks both emitted entries and keeps its original default-startup assertions.
 
-A separately assigned production change would need an early opt-in entry before those imports
-and path captures, a caller-created synthetic `userData` directory, fake-only provider/server
-initialization, a supported no-window mode, structured readiness/failure output, and a bounded
-request to the real graceful shutdown path with a terminal receipt. It must default off and
-retain production security settings. A7 does not implement or approve that change. Native
-startup/clean shutdown and human visual/dialog checks remain `not_run` until separately evidenced.
+Probe mode accepts a fresh test-owned directory with matching `control.json` and `owner.json`.
+It creates synthetic `userData`/session/log directories before Electron readiness, validates the
+ASAR identity with raw filesystem bytes, and loads only the public core fake-transport provider.
+It imports no desktop settings, auth, persistence or provider service graph. Invalid probe flags
+exit nonzero without loading normal startup. The native probe emits ready output, calls
+`app.quit()`, observes `before-quit`/`will-quit`/`quit`, and records its terminal receipt. It has a
+fifteen-second internal deadline. It never creates a window, tray or server, calls safeStorage,
+opens an external URL, or shows native credential dialogs. The caller supplies a minimal synthetic
+home environment as well as the explicit fresh `userData` root.
+
+This synthetic Electron lifecycle does **not** exercise normal persistence draining, real provider
+setup, window rendering, native dialogs or manual interaction. The unchanged normal startup
+recovery/shutdown behavior remains covered by its existing ordinary unit assertions. If macOS
+refuses to run the unsigned bundle, retain the actual failure; do not sign (including ad hoc),
+change security settings or claim native lifecycle success from the stock-runtime portable probe.
 
 ## A5 workflow proposal
 
 A5 owns workflow, manifest and lock changes. After reviewing actual local receipts, consider a
 separate `windows-2025` portable artifact job: Node 24, locked install, the single helper test file,
-`npm run build`, these two helpers with output under `RUNNER_TEMP`, `--portable-only`, and JSON
-upload even on failure. Keep a twenty-minute job limit and one package per job. Preserve existing
-Linux and Windows MCP/skills coverage. Do not label this job a native application startup smoke.
+`npm run build`, these two helpers with output under `RUNNER_TEMP`, portable and synthetic native
+receipts, and JSON upload even on failure. Add the four startup test files above to preserve the
+default route and probe isolation. Keep a twenty-minute job limit and one package per job.
+Preserve existing Linux and Windows MCP/skills coverage. Label the native stage synthetic;
+do not claim normal startup/persistence or visual acceptance.
 
 Gate an arm64 Mac job on an actual clean arm64 Mac receipt and runner availability/cost. Do not
 add a macOS CI claim based on Windows checks or local Mac packaging alone. Measured timings,

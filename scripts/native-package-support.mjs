@@ -104,6 +104,7 @@ export function runBounded(executable, args, { cwd, env, timeout = 60_000 }) {
     maxBuffer: 8 * 1024 * 1024
   })
   return {
+    pid: child.pid,
     exitCode: child.status,
     signal: child.signal,
     error: child.error?.message ?? null,

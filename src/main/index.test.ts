@@ -144,7 +144,9 @@ it('creates the shell and shows actionable recovery instructions when no saved s
   const path = join(mocks.directory, 'botState.json')
   await fs.writeFile(path, '{broken')
   await fs.writeFile(`${path}.bak`, '[]')
-  await import('./index')
+  await (
+    await import('./index')
+  ).startupDispatch
   await vi.waitFor(() => expect(mocks.addIPCHandlers).toHaveBeenCalledOnce())
 
   expect(mocks.windows).toHaveLength(1)
@@ -172,7 +174,9 @@ it('opens a normal shell without a recovery dialog after a valid backup loads', 
   const path = join(mocks.directory, 'botState.json')
   await fs.writeFile(path, '{broken')
   await fs.writeFile(`${path}.bak`, '{"recovered":true}')
-  await import('./index')
+  await (
+    await import('./index')
+  ).startupDispatch
   await vi.waitFor(() => expect(mocks.addIPCHandlers).toHaveBeenCalledOnce())
   mocks.windows[0].callbacks.get('ready-to-show')?.()
   expect(mocks.dialog).not.toHaveBeenCalled()
@@ -181,7 +185,9 @@ it('opens a normal shell without a recovery dialog after a valid backup loads', 
 })
 
 it('keeps unsupported save durability in developer logs without showing users a warning', async () => {
-  await import('./index')
+  await (
+    await import('./index')
+  ).startupDispatch
   await vi.waitFor(() => expect(mocks.addIPCHandlers).toHaveBeenCalledOnce())
   const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
   vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
@@ -205,7 +211,9 @@ it('keeps unsupported save durability in developer logs without showing users a 
 })
 
 it('still shows a recovery warning when agent storage is restored from its backup', async () => {
-  await import('./index')
+  await (
+    await import('./index')
+  ).startupDispatch
   await vi.waitFor(() => expect(mocks.addIPCHandlers).toHaveBeenCalledOnce())
   const { createAgentPersistence } = await import('./services/agentPersistence')
   const path = join(mocks.directory, 'agent-sessions.json')
@@ -231,9 +239,14 @@ it('still shows a recovery warning when agent storage is restored from its backu
 })
 
 it('still shows an error for an actual committed-save directory sync failure', async () => {
-  await import('./index')
+  await (
+    await import('./index')
+  ).startupDispatch
   await vi.waitFor(() => expect(mocks.addIPCHandlers).toHaveBeenCalledOnce())
   const { atomicWrite } = await import('./services/atomicPersistence')
+  // Exercise the supported directory-sync error branch on every host. The separate
+  // Windows test above retains the actual unsupported-operation behavior.
+  vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
   const path = join(mocks.directory, 'settings.json')
   const open = fs.open.bind(fs)
   vi.spyOn(fs, 'open').mockImplementation(async (...args: Parameters<typeof fs.open>) => {
@@ -254,7 +267,9 @@ it('still shows an error for an actual committed-save directory sync failure', a
 })
 
 it('resumes spam protection and the runtime when a failed checkpoint cancels quitting', async () => {
-  await import('./index')
+  await (
+    await import('./index')
+  ).startupDispatch
   await vi.waitFor(() => expect(mocks.addIPCHandlers).toHaveBeenCalledOnce())
   mocks.saveStats.mockRejectedValueOnce(new Error('synthetic disk failure'))
   const preventDefault = vi.fn()
@@ -273,7 +288,9 @@ it('resumes spam protection and the runtime when a failed checkpoint cancels qui
 })
 
 it('revokes startup review on main-frame reload or renderer destruction only', async () => {
-  await import('./index')
+  await (
+    await import('./index')
+  ).startupDispatch
   await vi.waitFor(() => expect(mocks.addIPCHandlers).toHaveBeenCalledOnce())
   const window = mocks.windows[0]
   const navigation = window.webCallbacks.get('did-start-navigation')!
@@ -289,7 +306,9 @@ it('revokes startup review on main-frame reload or renderer destruction only', a
 })
 
 it('pauses client admission before closing owned clients and exits only after both MCP sides stop', async () => {
-  await import('./index')
+  await (
+    await import('./index')
+  ).startupDispatch
   await vi.waitFor(() => expect(mocks.addIPCHandlers).toHaveBeenCalledOnce())
   await mocks.appCallbacks.get('before-quit')?.({ preventDefault: vi.fn() })
   expect(mocks.agentMcp.pause).toHaveBeenCalledOnce()
@@ -305,7 +324,9 @@ it('pauses client admission before closing owned clients and exits only after bo
 })
 
 it('keeps the app open and resumes admission without connecting after owned client cleanup fails', async () => {
-  await import('./index')
+  await (
+    await import('./index')
+  ).startupDispatch
   await vi.waitFor(() => expect(mocks.addIPCHandlers).toHaveBeenCalledOnce())
   mocks.agentMcp.close.mockRejectedValueOnce(new Error('fixture-owned-cleanup-failure'))
   await mocks.appCallbacks.get('before-quit')?.({ preventDefault: vi.fn() })

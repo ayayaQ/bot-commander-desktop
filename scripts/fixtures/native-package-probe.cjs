@@ -136,18 +136,20 @@ async function main() {
   assert.ok(artifacts['out/renderer/index.html'])
 
   const workerRelative = 'out/main/agentValidationWorker.mjs'
-  const mainSource = fs.readFileSync(entry, 'utf8')
+  const mainSource = fs.readFileSync(path.join(root, 'out/main/normalStartup.js'), 'utf8')
   const resolver = mainSource.match(
     /function agentValidationWorkerEntry\(directory = __dirname\) \{[\s\S]*?\n\}/
   )?.[0]
   assert.ok(resolver, 'Built main has no supported packaged worker resolver')
+  const namespaces = resolver.match(/return ([$\w]+)\.pathToFileURL\(([$\w]+)\.join\(/)
+  assert.ok(namespaces, 'Worker resolver must use emitted Node URL/path helpers')
   // Execute only the emitted pure resolver, never the application startup entry.
   const workerUrl = vm.runInNewContext(
     resolver + '\nagentValidationWorkerEntry()',
     {
       __dirname: path.dirname(entry),
-      node_url: { pathToFileURL },
-      node_path: path,
+      [namespaces[1]]: { pathToFileURL },
+      [namespaces[2]]: path,
       AGENT_VALIDATION_WORKER_FILENAME: 'agentValidationWorker.mjs'
     },
     { timeout: 1000 }

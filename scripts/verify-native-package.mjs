@@ -2,10 +2,12 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
+import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import {
   executableArchitecture,
   externalPath,
+  fileHash,
   inventory,
   isWithin,
   isolatedEnvironment,
@@ -49,7 +51,7 @@ const scratch = fs.mkdtempSync(path.join(path.dirname(reportFile), 'a7-offline-p
 const started = Date.now()
 const report = {
   schemaVersion: 1,
-  scope: input['portable-only'] ? 'portable-artifact-only' : 'native-acceptance',
+  scope: input['portable-only'] ? 'portable-artifact-only' : 'synthetic-native-lifecycle',
   status: 'failed',
   host: { ...target, node: process.versions.node },
   artifact,
@@ -57,8 +59,12 @@ const report = {
     portable: { status: 'not_run' },
     packagedStartup: {
       status: 'not_run',
-      reason:
-        'No supported early synthetic userData, fake-only initialization, machine-readable readiness and graceful quit hook. Hardened executable runAsNode is disabled; production startup was not edited or launched.'
+      scope: 'synthetic-offline-bootstrap',
+      reason: 'Not selected in portable-only mode'
+    },
+    normalStartup: {
+      status: 'not_run',
+      reason: 'Synthetic bootstrap does not validate normal persistence, provider setup or UI'
     },
     manualVisual: { status: 'not_run', reason: 'Requires a separate human receipt' },
     hostedCI: { status: 'not_run' }
@@ -94,6 +100,7 @@ try {
   const before = inventory(artifact)
   report.artifactTree = before
   report.source = {
+    inputs: inventory(path.join(checkout, 'src')),
     outputs: inventory(path.join(checkout, 'out')),
     resources: inventory(path.join(checkout, 'resources'))
   }
@@ -115,13 +122,71 @@ try {
   assert.equal(receipt.platform, target.platform)
   assert.equal(inventory(artifact).sha256, before.sha256, 'Probe changed the artifact')
   report.stages.portable = { status: 'passed', receipt }
-  report.status = input['portable-only'] ? 'passed' : 'partial'
+  if (!input['portable-only']) {
+    const runRoot = fs.mkdtempSync(path.join(path.dirname(reportFile), 'bcfd-native-run-'))
+    try {
+      const control = {
+        version: 1,
+        runId: randomUUID(),
+        asarSha256: fileHash(path.join(resources, 'app.asar')),
+        sourceSha256: report.source.inputs.sha256
+      }
+      fs.writeFileSync(path.join(runRoot, 'control.json'), JSON.stringify(control))
+      fs.writeFileSync(path.join(runRoot, 'owner.json'), JSON.stringify({ runId: control.runId }))
+      const args = [`--bcfd-native-probe=${path.join(runRoot, 'control.json')}`]
+      const native = runBounded(executable, args, {
+        cwd: runRoot,
+        env: isolatedEnvironment(scratch),
+        timeout: 30_000
+      })
+      report.nativeProcess = { command: [executable, ...args], ...native }
+      assert.equal(native.error, null, `Native process error: ${native.error}`)
+      assert.equal(native.exitCode, 0, `Native process failed: ${native.stderr}`)
+      const ready = JSON.parse(fs.readFileSync(path.join(runRoot, 'ready.json'), 'utf8'))
+      const quit = JSON.parse(fs.readFileSync(path.join(runRoot, 'quit.json'), 'utf8'))
+      for (const value of [ready, quit]) {
+        for (const [key, expected] of Object.entries(control))
+          assert.equal(value[key], expected, `Native receipt identity mismatch: ${key}`)
+        assert.equal(value.status, 'passed')
+        assert.equal(value.platform, target.platform)
+        assert.equal(value.arch, target.arch)
+        assert.equal(value.pid, native.pid)
+        assert.equal(value.normalStartupLoaded, false)
+        assert.equal(value.windowsCreated, 0)
+        assert.equal(value.userData, path.join(runRoot, 'userData'))
+      }
+      assert.equal(ready.fakeProviderCalls, 1)
+      assert.equal(quit.exitCode, 0)
+      assert.equal(quit.beforeQuit, true)
+      assert.equal(quit.willQuit, true)
+      assert.equal(inventory(artifact).sha256, before.sha256, 'Native probe changed the artifact')
+      report.stages.packagedStartup = {
+        status: 'passed',
+        scope: 'synthetic-offline-bootstrap',
+        ready,
+        quit
+      }
+    } catch (error) {
+      report.stages.packagedStartup = {
+        status: 'failed',
+        scope: 'synthetic-offline-bootstrap',
+        error: error.message
+      }
+      throw error
+    } finally {
+      fs.rmSync(runRoot, { recursive: true, force: true })
+      report.nativeScratchCleanup = !fs.existsSync(runRoot)
+    }
+  }
+  report.status = 'passed'
 } catch (error) {
-  report.stages.portable = { status: 'failed', error: error.message }
+  if (report.stages.portable.status !== 'passed')
+    report.stages.portable = { status: 'failed', error: error.message }
+  report.error = error.message
 } finally {
   fs.rmSync(scratch, { recursive: true, force: true })
   report.scratchCleanup = !fs.existsSync(scratch)
   report.durationMs = Date.now() - started
   writeReport(reportFile, report)
 }
-process.exitCode = report.status === 'passed' ? 0 : report.status === 'partial' ? 2 : 1
+process.exitCode = report.status === 'passed' ? 0 : 1

@@ -66,7 +66,15 @@ function bundleAgentValidationWorker(): Plugin {
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin(), bundleAgentValidationWorker()],
-    build: { rollupOptions: { input: { index: resolve('src/main/index.ts') } } }
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve('src/main/index.ts'),
+          normalStartup: resolve('src/main/normalStartup.ts'),
+          nativePackageProbe: resolve('src/main/nativePackageProbe.ts')
+        }
+      }
+    }
   },
   preload: {
     plugins: [externalizeDepsPlugin()]

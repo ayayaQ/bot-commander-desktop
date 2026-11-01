@@ -75,8 +75,20 @@ for (const manifest of packages.values()) {
 const mainPath = path.join(root, app.main)
 const mainBytes = fs.readFileSync(mainPath)
 assert.ok(mainBytes.equals(fs.readFileSync(path.join(checkout, app.main))))
-const main = mainBytes.toString()
-assert.doesNotThrow(() => new vm.Script(main, { filename: mainPath }))
+assert.equal(app.main, './out/main/index.js', 'Package must retain the original main entry')
+const dispatcher = mainBytes.toString()
+assert.doesNotThrow(() => new vm.Script(dispatcher, { filename: mainPath }))
+assert.match(dispatcher, /require\("\.\/normalStartup\.js"\)/)
+assert.match(dispatcher, /require\("\.\/nativePackageProbe\.js"\)/)
+const normalStartupPath = path.join(root, 'out/main/normalStartup.js')
+assert.equal(path.dirname(normalStartupPath), path.dirname(mainPath))
+const normalStartupBytes = fs.readFileSync(normalStartupPath)
+assert.ok(
+  normalStartupBytes.equals(fs.readFileSync(path.join(checkout, 'out/main/normalStartup.js'))),
+  'Packaged default startup differs from this build'
+)
+const main = normalStartupBytes.toString()
+assert.doesNotThrow(() => new vm.Script(main, { filename: normalStartupPath }))
 const emitted = main.match(/const requireSdk = [\s\S]*?(?=\nconst kinds = )/)?.[0]
 assert.ok(emitted, 'Built main has no captured-schema validator fragment')
 assert.match(emitted, /node_module\.createRequire\(typeof __filename/)
@@ -455,6 +467,7 @@ console.log(
     electron: process.versions.electron,
     node: process.versions.node,
     mainPath,
+    normalStartupPath,
     versions,
     productionPackages: reachable.size,
     dependencyEdges: edges,
@@ -472,6 +485,7 @@ console.log(
     bareSdkDynamicImport: 'passed',
     sessionOAuthSdkHelpers: 'passed',
     mainSha256: sha256(mainBytes),
+    normalStartupSha256: sha256(normalStartupBytes),
     asarSha256: sha256(rawFs.readFileSync(root))
   })
 )

@@ -130,7 +130,13 @@ describe('production disposable agent validation worker (headless)', () => {
   it('builds the same sibling entry during initial main builds and watch rebuilds', async () => {
     const config = electronViteConfig as { main: { plugins: Plugin[]; build: unknown } }
     expect(config.main.build).toEqual({
-      rollupOptions: { input: { index: resolve('src/main/index.ts') } }
+      rollupOptions: {
+        input: {
+          index: resolve('src/main/index.ts'),
+          normalStartup: resolve('src/main/normalStartup.ts'),
+          nativePackageProbe: resolve('src/main/nativePackageProbe.ts')
+        }
+      }
     })
     expect(SERVICE_WORKER_FILENAME).toBe(AGENT_VALIDATION_WORKER_FILENAME)
     const plugin = config.main.plugins.find(
