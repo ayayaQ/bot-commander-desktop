@@ -4,6 +4,7 @@ import type { AgentSession } from '../../shared/agentTypes'
 import type { AiRuntimeSettings } from './aiProviderService'
 import { modelCapabilityCatalog } from './modelCapabilityService'
 import { createAgentProvider, executeAgentProviderTurn } from './agentProviderAdapter'
+import { createAgentContextProjection } from './agentContextProjection'
 
 const settings: AiRuntimeSettings = { aiProvider: 'openai', openaiApiKey: 'fake-openai-key' }
 const routerSettings: AiRuntimeSettings = {
@@ -62,6 +63,253 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('desktop shared-provider settings bridge', () => {
+  it('shows the upstream OpenRouter error without exposing credentials or raw metadata', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            message: 'Provider returned error',
+            metadata: {
+              provider_name: 'Anthropic',
+              flagged_input: 'Private prompt',
+              raw: JSON.stringify({
+                error: { message: 'Invalid signature in thinking block: fake-router-key' }
+              })
+            }
+          }
+        }),
+        { status: 400 }
+      )
+    )
+    await expect(
+      run(routerSettings, { model: session.model, reasoningEffort: 'none' })
+    ).rejects.toThrow(
+      'OpenRouter request failed (HTTP 400): Provider returned error; Invalid signature in thinking block: [redacted]; Provider: Anthropic'
+    )
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  it('preserves structured context-overflow classification and does not retry HTTP errors', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 'context_length_exceeded',
+            message: 'Too much context'
+          }
+        }),
+        { status: 400 }
+      )
+    )
+    await expect(
+      run(routerSettings, { model: session.model, reasoningEffort: 'none' })
+    ).rejects.toMatchObject({
+      code: 'context_overflow',
+      status: 400
+    })
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  const routerModel = { model: 'anthropic/session-model', reasoningEffort: 'medium' as const }
+  const signedMessage = {
+    role: 'assistant',
+    content: '',
+    tool_calls: [
+      {
+        id: 'signed-call',
+        type: 'function',
+        function: { name: 'read_bot_state', arguments: '{ }' }
+      }
+    ],
+    reasoning: 'Provider reasoning',
+    reasoning_details: [
+      { type: 'reasoning.text', text: 'Provider reasoning', signature: 'opaque-signature' }
+    ]
+  }
+  async function signedTurn() {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ choices: [{ finish_reason: 'tool_calls', message: signedMessage }] })
+      )
+    )
+    const provider = createAgentProvider(routerSettings, routerModel)
+    const result = await provider.generate({ messages, tools }, new AbortController().signal)
+    const history: HistoryMessage[] = [
+      ...messages,
+      { kind: 'assistant', ...result },
+      { kind: 'tool_result', callId: 'signed-call', name: 'read_bot_state', content: '{}' }
+    ]
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: 'Done' } }] })
+      )
+    )
+    return { provider, history }
+  }
+
+  it('preserves signed reasoning during a live tool continuation with an unchanged prefix', async () => {
+    const { provider, history } = await signedTurn()
+    const original = structuredClone(history)
+    await provider.generate({ messages: history, tools }, new AbortController().signal)
+    expect(request().body.messages[2]).toMatchObject(signedMessage)
+    expect(history).toEqual(original)
+  })
+
+  it('preserves bound Claude reasoning after JSON persistence and a fresh provider instance', async () => {
+    const { history } = await signedTurn()
+    const persisted: HistoryMessage[] = JSON.parse(JSON.stringify(history))
+    const original = structuredClone(persisted)
+    const provider = createAgentProvider(routerSettings, routerModel)
+    await provider.generate({ messages: persisted, tools }, new AbortController().signal)
+    expect(request().body.messages[2]).toEqual(signedMessage)
+    expect(JSON.stringify(request().body)).not.toContain('_vivi_openrouter_reasoning')
+    expect(request().body.messages[3]).toEqual({
+      role: 'tool',
+      tool_call_id: 'signed-call',
+      content: '{}'
+    })
+    expect(persisted).toEqual(original)
+    const originalProvider = createAgentProvider(routerSettings, routerModel)
+    expect(provider.estimateContext!({ messages: persisted, tools })).toEqual(
+      originalProvider.estimateContext!({ messages: history, tools })
+    )
+  })
+
+  it('omits unbound legacy Claude reasoning without rewriting exact native calls or receipts', async () => {
+    const { history } = await signedTurn()
+    const legacy = structuredClone(history)
+    if (legacy[2].kind === 'assistant') {
+      legacy[2].providerState = {
+        provider: `openrouter:${routerModel.model}`,
+        items: [structuredClone(signedMessage)]
+      }
+    }
+    const original = structuredClone(legacy)
+    const provider = createAgentProvider(routerSettings, routerModel)
+    await provider.generate({ messages: legacy, tools }, new AbortController().signal)
+    expect(request().body.messages[2]).toEqual({
+      role: 'assistant',
+      content: '',
+      tool_calls: signedMessage.tool_calls
+    })
+    expect(request().body.messages[3]).toEqual({
+      role: 'tool',
+      tool_call_id: 'signed-call',
+      content: '{}'
+    })
+    expect(legacy).toEqual(original)
+    const stripped = structuredClone(legacy)
+    if (stripped[2].kind === 'assistant') {
+      const native = stripped[2].providerState!.items[0]
+      if (native && typeof native === 'object' && !Array.isArray(native)) {
+        delete native.reasoning
+        delete native.reasoning_details
+      }
+    }
+    expect(provider.estimateContext!({ messages: legacy, tools })).toEqual(
+      provider.estimateContext!({ messages: stripped, tools })
+    )
+  })
+
+  it('expires only reasoning after a refreshed skill receipt across a persisted session', async () => {
+    const skillTools = [...tools, { ...tools[0], name: 'read_skill' }]
+    const skillMessage = {
+      ...signedMessage,
+      tool_calls: [
+        {
+          ...signedMessage.tool_calls[0],
+          id: 'skill-read',
+          function: { name: 'read_skill', arguments: '{ }' }
+        }
+      ]
+    }
+    const reply = (message: typeof signedMessage) =>
+      new Response(JSON.stringify({ choices: [{ finish_reason: 'tool_calls', message }] }))
+    fetchMock.mockResolvedValueOnce(reply(skillMessage)).mockResolvedValueOnce(reply(signedMessage))
+    const provider = createAgentProvider(routerSettings, routerModel)
+    const first = await provider.generate(
+      { messages, tools: skillTools },
+      new AbortController().signal
+    )
+    const history: HistoryMessage[] = [
+      ...messages,
+      { kind: 'assistant', ...first },
+      { kind: 'tool_result', callId: 'skill-read', name: 'read_skill', content: 'Prior guidance' }
+    ]
+    const second = await provider.generate(
+      { messages: history, tools: skillTools },
+      new AbortController().signal
+    )
+    history.push(
+      { kind: 'assistant', ...second },
+      { kind: 'tool_result', callId: 'signed-call', name: 'read_bot_state', content: '{}' }
+    )
+    const persisted: HistoryMessage[] = JSON.parse(JSON.stringify(history))
+    const original = structuredClone(persisted)
+    const projected = createAgentContextProjection(persisted)(persisted)
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: 'Done' } }] })
+      )
+    )
+    const resumed = createAgentProvider(routerSettings, routerModel)
+    await resumed.generate({ messages: projected, tools: skillTools }, new AbortController().signal)
+    const assistants = request().body.messages.filter((message) => message.role === 'assistant')
+    expect(assistants[0]).toEqual(skillMessage)
+    expect(assistants[1]).toEqual({
+      role: 'assistant',
+      content: '',
+      tool_calls: signedMessage.tool_calls
+    })
+    expect(request().body.messages[3].content).toContain('Earlier skill guidance omitted')
+    expect(persisted).toEqual(original)
+    expect(JSON.stringify(request().body)).not.toContain('_vivi_openrouter_reasoning')
+  })
+
+  it.each(['prefix', 'tools', 'reasoning', 'compaction'] as const)(
+    'omits bound Claude reasoning when the %s changes within a run',
+    async (changed) => {
+      const { provider, history } = await signedTurn()
+      const input = {
+        messages:
+          changed === 'prefix'
+            ? [
+                {
+                  kind: 'message' as const,
+                  role: 'user' as const,
+                  content: 'Updated skill catalog'
+                },
+                ...history
+              ]
+            : changed === 'compaction'
+              ? history.slice(1)
+              : history,
+        tools: changed === 'tools' ? [] : tools
+      }
+      const original = structuredClone(input)
+      const selected =
+        changed === 'reasoning'
+          ? createAgentProvider(routerSettings, { ...routerModel, reasoningEffort: 'high' })
+          : provider
+      await selected.generate(input, new AbortController().signal)
+      const assistant = request().body.messages.find((m) => m.role === 'assistant')
+      expect(assistant).not.toHaveProperty('reasoning_details')
+      expect(assistant).not.toHaveProperty('reasoning')
+      expect(assistant.tool_calls).toEqual(signedMessage.tool_calls)
+      expect(input).toEqual(original)
+      const stripped = structuredClone(input)
+      for (const message of stripped.messages) {
+        if (message.kind !== 'assistant') continue
+        for (const native of message.providerState?.items ?? []) {
+          if (!native || typeof native !== 'object' || Array.isArray(native)) continue
+          delete native.reasoning
+          delete native.reasoning_details
+        }
+      }
+      expect(selected.estimateContext!(input)).toEqual(selected.estimateContext!(stripped))
+    }
+  )
+
   it('defaults to OpenAI and keeps the active session model instead of chat defaults', async () => {
     const original = structuredClone(messages)
     await run({ openaiApiKey: 'fake-openai-key', selectedOpenAiModel: 'gpt-chat-default' })

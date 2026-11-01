@@ -95,21 +95,76 @@ const { requireSdk, validateAgentMcpSchema } = moduleAtMain(
 )
 const baseline = new Set(Object.keys(createRequire(import.meta.url).cache))
 const resolutions = {}
+const coreRoot = path.join(root, 'node_modules/@ayayaq/vivi')
+const coreManifest = readJson(path.join(coreRoot, 'package.json'))
+const corePublicSpecs = Object.keys(coreManifest.exports).map((subpath) =>
+  subpath === '.' ? '@ayayaq/vivi' : `@ayayaq/vivi/${subpath.slice(2)}`
+)
 for (const spec of [
-  '@ayayaq/vivi',
-  '@ayayaq/vivi/extensions',
-  '@ayayaq/vivi/extensions/calculator',
-  '@ayayaq/vivi/extensions/mcp',
-  '@ayayaq/vivi/events',
-  '@ayayaq/vivi/events/stream',
-  '@ayayaq/vivi/presentation',
+  ...corePublicSpecs,
   '@modelcontextprotocol/client',
   '@modelcontextprotocol/client/validators/ajv',
   'url-template'
 ]) {
   resolutions[spec] = requireSdk.resolve(spec)
   assert.ok(resolutions[spec].startsWith(path.join(root, 'node_modules') + path.sep))
+  if (corePublicSpecs.includes(spec)) requireSdk(spec)
 }
+for (const file of [
+  'LICENSE',
+  'NOTICE',
+  'ATTRIBUTION.md',
+  'src/providers/openrouter-reasoning.ts'
+]) {
+  assert.ok(
+    fs
+      .readFileSync(path.join(coreRoot, file))
+      .equals(fs.readFileSync(path.join(checkout, 'node_modules/@ayayaq/vivi', file))),
+    `Packaged core ${file} differs from the installed registry release`
+  )
+}
+// Exercise only the packaged provider with fake HTTP; never launch Electron main or a live request.
+const coreWireMessages = []
+const coreNativeMessage = {
+  role: 'assistant',
+  content: 'Offline package reply',
+  reasoning_details: [{ type: 'reasoning.text', text: 'Fixture reasoning', signature: 'fixture' }]
+}
+const coreProviderOptions = {
+  apiKey: 'offline-package-fixture',
+  model: 'anthropic/package-fixture',
+  fetch: async (_url, init) => {
+    coreWireMessages.push(JSON.parse(init.body).messages)
+    return new Response(
+      JSON.stringify({ choices: [{ finish_reason: 'stop', message: coreNativeMessage }] })
+    )
+  }
+}
+const createPackedRouter = requireSdk('@ayayaq/vivi/providers/openrouter').createOpenRouterProvider
+const corePrefix = [{ kind: 'message', role: 'user', content: 'Offline package request' }]
+const coreReply = await createPackedRouter(coreProviderOptions).generate(
+  { messages: corePrefix, tools: [] },
+  new AbortController().signal
+)
+const corePersisted = JSON.parse(
+  JSON.stringify([...corePrefix, { kind: 'assistant', ...coreReply }])
+)
+const coreBefore = JSON.stringify(corePersisted)
+const resumedPackedRouter = createPackedRouter(coreProviderOptions)
+await resumedPackedRouter.generate(
+  { messages: corePersisted, tools: [] },
+  new AbortController().signal
+)
+assert.deepEqual(coreWireMessages[1][1], coreNativeMessage)
+await resumedPackedRouter.generate(
+  {
+    messages: [{ kind: 'message', role: 'system', content: 'Refreshed catalog' }, ...corePersisted],
+    tools: []
+  },
+  new AbortController().signal
+)
+assert.deepEqual(coreWireMessages[2][2], { role: 'assistant', content: coreNativeMessage.content })
+assert.equal(JSON.stringify(corePersisted), coreBefore)
 const versions = {}
 for (const name of ['@ayayaq/vivi', '@modelcontextprotocol/client', 'url-template']) {
   versions[name] = readJson(path.join(root, 'node_modules', name, 'package.json')).version
@@ -405,6 +460,9 @@ console.log(
     dependencyEdges: edges,
     resolutions,
     loadedProductionModules: loaded.length,
+    corePublicExports: corePublicSpecs.length,
+    coreSourceAndNotices: 'passed',
+    coreReasoningReplay: 'passed',
     schemaChecks: { valid: 1, invalid: 5, capturedSchemaMutation: 'rejected' },
     ownedExtensionScope: 'passed',
     conversationRecordReplay: 'passed',

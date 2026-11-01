@@ -12,6 +12,23 @@ The `0.2.0` release added the shared provider subpaths and canonical-history hel
 also includes the pure optional `providers/models` capability normalizer. The earlier
 `0.1.0` release contains only the original core.
 
+## Shared provider replay in 0.17.0
+
+The exact `0.17.0` registry release owns OpenRouter Claude reasoning replay. Its opaque native
+state binds signed reasoning to the preceding messages, tools and reasoning configuration.
+Valid bindings survive JSON persistence and fresh provider instances; changed context, expired
+skill receipts, compaction and unbound legacy reasoning are projected out only for requests and
+estimates. Canonical receipts and exact native tool calls remain unchanged. There is no separate
+desktop replay cache or automatic retry.
+
+Desktop retains bounded, credential-redacted upstream error presentation and its existing
+account, approval and cancellation policies. The core's optional request projection and safe
+error details do not add ChatGPT sign-in or a permission-bypass mode to this app.
+
+The registry archive's SHA-256 is
+`f709f18cc262f0b6c56170cb4d5fa47ab196b1039833aa0795e61598b55b49a0`; its immutable URL and
+SHA-512 integrity are recorded in the lockfile. No unrelated dependency entries changed.
+
 ## Display-only tool presentations
 
 The renderer adapts existing host/IPC tool facts through the optional `/presentation` subpath.
