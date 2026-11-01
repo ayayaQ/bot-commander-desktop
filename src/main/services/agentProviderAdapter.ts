@@ -20,7 +20,6 @@ import {
 import type { AiRuntimeSettings } from './aiProviderService'
 import { getAiProvider, getProviderApiKey } from './aiProviderService'
 import { immutableModelCapabilities, modelCapabilityCatalog } from './modelCapabilityService'
-import { createOpenRouterReasoningReplay } from './agentProviderHistory'
 import { readOpenRouterDiagnostic } from './agentProviderError'
 
 type SessionModel = Pick<AgentSession, 'model' | 'reasoningEffort'>
@@ -125,15 +124,10 @@ export function createAgentProvider(
         : createOpenAIProvider({ ...common, apiKey, ...(fetch ? { fetch } : {}) })
   const transport = createTransport()
   const fetchImpl = globalThis.fetch
-  const reasoningReplay =
-    provider === 'openrouter' ? createOpenRouterReasoningReplay(session.model) : undefined
   const projectInput = (input: {
     messages: readonly HistoryMessage[]
     tools: readonly ToolDefinition[]
-  }) => {
-    const supported = { ...input, tools: capabilities.tools === 'supported' ? input.tools : [] }
-    return reasoningReplay?.project(supported) ?? supported
-  }
+  }) => ({ ...input, tools: capabilities.tools === 'supported' ? input.tools : [] })
   return {
     ...(transport.estimateContext
       ? {
@@ -169,9 +163,7 @@ export function createAgentProvider(
           : transport
       const projected = projectInput(input)
       try {
-        const result = await selected.generate(projected, signal, generateOptions)
-        reasoningReplay?.accept(projected, result)
-        return result
+        return await selected.generate(projected, signal, generateOptions)
       } catch (error) {
         if (diagnostic && error instanceof ProviderRequestError && error.code === 'http') {
           throw new ProviderRequestError(

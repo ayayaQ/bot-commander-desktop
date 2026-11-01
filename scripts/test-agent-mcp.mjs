@@ -50,6 +50,7 @@ const files = [
   'src/main/services/agentHistory.test.ts',
   'src/main/services/agentSessionPersistence.test.ts',
   'src/main/services/agentProviderAdapter.test.ts',
+  'src/main/services/agentProviderError.test.ts',
   'src/main/services/agentToolResult.test.ts',
   'src/main/utils/gracefulShutdown.test.ts',
   'src/main/services/atomicPersistence.test.ts',

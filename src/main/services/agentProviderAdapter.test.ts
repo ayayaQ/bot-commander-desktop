@@ -4,6 +4,7 @@ import type { AgentSession } from '../../shared/agentTypes'
 import type { AiRuntimeSettings } from './aiProviderService'
 import { modelCapabilityCatalog } from './modelCapabilityService'
 import { createAgentProvider, executeAgentProviderTurn } from './agentProviderAdapter'
+import { createAgentContextProjection } from './agentContextProjection'
 
 const settings: AiRuntimeSettings = { aiProvider: 'openai', openaiApiKey: 'fake-openai-key' }
 const routerSettings: AiRuntimeSettings = {
@@ -154,11 +155,38 @@ describe('desktop shared-provider settings bridge', () => {
     expect(history).toEqual(original)
   })
 
-  it('omits saved Claude reasoning on a new run while preserving exact native calls and receipts', async () => {
+  it('preserves bound Claude reasoning after JSON persistence and a fresh provider instance', async () => {
     const { history } = await signedTurn()
-    const original = structuredClone(history)
+    const persisted: HistoryMessage[] = JSON.parse(JSON.stringify(history))
+    const original = structuredClone(persisted)
     const provider = createAgentProvider(routerSettings, routerModel)
-    await provider.generate({ messages: history, tools }, new AbortController().signal)
+    await provider.generate({ messages: persisted, tools }, new AbortController().signal)
+    expect(request().body.messages[2]).toEqual(signedMessage)
+    expect(JSON.stringify(request().body)).not.toContain('_vivi_openrouter_reasoning')
+    expect(request().body.messages[3]).toEqual({
+      role: 'tool',
+      tool_call_id: 'signed-call',
+      content: '{}'
+    })
+    expect(persisted).toEqual(original)
+    const originalProvider = createAgentProvider(routerSettings, routerModel)
+    expect(provider.estimateContext!({ messages: persisted, tools })).toEqual(
+      originalProvider.estimateContext!({ messages: history, tools })
+    )
+  })
+
+  it('omits unbound legacy Claude reasoning without rewriting exact native calls or receipts', async () => {
+    const { history } = await signedTurn()
+    const legacy = structuredClone(history)
+    if (legacy[2].kind === 'assistant') {
+      legacy[2].providerState = {
+        provider: `openrouter:${routerModel.model}`,
+        items: [structuredClone(signedMessage)]
+      }
+    }
+    const original = structuredClone(legacy)
+    const provider = createAgentProvider(routerSettings, routerModel)
+    await provider.generate({ messages: legacy, tools }, new AbortController().signal)
     expect(request().body.messages[2]).toEqual({
       role: 'assistant',
       content: '',
@@ -169,8 +197,8 @@ describe('desktop shared-provider settings bridge', () => {
       tool_call_id: 'signed-call',
       content: '{}'
     })
-    expect(history).toEqual(original)
-    const stripped = structuredClone(history)
+    expect(legacy).toEqual(original)
+    const stripped = structuredClone(legacy)
     if (stripped[2].kind === 'assistant') {
       const native = stripped[2].providerState!.items[0]
       if (native && typeof native === 'object' && !Array.isArray(native)) {
@@ -178,12 +206,67 @@ describe('desktop shared-provider settings bridge', () => {
         delete native.reasoning_details
       }
     }
-    expect(provider.estimateContext!({ messages: history, tools })).toEqual(
+    expect(provider.estimateContext!({ messages: legacy, tools })).toEqual(
       provider.estimateContext!({ messages: stripped, tools })
     )
   })
 
-  it.each(['prefix', 'tools'] as const)(
+  it('expires only reasoning after a refreshed skill receipt across a persisted session', async () => {
+    const skillTools = [...tools, { ...tools[0], name: 'read_skill' }]
+    const skillMessage = {
+      ...signedMessage,
+      tool_calls: [
+        {
+          ...signedMessage.tool_calls[0],
+          id: 'skill-read',
+          function: { name: 'read_skill', arguments: '{ }' }
+        }
+      ]
+    }
+    const reply = (message: typeof signedMessage) =>
+      new Response(JSON.stringify({ choices: [{ finish_reason: 'tool_calls', message }] }))
+    fetchMock.mockResolvedValueOnce(reply(skillMessage)).mockResolvedValueOnce(reply(signedMessage))
+    const provider = createAgentProvider(routerSettings, routerModel)
+    const first = await provider.generate(
+      { messages, tools: skillTools },
+      new AbortController().signal
+    )
+    const history: HistoryMessage[] = [
+      ...messages,
+      { kind: 'assistant', ...first },
+      { kind: 'tool_result', callId: 'skill-read', name: 'read_skill', content: 'Prior guidance' }
+    ]
+    const second = await provider.generate(
+      { messages: history, tools: skillTools },
+      new AbortController().signal
+    )
+    history.push(
+      { kind: 'assistant', ...second },
+      { kind: 'tool_result', callId: 'signed-call', name: 'read_bot_state', content: '{}' }
+    )
+    const persisted: HistoryMessage[] = JSON.parse(JSON.stringify(history))
+    const original = structuredClone(persisted)
+    const projected = createAgentContextProjection(persisted)(persisted)
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: 'Done' } }] })
+      )
+    )
+    const resumed = createAgentProvider(routerSettings, routerModel)
+    await resumed.generate({ messages: projected, tools: skillTools }, new AbortController().signal)
+    const assistants = request().body.messages.filter((message) => message.role === 'assistant')
+    expect(assistants[0]).toEqual(skillMessage)
+    expect(assistants[1]).toEqual({
+      role: 'assistant',
+      content: '',
+      tool_calls: signedMessage.tool_calls
+    })
+    expect(request().body.messages[3].content).toContain('Earlier skill guidance omitted')
+    expect(persisted).toEqual(original)
+    expect(JSON.stringify(request().body)).not.toContain('_vivi_openrouter_reasoning')
+  })
+
+  it.each(['prefix', 'tools', 'reasoning', 'compaction'] as const)(
     'omits bound Claude reasoning when the %s changes within a run',
     async (changed) => {
       const { provider, history } = await signedTurn()
@@ -198,16 +281,32 @@ describe('desktop shared-provider settings bridge', () => {
                 },
                 ...history
               ]
-            : history,
+            : changed === 'compaction'
+              ? history.slice(1)
+              : history,
         tools: changed === 'tools' ? [] : tools
       }
       const original = structuredClone(input)
-      await provider.generate(input, new AbortController().signal)
+      const selected =
+        changed === 'reasoning'
+          ? createAgentProvider(routerSettings, { ...routerModel, reasoningEffort: 'high' })
+          : provider
+      await selected.generate(input, new AbortController().signal)
       const assistant = request().body.messages.find((m) => m.role === 'assistant')
       expect(assistant).not.toHaveProperty('reasoning_details')
       expect(assistant).not.toHaveProperty('reasoning')
       expect(assistant.tool_calls).toEqual(signedMessage.tool_calls)
       expect(input).toEqual(original)
+      const stripped = structuredClone(input)
+      for (const message of stripped.messages) {
+        if (message.kind !== 'assistant') continue
+        for (const native of message.providerState?.items ?? []) {
+          if (!native || typeof native !== 'object' || Array.isArray(native)) continue
+          delete native.reasoning
+          delete native.reasoning_details
+        }
+      }
+      expect(selected.estimateContext!(input)).toEqual(selected.estimateContext!(stripped))
     }
   )
 

@@ -772,11 +772,20 @@ render()
     protocol: '2026-07-28',
     allowLoopbackHttp: false
   })
+  const overrideSavesBeforeEdit = await count('agent-mcp:configure')
   await click('Edit')
+  // CDP mouse release does not wait for Svelte's bound details state to render.
+  await wait("document.querySelector('form details')?.open === false")
   assert.equal(await evaluate("return document.querySelector('form details').open"), false)
   await click('Save configuration')
   await wait(
-    "window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:configure').at(-1).args[0].protocol === '2026-07-28'"
+    `window.__fixture.calls.filter((item) => item.channel === 'agent-mcp:configure').length === ${overrideSavesBeforeEdit + 1}`
+  )
+  assert.deepEqual(
+    await evaluate(
+      "return window.__fixture.calls.findLast((item) => item.channel === 'agent-mcp:configure').args[0]"
+    ),
+    httpSaved
   )
   flows.push('Editing existing stdio or HTTP entries preserves explicit protocol overrides')
   assert.equal(
