@@ -1,0 +1,106 @@
+{
+  "wrapEvalInIIFE": true,
+  "candidateKind": "command",
+  "candidateHash": "synthetic-native-command-v1",
+  "baseRevision": null,
+  "fixtureHash": "synthetic-native-fixture-v1",
+  "candidate": {
+    "id": "native-offline-command",
+    "command": "!offline",
+    "commandDescription": "Synthetic native package worker fixture",
+    "type": 0,
+    "channelMessage": "$eval return 6 * 7; $halt:offline",
+    "privateMessage": "",
+    "channelEmbed": {
+      "title": "",
+      "description": "",
+      "hexColor": "",
+      "imageURL": "",
+      "thumbnailURL": "",
+      "footer": ""
+    },
+    "privateEmbed": {
+      "title": "",
+      "description": "",
+      "hexColor": "",
+      "imageURL": "",
+      "thumbnailURL": "",
+      "footer": ""
+    },
+    "deleteAfter": false,
+    "deleteIfStrings": "",
+    "deleteNum": 0,
+    "ignoreErrorMessage": false,
+    "isBan": false,
+    "isKick": false,
+    "isNSFW": false,
+    "requiredRole": "",
+    "isVoiceMute": false,
+    "isAdmin": false,
+    "phrase": false,
+    "reaction": "",
+    "roleToAssign": "",
+    "specificChannel": "",
+    "specificMessage": "",
+    "startsWith": false
+  },
+  "suite": {
+    "cases": [
+      {
+        "name": "Inline QuickJS arithmetic and clean worker exit",
+        "state": {
+          "botState": {},
+          "variables": {},
+          "cooldowns": {},
+          "clockMs": 0,
+          "ai": { "response": "Synthetic offline response", "error": "" },
+          "guildId": "900000000000000001",
+          "guildName": "Synthetic package guild",
+          "channelId": "900000000000000002",
+          "channelName": "offline",
+          "nsfw": false,
+          "members": [
+            {
+              "id": "100000000000000001",
+              "name": "Fixture",
+              "roles": [],
+              "permissions": [],
+              "kicked": false,
+              "banned": false,
+              "muted": false
+            }
+          ],
+          "roles": [],
+          "channels": [
+            {
+              "id": "900000000000000002",
+              "guildId": "900000000000000001",
+              "name": "offline",
+              "type": 0,
+              "topic": "",
+              "nsfw": false,
+              "parentId": null,
+              "position": 0,
+              "slowmode": 0,
+              "overwrites": {}
+            }
+          ],
+          "messages": [],
+          "nextId": 1,
+          "strictMocks": true
+        },
+        "steps": [
+          {
+            "kind": "message",
+            "senderId": "100000000000000001",
+            "content": "!offline",
+            "assertions": [
+              { "path": "/outcome", "equals": "executed" },
+              { "path": "/effects/messages/0/content", "equals": "42:offline" }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
