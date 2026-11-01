@@ -123,8 +123,8 @@ jobs:
       run:
         shell: pwsh
     env:
-      A7_PACKAGE_OUTPUT: ${{ runner.temp }}/a7-native-package-${{ github.run_id }}-${{ github.run_attempt }}
-      A7_JSON_RECEIPTS: ${{ runner.temp }}/a7-native-receipts-${{ github.run_id }}-${{ github.run_attempt }}
+      A7_PACKAGE_OUTPUT: a7-native-package-${{ github.run_id }}-${{ github.run_attempt }}
+      A7_JSON_RECEIPTS: a7-native-receipts-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -156,14 +156,14 @@ jobs:
         timeout-minutes: 11
         run: >-
           node scripts/package-native.mjs
-          --output "$env:A7_PACKAGE_OUTPUT"
-          --report "$env:A7_JSON_RECEIPTS/package.json"
+          --output "$env:RUNNER_TEMP/$env:A7_PACKAGE_OUTPUT"
+          --report "$env:RUNNER_TEMP/$env:A7_JSON_RECEIPTS/package.json"
       - name: Verify portable artifact and synthetic native ready and quit
         timeout-minutes: 2
         run: >-
           node scripts/verify-native-package.mjs
-          --artifact "$env:A7_PACKAGE_OUTPUT/win-unpacked"
-          --report "$env:A7_JSON_RECEIPTS/native.json"
+          --artifact "$env:RUNNER_TEMP/$env:A7_PACKAGE_OUTPUT/win-unpacked"
+          --report "$env:RUNNER_TEMP/$env:A7_JSON_RECEIPTS/native.json"
       # Retain only the two JSON receipts, including failure receipts when available.
       - name: Retain synthetic lifecycle JSON receipts
         if: always()
@@ -172,8 +172,8 @@ jobs:
         with:
           name: windows-synthetic-native-json-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ env.A7_JSON_RECEIPTS }}/package.json
-            ${{ env.A7_JSON_RECEIPTS }}/native.json
+            ${{ runner.temp }}/${{ env.A7_JSON_RECEIPTS }}/package.json
+            ${{ runner.temp }}/${{ env.A7_JSON_RECEIPTS }}/native.json
           if-no-files-found: warn
           retention-days: 7
           include-hidden-files: false
