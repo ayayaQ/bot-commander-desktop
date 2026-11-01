@@ -114,3 +114,66 @@ jobs:
         run: npm test -- src/main/services/agentSkillsWorkflow.integration.test.ts src/main/services/agentSkillSaveSupport.test.ts
       - name: Portable skill discovery, resources, and Windows aliases
         run: npm test -- src/main/services/agentSkillStore.test.ts --testNamePattern "always includes|supports canonical Unicode|reads existing standard|keeps scripts inert|reports size|excludes duplicate|bounds resource bytes|rechecks registered fixture|accepts ordinary Windows case"
+
+  native-package-windows-synthetic:
+    name: Windows synthetic native package lifecycle
+    runs-on: windows-2025
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      A7_PACKAGE_OUTPUT: ${{ runner.temp }}/a7-native-package-${{ github.run_id }}-${{ github.run_attempt }}
+      A7_JSON_RECEIPTS: ${{ runner.temp }}/a7-native-receipts-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          architecture: x64
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install locked dependencies
+        timeout-minutes: 5
+        run: npm.cmd ci --no-audit --no-fund
+      - name: Check ordinary startup routing and native helper contracts
+        timeout-minutes: 2
+        run: >-
+          npm.cmd test --
+          src/main/index.test.ts
+          src/main/nativeStartupRoute.test.ts
+          src/main/nativeStartupDispatch.test.ts
+          src/main/nativePackageProbe.test.ts
+          scripts/native-package-support.test.ts
+      - name: Build production application including typecheck
+        timeout-minutes: 5
+        run: npm.cmd run build
+      - name: Create unsigned unpacked Windows test package
+        timeout-minutes: 11
+        run: >-
+          node scripts/package-native.mjs
+          --output "$env:A7_PACKAGE_OUTPUT"
+          --report "$env:A7_JSON_RECEIPTS/package.json"
+      - name: Verify portable artifact and synthetic native ready and quit
+        timeout-minutes: 2
+        run: >-
+          node scripts/verify-native-package.mjs
+          --artifact "$env:A7_PACKAGE_OUTPUT/win-unpacked"
+          --report "$env:A7_JSON_RECEIPTS/native.json"
+      # Retain only the two JSON receipts, including failure receipts when available.
+      - name: Retain synthetic lifecycle JSON receipts
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-synthetic-native-json-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.A7_JSON_RECEIPTS }}/package.json
+            ${{ env.A7_JSON_RECEIPTS }}/native.json
+          if-no-files-found: warn
+          retention-days: 7
+          include-hidden-files: false
