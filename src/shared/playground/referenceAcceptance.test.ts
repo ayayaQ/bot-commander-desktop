@@ -10,6 +10,7 @@ import { decodeBCFDCommand } from '../commandCodec'
 import { runAgentValidation } from './agentValidation'
 import { createScriptSandboxFactory, type ScriptSandboxFactory } from './script'
 import { createPlaygroundState, type PlaygroundState } from './types'
+import { normalizeWorld, PLAYGROUND_BOT_ID, selectWorldContext } from './world'
 
 const memberRole = '200000000000000002'
 const welcomeTemplate =
@@ -61,6 +62,31 @@ function action(patch: Partial<BCFDInteractionAction> = {}): BCFDInteractionActi
   }
 }
 
+function roleButton(): BCFDInteractionCommand {
+  return {
+    id: 'reference-interaction',
+    commandName: 'member',
+    commandDescription: 'Choose the member role',
+    options: [],
+    isRegistered: false,
+    rootAction: action({
+      buttons: [
+        {
+          customId: 'member-role',
+          label: 'Member',
+          style: 1,
+          disabled: false,
+          action: action({
+            channelMessage: 'Member role toggled for $namePlain',
+            isRoleAssigner: true,
+            roleToAssign: memberRole
+          })
+        }
+      ]
+    })
+  }
+}
+
 function request(
   candidate: AgentValidationRequest['candidate'],
   state: PlaygroundState,
@@ -79,7 +105,14 @@ function request(
 }
 
 function expectPassed(report: AgentValidationReport): void {
-  expect(report.outcome).toBe('passed')
+  expect(
+    report.outcome,
+    JSON.stringify(
+      report.cases.flatMap((testCase) =>
+        testCase.steps.flatMap((step) => step.assertions.filter((assertion) => !assertion.passed))
+      )
+    )
+  ).toBe('passed')
   expect(report.timedOut).toBe(false)
   expect(report.cancelled).toBe(false)
   expect(report.truncated).toBe(false)
@@ -97,16 +130,14 @@ beforeAll(async () => {
 })
 
 describe('ordinary reference acceptance sequences', () => {
-  it('renders the documented welcome template exactly on a supported message command', async () => {
-    // The tutorial uses Member Join. This only exercises its response on message-received;
-    // GuildMemberAdd dispatch is not implemented by the offline runner.
+  it('renders the documented welcome template exactly on memberJoin', async () => {
     const state = createPlaygroundState()
     const report = await runAgentValidation(
-      request(command(), state, [
+      request(command({ type: 2 }), state, [
         {
-          kind: 'message',
+          kind: 'memberJoin',
           senderId: state.members[0].id,
-          content: '!welcome',
+          content: '',
           assertions: [
             { path: '/outcome', equals: 'executed' },
             {
@@ -198,28 +229,7 @@ describe('ordinary reference acceptance sequences', () => {
     const recipient = state.members[1]
     const wrongRecipient = state.members[2]
     const originalMembers = structuredClone(state.members)
-    const candidate: BCFDInteractionCommand = {
-      id: 'reference-interaction',
-      commandName: 'member',
-      commandDescription: 'Choose the member role',
-      options: [],
-      isRegistered: false,
-      rootAction: action({
-        buttons: [
-          {
-            customId: 'member-role',
-            label: 'Member',
-            style: 1,
-            disabled: false,
-            action: action({
-              channelMessage: 'Member role toggled for $namePlain',
-              isRoleAssigner: true,
-              roleToAssign: memberRole
-            })
-          }
-        ]
-      })
-    }
+    const candidate = roleButton()
     const report = await runAgentValidation(
       request(
         candidate,
@@ -273,9 +283,101 @@ describe('ordinary reference acceptance sequences', () => {
     expectPassed(report)
     expect(report.coverage).toMatchObject({ matched: 3, executed: 2, blocked: 1 })
     expect(report.cases[0].steps[1].expectedNegative).toBe(true)
-    // Fake role toggles do not simulate Discord ManageRoles permission or role hierarchy.
+    // The recipient needs no permission; role management checks the fake bot.
     expect(recipient.permissions).toEqual([])
     expect(state.members).toEqual(originalMembers)
     expect(state.messages).toEqual([])
+  })
+
+  it.each([
+    { name: 'lower role permitted', rolePosition: 99 },
+    { name: 'missing ManageRoles denied', rolePosition: 99, missingPermission: true },
+    { name: 'equal role denied', rolePosition: 100 },
+    { name: 'higher role denied', rolePosition: 101 },
+    { name: 'equal member denied', rolePosition: 99, memberPosition: 100 },
+    { name: 'higher member denied', rolePosition: 99, memberPosition: 101 },
+    { name: 'administrator hierarchy denied', rolePosition: 100, administrator: true }
+  ])('enforces bot permission and hierarchy for the role button: $name', async (scenario) => {
+    const state = normalizeWorld()
+    const world = state.world!
+    const recipient = state.members[1]
+    const bot = world.memberships.find((member) => member.id === PLAYGROUND_BOT_ID)!
+    const botRole = world.roles.find((role) => bot.roles.includes(role.id))!
+    botRole.permissions = scenario.administrator
+      ? ['Administrator']
+      : ['ViewChannel', 'SendMessages', ...(scenario.missingPermission ? [] : ['ManageRoles'])]
+    world.roles.find((role) => role.id === memberRole)!.position = scenario.rolePosition
+    if (scenario.memberPosition) {
+      const elevatedRole = '200000000000000003'
+      world.roles.push({
+        id: elevatedRole,
+        guildId: state.guildId,
+        name: 'Senior member',
+        position: scenario.memberPosition,
+        permissions: []
+      })
+      world.memberships.find((member) => member.id === recipient.id)!.roles = [elevatedRole]
+    }
+    selectWorldContext(state, { guildId: state.guildId, channelId: state.channelId })
+    const original = structuredClone(state)
+    const permitted = scenario.name === 'lower role permitted'
+    const reason = scenario.missingPermission
+      ? 'Missing bot ManageRoles permission'
+      : scenario.memberPosition
+        ? 'Member is not manageable: role hierarchy or guild owner'
+        : 'Role is not editable: managed role or role hierarchy'
+    const expectedMembers = structuredClone(state.members)
+    const expectedMemberships = structuredClone(world.memberships)
+    if (permitted) {
+      expectedMembers[1].roles = [memberRole]
+      expectedMemberships[1].roles = [memberRole]
+    }
+    const context = { guildId: state.guildId, channelId: state.channelId }
+    const input = request(
+      roleButton(),
+      state,
+      [
+        {
+          kind: 'slash',
+          senderId: recipient.id,
+          context,
+          assertions: [
+            { path: '/outcome', equals: 'executed' },
+            { path: '/effects/messages/0/id', equals: '800000000000000002' },
+            { path: '/effects/messages/0/content', equals: 'Choose your member role' },
+            { path: '/effects/memberChanges/length', equals: 0 }
+          ]
+        },
+        {
+          kind: 'button',
+          senderId: recipient.id,
+          context,
+          messageId: '800000000000000002',
+          customId: 'member-role',
+          assertions: [
+            { path: '/outcome', equals: permitted ? 'executed' : 'error' },
+            { path: permitted ? '/errors' : '/errors/0', equals: permitted ? [] : reason },
+            // Production sends the response before attempting the role toggle.
+            { path: '/effects/messages/0/content', equals: 'Member role toggled for Sam' },
+            { path: '/effects/messages/0/ephemeral', equals: true },
+            { path: '/effects/messages/0/recipient', equals: recipient.id },
+            { path: '/effects/memberChanges/length', equals: permitted ? 1 : 0 },
+            { path: '/state/members', equals: expectedMembers },
+            { path: '/state/world/memberships', equals: expectedMemberships }
+          ]
+        }
+      ],
+      'interaction'
+    )
+    input.suite.version = 3
+    const report = await runAgentValidation(input)
+    expectPassed(report)
+    expect(report.coverage).toMatchObject({
+      matched: 2,
+      executed: permitted ? 2 : 1,
+      errors: permitted ? 0 : 1
+    })
+    expect(report.cases[0].steps[1].expectedNegative).toBe(!permitted)
+    expect(state).toEqual(original)
   })
 })
