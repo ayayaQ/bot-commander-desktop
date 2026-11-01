@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   normalizeSettings: vi.fn(),
   setSettings: vi.fn(),
   publicSettings: vi.fn(),
+  persistSettingsUpdate: vi.fn(),
   provider: vi.fn(),
   capabilities: vi.fn(),
   fetchModels: vi.fn(),
@@ -90,7 +91,8 @@ vi.mock('../services/settingsService', () => ({
   getSettings: mocks.settings,
   normalizeSettings: mocks.normalizeSettings,
   setSettings: mocks.setSettings,
-  publicSettings: mocks.publicSettings
+  publicSettings: mocks.publicSettings,
+  persistSettingsUpdate: mocks.persistSettingsUpdate
 }))
 vi.mock('../services/aiProviderService', () => ({
   getAiProvider: mocks.provider,
@@ -659,7 +661,10 @@ describe('write-only DeepSeek credential IPC', () => {
     vi.clearAllMocks()
     current = {
       aiProvider: 'deepseek',
-      openaiApiKey: '',
+      openaiApiKey: 'saved-openai-fixture',
+      openrouterApiKey: 'saved-openrouter-fixture',
+      openaiAccountRevision: 'openai-revision',
+      openrouterAccountRevision: 'openrouter-revision',
       deepseekApiKey: 'saved-chat-fixture',
       deepseekWebApiKey: 'saved-web-fixture',
       deepseekChatAccountRevision: 'chat-revision',
@@ -675,22 +680,42 @@ describe('write-only DeepSeek credential IPC', () => {
       current = value
     })
     mocks.publicSettings.mockImplementation(() => {
-      const { deepseekApiKey, deepseekWebApiKey, ...rest } = current
+      const { openaiApiKey, openrouterApiKey, deepseekApiKey, deepseekWebApiKey, ...rest } = current
       return {
         ...rest,
+        openaiKeyConfigured: !!openaiApiKey,
+        openrouterKeyConfigured: !!openrouterApiKey,
         deepseekKeyConfigured: !!deepseekApiKey,
         deepseekWebKeyConfigured: !!deepseekWebApiKey
       }
     })
     mocks.saveSettings.mockResolvedValue(undefined)
+    mocks.persistSettingsUpdate.mockImplementation(async (value, persist) => {
+      const next = mocks.normalizeSettings(value)
+      try {
+        await persist(next)
+      } catch {
+        throw new Error('The existing keys remain active')
+      }
+      mocks.setSettings(next)
+    })
   })
   it('returns flags/nonces only and ordinary settings saves preserve host credentials', async () => {
     const routes = await handlers()
     expect(routes.get('get-settings')!({})).not.toHaveProperty('deepseekApiKey')
     const saved = await routes.get('save-settings')!(
       {},
-      { ...current, theme: 'dark', deepseekApiKey: 'forged-chat', deepseekWebApiKey: 'forged-web' }
+      {
+        ...current,
+        theme: 'dark',
+        openaiApiKey: '',
+        openrouterApiKey: 'forged-router',
+        deepseekApiKey: 'forged-chat',
+        deepseekWebApiKey: 'forged-web'
+      }
     )
+    expect(current.openaiApiKey).toBe('saved-openai-fixture')
+    expect(current.openrouterApiKey).toBe('saved-openrouter-fixture')
     expect(current.deepseekApiKey).toBe('saved-chat-fixture')
     expect(current.deepseekWebApiKey).toBe('saved-web-fixture')
     expect(saved).not.toHaveProperty('deepseekApiKey')
@@ -741,8 +766,204 @@ describe('write-only DeepSeek credential IPC', () => {
         {},
         { purpose: 'chat', value: 'replacement-secret', expectedRevision: 'chat-revision' }
       )
-    ).rejects.toThrow('existing key remains active')
+    ).rejects.toThrow('existing keys remain active')
     expect(current.deepseekApiKey).toBe('saved-chat-fixture')
     expect(mocks.setSettings).not.toHaveBeenCalled()
   })
+  it.each(['openai', 'openrouter'])(
+    'replaces and explicitly removes only %s through narrow IPC',
+    async (provider) => {
+      const routes = await handlers()
+      const result = await routes.get('save-provider-key')!(
+        {},
+        {
+          provider,
+          action: 'replace',
+          value: 'new-legacy-fixture',
+          expectedRevision: `${provider}-revision`
+        }
+      )
+      expect(current[`${provider}ApiKey`]).toBe('new-legacy-fixture')
+      expect(current.deepseekApiKey).toBe('saved-chat-fixture')
+      expect(JSON.stringify(result)).not.toContain('fixture')
+      expect(JSON.stringify(mocks.send.mock.calls)).not.toContain('new-legacy-fixture')
+      await routes.get('save-provider-key')!(
+        {},
+        { provider, action: 'remove', expectedRevision: `${provider}-revision` }
+      )
+      expect(current[`${provider}ApiKey`]).toBe('')
+    }
+  )
+
+  it.each([
+    { provider: 'openai', action: 'replace', value: 'fake-key', expectedRevision: 'stale' },
+    { provider: 'openrouter', action: 'remove', expectedRevision: 'stale' },
+    {
+      provider: 'deepseek',
+      action: 'replace',
+      value: 'fake-key',
+      expectedRevision: 'chat-revision'
+    },
+    { provider: 'openai', action: 'replace', value: '', expectedRevision: 'openai-revision' },
+    {
+      provider: 'openai',
+      action: 'replace',
+      value: ' fake-key',
+      expectedRevision: 'openai-revision'
+    },
+    {
+      provider: 'openai',
+      action: 'replace',
+      value: 'fake\nkey',
+      expectedRevision: 'openai-revision'
+    },
+    { provider: 'openai', action: 'remove', value: '', expectedRevision: 'openai-revision' },
+    {
+      provider: 'openai',
+      action: 'replace',
+      value: 'fake-key',
+      expectedRevision: 'openai-revision',
+      endpoint: 'https://invalid.test'
+    }
+  ])('rejects invalid/stale legacy payload %# before persistence', async (request) => {
+    const routes = await handlers()
+    await expect(routes.get('save-provider-key')!({}, request)).rejects.toThrow()
+    expect(mocks.saveSettings).not.toHaveBeenCalled()
+    expect(mocks.setSettings).not.toHaveBeenCalled()
+  })
+
+  it('keeps legacy keys and public state on a failed replacement without echoing secrets', async () => {
+    const routes = await handlers()
+    mocks.saveSettings.mockRejectedValueOnce(new Error('fake-sensitive-key'))
+    const failure = await routes.get('save-provider-key')!(
+      {},
+      {
+        provider: 'openai',
+        action: 'replace',
+        value: 'fake-sensitive-key',
+        expectedRevision: 'openai-revision'
+      }
+    ).catch((error) => error)
+    expect(failure.message).not.toContain('fake-sensitive-key')
+    expect(current.openaiApiKey).toBe('saved-openai-fixture')
+    expect(mocks.setSettings).not.toHaveBeenCalled()
+    expect(mocks.send).not.toHaveBeenCalled()
+  })
+})
+
+describe('credential IPC with real settings revisions and fake persistence', () => {
+  let service: typeof import('../services/settingsService')
+  let routes: Map<string, (...args: unknown[]) => unknown>
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    service = await vi.importActual('../services/settingsService')
+    service.setSettings({
+      ...service.getSettings(),
+      aiProvider: 'openai',
+      agentReviewerProvider: 'openai',
+      openaiApiKey: 'fake-original-openai',
+      openrouterApiKey: 'fake-original-router',
+      deepseekApiKey: 'fake-original-chat',
+      deepseekWebApiKey: 'fake-original-web'
+    })
+    mocks.settings.mockImplementation(service.getSettings)
+    mocks.publicSettings.mockImplementation(service.publicSettings)
+    mocks.persistSettingsUpdate.mockImplementation(service.persistSettingsUpdate)
+    mocks.saveSettings.mockResolvedValue(undefined)
+    const { addIPCHandlers } = await import('./ipcHandlers')
+    addIPCHandlers()
+    routes = new Map(mocks.handle.mock.calls.map(([channel, handler]) => [channel, handler]))
+  })
+
+  it('rejects a second write using the old revision and preserves all secrets on an unrelated stale settings save', async () => {
+    const old = service.publicSettings()
+    const replaced = (await routes.get('save-provider-key')!(
+      {},
+      {
+        provider: 'openai',
+        action: 'replace',
+        value: 'fake-replacement-openai',
+        expectedRevision: old.openaiAccountRevision
+      }
+    )) as typeof old
+    expect(replaced.openaiAccountRevision).not.toBe(old.openaiAccountRevision)
+    expect(replaced.agentDecisionAccountRevision).not.toBe(old.agentDecisionAccountRevision)
+    expect(replaced.openrouterAccountRevision).toBe(old.openrouterAccountRevision)
+    await expect(
+      routes.get('save-provider-key')!(
+        {},
+        {
+          provider: 'openai',
+          action: 'remove',
+          expectedRevision: old.openaiAccountRevision
+        }
+      )
+    ).rejects.toThrow('account changed')
+    await routes.get('save-settings')!({}, { ...old, theme: 'dark', openaiApiKey: '' })
+    expect(service.getSettings()).toMatchObject({
+      theme: 'dark',
+      openaiApiKey: 'fake-replacement-openai',
+      openrouterApiKey: 'fake-original-router',
+      deepseekApiKey: 'fake-original-chat',
+      deepseekWebApiKey: 'fake-original-web',
+      openaiAccountRevision: replaced.openaiAccountRevision,
+      agentDecisionAccountRevision: replaced.agentDecisionAccountRevision
+    })
+    expect(JSON.stringify(mocks.send.mock.calls)).not.toContain('fake-')
+  })
+
+  it('serializes ordinary saves and credential writes and snapshots the queued request', async () => {
+    const before = service.publicSettings()
+    let finish!: () => void
+    mocks.saveSettings.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    const ordinary = routes.get('save-settings')!({}, { ...before, theme: 'dark' })
+    await vi.waitFor(() => expect(mocks.saveSettings).toHaveBeenCalledTimes(1))
+    const request = {
+      provider: 'openrouter',
+      action: 'replace',
+      value: 'fake-queued-key',
+      expectedRevision: before.openrouterAccountRevision
+    }
+    const credential = routes.get('save-provider-key')!({}, request)
+    request.value = 'fake-mutated-after-request'
+    expect(mocks.saveSettings).toHaveBeenCalledTimes(1)
+    finish()
+    await ordinary
+    await credential
+    expect(service.getSettings()).toMatchObject({
+      theme: 'dark',
+      openrouterApiKey: 'fake-queued-key'
+    })
+    expect(JSON.stringify(mocks.send.mock.calls)).not.toContain('fake-')
+  })
+
+  it.each(['replace', 'remove'] as const)(
+    'leaves exact live state and revision retryable when %s persistence fails',
+    async (action) => {
+      const before = service.publicSettings()
+      mocks.saveSettings.mockRejectedValueOnce(new Error('fake-sensitive-detail'))
+      const request = {
+        provider: 'openai',
+        action,
+        expectedRevision: before.openaiAccountRevision,
+        ...(action === 'replace' ? { value: 'fake-replacement' } : {})
+      }
+      await expect(routes.get('save-provider-key')!({}, request)).rejects.toThrow(
+        'existing keys remain active'
+      )
+      expect(service.publicSettings()).toEqual(before)
+      expect(mocks.send).not.toHaveBeenCalled()
+      await routes.get('save-provider-key')!({}, request)
+      expect(service.getSettings().openaiApiKey).toBe(
+        action === 'replace' ? 'fake-replacement' : ''
+      )
+      expect(service.getSettings().openaiAccountRevision).not.toBe(before.openaiAccountRevision)
+      expect(mocks.saveSettings.mock.calls[1][0]).toEqual(service.getSettings())
+    }
+  )
 })

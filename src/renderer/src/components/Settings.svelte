@@ -6,6 +6,7 @@
     loadSettings,
     saveSettings,
     saveDeepSeekKey,
+    saveProviderKey,
     patchSettings,
     retrySettingsSave,
     settingsDraftStore,
@@ -14,6 +15,8 @@
     withSelectedModelForProvider
   } from '../stores/settings'
   import { t } from '../stores/localisation'
+  import SettingsCredentials from './SettingsCredentials.svelte'
+  import type { LegacyCredentialProvider } from '../../../shared/settingsCredentials'
   import HeaderBar from './HeaderBar.svelte'
   import ApiAuth from './ApiAuth.svelte'
   import ModelPicker from './ModelPicker.svelte'
@@ -40,12 +43,14 @@
   let showToken: boolean = $state()
   let selectedLanguage: string = $state()
   let aiProvider: 'openai' | 'openrouter' | 'deepseek' = $state('openai')
-  let openaiApiKey: string = $state()
-  let openrouterApiKey: string = $state('')
+  let openaiKeyConfigured = $state(false)
+  let openrouterKeyConfigured = $state(false)
+  let openaiAccountRevision: string | undefined = $state()
+  let openrouterAccountRevision: string | undefined = $state()
   let deepseekKeyInput = $state('')
   let deepseekKeyConfigured = $state(false)
   let deepseekChatAccountRevision: string | undefined = $state()
-  let credentialBusy: 'chat' | 'web' | '' = $state('')
+  let credentialBusy: 'chat' | 'web' | LegacyCredentialProvider | '' = $state('')
   let credentialErrors = $state({ chat: '', web: '' })
   let reviewerProvider: ReviewerProvider | '' = $state('')
   let webProvider: 'disabled' | 'deepseek' = $state('disabled')
@@ -76,8 +81,8 @@
     const provider = settings.aiProvider || 'openai'
     if (
       aiProvider !== provider ||
-      openaiApiKey !== settings.openaiApiKey ||
-      openrouterApiKey !== (settings.openrouterApiKey || '') ||
+      openaiAccountRevision !== settings.openaiAccountRevision ||
+      openrouterAccountRevision !== settings.openrouterAccountRevision ||
       deepseekChatAccountRevision !== settings.deepseekChatAccountRevision ||
       deepseekKeyConfigured !== Boolean(settings.deepseekKeyConfigured)
     ) {
@@ -94,8 +99,10 @@
     showToken = settings.showToken
     selectedLanguage = settings.language
     aiProvider = settings.aiProvider || 'openai'
-    openaiApiKey = settings.openaiApiKey
-    openrouterApiKey = settings.openrouterApiKey || ''
+    openaiKeyConfigured = Boolean(settings.openaiKeyConfigured)
+    openrouterKeyConfigured = Boolean(settings.openrouterKeyConfigured)
+    openaiAccountRevision = settings.openaiAccountRevision
+    openrouterAccountRevision = settings.openrouterAccountRevision
     deepseekKeyConfigured = Boolean(settings.deepseekKeyConfigured)
     deepseekChatAccountRevision = settings.deepseekChatAccountRevision
     reviewerProvider = selectedReviewer(settings) || ''
@@ -143,26 +150,17 @@
     void patchSettings({ agentNotificationsEnabled })
   }
 
-  function updateOpenAIKey(event) {
-    catalogGate.invalidate()
-    selectedGate.invalidate()
-    selectedCapabilities = undefined
-    aiModels = []
-    isLoadingModels = false
-    modelFetchError = 'Provider key changed. Refresh the model catalog.'
-    openaiApiKey = event.target.value
-    void patchSettings({ openaiApiKey })
-  }
-
-  function updateOpenRouterKey(event) {
-    catalogGate.invalidate()
-    selectedGate.invalidate()
-    selectedCapabilities = undefined
-    aiModels = []
-    isLoadingModels = false
-    modelFetchError = 'Provider key changed. Refresh the model catalog.'
-    openrouterApiKey = event.target.value
-    void patchSettings({ openrouterApiKey })
+  async function updateProviderCredential(
+    provider: LegacyCredentialProvider,
+    change: { action: 'replace'; value: string } | { action: 'remove' }
+  ) {
+    if (credentialBusy) throw new Error('A credential update is already pending')
+    credentialBusy = provider
+    try {
+      await saveProviderKey(provider, change)
+    } finally {
+      credentialBusy = ''
+    }
   }
 
   async function updateDeepSeekCredential(purpose: 'chat' | 'web', clear = false) {
@@ -233,8 +231,10 @@
         selectedAiModel,
         {
           aiProvider,
-          openaiApiKey,
-          openrouterApiKey,
+          openaiKeyConfigured,
+          openaiAccountRevision,
+          openrouterKeyConfigured,
+          openrouterAccountRevision,
           deepseekKeyConfigured,
           deepseekChatAccountRevision
         },
@@ -265,8 +265,10 @@
           selectedAiModel,
           {
             aiProvider,
-            openaiApiKey,
-            openrouterApiKey,
+            openaiKeyConfigured,
+            openaiAccountRevision,
+            openrouterKeyConfigured,
+            openrouterAccountRevision,
             deepseekKeyConfigured,
             deepseekChatAccountRevision
           },
@@ -283,8 +285,10 @@
     aiModels = []
     const local = {
       aiProvider,
-      openaiApiKey,
-      openrouterApiKey,
+      openaiKeyConfigured,
+      openaiAccountRevision,
+      openrouterKeyConfigured,
+      openrouterAccountRevision,
       deepseekKeyConfigured,
       deepseekChatAccountRevision
     }
@@ -296,7 +300,7 @@
       return
     }
     if (
-      (aiProvider === 'openai' && !openaiApiKey) ||
+      (aiProvider === 'openai' && !openaiKeyConfigured) ||
       (aiProvider === 'deepseek' && !deepseekKeyConfigured)
     ) {
       isLoadingModels = false
@@ -312,8 +316,10 @@
         canRefreshModelCatalog(
           {
             aiProvider,
-            openaiApiKey,
-            openrouterApiKey,
+            openaiKeyConfigured,
+            openaiAccountRevision,
+            openrouterKeyConfigured,
+            openrouterAccountRevision,
             deepseekKeyConfigured,
             deepseekChatAccountRevision
           },
@@ -364,8 +370,10 @@
   $effect(() => {
     const local = {
       aiProvider,
-      openaiApiKey,
-      openrouterApiKey,
+      openaiKeyConfigured,
+      openaiAccountRevision,
+      openrouterKeyConfigured,
+      openrouterAccountRevision,
       deepseekKeyConfigured,
       deepseekChatAccountRevision
     }
@@ -386,8 +394,10 @@
     model: string,
     local: {
       aiProvider: 'openai' | 'openrouter' | 'deepseek'
-      openaiApiKey: string
-      openrouterApiKey: string
+      openaiKeyConfigured: boolean
+      openrouterKeyConfigured: boolean
+      openaiAccountRevision?: string
+      openrouterAccountRevision?: string
       deepseekKeyConfigured: boolean
       deepseekChatAccountRevision?: string
     },
@@ -416,8 +426,10 @@
         canRefreshModelCatalog(
           {
             aiProvider,
-            openaiApiKey,
-            openrouterApiKey,
+            openaiKeyConfigured,
+            openaiAccountRevision,
+            openrouterKeyConfigured,
+            openrouterAccountRevision,
             deepseekKeyConfigured,
             deepseekChatAccountRevision
           },
@@ -450,8 +462,10 @@
                 model,
                 {
                   aiProvider,
-                  openaiApiKey,
-                  openrouterApiKey,
+                  openaiKeyConfigured,
+                  openaiAccountRevision,
+                  openrouterKeyConfigured,
+                  openrouterAccountRevision,
                   deepseekKeyConfigured,
                   deepseekChatAccountRevision
                 },
@@ -650,36 +664,23 @@
     </select>
   </div>
 
-  <div class="form-control">
-    <!-- svelte-ignore a11y_label_has_associated_control -->
-    <label class="label">
-      <span class="label-text">{$t('openai-api-key')}</span>
-      {#if aiProvider !== 'openai'}
-        <span class="label-text-alt">Required for Discord $chat response moderation</span>
-      {/if}
-    </label>
-    <input
-      type={showToken ? 'text' : 'password'}
-      class="input w-full"
-      value={openaiApiKey}
-      oninput={updateOpenAIKey}
-      placeholder={$t('enter-your-openai-api-key')}
-    />
-  </div>
-
-  <div class="form-control">
-    <!-- svelte-ignore a11y_label_has_associated_control -->
-    <label class="label">
-      <span class="label-text">OpenRouter API Key</span>
-    </label>
-    <input
-      type={showToken ? 'text' : 'password'}
-      class="input w-full"
-      value={openrouterApiKey}
-      oninput={updateOpenRouterKey}
-      placeholder="Enter your OpenRouter API key..."
-    />
-  </div>
+  <SettingsCredentials
+    provider="openai"
+    configured={openaiKeyConfigured}
+    revision={openaiAccountRevision}
+    disabled={!!credentialBusy || $settingsSaveStatus.saving || $settingsSaveStatus.unsaved}
+    update={(change) => updateProviderCredential('openai', change)}
+  />
+  {#if aiProvider !== 'openai'}
+    <p class="text-xs opacity-70">OpenAI is required for Discord $chat response moderation.</p>
+  {/if}
+  <SettingsCredentials
+    provider="openrouter"
+    configured={openrouterKeyConfigured}
+    revision={openrouterAccountRevision}
+    disabled={!!credentialBusy || $settingsSaveStatus.saving || $settingsSaveStatus.unsaved}
+    update={(change) => updateProviderCredential('openrouter', change)}
+  />
 
   <div class="form-control">
     <label class="label" for="deepseek-chat-key">

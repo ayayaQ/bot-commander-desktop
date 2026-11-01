@@ -212,3 +212,109 @@ it('initializes fresh public nonces before the first key write and preserves exp
   )
   expect(service.getSettings().agentWebAccountRevision).toBe(persisted.agentWebAccountRevision)
 })
+
+describe('legacy provider write-only boundary', () => {
+  it('omits every saved key from public snapshots and uses independent opaque revisions', async () => {
+    vi.resetModules()
+    const service = await import('./settingsService')
+    service.setSettings(
+      legacySettings({
+        openaiApiKey: 'fake-openai-only',
+        openrouterApiKey: 'fake-router-only',
+        deepseekApiKey: 'fake-chat-only',
+        deepseekWebApiKey: 'fake-web-only'
+      })
+    )
+    const first = service.publicSettings()
+    expect(first).toMatchObject({ openaiKeyConfigured: true, openrouterKeyConfigured: true })
+    for (const name of ['openaiApiKey', 'openrouterApiKey', 'deepseekApiKey', 'deepseekWebApiKey'])
+      expect(first).not.toHaveProperty(name)
+    expect(JSON.stringify(first)).not.toContain('fake-')
+    for (const provider of ['openai', 'openrouter'] as const)
+      expect(first[`${provider}AccountRevision`]).toMatch(/^[a-f0-9-]{36}$/)
+    service.setSettings({ ...service.getSettings(), openrouterApiKey: 'fake-router-replaced' })
+    const second = service.publicSettings()
+    expect(second.openaiAccountRevision).toBe(first.openaiAccountRevision)
+    expect(second.openrouterAccountRevision).not.toBe(first.openrouterAccountRevision)
+    // Changing a non-reviewer account must not invalidate the active OpenAI reviewer.
+    expect(second.agentDecisionAccountRevision).toBe(first.agentDecisionAccountRevision)
+    service.setSettings({ ...service.getSettings(), openaiApiKey: '' })
+    expect(service.publicSettings().openaiKeyConfigured).toBe(false)
+    expect(service.publicSettings().agentDecisionAccountRevision).not.toBe(
+      first.agentDecisionAccountRevision
+    )
+  })
+
+  it.each(['openaiApiKey', 'openrouterApiKey', 'deepseekApiKey', 'deepseekWebApiKey'] as const)(
+    'keeps all live keys/nonces/generation on failed %s writes and commits exact persisted revisions on retry',
+    async (key) => {
+      vi.resetModules()
+      const service = await import('./settingsService')
+      service.setSettings(
+        legacySettings({ openaiApiKey: 'fake-original', agentReviewerProvider: 'openai' })
+      )
+      const first = service.getSettings()
+      const publicBefore = service.publicSettings()
+      const generation = service.getAgentDecisionSettingsGeneration()
+      const changed = vi.fn()
+      service.onSettingsChanged(changed)
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const persist = vi.fn().mockRejectedValueOnce(new Error('fake-replacement-secret'))
+      await expect(
+        service.persistSettingsUpdate({ ...first, [key]: 'fake-replacement-secret' }, persist)
+      ).rejects.toThrow('existing keys remain active')
+      expect(service.getSettings()).toEqual(first)
+      expect(service.publicSettings()).toEqual(publicBefore)
+      expect(service.getAgentDecisionSettingsGeneration()).toBe(generation)
+      expect(changed).not.toHaveBeenCalled()
+      expect(log).not.toHaveBeenCalled()
+      log.mockRestore()
+      // An unrelated normalization after rollback must not advance any account nonce.
+      service.setSettings({ ...first, theme: 'dark' })
+      expect(service.publicSettings()).toEqual({ ...publicBefore, theme: 'dark' })
+      persist.mockResolvedValueOnce(undefined)
+      await service.persistSettingsUpdate(
+        { ...service.getSettings(), [key]: 'fake-replacement-secret' },
+        persist
+      )
+      expect(service.getSettings()).toEqual(persist.mock.calls[1][0])
+      expect(service.getSettings()[key]).toBe('fake-replacement-secret')
+      expect(JSON.stringify(service.publicSettings())).not.toContain('fake-replacement-secret')
+    }
+  )
+
+  it('does not accept renderer-chosen initial legacy account revisions on a first ordinary save', async () => {
+    vi.resetModules()
+    const service = await import('./settingsService')
+    const forged = '11111111-1111-1111-1111-111111111111'
+    await service.persistSettingsUpdate(
+      {
+        ...service.getSettings(),
+        openaiAccountRevision: forged,
+        openrouterAccountRevision: forged
+      },
+      async () => {}
+    )
+    expect(service.publicSettings().openaiAccountRevision).not.toBe(forged)
+    expect(service.publicSettings().openrouterAccountRevision).not.toBe(forged)
+  })
+
+  it('retains both legacy account nonces through startup hydration and unrelated saves', async () => {
+    vi.resetModules()
+    let service = await import('./settingsService')
+    service.setSettings(legacySettings({ openaiApiKey: 'fake-a', openrouterApiKey: 'fake-b' }))
+    const persisted = service.getSettings()
+    vi.resetModules()
+    service = await import('./settingsService')
+    service.setSettings(service.normalizeSettings({ ...persisted }))
+    service.setSettings({
+      ...service.getSettings(),
+      theme: 'dark',
+      openaiAccountRevision: 'forged'
+    })
+    expect(service.getSettings().openaiAccountRevision).toBe(persisted.openaiAccountRevision)
+    expect(service.getSettings().openrouterAccountRevision).toBe(
+      persisted.openrouterAccountRevision
+    )
+  })
+})

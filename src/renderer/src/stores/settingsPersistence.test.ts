@@ -10,8 +10,8 @@ function settings(overrides: Partial<AppSettings> = {}): AppSettings {
     hideOutput: false,
     language: 'en',
     aiProvider: 'openai',
-    openaiApiKey: '',
-    openrouterApiKey: '',
+    openaiKeyConfigured: false,
+    openrouterKeyConfigured: false,
     selectedAiModel: 'gpt-5.4-nano',
     selectedOpenAiModel: 'gpt-5.4-nano',
     selectedOpenRouterModel: 'openai/gpt-5.4-nano',
@@ -98,14 +98,14 @@ describe('settings persistence model', () => {
       .mockReturnValueOnce(first.promise)
       .mockImplementationOnce(async (value) => value)
     const model = createSettingsPersistence(settings(), persist)
-    const saving = model.patch({ openaiApiKey: 'example key' })
+    const saving = model.patch({ selectedOpenAiModel: 'custom-fixture-model' })
     await Promise.resolve()
     model.patch({ developerPrompt: 'Keep this text' })
     first.reject(new Error('Unavailable'))
     expect(await saving).toBe(false)
     expect(await model.retry()).toBe(true)
     expect(get(model.committed)).toMatchObject({
-      openaiApiKey: 'example key',
+      selectedOpenAiModel: 'custom-fixture-model',
       developerPrompt: 'Keep this text'
     })
   })
