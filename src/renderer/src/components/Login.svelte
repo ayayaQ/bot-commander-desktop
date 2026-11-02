@@ -241,12 +241,12 @@
               aria-describedby="spam-protection-help"
               checked={$settingsStore.spamProtectionEnabled === true}
               disabled={savingSpamProtection ||
-                (!$settingsStore.spamProtectionEnabled && !$settingsStore.openrouterApiKey?.trim())}
+                (!$settingsStore.spamProtectionEnabled && !$settingsStore.openrouterKeyConfigured)}
               onchange={toggleSpamProtection}
             />
           </div>
         </div>
-        {#if !$settingsStore.openrouterApiKey?.trim()}
+        {#if !$settingsStore.openrouterKeyConfigured}
           <p class="text-xs mt-2">{$t('spam-protection-key-required')}</p>
           <button class="btn btn-link btn-xs px-0" onclick={() => onSelectTab?.('settings')}
             >{$t('settings')}</button

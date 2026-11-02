@@ -6,7 +6,11 @@
     dmChannel
   } from '../../../shared/playground/world'
   import { onMount, tick } from 'svelte'
-  import { addPlaygroundMember, commandEventDraft } from '../utils/playgroundControls'
+  import {
+    addPlaygroundMember,
+    commandEventDraft,
+    setPlaygroundResourceEnabled
+  } from '../utils/playgroundControls'
   import { get } from 'svelte/store'
   import { settingsStore } from '../stores/settings'
   import { playgroundReplay } from '../stores/playgroundReplay'
@@ -838,7 +842,15 @@
                 class="checkbox checkbox-sm"
                 type="checkbox"
                 aria-label={`Enable ${command.command}`}
-                bind:group={selectedCommandIds}
+                checked={selectedCommandIds.includes(command.id)}
+                onchange={(event) => {
+                  if (busy || loading) return
+                  selectedCommandIds = setPlaygroundResourceEnabled(
+                    selectedCommandIds,
+                    command.id,
+                    event.currentTarget.checked
+                  )
+                }}
                 value={command.id}
                 disabled={busy || loading}
               />
@@ -863,7 +875,15 @@
                 class="checkbox checkbox-sm"
                 type="checkbox"
                 aria-label={`Enable /${interaction.commandName}`}
-                bind:group={selectedInteractionIds}
+                checked={selectedInteractionIds.includes(interaction.id)}
+                onchange={(event) => {
+                  if (busy || loading) return
+                  selectedInteractionIds = setPlaygroundResourceEnabled(
+                    selectedInteractionIds,
+                    interaction.id,
+                    event.currentTarget.checked
+                  )
+                }}
                 value={interaction.id}
                 disabled={busy || loading}
               />

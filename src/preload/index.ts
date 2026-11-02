@@ -34,6 +34,7 @@ const validInvokeChannels = [
   'get-settings',
   'save-settings',
   'save-deepseek-key',
+  'save-provider-key',
   'mcp:get-status',
   'mcp:get-activity',
   'mcp:update-config',

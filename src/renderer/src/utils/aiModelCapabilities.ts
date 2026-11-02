@@ -41,8 +41,10 @@ export class ModelCatalogRequestGate {
 
 interface CatalogSettings {
   aiProvider?: AiProvider
-  openaiApiKey?: string
-  openrouterApiKey?: string
+  openaiKeyConfigured?: boolean
+  openrouterKeyConfigured?: boolean
+  openaiAccountRevision?: string
+  openrouterAccountRevision?: string
   deepseekKeyConfigured?: boolean
   deepseekChatAccountRevision?: string
 }
@@ -55,9 +57,10 @@ export function catalogSettingsMatch(local: CatalogSettings, committed: CatalogS
       Boolean(local.deepseekKeyConfigured) === Boolean(committed.deepseekKeyConfigured) &&
       local.deepseekChatAccountRevision === committed.deepseekChatAccountRevision
     )
-  return provider === 'openrouter'
-    ? (local.openrouterApiKey || '') === (committed.openrouterApiKey || '')
-    : (local.openaiApiKey || '') === (committed.openaiApiKey || '')
+  return (
+    Boolean(local[`${provider}KeyConfigured`]) === Boolean(committed[`${provider}KeyConfigured`]) &&
+    local[`${provider}AccountRevision`] === committed[`${provider}AccountRevision`]
+  )
 }
 
 export function canRefreshModelCatalog(

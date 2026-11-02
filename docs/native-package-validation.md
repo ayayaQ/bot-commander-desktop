@@ -113,18 +113,19 @@ recovery/shutdown behavior remains covered by its existing ordinary unit asserti
 refuses to run the unsigned bundle, retain the actual failure; do not sign (including ad hoc),
 change security settings or claim native lifecycle success from the stock-runtime portable probe.
 
-## A5 workflow proposal
+## Hosted Windows coverage and remaining platform limits
 
-A5 owns workflow, manifest and lock changes. After reviewing actual local receipts, consider a
-separate `windows-2025` portable artifact job: Node 24, locked install, the single helper test file,
-`npm run build`, these two helpers with output under `RUNNER_TEMP`, portable and synthetic native
-receipts, and JSON upload even on failure. Add the four startup test files above to preserve the
-default route and probe isolation. Keep a twenty-minute job limit and one package per job.
-Preserve existing Linux and Windows MCP/skills coverage. Label the native stage synthetic;
-do not claim normal startup/persistence or visual acceptance.
+The `native-package-windows-synthetic` job in `.github/workflows/ci.yml` uses `windows-2025`,
+Node 24, a locked install, the helper and four startup test files, and `npm run build`. It runs
+both helpers with output under `RUNNER_TEMP`, checks portable artifacts and the synthetic native
+lifecycle, and retains only the package/native JSON receipts, including failure receipts when
+available. The job has a twenty-minute limit and creates one unsigned unpacked test package.
+Existing Linux and Windows MCP/skills coverage is retained. This stage does not establish
+normal startup/persistence or visual acceptance.
 
 Gate an arm64 Mac job on an actual clean arm64 Mac receipt and runner availability/cost. Do not
 add a macOS CI claim based on Windows checks or local Mac packaging alone. Measured timings,
 artifact sizes, source SHA and hashes belong in the coordinator evidence, not estimated passes.
 Rebuild and re-probe the final combined candidate after A4/settings or A5/package changes that
-affect startup. No CI job or package script is added by these helpers.
+affect startup. macOS native lifecycle success remains unestablished until an actual successful
+receipt is obtained; portable verification or Windows CI cannot substitute for that result.
