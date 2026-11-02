@@ -64,6 +64,7 @@ jobs:
           ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron scripts/verify-agent-mcp-package.mjs "$RUNNER_TEMP/agent-mcp-package/linux-unpacked/resources/app.asar"
       - name: Check rendered MCP controls with an installed headless browser
         run: |
+          node --test scripts/owned-process-cleanup.test.mjs
           export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
           export MCP_UI_REPORT="$RUNNER_TEMP/agent-mcp-ui.json"
           node scripts/test-agent-mcp-ui.mjs

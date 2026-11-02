@@ -1,12 +1,13 @@
 /** Offline renderer workflow using real Chromium, the actual Svelte card, and fake IPC only.
  * Run: node scripts/test-agent-mcp-ui.mjs
  * Optional: MCP_UI_REPORT=/absolute/report.json MCP_UI_SCREENSHOT=/absolute/screenshot.png
+ * Cleanup is verified for a detached POSIX group; Windows fails closed without a Job Object.
  * Requires an installed Chromium (CHROMIUM_PATH overrides /usr/bin/chromium).
  * No Electron main, external MCP server, provider, Discord or credentials are used.
  */
 import { createServer } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
-import { spawn } from 'node:child_process'
+import { spawnOwnedProcess, requestBrowserClose } from './owned-process-cleanup.mjs'
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { parse } from 'acorn'
 import { dirname, join, resolve } from 'node:path'
@@ -314,7 +315,7 @@ render()
   const endpoint = new Promise((yes, no) => {
     let diagnostics = ''
     const timeout = setTimeout(() => no(new Error('Chromium DevTools startup timed out')), 10000)
-    chromium = spawn(
+    chromium = spawnOwnedProcess(
       process.env.CHROMIUM_PATH || '/usr/bin/chromium',
       [
         '--headless',
@@ -1427,15 +1428,38 @@ render()
   }
   throw error
 } finally {
+  await requestBrowserClose(socket)
   socket?.close()
-  if (chromium && chromium.exitCode === null) {
-    chromium.kill('SIGTERM')
-    await Promise.race([
-      new Promise((yes) => chromium.once('exit', yes)),
-      new Promise((yes) => setTimeout(yes, 3000))
-    ])
-    if (chromium.exitCode === null) chromium.kill('SIGKILL')
+  // Stop the owned browser process group before deleting their profile. A cleanup
+  // failure remains visible and retains the fixture for the clean-checkout guard.
+  let cleanupError
+  try {
+    await chromium?.stopOwnedTree()
+  } catch (error) {
+    cleanupError = error
   }
   await vite?.close()
+  if (cleanupError) {
+    // Do not leave a successful flow report when process cleanup was not confirmed.
+    if (process.env.MCP_UI_REPORT) {
+      const path = resolve(process.env.MCP_UI_REPORT)
+      let previous = {}
+      try {
+        previous = JSON.parse(await readFile(path, 'utf8'))
+      } catch {
+        /* Report may not exist yet. */
+      }
+      await writeFile(
+        path,
+        JSON.stringify(
+          { ...previous, passed: false, cleanupError: cleanupError.message, fixtureRetained: true },
+          null,
+          2
+        ) + '\n'
+      )
+    }
+    console.error('Owned browser cleanup unconfirmed; fixture retained:', cleanupError)
+    throw cleanupError
+  }
   await rm(fixtureDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
 }
