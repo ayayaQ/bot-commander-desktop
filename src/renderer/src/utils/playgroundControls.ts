@@ -7,6 +7,16 @@ import {
 import { allocateEntityId, commitWorld } from '../../../shared/playground/world'
 import type { BCFDCommand } from '../types/types'
 
+/** Change one resource's membership without rebuilding selection from a filtered view. */
+export function setPlaygroundResourceEnabled(
+  selectedIds: readonly string[],
+  resourceId: string,
+  enabled: boolean
+): string[] {
+  const otherIds = selectedIds.filter((id) => id !== resourceId)
+  return enabled ? [...otherIds, resourceId] : otherIds
+}
+
 /** A picker prepares an event; dispatch still decides which enabled commands match. */
 export function commandEventDraft(command: Pick<BCFDCommand, 'type' | 'command'>) {
   const mode = commandEvents[command.type]

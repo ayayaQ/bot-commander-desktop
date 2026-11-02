@@ -21,19 +21,24 @@ assert(process.env.SETTINGS_UI_REPORT, 'Supply a task-owned JSON evidence path')
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim()
+const checkoutStatus = git('status', '--porcelain', '--untracked-files=normal')
 const report = {
   passed: false,
   browserExecuted: false,
   provenance: {
     sha: git('rev-parse', 'HEAD'),
     tree: git('rev-parse', 'HEAD^{tree}'),
-    dirty: git('status', '--porcelain', '--untracked-files=normal') !== ''
+    dirty: checkoutStatus !== ''
   },
   hosted: { runId: process.env.GITHUB_RUN_ID, attempt: process.env.GITHUB_RUN_ATTEMPT },
   teardown: {},
   limitations: ['Actual Settings component with fake in-memory IPC; no native storage or providers']
 }
-assert.equal(report.provenance.dirty, false, 'Hosted evidence requires an exact clean checkout')
+assert.equal(
+  report.provenance.dirty,
+  false,
+  `Hosted evidence requires an exact clean checkout:\n${checkoutStatus}`
+)
 
 function deadline(promise, milliseconds, label) {
   let timer
