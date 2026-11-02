@@ -1,3 +1,4 @@
+import type { ProviderCredentialState } from '../../../shared/settingsCredentials'
 export type BCFDCommand = {
   id: string
   channelMessage: string
@@ -196,16 +197,14 @@ export function createDefaultInteractionButton(): BCFDInteractionButton {
   }
 }
 
-export type AppSettings = {
+export type AppSettings = ProviderCredentialState & {
   theme: string
   showToken: boolean
   hideOutput: boolean
   language: string
   aiProvider?: 'openai' | 'openrouter' | 'deepseek'
   agentDecisionAccountRevision?: string
-  openaiApiKey: string
   spamProtectionEnabled?: boolean
-  openrouterApiKey?: string
   deepseekKeyConfigured?: boolean
   deepseekWebKeyConfigured?: boolean
   deepseekChatAccountRevision?: string

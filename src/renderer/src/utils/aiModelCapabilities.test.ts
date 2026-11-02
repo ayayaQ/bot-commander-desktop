@@ -47,8 +47,12 @@ describe('renderer endpoint and catalog freshness controls', () => {
     expect(gate.current(current)).toBe(true)
   })
   it('blocks pending or failed provider saves until the exact committed identity matches', () => {
-    const old = { aiProvider: 'openai' as const, openaiApiKey: 'old-fixture-key' }
-    const local = { ...old, openaiApiKey: 'new-fixture-key' }
+    const old = {
+      aiProvider: 'openai' as const,
+      openaiKeyConfigured: true,
+      openaiAccountRevision: 'old-fixture-revision'
+    }
+    const local = { ...old, openaiAccountRevision: 'new-fixture-revision' }
     expect(canRefreshModelCatalog(local, old, { saving: true, unsaved: true })).toBe(false)
     expect(canRefreshModelCatalog(local, old, { saving: false, unsaved: true })).toBe(false)
     expect(canRefreshModelCatalog(local, old, { saving: false, unsaved: false })).toBe(false)
@@ -59,7 +63,7 @@ describe('renderer endpoint and catalog freshness controls', () => {
       catalogSettingsMatch(local, {
         ...local,
         aiProvider: 'openrouter',
-        openrouterApiKey: 'router-key'
+        openrouterKeyConfigured: true
       })
     ).toBe(false)
   })
@@ -68,14 +72,14 @@ describe('renderer endpoint and catalog freshness controls', () => {
       aiProvider: 'deepseek' as const,
       deepseekKeyConfigured: true,
       deepseekChatAccountRevision: 'chat-account-fixture',
-      openaiApiKey: 'moderation-fixture',
-      openrouterApiKey: 'reviewer-fixture'
+      openaiAccountRevision: 'moderation-fixture',
+      openrouterAccountRevision: 'reviewer-fixture'
     }
     expect(
-      catalogSettingsMatch(committed, { ...committed, openaiApiKey: 'other-moderation' })
+      catalogSettingsMatch(committed, { ...committed, openaiAccountRevision: 'other-moderation' })
     ).toBe(true)
     expect(
-      catalogSettingsMatch(committed, { ...committed, openrouterApiKey: 'other-reviewer' })
+      catalogSettingsMatch(committed, { ...committed, openrouterAccountRevision: 'other-reviewer' })
     ).toBe(true)
     expect(
       catalogSettingsMatch(committed, {
@@ -93,6 +97,34 @@ describe('renderer endpoint and catalog freshness controls', () => {
       false
     )
   })
+
+  it.each(['openai', 'openrouter'] as const)(
+    'tracks %s catalog identity through flags and host revision',
+    (provider) => {
+      const first = {
+        aiProvider: provider,
+        [`${provider}KeyConfigured`]: true,
+        [`${provider}AccountRevision`]: 'fake-first-revision'
+      }
+      expect(catalogSettingsMatch(first, first)).toBe(true)
+      expect(
+        catalogSettingsMatch(first, {
+          ...first,
+          [`${provider}AccountRevision`]: 'fake-replaced-revision'
+        })
+      ).toBe(false)
+      expect(catalogSettingsMatch(first, { ...first, [`${provider}KeyConfigured`]: false })).toBe(
+        false
+      )
+      const other = provider === 'openai' ? 'openrouter' : 'openai'
+      expect(
+        catalogSettingsMatch(first, {
+          ...first,
+          [`${other}AccountRevision`]: 'fake-unrelated-revision'
+        })
+      ).toBe(true)
+    }
+  )
 
   it('uses pure selected facts independently of account membership and rejects stale selected snapshots', () => {
     expect(selectedModelCapabilities('openai', 'responses', 'gpt-5.1', [], capabilities)).toEqual(

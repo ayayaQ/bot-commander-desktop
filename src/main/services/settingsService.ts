@@ -12,6 +12,7 @@ let observedWeb: {
   revision: string
 }
 let observedChat: { key: string; revision: string }
+let observedLegacy: Partial<Record<'openai' | 'openrouter', { key: string; revision: string }>> = {}
 let settingsGeneration = 0
 
 export function getAgentDecisionSettingsGeneration(): number {
@@ -191,6 +192,22 @@ export function normalizeSettings(newSettings: AppSettings): AppSettings {
     }
   }
   newSettings.deepseekChatAccountRevision = observedChat.revision
+  for (const provider of ['openai', 'openrouter'] as const) {
+    const key = newSettings[`${provider}ApiKey`] || ''
+    const previous = observedLegacy[provider]
+    if (!previous || previous.key !== key) {
+      const stored = newSettings[`${provider}AccountRevision`]
+      observedLegacy[provider] = {
+        key,
+        revision:
+          !previous && typeof stored === 'string' && /^[a-f0-9-]{36}$/.test(stored)
+            ? stored
+            : randomUUID()
+      }
+    }
+    newSettings[`${provider}AccountRevision`] = observedLegacy[provider]!.revision
+    delete newSettings[`${provider}KeyConfigured`]
+  }
   delete newSettings.deepseekKeyConfigured
   delete newSettings.deepseekWebKeyConfigured
   const webProvider = newSettings.webProvider
@@ -226,16 +243,49 @@ export function setSettings(newSettings: AppSettings) {
   for (const listener of listeners) listener(settings, previous)
 }
 
-/** New DeepSeek secrets are write-only across the renderer boundary. Legacy providers are unchanged. */
-export function publicSettings(value?: AppSettings): AppSettings {
+/** Normalize and persist under the caller's settings lock; failed writes retain all live nonces. */
+export async function persistSettingsUpdate(
+  value: AppSettings,
+  persist: (next: AppSettings) => Promise<void>
+): Promise<void> {
+  // Establish host-owned nonces even if the first renderer request is an ordinary save.
+  publicSettings()
+  const previous = { observedCredentials, observedChat, observedWeb, observedLegacy }
+  // normalizeSettings replaces entries, so keep the previous legacy map untouched for rollback.
+  observedLegacy = { ...observedLegacy }
+  let next: AppSettings
+  try {
+    next = normalizeSettings(value)
+    await persist(next)
+  } catch {
+    observedCredentials = previous.observedCredentials
+    observedChat = previous.observedChat
+    observedWeb = previous.observedWeb
+    observedLegacy = previous.observedLegacy
+    throw new Error(
+      'Settings could not be saved. The existing keys remain active; retry after reloading Settings.'
+    )
+  }
+  setSettings(next)
+}
+
+export type PublicSettings = Omit<
+  AppSettings,
+  'openaiApiKey' | 'openrouterApiKey' | 'deepseekApiKey' | 'deepseekWebApiKey'
+>
+
+/** Saved provider credentials never cross the renderer boundary. */
+export function publicSettings(value?: AppSettings): PublicSettings {
   // Establish the live baseline before exposing write nonces on a fresh installation.
   // Persisted settings are normalized during startup before this renderer boundary.
   if (!observedChat || !observedWeb || !observedCredentials)
     settings = normalizeSettings({ ...settings })
   value ??= settings
-  const { deepseekApiKey, deepseekWebApiKey, ...safe } = value
+  const { openaiApiKey, openrouterApiKey, deepseekApiKey, deepseekWebApiKey, ...safe } = value
   return {
     ...safe,
+    openaiKeyConfigured: !!openaiApiKey?.trim(),
+    openrouterKeyConfigured: !!openrouterApiKey?.trim(),
     deepseekKeyConfigured: !!deepseekApiKey?.trim(),
     deepseekWebKeyConfigured: !!deepseekWebApiKey?.trim()
   }

@@ -322,8 +322,8 @@
         nextProvider === 'deepseek'
           ? `${Boolean(settings.deepseekKeyConfigured)}:${settings.deepseekChatAccountRevision || ''}`
           : nextProvider === 'openrouter'
-            ? settings.openrouterApiKey
-            : settings.openaiApiKey
+            ? `${Boolean(settings.openrouterKeyConfigured)}:${settings.openrouterAccountRevision || ''}`
+            : `${Boolean(settings.openaiKeyConfigured)}:${settings.openaiAccountRevision || ''}`
       if (provider === nextProvider && key === nextKey) return
       provider = nextProvider
       key = nextKey

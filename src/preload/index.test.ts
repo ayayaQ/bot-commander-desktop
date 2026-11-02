@@ -37,6 +37,7 @@ describe('public agent MCP OAuth preload whitelist', () => {
     'agent:compact',
     'agent:steer',
     'save-deepseek-key',
+    'save-provider-key',
     'agent-mcp:oauth-configure-client',
     'agent-mcp:oauth-prepare-registration',
     'agent-mcp:oauth-register',
