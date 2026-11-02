@@ -53,6 +53,9 @@ jobs:
       - name: Check Playground error classification and interactive feedback
         run: npm test -- src/shared/playground/scriptErrorClassification.test.ts src/renderer/src/utils/playgroundWorkerFeedback.test.ts
 
+      - name: Check ordinary Playground selection and reference flows
+        run: npm run test:playground
+
       - name: Build production application
         run: npm run build
       - name: Verify packaged production dependencies and SDK validator resolution
