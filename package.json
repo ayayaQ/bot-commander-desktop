@@ -17,6 +17,7 @@
     "test": "vitest run",
     "test:steering": "vitest run src/main/services/agentService.test.ts -t steering && vitest run src/main/services/agentPersistence.integration.test.ts src/main/services/agentSessionPersistence.test.ts src/main/handlers/ipcHandlers.test.ts src/preload/index.test.ts src/renderer/src/stores/agentComposer.test.ts",
     "test:mcp": "node scripts/test-agent-mcp.mjs",
+    "test:settings-credentials:ui": "node scripts/run-settings-credentials-hosted.mjs",
     "test:playground": "node --test scripts/test-playground-selection.mjs && node scripts/test-playground.mjs",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",

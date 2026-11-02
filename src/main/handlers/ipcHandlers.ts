@@ -1,3 +1,4 @@
+import type { SaveProviderKeyRequest } from '../../shared/settingsCredentials'
 import { BrowserWindow, session, dialog, shell, Notification, clipboard } from 'electron'
 import { trustedIpcMain as ipcMain } from './ipcSecurity'
 import { OAuth2Scopes, PermissionsBitField, WebhookClient } from 'discord.js'
@@ -46,12 +47,7 @@ import type {
 } from '../../shared/agentMcpOAuthTypes'
 import { agentMcpService, agentMcpOAuthService } from '../services/agentMcpService'
 import { interactionPublisher } from '../services/interactionPublicationService'
-import {
-  getSettings,
-  setSettings,
-  normalizeSettings,
-  publicSettings
-} from '../services/settingsService'
+import { getSettings, publicSettings, persistSettingsUpdate } from '../services/settingsService'
 import { registerAgentDecisionSecret } from '../services/agentDecisionPrivacy'
 import {
   fetchAiModels,
@@ -344,14 +340,17 @@ export function addIPCHandlers() {
   ipcMain.handle('save-settings', async (_, newSettings: AppSettings) => {
     newSettings = structuredClone(newSettings)
     return withResourceMutationLock('settings', async () => {
-      const next = normalizeSettings({
-        ...newSettings,
-        deepseekApiKey: getSettings().deepseekApiKey,
-        deepseekWebApiKey: getSettings().deepseekWebApiKey,
-        deepseekChatAccountRevision: getSettings().deepseekChatAccountRevision
-      })
-      await saveSettings(next)
-      setSettings(next)
+      await persistSettingsUpdate(
+        {
+          ...newSettings,
+          openaiApiKey: getSettings().openaiApiKey,
+          openrouterApiKey: getSettings().openrouterApiKey,
+          deepseekApiKey: getSettings().deepseekApiKey,
+          deepseekWebApiKey: getSettings().deepseekWebApiKey,
+          deepseekChatAccountRevision: getSettings().deepseekChatAccountRevision
+        },
+        saveSettings
+      )
       emitResourceChanged('settings', 'renderer', publicSettings())
       return publicSettings()
     })
@@ -380,23 +379,55 @@ export function addIPCHandlers() {
             : current.agentWebAccountRevision
         if (request.expectedRevision !== revision)
           throw new Error('DeepSeek account changed; reload Settings before saving this key.')
-        const next = normalizeSettings({
-          ...current,
-          [request.purpose === 'chat' ? 'deepseekApiKey' : 'deepseekWebApiKey']: request.value
-        })
-        try {
-          await saveSettings(next)
-        } catch {
-          throw new Error(
-            'DeepSeek key could not be saved. The existing key remains active; check secure storage and retry.'
-          )
-        }
-        setSettings(next)
+        await persistSettingsUpdate(
+          {
+            ...current,
+            [request.purpose === 'chat' ? 'deepseekApiKey' : 'deepseekWebApiKey']: request.value
+          },
+          saveSettings
+        )
         emitResourceChanged('settings', 'renderer', publicSettings())
         return publicSettings()
       })
     }
   )
+
+  ipcMain.handle('save-provider-key', async (_, input: SaveProviderKeyRequest) => {
+    // Snapshot before waiting for the lock; accept only the exact write-only request contract.
+    const request = structuredClone(input)
+    if (
+      !request ||
+      !['openai', 'openrouter'].includes(request.provider) ||
+      typeof request.expectedRevision !== 'string' ||
+      !request.expectedRevision ||
+      !['replace', 'remove'].includes(request.action) ||
+      Object.keys(request).sort().join(',') !==
+        (request.action === 'replace'
+          ? 'action,expectedRevision,provider,value'
+          : 'action,expectedRevision,provider') ||
+      (request.action === 'replace' &&
+        (typeof request.value !== 'string' ||
+          !request.value ||
+          request.value.length > 4096 ||
+          request.value !== request.value.trim() ||
+          /[^\x21-\x7e]/.test(request.value)))
+    )
+      throw new Error('Provider credential request is invalid')
+    return withResourceMutationLock('settings', async () => {
+      const current = getSettings()
+      if (request.expectedRevision !== current[`${request.provider}AccountRevision`])
+        throw new Error('Provider account changed; reload Settings before saving this key.')
+      await persistSettingsUpdate(
+        {
+          ...current,
+          [`${request.provider}ApiKey`]: request.action === 'replace' ? request.value : ''
+        },
+        saveSettings
+      )
+      emitResourceChanged('settings', 'renderer', publicSettings())
+      return publicSettings()
+    })
+  })
 
   ipcMain.handle('mcp:get-status', () => getMcpServerStatus())
   ipcMain.handle('mcp:get-activity', () => getMcpActivity())

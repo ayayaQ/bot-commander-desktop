@@ -1,3 +1,4 @@
+import type { ProviderCredentialState } from '../../shared/settingsCredentials'
 export type BCFDCommand = {
   id: string
   channelMessage: string
@@ -132,7 +133,7 @@ export type BCFDInteractionCommand = {
   cooldownMessage?: string
 }
 
-export type AppSettings = {
+export type AppSettings = ProviderCredentialState & {
   theme: string
   showToken: boolean
   hideOutput: boolean

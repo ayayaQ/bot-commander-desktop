@@ -74,6 +74,14 @@ jobs:
           export PRESENTATION_UI_REPORT="$RUNNER_TEMP/agent-presentation-ui.json"
           node scripts/test-agent-presentation-ui.mjs
 
+      - name: Check rendered offline Settings credential interactions
+        timeout-minutes: 4
+        env:
+          SETTINGS_UI_REPORT: ${{ runner.temp }}/settings-credentials-ui.json
+        run: |
+          export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
+          npm run test:settings-credentials:ui
+
   agent-mcp-windows-native:
     name: Windows native MCP process lifecycle
     runs-on: windows-2025

@@ -3,6 +3,10 @@ import { describe, expect, it } from 'vitest'
 import { compile } from 'svelte/compiler'
 
 const settings = readFileSync('src/renderer/src/components/Settings.svelte', 'utf8')
+const credentialControl = readFileSync(
+  'src/renderer/src/components/SettingsCredentials.svelte',
+  'utf8'
+)
 const panel = readFileSync('src/renderer/src/components/AgentPanel.svelte', 'utf8')
 
 function select(id: string): string {
@@ -15,6 +19,7 @@ describe('provider settings and enrollment controls', () => {
   it('compiles the settings and agent UI without a browser or provider calls', () => {
     for (const [filename, source] of [
       ['Settings.svelte', settings],
+      ['SettingsCredentials.svelte', credentialControl],
       ['AgentPanel.svelte', panel]
     ]) {
       expect(() => compile(source, { filename, generate: 'client' })).not.toThrow()
@@ -66,6 +71,20 @@ describe('provider settings and enrollment controls', () => {
       /deepseekWebAccountRevision !== settings.agentWebAccountRevision\)\s*deepseekWebKeyInput = ''/
     )
     expect(settings).toContain('Could not confirm the key update. Reload settings before retrying.')
+  })
+
+  it('uses write-only legacy controls and opaque catalog account identity', () => {
+    for (const provider of ['openai', 'openrouter']) {
+      expect(settings).not.toContain(`${provider}ApiKey`)
+      expect(settings).toContain(`provider="${provider}"`)
+      expect(settings).toContain(`revision={${provider}AccountRevision}`)
+    }
+    expect(credentialControl).toContain('type="password"')
+    expect(credentialControl).toContain('Replace key')
+    expect(credentialControl).toContain('Remove key')
+    expect(credentialControl).toContain('Cancel')
+    expect(credentialControl).toMatch(/finally\s*{\s*input = ''/)
+    expect(credentialControl).not.toMatch(/(?:localStorage|sessionStorage)/)
   })
 
   // Auto activation and the separate web toggle are covered with real UI interactions in

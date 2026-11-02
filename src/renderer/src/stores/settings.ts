@@ -1,3 +1,7 @@
+import type {
+  LegacyCredentialProvider,
+  SaveProviderKeyRequest
+} from '../../../shared/settingsCredentials'
 import { get } from 'svelte/store'
 import { createSettingsPersistence } from './settingsPersistence'
 import type { AppSettings } from '../types/types'
@@ -11,8 +15,8 @@ const defaultSettings: AppSettings = {
   hideOutput: false,
   language: 'en',
   aiProvider: 'openai',
-  openaiApiKey: '',
-  openrouterApiKey: '',
+  openaiKeyConfigured: false,
+  openrouterKeyConfigured: false,
   deepseekKeyConfigured: false,
   webProvider: 'disabled',
   deepseekWebKeySource: 'separate',
@@ -30,9 +34,11 @@ const defaultSettings: AppSettings = {
 }
 
 /** Guard mixed-version responses and callers without retaining new credentials in stores. */
-function withoutDeepSeekSecrets(settings: AppSettings): AppSettings {
+function withoutCredentialSecrets(settings: AppSettings): AppSettings {
   if (!settings || typeof settings !== 'object') return settings
   const safe = { ...settings } as AppSettings & Record<string, unknown>
+  delete safe.openaiApiKey
+  delete safe.openrouterApiKey
   delete safe.deepseekApiKey
   delete safe.deepseekWebApiKey
   return safe
@@ -41,8 +47,8 @@ function withoutDeepSeekSecrets(settings: AppSettings): AppSettings {
 const persistence = createSettingsPersistence(
   defaultSettings,
   async (settings) =>
-    withoutDeepSeekSecrets(
-      await window.electron.ipcRenderer.invoke('save-settings', withoutDeepSeekSecrets(settings))
+    withoutCredentialSecrets(
+      await window.electron.ipcRenderer.invoke('save-settings', withoutCredentialSecrets(settings))
     ),
   (settings) => {
     currentLanguage.set(settings.language)
@@ -56,14 +62,14 @@ export const settingsStore = persistence.committed
 export const settingsDraftStore = persistence.draft
 export const settingsSaveStatus = persistence.status
 export const saveSettings = (settings: AppSettings) =>
-  persistence.save(withoutDeepSeekSecrets(settings))
+  persistence.save(withoutCredentialSecrets(settings))
 export const patchSettings = (changes: Partial<AppSettings>) =>
-  persistence.patch(withoutDeepSeekSecrets(changes as AppSettings))
+  persistence.patch(withoutCredentialSecrets(changes as AppSettings))
 export const retrySettingsSave = persistence.retry
 
 export async function loadSettings() {
   return persistence.load(async () =>
-    withoutDeepSeekSecrets(await window.electron.ipcRenderer.invoke('get-settings'))
+    withoutCredentialSecrets(await window.electron.ipcRenderer.invoke('get-settings'))
   )
 }
 
@@ -78,6 +84,18 @@ export async function saveDeepSeekKey(purpose: 'chat' | 'web', value: string): P
     value,
     expectedRevision
   })
+  await loadSettings()
+}
+
+/** Explicit replacement/removal; blank inputs never become ordinary settings writes. */
+export async function saveProviderKey(
+  provider: LegacyCredentialProvider,
+  change: { action: 'replace'; value: string } | { action: 'remove' }
+): Promise<void> {
+  const expectedRevision = get(settingsStore)[`${provider}AccountRevision`]
+  if (!expectedRevision) throw new Error('Wait for settings to load before updating the key')
+  const request: SaveProviderKeyRequest = { provider, expectedRevision, ...change }
+  await window.electron.ipcRenderer.invoke('save-provider-key', request)
   await loadSettings()
 }
 

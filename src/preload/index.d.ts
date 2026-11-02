@@ -1,3 +1,4 @@
+export type { SaveProviderKeyRequest } from '../shared/settingsCredentials'
 import { ExposedElectronAPI } from '../renderer/src/env'
 
 // Publication state is shared by invoke('get-interaction-publication') and
