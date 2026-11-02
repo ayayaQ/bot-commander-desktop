@@ -51,7 +51,7 @@ jobs:
         run: npm test -- src/renderer/src/utils/agentToolPresentation.test.ts
 
       - name: Check Playground error classification and interactive feedback
-        run: npm test -- src/shared/playground/scriptErrorClassification.test.ts src/renderer/src/utils/playgroundWorkerFeedback.test.ts
+        run: npm test -- src/shared/playground/scriptErrorClassification.test.ts src/renderer/src/utils/playgroundWorkerFeedback.test.ts src/renderer/src/utils/playgroundControls.test.ts
 
       - name: Build production application
         run: npm run build

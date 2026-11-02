@@ -1,10 +1,60 @@
 import { describe, expect, it } from 'vitest'
-import { addPlaygroundMember, commandEventDraft, playgroundFeedback } from './playgroundControls'
+import {
+  addPlaygroundMember,
+  commandEventDraft,
+  playgroundFeedback,
+  setPlaygroundResourceEnabled
+} from './playgroundControls'
 import { normalizeWorld, selectWorldContext } from '../../../shared/playground/world'
 import { validateAgentValidationState } from '../../../shared/playground/agentValidationFixtures'
 import { PLAYGROUND_LIMITS, type PlaygroundResult } from '../../../shared/playground/types'
 
 describe('simplified playground controls', () => {
+  it.each(['command', 'interaction'])(
+    'preserves hidden enabled and disabled %s selections across filtered toggles',
+    (kind) => {
+      const visible = `${kind}-visible`
+      const hiddenEnabled = `${kind}-hidden-enabled`
+      const hiddenDisabled = `${kind}-hidden-disabled`
+      const original = Object.freeze([visible, hiddenEnabled])
+
+      const disabled = setPlaygroundResourceEnabled(original, visible, false)
+      expect(disabled).toEqual([hiddenEnabled])
+      const enabled = setPlaygroundResourceEnabled(disabled, visible, true)
+      expect(enabled).toHaveLength(2)
+      expect(enabled).toEqual(expect.arrayContaining([visible, hiddenEnabled]))
+      expect(enabled).not.toContain(hiddenDisabled)
+      expect(original).toEqual([visible, hiddenEnabled])
+    }
+  )
+
+  it('updates command and interaction sets independently even when IDs match', () => {
+    const commands = ['shared-id', 'hidden-command']
+    const interactions = ['shared-id', 'hidden-interaction']
+    const nextCommands = setPlaygroundResourceEnabled(commands, 'shared-id', false)
+    expect(nextCommands).toEqual(['hidden-command'])
+    expect(interactions).toEqual(['shared-id', 'hidden-interaction'])
+
+    const nextInteractions = setPlaygroundResourceEnabled(interactions, 'shared-id', false)
+    expect(setPlaygroundResourceEnabled(nextCommands, 'shared-id', true)).toEqual([
+      'hidden-command',
+      'shared-id'
+    ])
+    expect(nextInteractions).toEqual(['hidden-interaction'])
+    expect(commands).toEqual(['shared-id', 'hidden-command'])
+  })
+
+  it('repeated enable and disable do not duplicate IDs or mutate earlier selections', () => {
+    const original = Object.freeze(['hidden-enabled'])
+    const enabled = setPlaygroundResourceEnabled(original, 'visible', true)
+    expect(setPlaygroundResourceEnabled(enabled, 'visible', true)).toEqual(enabled)
+    const disabled = setPlaygroundResourceEnabled(enabled, 'visible', false)
+    expect(disabled).toEqual(['hidden-enabled'])
+    expect(setPlaygroundResourceEnabled(disabled, 'visible', false)).toEqual(disabled)
+    expect(enabled).toEqual(['hidden-enabled', 'visible'])
+    expect(original).toEqual(['hidden-enabled'])
+  })
+
   it('prepares each saved command event without sending a message for member events', () => {
     expect(commandEventDraft({ command: '!ping', type: 0 })).toEqual({
       mode: 'message',
